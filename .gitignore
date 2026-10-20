@@ -1,0 +1,29 @@
+# 开发依赖与构建产物
+**/node_modules/
+**/target/
+**/gen/
+/.tools/
+/.agent-teams/
+/dist/
+**/.runtime/
+**/src-tauri/resources/ofm/
+
+# 用户数据、凭据与本地缓存
+**/.env
+**/.env.*
+**/.credentials.yaml
+**/.credentials.yml
+**/channel-credentials.json
+**/eac-user.json
+**/service.lock
+**/stats.json
+**/Cookies
+*.p12
+*.pfx
+*.key
+*.log
+**/.aoci/
+**/.verify/
+**/.pr-screenshots/
+.DS_Store
+Thumbs.db

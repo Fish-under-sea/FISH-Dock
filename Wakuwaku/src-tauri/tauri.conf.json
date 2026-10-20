@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FISH Dock",
+  "version": "1.0.0",
+  "identifier": "com.fish.dshfish",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [],
+    "security": {
+      "csp": null,
+      "assetProtocol": { "enable": true, "scope": [] }
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/DSH-FISH-Windows.ico", "icons/dsh-fish.png"]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "node": {
+    "version": "24.14.0",
+    "filename": "node-v24.14.0-win-x64.zip",
+    "directory": "node-v24.14.0-win-x64",
+    "url": "https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip",
+    "sha256": "313fa40c0d7b18575821de8cb17483031fe07d95de5994f6f435f3b345f85c66"
+  },
+  "webview2": {
+    "version": "155.0.4283.62",
+    "filename": "webview2-155.0.4283.62-x64.cab",
+    "directory": "Microsoft.WebView2.FixedVersionRuntime.155.0.4283.62.x64",
+    "url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/232cf50b-3980-4531-afbb-779f446d7de1/Microsoft.WebView2.FixedVersionRuntime.155.0.4283.62.x64.cab",
+    "sha256": "cf54aa717a0ebd05b40e87620724583cb6eb0a5b8b64764cc11e42822f68bf6c"
+  },
+  "webview2_license": {
+    "filename": "WebView2-Fixed-Version.html",
+    "url": "https://developer.microsoft.com/microsoft-edge/api/eula/webview2?locale=en-us&fixed=true",
+    "sha256": "5aed9c5db23729193a47a1097c23f14db15e5835fde8fb251cec33384a4cd146"
+  }
+}

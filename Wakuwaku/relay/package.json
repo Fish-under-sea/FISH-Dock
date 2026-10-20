@@ -1,0 +1,9 @@
+{
+  "name": "wakuwaku-crash-relay",
+  "private": true,
+  "type": "module",
+  "description": "Takes Wakuwaku's crash reports and files them as issues (relay/README.md)",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

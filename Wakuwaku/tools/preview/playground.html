@@ -1,0 +1,644 @@
+<title>Wakuwaku 手感试玩</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  :root {
+    --bg: #eef0f3;
+    --surface: #ffffff;
+    --surface-2: #f6f7f9;
+    --ink: #1b1b1f;
+    --soft: #5f6168;
+    --faint: #8b8d94;
+    --line: rgba(0, 0, 0, 0.08);
+    --chip: rgba(0, 0, 0, 0.05);
+    --chip-on: #ffffff;
+    --chip-on-ink: #1b1b1f;
+    --chip-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+    --accent: #0067c0;
+    --accent-ink: #ffffff;
+    --switch-off: rgba(0, 0, 0, 0.18);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.06);
+    --menu-bg: #f9f9f9;
+    --menu-ink: #1b1b1f;
+    --menu-line: rgba(0, 0, 0, 0.1);
+    --menu-hover: rgba(0, 0, 0, 0.05);
+    --toast-bg: rgba(36, 36, 40, 0.94);
+    --toast-ink: #ffffff;
+    --screen-edge: rgba(0, 0, 0, 0.12);
+    color-scheme: light;
+    font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      --bg: #161618;
+      --surface: #202023;
+      --surface-2: #2a2a2e;
+      --ink: #ececf1;
+      --soft: #a6a7ad;
+      --faint: #7d7e85;
+      --line: rgba(255, 255, 255, 0.08);
+      --chip: rgba(255, 255, 255, 0.06);
+      --chip-on: #3a3a3f;
+      --chip-on-ink: #ffffff;
+      --chip-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      --accent: #4cc2ff;
+      --accent-ink: #00131f;
+      --switch-off: rgba(255, 255, 255, 0.22);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+      --menu-bg: #2c2c2c;
+      --menu-ink: #f2f2f2;
+      --menu-line: rgba(255, 255, 255, 0.1);
+      --menu-hover: rgba(255, 255, 255, 0.07);
+      --toast-bg: rgba(250, 250, 252, 0.95);
+      --toast-ink: #1b1b1f;
+      --screen-edge: rgba(255, 255, 255, 0.1);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme='dark'] {
+    --bg: #161618;
+    --surface: #202023;
+    --surface-2: #2a2a2e;
+    --ink: #ececf1;
+    --soft: #a6a7ad;
+    --faint: #7d7e85;
+    --line: rgba(255, 255, 255, 0.08);
+    --chip: rgba(255, 255, 255, 0.06);
+    --chip-on: #3a3a3f;
+    --chip-on-ink: #ffffff;
+    --chip-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --accent: #4cc2ff;
+    --accent-ink: #00131f;
+    --switch-off: rgba(255, 255, 255, 0.22);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+    --menu-bg: #2c2c2c;
+    --menu-ink: #f2f2f2;
+    --menu-line: rgba(255, 255, 255, 0.1);
+    --menu-hover: rgba(255, 255, 255, 0.07);
+    --toast-bg: rgba(250, 250, 252, 0.95);
+    --toast-ink: #1b1b1f;
+    --screen-edge: rgba(255, 255, 255, 0.1);
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    overflow-x: hidden;
+  }
+  .wk-page {
+    box-sizing: border-box;
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 20px max(16px, env(safe-area-inset-right, 0px)) 28px max(16px, env(safe-area-inset-left, 0px));
+  }
+  .wk-head h1 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin: 0;
+    font-size: 22px;
+    font-weight: 600;
+  }
+  /* Which build this is (publish.js build --label, or the local preview's). */
+  .wk-build {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--chip);
+    color: var(--soft);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .wk-build.wk-live::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #34c759;
+  }
+  .wk-head p {
+    margin: 6px 0 16px;
+    max-width: 760px;
+    color: var(--soft);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .wk-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 312px;
+    gap: 18px;
+    align-items: start;
+  }
+  .wk-stage {
+    min-width: 0;
+  }
+  .wk-viewport {
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+    box-shadow: 0 0 0 1px var(--screen-edge), var(--shadow);
+    background: #1b2533;
+  }
+  #wk-screen {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1600px;
+    height: 900px;
+    transform-origin: 0 0;
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+  #wk-screen > * {
+    position: absolute;
+  }
+  #wk-wall {
+    inset: 0;
+    background: #1b2533 url('assets/wall.jpg') center / cover no-repeat;
+  }
+  #wk-screen iframe {
+    border: 0;
+    background: transparent;
+    /* Her pages say no colour scheme of their own: the frame as theirs, or it would be opaque. */
+    color-scheme: light;
+  }
+  #wk-plate {
+    border-radius: 8px;
+    backdrop-filter: blur(30px) saturate(1.25);
+    background: rgba(32, 32, 32, 0.3);
+    pointer-events: none;
+  }
+  #wk-plate[data-mode='light'] {
+    background: rgba(243, 243, 243, 0.3);
+  }
+  #wk-thumbs {
+    inset: 0;
+    pointer-events: none;
+  }
+  .wk-thumb {
+    position: absolute;
+    overflow: hidden;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--app) 18%, #f4f5f7);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  }
+  .wk-tbar {
+    height: 14%;
+    background: var(--app);
+  }
+  .wk-tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 6%;
+    padding: 7% 8%;
+  }
+  .wk-tbody b {
+    overflow: hidden;
+    color: #2a2a30;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .wk-tbody i {
+    display: block;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.1);
+  }
+  .wk-tbody i:nth-child(3) {
+    width: 70%;
+  }
+  .wk-tbody i:nth-child(4) {
+    width: 45%;
+  }
+  .wk-tips {
+    margin: 14px 0 0;
+    padding: 0 0 0 18px;
+    color: var(--soft);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  /* --- The panel ------------------------------------------------------------------------ */
+  .wk-panel {
+    box-sizing: border-box;
+    padding: 6px 16px 16px;
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    font-size: 13px;
+  }
+  .wk-fold {
+    display: none;
+  }
+  .wk-group {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .wk-group:last-child {
+    border-bottom: 0;
+  }
+  .wk-group h2 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .wk-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 34px;
+  }
+  .wk-row[hidden] {
+    display: none;
+  }
+  .wk-row > span {
+    color: var(--soft);
+  }
+  .wk-seg {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--chip);
+  }
+  .wk-seg.wide {
+    display: flex;
+  }
+  .wk-seg.wide button {
+    flex: 1;
+  }
+  .wk-seg button,
+  .wk-moods button {
+    border: 0;
+    padding: 5px 10px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--soft);
+    font: inherit;
+    cursor: pointer;
+  }
+  .wk-seg button.on,
+  .wk-moods button.on {
+    background: var(--chip-on);
+    color: var(--chip-on-ink);
+    box-shadow: var(--chip-shadow);
+    font-weight: 600;
+  }
+  .wk-srow {
+    padding: 8px 0;
+  }
+  .wk-srow + .wk-srow {
+    border-top: 1px solid var(--line);
+  }
+  .wk-sname {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .wk-sname i {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .wk-sname span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .wk-x {
+    border: 0;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--faint);
+    font: inherit;
+    cursor: pointer;
+  }
+  .wk-x:hover {
+    background: var(--chip);
+    color: var(--ink);
+  }
+  .wk-moods {
+    display: flex;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--chip);
+  }
+  .wk-moods button {
+    flex: 1;
+    padding: 5px 0;
+  }
+  .wk-btns,
+  .wk-scenes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .wk-btns.wk-three {
+    grid-template-columns: 1fr 1fr 1fr;
+    margin-bottom: 6px;
+  }
+  .wk-group h2.wk-sub {
+    margin-top: 12px;
+  }
+  .wk-seg.tight button {
+    padding: 5px 4px;
+    white-space: nowrap;
+  }
+  .wk-secs {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--soft);
+  }
+  .wk-secs input {
+    box-sizing: border-box;
+    width: 72px;
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--ink);
+    font: inherit;
+    text-align: center;
+  }
+  .wk-scenes button {
+    border: 0;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: var(--chip);
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
+    line-height: 1.3;
+    cursor: pointer;
+  }
+  .wk-scenes button:hover {
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .wk-scenes button.on {
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
+  }
+  .wk-btn,
+  .wk-btns button {
+    border: 0;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: var(--chip);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+  }
+  .wk-btn {
+    width: 100%;
+    margin-top: 8px;
+  }
+  .wk-btn:hover,
+  .wk-btns button:hover {
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .wk-note {
+    margin: 8px 0 0;
+    color: var(--faint);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .wk-switch {
+    position: relative;
+    flex: none;
+    width: 40px;
+    height: 22px;
+    border: 0;
+    padding: 0;
+    border-radius: 11px;
+    background: var(--switch-off);
+    cursor: pointer;
+  }
+  .wk-switch::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ffffff;
+    transition: left 0.15s ease;
+  }
+  .wk-switch.on {
+    background: var(--accent);
+  }
+  .wk-switch.on::after {
+    left: 21px;
+  }
+
+  /* --- Her own menu (Windows'), and a word where Windows would act ----------------------- */
+  .wk-menu {
+    position: fixed;
+    z-index: 20;
+    min-width: 220px;
+    padding: 4px;
+    border-radius: 8px;
+    background: var(--menu-bg);
+    color: var(--menu-ink);
+    box-shadow: 0 0 0 1px var(--menu-line), 0 8px 24px rgba(0, 0, 0, 0.22);
+    font-size: 13px;
+  }
+  .wk-menu[hidden],
+  .wk-toast[hidden] {
+    display: none;
+  }
+  .wk-mi {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    border: 0;
+    padding: 7px 12px 7px 6px;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: default;
+  }
+  .wk-mi:hover {
+    background: var(--menu-hover);
+  }
+  .wk-check {
+    width: 16px;
+    text-align: center;
+  }
+  .wk-sep {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--menu-line);
+  }
+  .wk-toast {
+    position: fixed;
+    z-index: 21;
+    left: max(16px, env(safe-area-inset-left, 0px));
+    bottom: 20px;
+    max-width: min(420px, calc(100vw - 32px));
+    padding: 9px 14px;
+    border-radius: 10px;
+    background: var(--toast-bg);
+    color: var(--toast-ink);
+    box-shadow: var(--shadow);
+    font-size: 13px;
+  }
+
+  /* --- Narrow: the panel a sheet at the foot ---------------------------------------------- */
+  @media (max-width: 900px) {
+    .wk-page {
+      padding-bottom: calc(52vh + 24px);
+    }
+    .wk-main {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .wk-panel {
+      position: fixed;
+      z-index: 10;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      max-height: 52vh;
+      overflow-y: auto;
+      padding: 0 max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -1px 0 var(--line), 0 -8px 24px rgba(0, 0, 0, 0.12);
+    }
+    .wk-panel.folded {
+      max-height: 48px;
+      overflow: hidden;
+    }
+    .wk-fold {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: block;
+      width: 100%;
+      height: 44px;
+      border: 0;
+      background: var(--surface);
+      color: var(--ink);
+      font: inherit;
+      font-weight: 600;
+    }
+    .wk-fold::before {
+      content: '';
+      display: block;
+      width: 36px;
+      height: 4px;
+      margin: 0 auto 8px;
+      border-radius: 2px;
+      background: var(--switch-off);
+    }
+    .wk-toast {
+      bottom: calc(52vh + 12px);
+    }
+  }
+</style>
+
+<div class="wk-page">
+  <header class="wk-head">
+    <h1>Wakuwaku 手感试玩<!--wk-build--></h1>
+    <p>她真正的页面跑在一张假的桌面上：悬停、点击、右键、拖动，都是她自己的代码在处理。右边的控制台先挑一个场景，再替 Rust 那边发消息，比如会话变了、她打个招呼。要靠 Windows 才能做的事（开始菜单、打开程序），会在左下角说一声。</p>
+  </header>
+  <div class="wk-main">
+    <section class="wk-stage">
+      <div id="wk-viewport" class="wk-viewport">
+        <div id="wk-screen">
+          <div id="wk-wall"></div>
+          <iframe id="wk-desk" title="桌面上的小工具"></iframe>
+          <div id="wk-plate" hidden></div>
+          <iframe id="wk-home" title="她的家"></iframe>
+          <div id="wk-thumbs"></div>
+        </div>
+      </div>
+      <ul class="wk-tips">
+        <li>鼠标停在胶囊上会展开，移开就收起；小工具那一行有 › 的，点一下就地展开卡片。</li>
+        <li>右键条带的空白处是她的菜单：「添加小工具…」进入编辑并打开右边的小工具库，「编辑任务栏布局」只拖动各部分。随改随存，拿掉的能撤销；Esc 先关库，再按一次就是完成。</li>
+        <li>右键小工具和程序按钮也有菜单；点有两个窗口的终端按钮，会弹出窗口预览。</li>
+        <li>桌面上的小工具可以拖；拖到同样大小的另一个上停半秒就叠起来；双击工作台的标题可以改名。</li>
+        <li>按住 Ctrl 在桌面空白处拖出一个框，或按住 Ctrl 点小工具，能选中几个；右键选中的一个：「组成工作台」（接着给它起名）或「从桌面移除」。Esc 或不按 Ctrl 点一下就取消。</li>
+        <li>工作台的 ⋯ 里「存为组合…」把它存起来；小工具库的「组合」里把它拖到桌面上，或单击，就按原样再搭一块；右键卡片能改名、删除。</li>
+        <li>提醒停多久：右边「她有事告诉你时」下面的「停留多久」（设置「通用 → 提醒」里是同一个）。光环一步一步地转两圈后静静亮着，到时间才变成小点；「展开胶囊」时胶囊开这么久；选「看到为止」就等鼠标经过。「发生点什么」里的做完、改好、出错、打招呼能一次次再来；场景「提醒停留」「展开停留」直接开始。</li>
+        <li>灵动岛模式下，右边「环境」的「岛的位置」（设置「外观 → 位置」）能把岛放到左上、居中、右上：展开时朝屏幕中间长，流光、小点、小工具库、胶囊面板都跟着。场景「岛在右上」是展开的样子。</li>
+      </ul>
+    </section>
+    <aside id="wk-panel" class="wk-panel" aria-label="控制台">
+      <button id="wk-fold" class="wk-fold" type="button">控制台</button>
+      <div class="wk-group">
+        <h2>场景</h2>
+        <div id="wk-scenes" class="wk-scenes"></div>
+        <p id="wk-scene-note" class="wk-note"></p>
+      </div>
+      <div class="wk-group">
+        <h2>环境</h2>
+        <div class="wk-row"><span>她的家</span><div class="wk-seg" data-seg="home"></div></div>
+        <div class="wk-row"><span>Windows</span><div class="wk-seg" data-seg="mode"></div></div>
+        <div class="wk-row" data-row="material"><span>条带</span><div class="wk-seg" data-seg="material"></div></div>
+        <div class="wk-row" data-row="edge"><span>位置</span><div class="wk-seg" data-seg="edge"></div></div>
+        <div class="wk-row" data-row="islandPos"><span>岛的位置</span><div class="wk-seg" data-seg="islandPos"></div></div>
+      </div>
+      <div class="wk-group">
+        <h2>会话</h2>
+        <div id="wk-sessions"></div>
+        <button type="button" class="wk-btn" data-act="add">加一个会话</button>
+        <p class="wk-note">点心情就是一次会话状态的变化。「等你」会带一张询问卡片；最近变化的会话显示在胶囊上。</p>
+      </div>
+      <div class="wk-group">
+        <h2>发生点什么</h2>
+        <div class="wk-btns wk-three">
+          <button type="button" data-act="end:done">做完</button>
+          <button type="button" data-act="end:review">改好</button>
+          <button type="button" data-act="end:error">出错</button>
+        </div>
+        <div class="wk-btns">
+          <button type="button" data-act="hello">打招呼</button>
+          <button type="button" data-act="fail">工具失败</button>
+          <button type="button" data-act="nudge">插件冒头</button>
+          <button type="button" data-act="version">新版本</button>
+        </div>
+        <p class="wk-note">做完、改好、出错：最上面的会话先干一会儿再这样结束，每按一次来一次。工具失败发生在回合中间：按规格只让头像播个小动作，不转流光。新版本只留一个强调色小点。</p>
+      </div>
+      <div class="wk-group">
+        <h2>她有事告诉你时</h2>
+        <div class="wk-seg wide" data-seg="endCue"></div>
+        <h2 class="wk-sub">停留多久</h2>
+        <div class="wk-seg wide tight" data-seg="hold"></div>
+        <div class="wk-row" data-row="holdSecs" hidden><span>自定义</span><span class="wk-secs"><input id="wk-hold-secs" type="number" min="3" max="600" step="1" inputmode="numeric" aria-label="自定义的秒数，3 到 600"> 秒</span></div>
+        <p class="wk-note">和设置「通用 → 提醒」里的是同一个，从事情发生时算起：展开胶囊时开这么久；流光转完后光环静止亮着，到时间变成小点。只留小点时用不上。到时间（或鼠标从她的家移开）那个会话就回到空闲，和真机一样。</p>
+      </div>
+      <div class="wk-group">
+        <h2>其他</h2>
+        <div class="wk-row"><span>没人在电脑前</span><button type="button" class="wk-switch" data-toggle="quiet" aria-label="没人在电脑前"></button></div>
+        <div class="wk-row"><span>减少动画</span><button type="button" class="wk-switch" data-toggle="reduced" aria-label="减少动画"></button></div>
+        <button type="button" class="wk-btn" data-act="reset">这个场景从头开始</button>
+      </div>
+    </aside>
+  </div>
+</div>
+<div id="wk-menu" class="wk-menu" hidden></div>
+<div id="wk-toast" class="wk-toast" role="status" hidden></div>
+<script>
+  window.WAKU_HOST_PAGE = true
+</script>
+<script src="preview/fake-tauri.js"></script>
+<script src="preview/fixtures.js"></script>
+<script src="preview/scenes.js"></script>
+<script src="preview/playground.js"></script>

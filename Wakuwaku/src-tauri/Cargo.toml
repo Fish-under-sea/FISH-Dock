@@ -1,0 +1,95 @@
+[package]
+name = "wakuwaku"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+authors = ["Pengjie Zhou"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# macos-private-api: her windows see-through on macOS (tauri.conf.json
+# macOSPrivateApi); nothing elsewhere.
+tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset", "macos-private-api"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Her local HTTP port (server.rs): tiny_http 0.12.0 as patched in
+# vendor/tiny_http (below), which drops a connection it cannot take where
+# 0.12.0 panicked and so ended her.
+tiny_http = "0.12"
+sys-locale = "0.3"
+ureq = { version = "3.4.2", features = ["json"] }
+# Mail (mail.rs): IMAP over the system's TLS, spoken by io-imap (the library
+# under himalaya; pinned, as it is young and changes often), and letters read.
+native-tls = "0.2"
+mail-parser = { version = "0.11", features = ["full_encoding"] }
+# Letters written (mail/send.rs): the MIME of a letter, its headers encoded.
+mail-builder = { version = "1", default-features = false }
+io-imap = { version = "=0.7.1", default-features = false, features = ["client"] }
+# io-imap's parser (imap-codec) needs nom with alloc, which io-imap alone does
+# not turn on.
+nom = { version = "7", default-features = false, features = ["alloc"] }
+# The taskbar's tray icons, drawn into PNGs for its page (taskbar.rs); both
+# already in the tree, under Tauri.
+png = "0.17"
+base64 = "0.22"
+# The SHA-256 of an update downloaded (updates.rs); already in the tree, under Tauri.
+sha2 = "0.10"
+# LibreHardwareMonitor's zip unpacked (lhm_setup.rs): its entries inflated
+# and their CRC checked; both already in the tree and linked, under ureq
+# (its gzip).
+flate2 = "1"
+crc32fast = "1"
+# Tauri's async runtime made with fewer threads (main.rs); already in the tree, under Tauri.
+tokio = { version = "1", features = ["rt-multi-thread"] }
+# DeepSeek Harness's session log read for its last reply (events_dsh.rs):
+# a Zstandard decoder in plain Rust, nothing under it (no checksums: "hash"
+# off). New to the tree: 78,848 bytes of the release exe with the reading
+# of the log (11,452,416 before; 2026-10-16).
+ruzstd = { version = "=0.9.1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# Her tests make a connection's split fail (server.rs); her builds never have it.
+tiny_http = { version = "0.12", features = ["test-failed-split"] }
+
+[patch.crates-io]
+# tiny_http 0.12.0 with its connections' failures dropped, not panicked on
+# (vendor/tiny_http/README.md); 0.12.0 is the latest there is, and its master
+# panics the same way.
+tiny_http = { path = "vendor/tiny_http" }
+
+[features]
+default = ["custom-protocol"]
+# Serve the pages from the binary; without it Tauri waits for a dev server.
+custom-protocol = ["tauri/custom-protocol"]
+# The release the installer delivers: Node, the fixed-version WebView2 runtime
+# and the local model service are expanded beside the program at install time
+# and used in place (runtime.rs). The program itself embeds no archive.
+installed = []
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[target."cfg(windows)".dependencies]
+tauri-winrt-notification = "0.8.1"
+winreg = "0.56.0"
+# WebView2's ProcessFailed: her pages' renderer gone (crash/win.rs); both
+# already in the tree, under Tauri.
+webview2-com = "0.39"
+windows-core = "0.62"
+
+[target."cfg(target_os = \"macos\")".dependencies]
+# The island over the menu bar, round the notch (notch.rs): the window's level
+# and the screen's notch; both already in the tree, under Tauri.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+
+[target."cfg(unix)".dependencies]
+# The local time off Windows (widgets.rs local_now: localtime_r); already in
+# the tree, under Tauri.
+libc = "0.2"

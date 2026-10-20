@@ -1,0 +1,212 @@
+/* A program's windows or its menu over its button on her taskbar on another
+   display (barpop.js): as her own taskbar's (style.css #bar-rest .wpop),
+   dark, or light in Windows' light mode. The window is transparent round
+   it, room for its shadow. */
+html,
+body {
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  font: 12px 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+#pop {
+  position: absolute;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 200px;
+  max-width: 360px;
+  padding: 6px;
+  border-radius: 10px;
+  background: #1c1c1e;
+  color: #e5e5ea;
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+#pop[hidden] {
+  display: none;
+}
+
+/* The windows: a card each, its live picture drawn by Windows into the room under its title. */
+#pop.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 872px;
+}
+
+.wcard {
+  width: 208px;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.wcard:hover,
+.witem:hover {
+  background: #2c2c2e;
+}
+
+.wcard.front {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.wtop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+}
+
+.wtop img {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.wtop .wt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: #a1a1a6;
+  text-align: center;
+  line-height: 22px;
+}
+
+.wx:hover {
+  background: #ff5c6c;
+  color: #fff;
+}
+
+.wthumb {
+  height: 117px;
+  margin-top: 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* The menu: the program's name, then what can be done. */
+.whead {
+  padding: 6px 8px 4px;
+  color: #a1a1a6;
+  font-size: 11px;
+}
+
+.witem {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.light #pop {
+  background: #f9f9f9;
+  color: #1b1b1b;
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.16),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.light .wcard:hover,
+.light .witem:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light .wx,
+.light .whead {
+  color: #5d5d5d;
+}
+
+.light .wthumb {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Opening, it rises a little into place from the strip. */
+#pop.rising {
+  animation: pop-rise 0.18s ease both;
+}
+
+@keyframes pop-rise {
+  from {
+    opacity: 0;
+    transform: translate(var(--rise-x, 0), var(--rise-y, 8px));
+  }
+}
+
+/* Its room for the pointer reaches the window's edge on the strip
+   (barpop.js GAP; bar.css stretches the buttons' row to the strip's):
+   between a button and its list the pointer was on neither, and the list
+   closed after 400 ms there. Windows' own stays (zhoupengjie/Wakuwaku#56).
+   An element of its own (barpop.js reach), not ::after: going from an
+   ::after onto the list itself left the list (style.css .wreach). */
+#pop .reach {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 8px;
+}
+
+.e-top #pop .reach {
+  top: auto;
+  bottom: 100%;
+}
+
+.e-left #pop .reach,
+.e-right #pop .reach {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  width: 10px;
+}
+
+.e-left #pop .reach {
+  left: auto;
+  right: 100%;
+}
+
+.e-right #pop .reach {
+  left: 100%;
+  right: auto;
+}
+
+.e-top {
+  --rise-y: -8px;
+}
+
+.e-left {
+  --rise-x: -8px;
+  --rise-y: 0;
+}
+
+.e-right {
+  --rise-x: 8px;
+  --rise-y: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pop.rising {
+    animation-name: pop-fade;
+  }
+}
+
+@keyframes pop-fade {
+  from {
+    opacity: 0;
+  }
+}

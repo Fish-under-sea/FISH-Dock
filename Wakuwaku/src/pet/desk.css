@@ -1,0 +1,1516 @@
+/* The desktop's widgets (desk.js): the widget design of 2026-10-16, §2, §3, §7, §8, §9. One
+   window per display, clear but for the widgets; each a pane of glass whose ground is the
+   wallpaper under it blurred (desk.js paperFor), the glass colour over it, a hairline, a
+   highlight along its top, a soft shadow and a faint glow of its own colour in one corner.
+   Dark as Windows' mode is dark; .lw light. */
+:root {
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --font-num: 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --font-icon: 'Segoe Fluent Icons', 'Segoe MDL2 Assets', sans-serif;
+  --ease: cubic-bezier(0.3, 1.2, 0.45, 1);
+  --w-glass: rgba(28, 29, 34, 0.56);
+  --w-line: rgba(255, 255, 255, 0.11);
+  --w-hi: rgba(255, 255, 255, 0.08);
+  --w-fg: #f5f5f7;
+  --w-2: rgba(235, 235, 245, 0.64);
+  --w-3: rgba(235, 235, 245, 0.34);
+  --w-track: rgba(255, 255, 255, 0.12);
+  --w-shadow: 0 16px 40px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.2);
+  --w-menu: rgba(36, 37, 43, 0.92);
+  --w-on: rgba(255, 255, 255, 0.16);
+  --w-amber: #ffb340;
+  --w-tile: rgba(255, 255, 255, 0.06);
+  --w-tile-line: rgba(255, 255, 255, 0.06);
+  --w-red: #ff6b7a;
+  --w-dim: rgba(14, 14, 18, 0.5);
+  --w-accent: #4cc2ff;
+}
+
+body.lw {
+  --w-glass: rgba(250, 250, 252, 0.62);
+  --w-line: rgba(0, 0, 0, 0.07);
+  --w-hi: rgba(255, 255, 255, 0.7);
+  --w-fg: #1b1b1f;
+  --w-2: rgba(30, 30, 36, 0.62);
+  --w-3: rgba(30, 30, 36, 0.34);
+  --w-track: rgba(0, 0, 0, 0.09);
+  --w-shadow: 0 16px 40px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --w-menu: rgba(249, 249, 251, 0.95);
+  --w-on: #ffffff;
+  --w-amber: #b25e00;
+  --w-tile: rgba(255, 255, 255, 0.55);
+  --w-tile-line: rgba(0, 0, 0, 0.05);
+  --w-red: #c42b3c;
+  --w-dim: rgba(246, 246, 248, 0.58);
+  --w-accent: #005fb8;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  color: var(--w-fg);
+  font: 12px/1.35 var(--font-ui);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+#desk {
+  position: absolute;
+  inset: 0;
+}
+
+/* --- One in its place: alone, or a stack ----------------------------------------------------- */
+.dw {
+  position: absolute;
+  left: 0;
+  top: 0;
+  touch-action: none;
+}
+
+.dw.s {
+  width: 156px;
+  height: 156px;
+}
+
+.dw.m {
+  width: 324px;
+  height: 156px;
+}
+
+.dw.l {
+  width: 324px;
+  height: 324px;
+}
+
+.dw.dragging {
+  z-index: 20;
+}
+
+.dw.dragging .wd {
+  box-shadow:
+    inset 0 1px 0 var(--w-hi),
+    0 0 0 1px var(--w-line),
+    0 24px 56px rgba(0, 0, 0, 0.38),
+    0 4px 10px rgba(0, 0, 0, 0.22);
+}
+
+/* Held over one it may stack onto, half a second: that one ringed. */
+.dw.target .wd,
+.dw.target .layer.top .wd {
+  outline: 2px solid color-mix(in srgb, var(--w-fg) 70%, transparent);
+  outline-offset: 3px;
+}
+
+/* Picked with Ctrl: ringed in Windows' accent (desk.js selected). */
+.dw.sel > .wd,
+.dw.sel .layer.top .wd {
+  outline: 2px solid var(--w-accent);
+  outline-offset: 3px;
+}
+
+/* The rectangle Ctrl and a drag over the desktop draws, as Explorer's: a
+   thin dashed line in the accent, a light fill of it. */
+.dsel {
+  position: absolute;
+  z-index: 45;
+  box-sizing: border-box;
+  border: 1px dashed var(--w-accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--w-accent) 14%, transparent);
+  pointer-events: none;
+}
+
+.dsel[hidden] {
+  display: none;
+}
+
+/* --- The glass ----------------------------------------------------------------------------- */
+.wd {
+  --c: var(--w-2);
+  position: relative;
+  box-sizing: border-box;
+  border-radius: 22px;
+  padding: 14px 16px;
+  box-shadow:
+    0 0 0 1px var(--w-line),
+    var(--w-shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Under its words: the wallpaper under it, blurred (desk.js paperFor); over that the glass colour,
+   its glow in the corner and the highlight along its top. Clear without a picture yet: the
+   desktop itself through it. */
+.wd > .wpaper,
+.wd > .wtint {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.wd > .wtint {
+  background:
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--c) 22%, transparent), transparent 55%),
+    var(--w-glass);
+  box-shadow: inset 0 1px 0 var(--w-hi);
+}
+
+.wbody {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wbody > * {
+  position: relative;
+}
+
+.wd.s {
+  width: 156px;
+  height: 156px;
+}
+
+.wd.m {
+  width: 324px;
+  height: 156px;
+}
+
+.wd.l {
+  width: 324px;
+  height: 324px;
+}
+
+/* Nothing to say: greyed (§8). */
+.wd.empty-w {
+  --c: var(--w-3);
+}
+
+.wd.empty-w .hd,
+.wd.empty-w .empty {
+  opacity: 0.7;
+}
+
+.empty {
+  align-self: center;
+  color: var(--w-3);
+  font-size: 12.5px;
+}
+
+.werr {
+  color: var(--w-amber) !important;
+}
+
+/* Loading: one glint where its value goes, a few times, never endless (§8, §9). */
+.wshim {
+  display: inline-block;
+  width: 72px;
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, var(--w-track) 25%, color-mix(in srgb, var(--w-fg) 22%, transparent) 50%, var(--w-track) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out 4;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* --- The words in it ----------------------------------------------------------------------- */
+.hd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--w-2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.hd .hn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hd .gl,
+.hd .wgl {
+  color: var(--c);
+  font: normal 13px/1 var(--font-icon);
+  flex: none;
+}
+
+.hd .wsvg {
+  display: flex;
+  color: var(--c);
+  flex: none;
+}
+
+.hd .wsvg .wicon,
+.hd .wicon {
+  width: 13px;
+  height: 13px;
+}
+
+.hd .wher {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: none;
+  background-color: var(--w-track);
+  background-repeat: no-repeat;
+}
+
+.hd .r {
+  margin-left: auto;
+  padding-left: 8px;
+  font-weight: 500;
+  color: var(--w-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Room on the right for the two buttons while they show: its name cut short
+   before them (the VM, 2026-10-16: a small one's name ran under them). */
+.dw.hover .wd .hd .r,
+.dw.menu .wd .hd .r {
+  visibility: hidden;
+}
+
+.dw.hover .tools ~ .wbody .hd,
+.dw.menu .tools ~ .wbody .hd,
+.dw.hover .wd:has(.tools) .hd,
+.dw.menu .wd:has(.tools) .hd {
+  padding-right: 52px;
+}
+
+.big {
+  font: 300 46px/1 var(--font-num);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.big.md {
+  font-size: 34px;
+}
+
+.big.sm {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.big small {
+  font-size: 0.5em;
+  letter-spacing: 0;
+  color: var(--w-2);
+  margin-left: 2px;
+  font-weight: 400;
+}
+
+.sub {
+  color: var(--w-2);
+  font-size: 12.5px;
+}
+
+.ter {
+  color: var(--w-3);
+  font-size: 11.5px;
+}
+
+.ell,
+.sub,
+.ter {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grow {
+  flex: 1;
+  min-height: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.row .n {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row.top {
+  margin-top: 10px;
+  align-items: flex-end;
+}
+
+.row.top .beside,
+.beside {
+  margin-left: 8px;
+  padding-bottom: 4px;
+  min-width: 0;
+}
+
+.row.top .right {
+  margin-left: auto;
+  text-align: right;
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.row.foot {
+  gap: 12px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.num.mid {
+  font: 400 20px var(--font-num);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.num.mid small {
+  font-size: 11px;
+  color: var(--w-2);
+}
+
+.num.pct {
+  width: 40px;
+  text-align: right;
+}
+
+.num.price {
+  margin-left: auto;
+  font: 400 15px var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+.curve {
+  margin: 14px 0 6px;
+}
+
+.curve.none,
+.off {
+  opacity: 0.7;
+}
+
+.wspark,
+.wbars,
+.wring {
+  display: block;
+  overflow: visible;
+}
+
+.nodata {
+  color: var(--w-3);
+  font-size: 11.5px;
+}
+
+.lines {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.cols {
+  margin-top: 10px;
+  gap: 18px !important;
+}
+
+.cols .col {
+  flex: 1;
+  min-width: 0;
+}
+
+.cols .col .meter {
+  margin-top: 6px;
+}
+
+.mlines {
+  margin-top: 12px;
+  gap: 10px;
+}
+
+.mline .meter {
+  margin-top: 5px;
+}
+
+.nums {
+  margin-top: 10px;
+  align-items: flex-end !important;
+  gap: 16px !important;
+}
+
+/* Today's tokens medium, without hours: the two numbers larger, in the middle. */
+.row.nums.tokens {
+  gap: 28px !important;
+}
+
+/* A script's medium with a label and a value only: value over name, left, in the middle. */
+.twoline {
+  min-width: 0;
+}
+
+.twoline .gl,
+.twoline .wgl {
+  color: var(--c);
+  font: normal 13px/1 var(--font-icon);
+  flex: none;
+}
+
+.slines {
+  margin-top: 10px;
+  gap: 8px;
+}
+
+.sline .who {
+  width: 74px;
+  min-width: 0;
+}
+
+.sline .nocurve {
+  width: 90px;
+}
+
+.code {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.code.big-title {
+  font-size: 13px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--t);
+  background: color-mix(in srgb, var(--t) 16%, transparent);
+}
+
+.meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--w-track);
+  overflow: hidden;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.ringbox {
+  position: relative;
+  flex: none;
+}
+
+.ringn {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  font: 400 17px var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+.ringn small {
+  font-size: 10px;
+  color: var(--w-2);
+}
+
+.ringn.tomato {
+  font: 300 22px var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+.ringn.tomato .ter {
+  font: 11.5px var(--font-ui);
+}
+
+.dot {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.mails {
+  margin-top: 10px;
+  gap: 9px;
+}
+
+.mailrow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 8px;
+  min-width: 0;
+}
+
+.mailrow b {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mailrow span {
+  color: var(--w-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  grid-column: 1 / -1;
+}
+
+.mailrow em {
+  font-style: normal;
+  color: var(--w-3);
+  font-size: 11px;
+}
+
+/* Private words (§8): blurred until the pointer is on the widget. */
+.wpriv.hid {
+  filter: blur(4px);
+  transition: filter 0.18s;
+}
+
+.dw.hover .wpriv.hid {
+  filter: none;
+}
+
+.btns {
+  display: flex;
+  gap: 6px;
+}
+
+.wbtn {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 13px;
+  border: 0;
+  background: var(--w-track);
+  color: var(--w-fg);
+  font: 600 12px var(--font-ui);
+}
+
+.wbtn.off {
+  opacity: 0.45;
+}
+
+.tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--w-track);
+  font-size: 11px;
+}
+
+.tabs span {
+  padding: 2px 8px;
+  border-radius: 7px;
+  color: var(--w-2);
+}
+
+.tabs span.on {
+  background: var(--w-glass);
+  color: var(--w-fg);
+  font-weight: 600;
+}
+
+.tabs span.off {
+  opacity: 0.55;
+}
+
+.wx-hours {
+  display: grid;
+  text-align: center;
+  font-size: 11px;
+  color: var(--w-2);
+  gap: 2px;
+}
+
+.wx-hours b {
+  display: block;
+  color: var(--w-fg);
+  font: 500 13px var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+.wx-hours i {
+  display: block;
+  font: normal 13px/1.6 var(--font-icon);
+  font-style: normal;
+}
+
+/* --- The two buttons on the pointer's (§7): size, more ----------------------------------------- */
+.tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.18s;
+  pointer-events: none;
+}
+
+.dw.hover .tools,
+.dw.menu .tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dw.dragging .tools {
+  opacity: 0;
+}
+
+.tools button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--w-track);
+  color: var(--w-fg);
+  font: normal 10px/1 var(--font-icon);
+  cursor: pointer;
+}
+
+.tools button:hover {
+  background: color-mix(in srgb, var(--w-fg) 22%, transparent);
+}
+
+/* --- A stack (§7): the one on top whole, two layers under it, dots on its right ------------------- */
+.dw.stack .layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transition:
+    transform 0.45s var(--ease),
+    opacity 0.3s;
+}
+
+.dw.stack .layer.top {
+  z-index: 3;
+}
+
+.dw.stack .layer.b1 {
+  transform: translateY(13px) scale(0.94);
+  opacity: 0.75;
+  z-index: 2;
+}
+
+.dw.stack .layer.b2 {
+  transform: translateY(25px) scale(0.88);
+  opacity: 0.45;
+  z-index: 1;
+}
+
+.dw.stack .layer.rest {
+  transform: translateY(25px) scale(0.88);
+  opacity: 0;
+  z-index: 0;
+}
+
+/* Turned away: up and out; a turn back comes down from there. */
+.dw.stack .layer.gone {
+  transform: translateY(-30px) scale(0.96);
+  opacity: 0;
+  z-index: 4;
+}
+
+.dw.stack .layer.instant {
+  transition: none;
+}
+
+/* The layers under it: their glass and its edge, no words, no glow. */
+.dw.stack .layer:not(.top) .wbody,
+.dw.stack .layer:not(.top) .tools {
+  visibility: hidden;
+}
+
+.dw.stack .layer:not(.top) .wtint {
+  background: var(--w-glass);
+}
+
+.sdots {
+  position: absolute;
+  right: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  gap: 4px;
+  z-index: 6;
+  padding: 4px 2px;
+  touch-action: none;
+}
+
+.sdots button {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  transition: height 0.3s var(--ease);
+}
+
+body.lw .sdots button {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.sdots button.on {
+  height: 16px;
+  background: #fff;
+}
+
+body.lw .sdots button.on {
+  background: #1b1b1f;
+}
+
+/* --- A board (§7 工作台, and its note of 2026-10-16) ----------------------------------------------
+   A larger pane of the same glass (the wallpaper under it blurred 40, desk.js paperFor), its
+   corners 28; its title bar 46 px, always there; its widgets flat tiles on it (no glass of their
+   own: no glass on glass), corners 16, their glow at 55%. desk.js sets its box. */
+.db {
+  position: absolute;
+  inset: 0;
+  border-radius: 28px;
+  box-shadow:
+    0 0 0 1px var(--w-line),
+    var(--w-shadow);
+}
+
+.db > .wpaper,
+.db > .btint {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.db > .btint {
+  background: var(--w-glass);
+  box-shadow: inset 0 1px 0 var(--w-hi);
+}
+
+.dw.board.folded .db {
+  border-radius: 23px;
+}
+
+.bhead {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 0;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  color: var(--w-fg);
+}
+
+.btitle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bname {
+  max-width: 300px;
+  font: 600 14px var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bcount,
+.bmore {
+  color: var(--w-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Folded: its widgets' glyphs after its name, 16 px, six at most, then +N. */
+.bicons {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.bgl {
+  display: flex;
+  flex: none;
+  color: var(--c, var(--w-2));
+}
+
+.bgl .wgl {
+  font: normal 16px/1 var(--font-icon);
+}
+
+.bgl .wsvg {
+  display: flex;
+}
+
+.bgl .wicon {
+  width: 16px;
+  height: 16px;
+}
+
+.bgl .wher {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--w-track);
+  background-repeat: no-repeat;
+}
+
+.bbtns {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.bbtns button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--w-2);
+  font: normal 11px/1 var(--font-icon);
+  cursor: pointer;
+}
+
+.bbtns button:hover {
+  background: var(--w-track);
+}
+
+/* Its name being typed (a double-click on it): Enter keeps it, Esc not. */
+.bname-in {
+  width: 200px;
+  box-sizing: border-box;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 7px;
+  outline: 1.5px solid color-mix(in srgb, var(--w-fg) 38%, transparent);
+  background: var(--w-track);
+  color: var(--w-fg);
+  font: 600 14px var(--font-ui);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 存为组合…: the combo's name typed in its place, said so before it. */
+.bsave {
+  flex: none;
+  color: var(--w-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bname-in.save {
+  outline-color: var(--w-accent);
+}
+
+/* Its tiles: flat, a hairline, the glow a little fainter (55%). */
+.wd.tile {
+  position: absolute;
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1px var(--w-tile-line);
+}
+
+.wd.tile > .wtint {
+  background:
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--c) 12%, transparent), transparent 55%),
+    var(--w-tile);
+  box-shadow: none;
+}
+
+/* Dragged: over the others, its own glass colour while it is off the pane. */
+.wd.tile.lifted {
+  z-index: 10;
+  box-shadow:
+    inset 0 0 0 1px var(--w-tile-line),
+    0 16px 40px rgba(0, 0, 0, 0.3);
+}
+
+.wd.tile.lifted > .wtint {
+  background: var(--w-glass);
+}
+
+/* Its buttons on the tile under the pointer, not on all of them. */
+.dw.board.hover .tools,
+.dw.board.menu .tools {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dw.board .tile.hover .tools,
+.dw.board .tile.menu .tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dw.board.hover .wd .hd .r,
+.dw.board.menu .wd .hd .r {
+  visibility: visible;
+}
+
+.dw.board.hover .wd:has(.tools) .hd,
+.dw.board.menu .wd:has(.tools) .hd {
+  padding-right: 0;
+}
+
+.dw.board .tile.hover .hd .r,
+.dw.board .tile.menu .hd .r {
+  visibility: hidden;
+}
+
+.dw.board .tile.hover .hd,
+.dw.board .tile.menu .hd {
+  padding-right: 52px;
+}
+
+.dw.board.hover .wpriv.hid {
+  filter: blur(4px);
+}
+
+.dw.board .tile.hover .wpriv.hid {
+  filter: none;
+}
+
+/* Empty: a dashed place to drop into, saying so. */
+.bempty {
+  position: absolute;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed var(--w-3);
+  border-radius: 16px;
+  color: var(--w-3);
+  font-size: 12.5px;
+}
+
+/* Where the one dragged over it would land. */
+.bghost {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px dashed color-mix(in srgb, var(--w-fg) 55%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--w-fg) 6%, transparent);
+  pointer-events: none;
+}
+
+.dw.board.folded .tile,
+.dw.board.folded .bempty,
+.dw.board.folded .bghost {
+  display: none;
+}
+
+/* Full, refusing one: the pane shakes, gently, 0.3 s. */
+.db.shake {
+  animation: bshake 0.3s ease-in-out;
+}
+
+@keyframes bshake {
+  20% {
+    transform: translateX(-5px);
+  }
+  45% {
+    transform: translateX(5px);
+  }
+  70% {
+    transform: translateX(-3px);
+  }
+  90% {
+    transform: translateX(1px);
+  }
+}
+
+/* A word on a board for two seconds (a stack may not go in). */
+.wtoast {
+  position: absolute;
+  z-index: 40;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: var(--w-menu);
+  color: var(--w-fg);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow:
+    0 0 0 1px var(--w-line),
+    var(--w-shadow);
+  pointer-events: none;
+}
+
+.wtoast[hidden] {
+  display: none;
+}
+
+/* A board's 移除, asked first (desk.js askRemove): a dim layer over the board's own area, its
+   tiles softened under it, and in its middle a card in the menu's look: the question, a grey
+   line on what becomes of its widgets, 取消 and a red 移除. Folded: the card is its title bar,
+   all of it in one line. */
+.bask {
+  position: absolute;
+  z-index: 25;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border-radius: 28px;
+  background: var(--w-dim);
+  backdrop-filter: blur(6px);
+  animation: wfade 0.14s ease-out;
+}
+
+.bask[hidden] {
+  display: none;
+}
+
+.bask-card {
+  display: grid;
+  gap: 12px;
+  min-width: 248px;
+  max-width: 380px;
+  box-sizing: border-box;
+  padding: 14px 16px 12px;
+  border-radius: 12px;
+  background: var(--w-menu);
+  color: var(--w-fg);
+  box-shadow:
+    inset 0 1px 0 var(--w-hi),
+    0 0 0 1px var(--w-line),
+    var(--w-shadow);
+  animation: bask-in 0.2s var(--ease);
+}
+
+@keyframes bask-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+.bask-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.bask-q {
+  overflow: hidden;
+  font: 600 13px var(--font-ui);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bask-sub {
+  color: var(--w-2);
+  font-size: 12px;
+}
+
+.bask-btns {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bask-btns button {
+  height: 28px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--w-track);
+  color: var(--w-fg);
+  font: 600 12px var(--font-ui);
+  cursor: pointer;
+}
+
+.bask-btns button:hover {
+  background: color-mix(in srgb, var(--w-fg) 18%, transparent);
+}
+
+.bask-btns .bask-yes {
+  background: color-mix(in srgb, var(--w-red) 20%, transparent);
+  color: var(--w-red);
+}
+
+.bask-btns .bask-yes:hover {
+  background: color-mix(in srgb, var(--w-red) 30%, transparent);
+}
+
+.bask-btns button:focus-visible {
+  outline: 1.5px solid color-mix(in srgb, var(--w-fg) 45%, transparent);
+  outline-offset: 2px;
+}
+
+/* Folded: over its 46 px title bar, the question and its grey line, then the two buttons. */
+.bask.folded {
+  padding: 0;
+  border-radius: 23px;
+}
+
+.bask.folded .bask-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  padding: 0 9px 0 18px;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 1px 0 var(--w-hi),
+    0 0 0 1px var(--w-line);
+}
+
+.bask.folded .bask-text {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.bask.folded .bask-q {
+  flex: none;
+  max-width: 60%;
+}
+
+.bask.folded .bask-sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Its Add: the widgets there are, each where it is now. */
+.wmenu.wlib {
+  min-width: 268px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.wlib .wli {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.wlib .wli:hover {
+  background: var(--w-track);
+}
+
+.wli .wln {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wli .wlw {
+  color: var(--w-3);
+  font-size: 11.5px;
+}
+
+.wli .wgl {
+  color: var(--c);
+  font: normal 14px/1 var(--font-icon);
+}
+
+.wli .wsvg {
+  display: flex;
+  color: var(--c);
+}
+
+.wli .wicon {
+  width: 14px;
+  height: 14px;
+}
+
+.wli .wher {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--w-track);
+  background-repeat: no-repeat;
+}
+
+.wlnone {
+  padding: 8px;
+  color: var(--w-3);
+}
+
+/* --- A widget's menu (§10): as the taskbar's and the capsule's (style.css .wmenu) ---------------- */.wmenu {
+  position: absolute;
+  z-index: 30;
+  display: grid;
+  gap: 1px;
+  min-width: 232px;
+  max-width: 300px;
+  box-sizing: border-box;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--w-menu);
+  color: var(--w-fg);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-align: left;
+  box-shadow:
+    inset 0 1px 0 var(--w-hi),
+    0 0 0 1px var(--w-line),
+    var(--w-shadow);
+  animation: wfade 0.12s ease-out;
+}
+
+.wmenu[hidden] {
+  display: none;
+}
+
+@keyframes wfade {
+  from {
+    opacity: 0;
+  }
+}
+
+.wmenu .wmh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 7px;
+  font-weight: 600;
+}
+
+.wmenu .wmh b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wmenu .wmh .wgl {
+  color: var(--c);
+  font: normal 14px/1 var(--font-icon);
+}
+
+.wmenu .wmh .wsvg {
+  display: flex;
+  color: var(--c);
+}
+
+.wmenu .wmh .wicon {
+  width: 14px;
+  height: 14px;
+}
+
+.wmenu .wmh .wher {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--w-track);
+  background-repeat: no-repeat;
+}
+
+.wmenu .wmr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px 3px 8px;
+}
+
+.wmenu .wml {
+  flex: 1;
+  color: var(--w-2);
+}
+
+.wmenu .wms {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--w-track);
+}
+
+.wmenu button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wmenu .wmo {
+  min-width: 34px;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.wmenu .wmo.on {
+  background: var(--w-on);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.wmenu .wmo:not(.on):not(.off):hover {
+  background: color-mix(in srgb, var(--w-on) 50%, transparent);
+}
+
+.wmenu .wmi {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.wmenu .wmsub {
+  display: block;
+  margin-top: 2px;
+  color: var(--w-3);
+  font-size: 11px;
+  white-space: normal;
+}
+
+.wmenu .wmi:not(.off):hover {
+  background: var(--w-track);
+}
+
+.wmenu .off {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.wmenu .wmsep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--w-line);
+}
+
+.wmenu .wmwhy {
+  padding: 6px 8px 4px;
+  color: var(--w-2);
+  white-space: normal;
+  font-size: 11.5px;
+}
+
+/* --- Motion reduced (§9): fades for all of it ------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .dw.stack .layer,
+  .tools,
+  .sdots button,
+  .wpriv.hid {
+    transition: opacity 0.2s !important;
+  }
+
+  .dw.stack .layer.gone {
+    transform: none;
+  }
+
+  .wshim,
+  .wmenu {
+    animation: none !important;
+  }
+
+  /* A board's 移除 asked: faded in, not grown. */
+  .bask-card {
+    animation: wfade 0.14s ease-out;
+  }
+
+  /* A full board: a ring for as long, no shaking. */
+  .db.shake {
+    animation: none;
+    outline: 2px solid var(--w-amber);
+    outline-offset: 2px;
+  }
+}
+
+/* One without an icon of its own (widgets.js markHTML): the first character
+   of its name, weight 600, on a 16 px rounded square tinted as the stack
+   cards' icon tiles are: its colour at 18% under it, the letter in its
+   colour; light (.lw) 14% and the letter one step deeper; with no colour, a
+   grey tint and the secondary grey (the design session, 2026-10-16). Held
+   against each place's own glyph rules. */
+.wmark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px !important;
+  height: 16px !important;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mark) 18%, transparent) !important;
+  color: var(--mark) !important;
+  font: 600 10.5px/1 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif !important;
+  font-style: normal;
+  letter-spacing: 0;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+body.lw .wmark {
+  background: color-mix(in srgb, var(--mark) 14%, transparent) !important;
+  color: var(--mark-deep, var(--mark)) !important;
+}
+
+.wmark.none,
+body.lw .wmark.none {
+  background: rgba(127, 127, 127, 0.18) !important;
+  color: var(--w-2) !important;
+}

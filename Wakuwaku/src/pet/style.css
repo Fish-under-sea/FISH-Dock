@@ -1,0 +1,5653 @@
+:root {
+  --scale: 0.55;
+  --accent: #9aa4b2;
+  --sprite: none;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font-family: 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+}
+
+#stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* The bubble may shrink, she never does: its lines are cut short instead
+   (pet.js fillBubble), so however long the words, she is drawn whole. */
+#bubble {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-width: 96%;
+  box-sizing: border-box;
+  overflow: hidden;
+  margin-bottom: calc(6px * var(--scale) / 0.55);
+  padding: 0.35em 0.7em;
+  border-radius: 0.9em;
+  border: 2px solid var(--accent);
+  background: rgba(255, 255, 255, 0.94);
+  color: #1f2430;
+  font-size: calc(13px * var(--scale) / 0.55);
+  line-height: 1.35;
+  text-align: center;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  transition: opacity 0.25s;
+  pointer-events: none;
+}
+
+#bubble.hidden {
+  opacity: 0;
+}
+
+#bubble .line {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#bubble .more {
+  font-size: 0.86em;
+  opacity: 0.75;
+}
+
+#bubble .say {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* One 192x208 cell of the 1536x2288 sheet, scaled: the whole sheet (the
+   film) behind a cell-sized window, moved to the cell by a transform on its
+   own compositor layer, so a frame costs no repaint (it was the cell's
+   background-position, painted anew every frame). */
+#pet {
+  flex: none;
+  position: relative;
+  overflow: hidden;
+  transform: translateX(var(--shift, 0px));
+  width: calc(192px * var(--scale));
+  height: calc(208px * var(--scale));
+  cursor: grab;
+}
+
+#pet-film {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(1536px * var(--scale));
+  height: calc(var(--sheet-h, 2288px) * var(--scale));
+  background-image: var(--sprite);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* No sprite yet: a box to right-click or double-click. */
+#pet.empty {
+  border: 2px dashed #9aa4b2;
+  border-radius: 14px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* The prompt panel: fixed size text, whatever the pet's scale. */
+#panel {
+  flex: none;
+  width: 300px;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 2px solid var(--accent);
+  background: rgba(255, 255, 255, 0.97);
+  color: #1f2430;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+#panel[hidden],
+.asking #bubble {
+  display: none;
+}
+
+#panel .head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+#panel .title {
+  font-weight: 700;
+}
+
+#panel .chip,
+#panel .more {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #eef0f4;
+  color: #5a6170;
+}
+
+#panel .code {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  max-height: 96px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f3f4f7;
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#panel .code.plan {
+  max-height: 140px;
+  font-family: inherit;
+}
+
+#panel .text {
+  margin-bottom: 8px;
+}
+
+#panel .row {
+  display: flex;
+  gap: 6px;
+}
+
+#panel .options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+#panel .btn {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid #c9ceda;
+  border-radius: 7px;
+  background: #fff;
+  color: #1f2430;
+  font: inherit;
+  cursor: pointer;
+}
+
+#panel .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#panel .btn.primary {
+  border-color: #17a058;
+  background: #17c964;
+  color: #fff;
+}
+
+#panel .btn.always {
+  border-color: #3b5bdb;
+  background: #4d6bfe;
+  color: #fff;
+}
+
+#panel .btn.danger {
+  border-color: #f31260;
+  color: #c40d4d;
+}
+
+#panel .btn.option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+#panel .btn.option.picked {
+  border-color: #4d6bfe;
+  background: #eef2ff;
+}
+
+#panel .btn.option .desc {
+  font-size: 11px;
+  color: #5a6170;
+}
+
+#panel .note {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #5a6170;
+  overflow-wrap: anywhere;
+}
+
+#panel .foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+#panel .btn.ghost {
+  flex: none;
+  border: none;
+  padding: 2px 0;
+  background: none;
+  color: #5a6170;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+#panel .field {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+#panel .input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid #c9ceda;
+  border-radius: 7px;
+  font: inherit;
+  color: #1f2430;
+  background: #fff;
+}
+
+#panel .input:focus {
+  outline: 2px solid #4d6bfe;
+  outline-offset: -1px;
+}
+
+#panel .unit,
+#panel .hint {
+  align-self: center;
+  font-size: 11px;
+  color: #5a6170;
+}
+
+#panel .qdesc {
+  margin: -4px 0 8px;
+  font-size: 12px;
+  color: #5a6170;
+}
+
+/* --- The island (island.js) ------------------------------------------------ */
+
+#island-bar {
+  display: none;
+}
+
+.island #stage {
+  display: none;
+}
+
+.island #island-bar {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+}
+
+/* At a top corner (islandPos, island.js placeAnchor, anchor.js;
+   zhoupengjie/Wakuwaku#59): at that side of its window (island.rs puts the
+   window at the screen's corner), as far in from the side as down from the
+   top, so it grows toward the screen's middle as it opens: from the left
+   corner to the right, from the right one to the left. What is laid over
+   it (the ring, the dot) goes with it. */
+.home-island.isl-at-left #island-bar {
+  align-items: flex-start;
+  padding-left: 8px;
+}
+
+.home-island.isl-at-right #island-bar {
+  align-items: flex-end;
+  padding-right: 8px;
+}
+
+/* On a Mac it hangs from the screen's top edge over the menu bar, as tall as
+   the band there (island.js screenTop): black on the black notch, no ring. */
+.island.at-top #island-bar {
+  padding-top: 0;
+}
+
+.at-top #island {
+  box-shadow: none;
+}
+
+.at-top #island-compact {
+  height: var(--top-h, 36px);
+}
+
+/* Round a notch the words would sit under it: her and the clock only. */
+.notched #island-compact .label,
+.notched #island-compact .more {
+  visibility: hidden;
+}
+
+/* Tucked into the notch while nothing goes on: black on its black, nothing
+   in it, her portrait too. */
+.tucked #island-compact {
+  visibility: hidden;
+}
+
+.tucked.compact-her #island-her {
+  opacity: 0;
+}
+
+/* Closed in the notch, the pointer goes through it to what is under it (the
+   notch's own app): nothing here is under the pointer (bridge.js chainAt). */
+.aside #island,
+.aside #island * {
+  pointer-events: none;
+}
+
+/* The clock (or a widget's value) within the right ear (island.js EAR),
+   never under the notch. */
+.notched #island-compact .clock {
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#island-row {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Her, inside the island: one element all the way from the small round
+   portrait to her whole self, so she grows rather than being swapped. Frame
+   steps move the sheet; the shape (size, place, crop, scale) springs. */
+#island-her {
+  display: none;
+  position: absolute;
+  z-index: 1;
+  left: 6px;
+  top: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: grab;
+  transition:
+    left 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    top 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    width 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    height 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    border-radius 0.4s ease,
+    opacity 0.12s ease;
+}
+
+.has-her #island-her {
+  display: block;
+}
+
+/* Her ring, the mood's colour round the portrait: a layer of its own that
+   fades out before she grows and back in once she is small again. (As a
+   shadow on the clip it showed as a square frame while the clip grew.) */
+#island-her::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--ring, transparent);
+  opacity: 0;
+  transition: opacity 0.06s ease;
+}
+
+.compact-her #island-her::after {
+  opacity: 1;
+  transition: opacity 0.2s ease 0.45s;
+}
+
+#island-her .sheet,
+#drop-her .sheet {
+  position: relative;
+  width: 192px;
+  height: 208px;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+/* The sheet itself, behind a cell-sized window (island.js showFrame): moved
+   to the frame's cell by a transform on its own layer, no repaint per frame. */
+.sheet .film {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1536px;
+  height: 2288px;
+  background-repeat: no-repeat;
+  will-change: transform;
+  pointer-events: none;
+}
+
+#island-her .sheet {
+  transition: transform 0.56s cubic-bezier(0.3, 1.45, 0.5, 1);
+}
+
+/* Back in her home: put in her place at once (island.js herShown). */
+#island-her.snap,
+#island-her.snap .sheet {
+  transition: none !important;
+}
+
+/* Pulled out: her seat in the island is empty while she hangs in the drop. */
+.pulling #island-her {
+  opacity: 0;
+}
+
+/* The drop she is pulled out in: black shapes (the island, a neck, a drop)
+   blurred and sharpened again, so they melt into each other and pinch apart
+   like a liquid. The crisp island sits on top; she rides above it all. */
+#goo,
+#drop-her {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.pulling #goo,
+.reaching #goo {
+  display: block;
+  inset: 0;
+  z-index: 1;
+  filter: url(#goo-filter);
+}
+
+#goo div {
+  position: absolute;
+  background: #000;
+}
+
+#goo .goo-neck {
+  border-radius: 99px;
+  transform-origin: 50% 0;
+}
+
+#goo .goo-drop {
+  border-radius: 50%;
+}
+
+.pulling #drop-her {
+  display: block;
+  z-index: 3;
+  width: 96px;
+  height: 104px;
+  overflow: hidden;
+}
+
+#drop-her .sheet {
+  transform: scale(0.5);
+}
+
+/* Let go short of breaking free: everything springs back into the island. */
+.settling #goo div,
+.settling #drop-her {
+  transition:
+    left 0.3s ease-in,
+    top 0.3s ease-in,
+    width 0.3s ease-in,
+    height 0.3s ease-in,
+    transform 0.3s ease-in;
+}
+
+/* The island's own wobble when the drop pinches off. */
+.wobble #island {
+  animation: island-wobble 0.5s ease;
+  transform-origin: 50% 0;
+}
+
+@keyframes island-wobble {
+  30% {
+    transform: scale(1.04, 0.9);
+  }
+  60% {
+    transform: scale(0.98, 1.04);
+  }
+}
+
+/* Always black, light theme or dark: colour is only in the faces and clocks.
+   The spring: a curve that overshoots, then settles. */
+#island {
+  position: relative;
+  flex: none;
+  width: 112px;
+  height: 36px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #000;
+  color: #f5f5f7;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+  transition:
+    width 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    height 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    border-radius 0.4s ease;
+}
+
+#island-compact,
+#island-expanded {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: max-content;
+  white-space: nowrap;
+  opacity: 0;
+  transform: scale(0.94);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+  pointer-events: none;
+}
+
+/* Three places (island.js fillCompact): her at the left, the words in the
+   middle cut short, the value at the right edge; as wide as set. */
+#island-compact {
+  height: 36px;
+  gap: 10px;
+  padding: 0 16px 0 7px;
+  font-size: 13px;
+}
+
+#island-compact .clock {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What takes turns (words, "+N", value) as one, its width what is left. */
+#island-compact .turning {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Another widget's turn, another session: it slides in. */
+#island-compact .turning.turn {
+  animation: compact-turn 0.32s ease both;
+}
+
+@keyframes compact-turn {
+  from {
+    opacity: 0;
+    transform: translateY(45%);
+  }
+}
+
+/* The monitor pinned: its readings at the island's right end, past a line. */
+#island-compact .pinned {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 12.5px;
+}
+
+#island-compact.bare {
+  padding-right: 7px;
+}
+
+.has-her #island-compact {
+  padding-left: 40px;
+}
+
+/* As tall as what it says (island.js sizeOf), never shorter than her. */
+#island-expanded {
+  min-height: 84px;
+  max-width: 360px;
+  min-width: 300px;
+  gap: 14px;
+  padding: 12px 22px 12px 18px;
+}
+
+/* With her whole self standing at the left. */
+.has-her #island-expanded {
+  min-height: 116px;
+  max-width: 420px;
+  min-width: 320px;
+  padding-left: 124px;
+}
+
+/* The shape now: its content comes in once the old one has gone. */
+[data-view='compact'] #island-compact,
+[data-view='expanded'] #island-expanded {
+  opacity: 1;
+  transform: none;
+  transition-delay: 0.12s;
+}
+
+/* The open island's rows take the pointer: a session there goes to its
+   window, a widget is the one shown. Let through like the compact's, a
+   press on a session hit the island itself and only opened the settings
+   (2026-10-13, the user). */
+[data-view='expanded'] #island-expanded {
+  pointer-events: auto;
+}
+
+#island-compact .label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #d1d1d6;
+}
+
+#island-bar .clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+#island-expanded .lines {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+}
+
+/* On the taskbar no taller than the room above the strip (island.js
+   openMaxH, zhoupengjie/Wakuwaku#55): past that its lines scroll inside
+   it. The rows' light reaches 8 px past their sides, a session's 3 px
+   above and below: the box as far out, the rows where they were. */
+.home-taskbar #island-expanded .lines {
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  margin: -3px -8px;
+  padding: 3px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.isl-light.home-taskbar #island-expanded .lines {
+  scrollbar-color: rgba(0, 0, 0, 0.28) transparent;
+}
+
+/* The session shown: its name and clock, where it is, its reply, its list. */
+#island-expanded .me {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+/* A session with a window to go to: a soft light under the pointer. The
+   margin keeps its words where they were. */
+#island-expanded [data-jump] {
+  margin: -3px -8px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+#island-expanded [data-jump]:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#island-expanded .other[data-jump] {
+  margin: -1px -8px;
+  padding: 1px 8px;
+}
+
+/* The name, and the clock beside it. */
+#island-expanded .head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+#island-expanded .head .clock {
+  flex: none;
+  margin-left: auto;
+  font-size: 16px;
+}
+
+#island-expanded .title,
+#island-expanded .sub,
+#island-expanded .other > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#island-expanded .title {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#island-expanded .sub {
+  font-size: 12px;
+  color: #a1a1a6;
+}
+
+/* How the turn ended, in Claude's words: two lines at most. */
+#island-expanded .reply {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #d1d1d6;
+}
+
+/* How far down the to-do list, and the item it is on. */
+#island-expanded .progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 2px 0 1px;
+}
+
+#island-expanded .bar {
+  display: block;
+  flex: 1 1 0;
+  min-width: 60px;
+  height: 3px;
+  border-radius: 2px;
+  background: #2c2c2e;
+  overflow: hidden;
+}
+
+#island-expanded .progress .item {
+  flex: 0 1 auto;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: #a1a1a6;
+}
+
+#island-expanded .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+/* A line for each other session: its colour, its name, where it is, its clock. */
+#island-expanded .others {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 5px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+}
+
+#island-expanded .other {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+#island-expanded .other .dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+#island-expanded .other .who {
+  flex: 0 1 auto;
+  max-width: 45%;
+  color: #e5e5ea;
+}
+
+#island-expanded .other .what {
+  flex: 1 1 0;
+  min-width: 0;
+  color: #a1a1a6;
+}
+
+#island-expanded .other .when {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+#island-expanded .other.rest {
+  padding-left: 14px;
+  color: #8e8e93;
+}
+
+#island .portrait {
+  flex: none;
+  border-radius: 50%;
+  background-color: #1c1c1e;
+  background-repeat: no-repeat;
+}
+
+/* A face: a circle and two capsule eyes, which blink now and then. */
+.face {
+  position: relative;
+  flex: none;
+  display: inline-block;
+  border-radius: 50%;
+}
+
+.face i {
+  position: absolute;
+  top: 33%;
+  width: 15%;
+  height: 34%;
+  border-radius: 99px;
+  background: #0b0b0c;
+  transition: transform 0.07s;
+}
+
+.face i:first-child {
+  left: 27%;
+}
+
+.face i:last-child {
+  right: 27%;
+}
+
+.blink .face i {
+  transform: scaleY(0.15);
+}
+
+/* A widget's icon: its strokes in the colour around it. */
+.wicon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A widget in the compact island: icon and label, the value where the clock goes. */
+#island-compact .wlabel {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* An icon Windows has itself (widgets.js GLYPHS): from its icon font. */
+.wicon.wglyph {
+  display: inline-grid;
+  place-items: center;
+  font: normal 13px/1 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+}
+
+/* A monitor reading (widgets.js cellHTML): Windows' own glyph and the
+   number in one small cell, its ground filled from the left as far as the
+   reading goes (--p), white or black as the taskbar's own icons are
+   (--cell-ink: dark where the ground is light); filled orange when it
+   wants a look. The glyph at a size the icon font draws cleanly (--g: 12px;
+   on the taskbar 16px, as its tray's icons are: smaller, its details run
+   together). Every cell as wide as the widest reading ("100%", "337K"),
+   so they stay in columns as the numbers change. */
+.wcell {
+  --g: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: calc(var(--g) + 2px + 4.4ch + 6px);
+  height: calc(var(--g) + 4px);
+  box-sizing: border-box;
+  padding: 0 3px;
+  border-radius: 3px;
+  color: var(--cell-ink, #fff);
+  font-size: 11px;
+  line-height: 1;
+  vertical-align: middle;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--cell-fill, currentColor) 36%, transparent) var(--p), color-mix(in srgb, currentColor 9%, transparent) var(--p));
+}
+
+.wcell.high {
+  --cell-fill: var(--cell-high, #ffb340);
+}
+
+.wcell + .wcell {
+  margin-left: 4px;
+}
+
+.wcell .wg {
+  flex: none;
+  width: var(--g);
+  font: normal var(--g) / 1 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  text-align: center;
+}
+
+/* The network's triangles three quarters the size, in the same room: as
+   large they would outweigh the chip's and the memory's outlines. */
+.wcell .wg.tri {
+  font-size: calc(var(--g) * 0.75);
+}
+
+/* A drive read or written (hw.rs): the drive's glyph with the network's
+   small triangle, down or up, at its lower right corner, over the cell's
+   padding, so the cell is no wider than the others. */
+.wcell .wg.rd,
+.wcell .wg.wr {
+  position: relative;
+}
+
+.wcell .wg.rd::after,
+.wcell .wg.wr::after {
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  font-size: calc(var(--g) * 0.5);
+  line-height: 1;
+}
+
+.wcell .wg.rd::after {
+  content: '\EDDC';
+}
+
+.wcell .wg.wr::after {
+  content: '\EDDB';
+}
+
+#bar-rest .mon.rows .wcell {
+  --g: 16px;
+  height: 18px;
+}
+
+.wcell b {
+  flex: 1;
+  text-align: right;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-light #bar-rest,
+.isl-light #island {
+  --cell-ink: #1b1b1b;
+  --cell-high: #c25400;
+}
+
+#island-compact .wparts {
+  gap: 0;
+}
+
+#island-compact .wlabel .wicon {
+  flex: none;
+}
+
+/* The widgets in the open island, the one shown lit. */
+#island-expanded .wlist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+}
+
+#island-expanded .wrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0 -8px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  color: #a1a1a6;
+  cursor: pointer;
+}
+
+#island-expanded .wrow.on {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e5e5ea;
+}
+
+/* Under the pointer, lit as a session's line is: a press opens its settings. */
+#island-expanded .wrow {
+  transition: background 0.12s ease;
+}
+
+#island-expanded .wrow:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+#island-expanded .wrow .wl {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#island-expanded .wrow .wv {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* A widget's detail after its value (the weather's range), in the row's own grey. */
+#island-expanded .wrow .wd {
+  flex: none;
+  margin-left: -2px;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-expanded .head .wicon {
+  width: 16px;
+  height: 16px;
+  align-self: center;
+}
+
+/* Other sessions busy too: "+N" before the clock. */
+#island-compact .more {
+  flex: none;
+  margin-right: -4px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The prompt inside the island: the panel, dressed for black. */
+.island #panel {
+  position: absolute;
+  top: 13px;
+  left: 14px;
+  width: 340px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: #f5f5f7;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.island.has-her #panel {
+  left: 122px;
+}
+
+[data-view='ask'] #panel {
+  opacity: 1;
+  transition-delay: 0.2s;
+}
+
+.island #panel .chip,
+.island #panel .more {
+  background: #2c2c2e;
+  color: #c7c7cc;
+}
+
+.island #panel .code {
+  background: #1c1c1e;
+  color: #e5e5ea;
+}
+
+.island #panel .btn {
+  border-color: #3a3a3c;
+  background: #2c2c2e;
+  color: #f5f5f7;
+  border-radius: 14px;
+}
+
+.island #panel .btn.primary {
+  border-color: #34d27b;
+  background: #34d27b;
+  color: #04220f;
+}
+
+.island #panel .btn.always {
+  border-color: #5e9bff;
+  background: #5e9bff;
+  color: #04122b;
+}
+
+.island #panel .btn.danger {
+  border-color: #3a3a3c;
+  color: #ff6b7a;
+}
+
+.island #panel .btn.option.picked {
+  border-color: #5e9bff;
+  background: #16233d;
+}
+
+.island #panel .btn.ghost {
+  background: none;
+  color: #8e8e93;
+}
+
+.island #panel .input {
+  border-color: #3a3a3c;
+  background: #1c1c1e;
+  color: #f5f5f7;
+}
+
+.island #panel .note,
+.island #panel .unit,
+.island #panel .hint,
+.island #panel .qdesc,
+.island #panel .btn.option .desc {
+  color: #98989d;
+}
+
+/* Her portrait in the island while she is out (island.js stillHer). */
+.still-her {
+  position: relative;
+  flex: none;
+  display: inline-block;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #1c1c1e;
+}
+
+.still-her .sheet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 192px;
+  height: 208px;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+/* --- Her home, by display (island.js home()); the island is the one above. --- */
+
+#bar-rest {
+  display: none;
+}
+
+#bar-rest .face .v {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+#bar-rest .grow {
+  flex: 1;
+}
+
+#bar-rest .face {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The taskbar: a strip along the bottom of the screen in place of Windows'
+   own (as high, 48px); her end at the left, what opens from it growing up
+   into the room kept above it. Its right part is the bar's, with the Start
+   button first and the tray's icons and the clock last. */
+.home-taskbar #island-bar {
+  padding: 0;
+  align-items: stretch;
+}
+
+/* The page as big as its window, should Chromium have made it a little
+   bigger (island.js fitPage; 175%: zhoupengjie/Wakuwaku#19). What is laid
+   along its foot or right end, the fixed ones too (contain), along the
+   window's. */
+body.home-taskbar {
+  position: relative;
+  contain: layout;
+  width: calc(100% - var(--page-cut-x, 0px));
+  height: calc(100% - var(--page-cut-y, 0px));
+}
+
+/* As thick as the strip lies on the screen (island.js setStrip, --strip-h:
+   its physical px over the scale), its inner edge where the work area stops. */
+.home-taskbar #island-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--strip-h, 48px);
+  gap: 0;
+  background: #000;
+  box-shadow: inset var(--hair-x, 0) var(--hair-y, 1px) 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Its foot on the strip's: taller, it grows up. Above the rest: what opens
+   from her end covers it. */
+.home-taskbar #island {
+  position: absolute;
+  left: var(--isl-x, 0px);
+  bottom: 0;
+  z-index: 2;
+  box-shadow: none;
+  transition:
+    width 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    height 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    border-radius 0.4s ease,
+    left 0.3s ease,
+    right 0.3s ease,
+    bottom 0.3s ease;
+}
+
+/* Grown up from the strip, black on black: no outline, which would cut a
+   line down through the strip where the two meet. Shrinking back
+   (island.js holdGround), it keeps its shadow until the spring is over. */
+.home-taskbar #island:not([data-view='compact']),
+.home-taskbar #island.shrinking {
+  box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* The settings stand above the strip, as what Windows opens from its
+   taskbar does, and leave it whole (island.js TASKBAR_GAP). */
+.home-taskbar #island[data-view='settings'] {
+  left: 8px;
+  bottom: 56px;
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.home-taskbar #island-compact {
+  height: 48px;
+}
+
+.home-taskbar.has-her #island-compact {
+  padding-left: 46px;
+}
+
+/* The strip's Mica (mica.js): the desktop's picture under it, drawn small
+   and blurred, faded in over the last; Mica's own tint until it comes. A
+   line along its top over it, as on the black strip. */
+#mica {
+  display: none;
+}
+
+.tb-mica #island-row {
+  background: #202020;
+}
+
+.tb-mica #mica {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#mica canvas {
+  position: absolute;
+  transition: opacity 0.4s ease;
+}
+
+.tb-mica #mica::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset var(--hair-x, 0) var(--hair-y, 1px) 0 rgba(255, 255, 255, 0.1);
+}
+
+/* On the Mica, and on the light strip, her end is an island of its own: a
+   black capsule in the strip (island.js isCapsule, tb-capsule;
+   CAPSULE_X, CAPSULE_Y), and what it grows into rises from there,
+   rounded all round, with the settings' shadow and edge. */
+.home-taskbar.tb-capsule #island:not([data-view='settings']) {
+  left: var(--isl-x, 6px);
+  bottom: 5px;
+}
+
+.home-taskbar.tb-capsule #island[data-view='compact'] {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+.home-taskbar.tb-capsule #island:not([data-view='compact']):not([data-view='settings']) {
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.home-taskbar.tb-capsule #island-compact {
+  height: 38px;
+}
+
+.home-taskbar.tb-capsule.has-her #island-compact {
+  padding-left: 41px;
+}
+
+.home-taskbar #bar-rest {
+  position: absolute;
+  z-index: 1;
+  bottom: 0;
+  right: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 0 0 4px;
+  font-size: 12px;
+  color: #d1d1d6;
+  white-space: nowrap;
+}
+
+/* Its parts touch, each a 40px-high button with room of its own, so the
+   icons and words along it stand evenly apart, as on Windows' own; a little
+   more between the groups (Start and the programs, the monitor, the tray
+   and the clock). */
+.home-taskbar #bar-rest .wins {
+  margin-left: 2px;
+}
+
+.home-taskbar #bar-rest .faces:not(:empty) {
+  margin-right: 10px;
+}
+
+/* Show the desktop: a sliver at the screen's right edge, its line showing
+   under the pointer, as on Windows' own. */
+#bar-rest .tdesk {
+  align-self: stretch;
+  width: 9px;
+  margin-left: 3px;
+  border-left: 1px solid transparent;
+}
+
+/* OLED's guard (island.js oledShift): the island and the taskbar's parts a
+   screen pixel or two off, by turns. The strip's ground (#island-row, the
+   Mica) stays, and so does the show-desktop sliver, which meets the
+   screen's edge. Only while it is on: any translate, 0px too, makes a
+   stacking context and a frame for what is fixed inside. */
+.oled-shift #island,
+.oled-shift #bar-rest {
+  translate: var(--oled-x) var(--oled-y);
+}
+
+.oled-shift #bar-rest .tdesk {
+  translate: calc(-1 * var(--oled-x)) calc(-1 * var(--oled-y));
+}
+
+#bar-rest .tdesk:hover {
+  border-left-color: rgba(255, 255, 255, 0.35);
+}
+
+#bar-rest .faces {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The monitor on the taskbar: two rows, as the clock has the time over the
+   date (widgets.js rowsHTML), each reading a cell (.wcell), in columns. */
+#bar-rest .mon.rows {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1.25;
+  color: #e5e5ea;
+}
+
+/* On the taskbar a box as its buttons have (the clock's), for the
+   pointer's highlight to light it as it lights them (island.js GLIDE_ON). */
+.home-taskbar #bar-rest .mon.rows {
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 6px;
+}
+
+.home-taskbar #bar-rest .faces:has(.mon.rows) {
+  margin-right: 2px;
+}
+
+#bar-rest .mon.rows .wrow {
+  display: flex;
+}
+
+/* Start, as Windows' button: four squares. */
+#bar-rest .start {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#bar-rest .start svg {
+  width: 24px;
+  height: 24px;
+  position: relative;
+}
+
+/* Under the pointer (and the window in front): a light wash, as on the
+   black strip so on the Mica. */
+#bar-rest .start:hover,
+#bar-rest .ticon:hover,
+#bar-rest .tquick:hover,
+#bar-rest .tclock:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+/* Windows' quick settings: the network and the volume, one button. */
+#bar-rest .tquick {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* Windows' own icon font, as its taskbar draws these system icons (Segoe
+   Fluent Icons; Segoe MDL2 Assets before Windows 11). White as Windows' on
+   the dark taskbar, near black on the light one. */
+#bar-rest .fi {
+  display: block;
+  font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  font-size: 16px;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+  color: #fff;
+}
+
+.tb-light #bar-rest .fi {
+  color: #1b1b1b;
+}
+
+/* The volume: all three waves faint, those up to it over them solid. */
+#bar-rest .tquick .vol {
+  position: relative;
+}
+
+#bar-rest .tquick .vol .back {
+  opacity: 0.35;
+}
+
+/* Muted: the faint waves gone but their room kept (the struck-through
+   speaker over it is out of the flow: with nothing left in the flow it fell
+   below the middle and over the clock). */
+#bar-rest .tquick .vol .back[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
+#bar-rest .tquick .vol .front {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+/* The battery (island.js showBattery): none on a desktop. In Windows' own
+   battery font (.sysbatt), as its taskbar draws it: the outline, and the
+   level's fill over it; its percentage beside it, in the size of Windows'
+   captions. */
+#bar-rest .tquick .bat {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+#bar-rest .tquick .bat[hidden],
+#bar-rest .tquick .bat .pct[hidden] {
+  display: none;
+}
+
+#bar-rest .tquick .bat .glyph {
+  position: relative;
+}
+
+#bar-rest .tquick .bat .fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+#bar-rest .tquick .bat.sysbatt .fi {
+  font-family: 'SysBatt Fluent Icons';
+}
+
+/* The fill green while charging, yellow with the energy saver on, red when
+   critically low: Windows' own colors for them, on the dark strip and on
+   the light. */
+#bar-rest .tquick .bat[data-tint='green'] .fill {
+  color: #9fd89f;
+}
+
+#bar-rest .tquick .bat[data-tint='yellow'] .fill {
+  color: #eaa300;
+}
+
+#bar-rest .tquick .bat[data-tint='red'] .fill {
+  color: #d92c2c;
+}
+
+.tb-light #bar-rest .tquick .bat[data-tint='green'] .fill {
+  color: #107c10;
+}
+
+.tb-light #bar-rest .tquick .bat[data-tint='red'] .fill {
+  color: #c50f1f;
+}
+
+/* A pixel up, as Windows' sits by the battery's middle. */
+#bar-rest .tquick .bat .pct {
+  position: relative;
+  top: -1px;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  color: #fff;
+}
+
+.tb-light #bar-rest .tquick .bat .pct {
+  color: #1b1b1b;
+}
+
+/* What is using the microphone, the camera, the location (island.js showPrivacy). */
+#bar-rest .tpriv {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+/* In Windows' accent, as its own taskbar shows them (--win-accent: its
+   lighter shade on the dark strip, its darker on the light). */
+#bar-rest .tpriv .fi {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 7px;
+  border-radius: 6px;
+  color: var(--win-accent, #4cc2ff);
+  cursor: pointer;
+}
+
+.tb-light #bar-rest .tpriv .fi {
+  color: var(--win-accent, #0067c0);
+}
+
+#bar-rest .tpriv .fi:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.tb-light #bar-rest .tpriv .fi:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* The tray's icons, as the programs drew them (taskbar.rs). */
+#bar-rest .tray {
+  display: flex;
+  align-items: center;
+}
+
+#bar-rest .ticon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 40px;
+  border-radius: 6px;
+}
+
+#bar-rest .ticon img {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
+/* The time over the date; a press opens the notifications and the calendar. */
+#bar-rest .tclock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 6px;
+  line-height: 1.25;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+#bar-rest .tclock b {
+  font-weight: 500;
+  color: #f5f5f7;
+}
+
+#bar-rest .tclock i {
+  font-style: normal;
+  color: #a1a1a6;
+}
+
+/* The windows' buttons, in the order they came (taskbar.rs): an icon and a
+   title, a line under it, longer and in Windows' accent colour for the one
+   in front; lit amber while one flashes for attention. */
+#bar-rest .wins {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#bar-rest .win {
+  position: relative;
+  flex: 0 1 168px;
+  min-width: 40px;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  border-radius: 6px;
+  color: #d1d1d6;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+#bar-rest .win:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+#bar-rest .win.front {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+#bar-rest .win::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: #8e8e93;
+  transform: translateX(-50%);
+  transition:
+    width 0.2s ease,
+    background 0.2s ease;
+}
+
+#bar-rest .win.front::after {
+  width: 18px;
+  background: var(--win-accent, #5e9bff);
+}
+
+#bar-rest .win.min {
+  color: #8e8e93;
+}
+
+/* A window asking for attention: its button pulses orange as many times
+   as Windows flashes its own (ForegroundFlashCount, --flashes from
+   taskbar:look; 7 by default), then stays orange until the window is
+   brought to the front. The pulse is the opacity of a layer under the
+   icon, which the compositor animates alone; animating the background
+   repainted the button every frame, without end (35 to 40% of a core while
+   anything flashed, 2026-10-11). */
+#bar-rest .win.flash {
+  /* Its own stacking context, so the orange layer can lie under the icon. */
+  isolation: isolate;
+}
+
+#bar-rest .win.flash::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgba(255, 179, 64, 0.38);
+  will-change: opacity;
+  animation: win-flash 1.8s ease-in-out var(--flashes, 7) both;
+  /* How far along the flashes already are (island.js drawWindows). */
+  animation-delay: var(--flash-delay, 0ms);
+  pointer-events: none;
+}
+
+@keyframes win-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+#bar-rest .win img {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
+#bar-rest .win .letter {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: #3a3a3c;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+#bar-rest .win .wt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The keyboard: Caps Lock (only while on), the input method's script. */
+#bar-rest .kbd {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#bar-rest .kbd .caps {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: #ffb340;
+  color: #000;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+#bar-rest .kbd .caps.on {
+  display: flex;
+}
+
+#bar-rest .kbd .ime {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 40px;
+  padding: 0 2px;
+  border-radius: 6px;
+  color: #f5f5f7;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#bar-rest .kbd .ime:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+#bar-rest .kbd .ime.unknown {
+  color: #8e8e93;
+}
+
+/* An input method of another maker (inputs.rs): the picture of its mode
+   that Windows shows, or its own icon beside the script's mark. */
+#bar-rest .kbd .ime .pic {
+  width: 16px;
+  height: 16px;
+}
+
+#bar-rest .kbd .ime .pic + .script {
+  margin-left: 3px;
+}
+
+/* The input methods to pick from (a right press on the mark): each its
+   icon (a layout its language's mark), its language over its name, the
+   one in front marked. */
+#bar-rest .wpop .irow {
+  height: auto;
+  min-height: 40px;
+  padding: 4px 10px;
+}
+
+#bar-rest .wpop .irow .itile {
+  flex: none;
+  min-width: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+#bar-rest .wpop .irow .ilines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#bar-rest .wpop .irow .iname {
+  color: #a1a1a6;
+  font-size: 11px;
+}
+
+/* The tray's ^, the icons kept out after it, the folded ones above it
+   (open on a press), and an icon being dragged between the two. */
+#bar-rest .tray {
+  position: relative;
+}
+
+#bar-rest .tchev {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 40px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#bar-rest .tchev[hidden] {
+  display: none;
+}
+
+#bar-rest .tchev:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+#bar-rest .tchev .fi {
+  font-size: 16px;
+  transition: transform 0.2s ease;
+}
+
+#bar-rest .tchev.open .fi {
+  transform: rotate(180deg);
+}
+
+#bar-rest .tout {
+  display: flex;
+  align-items: center;
+}
+
+#bar-rest .tfly {
+  position: absolute;
+  left: -10px;
+  bottom: 54px;
+  display: grid;
+  grid-template-columns: repeat(5, 36px);
+  gap: 2px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #1c1c1e;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+#bar-rest .tfly[hidden] {
+  display: none;
+}
+
+#bar-rest .tfly .ticon {
+  width: 36px;
+  height: 36px;
+}
+
+#bar-rest .tfly .ticon:hover {
+  background: #2c2c2e;
+}
+
+/* The keyboard on the taskbar (Win+T, Win+B; island.js keyRing): a ring
+   round what it is on, as Windows draws round what has its keyboard, light
+   outside and a dark line inside it (the other way round in Windows' light
+   mode); drawn inside the button, as its column may clip what lies outside
+   it, and over the line a window in front has round its button or card.
+   Nothing of the browser's own. */
+#bar-rest :focus:not(.kfocus) {
+  outline: none;
+}
+
+#bar-rest .kfocus {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.7) !important;
+}
+
+.tb-light #bar-rest .kfocus {
+  outline-color: rgba(0, 0, 0, 0.9);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.7) !important;
+}
+
+.tray-dragging #bar-rest .tfly,
+.tray-dragging #bar-rest .tout {
+  outline: 1.5px dashed rgba(94, 155, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.tghost {
+  position: fixed;
+  z-index: 10;
+  width: 20px;
+  height: 20px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* While a tray icon or a program's button is dragged: the side of the one
+   it would land beside. */
+#bar-rest .ticon.drop-before,
+#bar-rest .win.drop-before {
+  box-shadow: inset 2px 0 0 var(--win-accent, #5e9bff);
+}
+
+#bar-rest .ticon.drop-after,
+#bar-rest .win.drop-after {
+  box-shadow: inset -2px 0 0 var(--win-accent, #5e9bff);
+}
+
+/* A program kept on the taskbar, not running: its icon alone. Several
+   windows: how many, by the icon. */
+#bar-rest .win.idle {
+  flex: none;
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  justify-content: center;
+}
+
+#bar-rest .win.idle::after {
+  display: none;
+}
+
+#bar-rest .win .count {
+  flex: none;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: #3a3a3c;
+  color: #e5e5ea;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+
+/* Icons alone (island.js, taskbarButtons): a square for each program and
+   for Start, the icon as big as on Windows' own taskbar. Its windows are
+   listed when the pointer rests on it: no title; how many, at the icon's
+   top right when more than one. */
+#bar-rest.icons .start,
+#bar-rest.icons .win {
+  flex: none;
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  justify-content: center;
+}
+
+#bar-rest.icons .win img,
+#bar-rest.icons .win .letter {
+  width: 24px;
+  height: 24px;
+}
+
+#bar-rest.icons .win .letter {
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+#bar-rest.icons .win .wt {
+  display: none;
+}
+
+#bar-rest.icons .win .count {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--win-accent, #5e9bff);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  box-shadow: 0 0 0 1.5px #000;
+}
+
+/* Centred (island.js alignApps), the middle run slides to the middle as programs come and go. */
+#bar-rest .tz-center {
+  transition: margin-left 0.25s ease;
+}
+
+/* Above a program's button: its windows to pick from, or what can be done. */
+#bar-rest .wpop {
+  position: absolute;
+  bottom: 54px;
+  z-index: 3;
+  min-width: 200px;
+  max-width: 360px;
+  padding: 6px;
+  border-radius: 10px;
+  background: #1c1c1e;
+  color: #e5e5ea;
+  font-size: 12px;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+/* Its room for the pointer reaches down to the buttons (zhoupengjie/Wakuwaku#56):
+   between a button and its list the pointer was on nothing, and the list
+   closed after 400 ms there. Windows' own stays however long the pointer
+   rests between them. 6 px to the strip, 4 more to its buttons' tops. An
+   element of its own (island.js popReach), not ::after: WebView2 left the
+   list (mouseleave) as the pointer went from its ::after onto the list
+   itself, and it closed under the pointer. */
+#bar-rest .wpop .wreach {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 10px;
+}
+
+.tb-top #bar-rest .wpop .wreach {
+  top: auto;
+  bottom: 100%;
+}
+
+.tb-side #bar-rest .wpop .wreach {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  width: 10px;
+}
+
+.tb-left #bar-rest .wpop .wreach {
+  left: auto;
+  right: 100%;
+}
+
+.tb-right #bar-rest .wpop .wreach {
+  left: 100%;
+  right: auto;
+}
+
+#bar-rest .wpop .wrow,
+#bar-rest .wpop .witem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#bar-rest .wpop .wrow:hover,
+#bar-rest .wpop .witem:hover {
+  background: #2c2c2e;
+}
+
+#bar-rest .wpop .wrow.front {
+  box-shadow: inset 2px 0 0 #5e9bff;
+}
+
+#bar-rest .wpop .wrow img {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+#bar-rest .wpop .wrow .wt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#bar-rest .wpop .wx {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: #a1a1a6;
+  text-align: center;
+  line-height: 22px;
+}
+
+#bar-rest .wpop .wx:hover {
+  background: #ff5c6c;
+  color: #fff;
+}
+
+#bar-rest .wpop .whead {
+  padding: 6px 8px 4px;
+  color: #a1a1a6;
+  font-size: 11px;
+}
+
+/* The windows listed above a program's button: a card each, its live
+   picture drawn by Windows into the room under its title. */
+#bar-rest .wpop.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 90vw;
+}
+
+/* After .list: closed, it is gone whichever kind it showed. */
+#bar-rest .wpop[hidden] {
+  display: none;
+}
+
+#bar-rest .wpop .wcard {
+  width: 208px;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+#bar-rest .wpop .wcard:hover {
+  background: #2c2c2e;
+}
+
+#bar-rest .wpop .wcard.front {
+  box-shadow: inset 0 0 0 1.5px #5e9bff;
+}
+
+#bar-rest .wpop .wtop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+}
+
+#bar-rest .wpop .wtop img {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+#bar-rest .wpop .wtop .wt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#bar-rest .wpop .wthumb {
+  height: 117px;
+  margin-top: 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* --- The taskbar in Windows' light mode (island.js tb-light: as Windows'
+   own taskbar is, SystemUsesLightTheme, which taskbar.rs sends) ---------------
+   The strip and what opens from it light, her island too (a capsule in
+   it, island.js isCapsule; its settings too). The programs draw
+   their tray icons for the light taskbar themselves. Under the pointer
+   and in front: a white wash, as on Windows' own. */
+.tb-light #island-row {
+  background: #eeeeee;
+  box-shadow: inset var(--hair-x, 0) var(--hair-y, 1px) 0 rgba(0, 0, 0, 0.08);
+}
+
+.tb-light.tb-mica #island-row {
+  background: #f3f3f3;
+}
+
+.tb-light #mica::after {
+  box-shadow: inset var(--hair-x, 0) var(--hair-y, 1px) 0 rgba(0, 0, 0, 0.06);
+}
+
+.tb-light #bar-rest,
+.tb-light #bar-rest .win,
+.tb-light #bar-rest .mon.rows,
+.tb-light #bar-rest .tclock b,
+.tb-light #bar-rest .kbd .ime {
+  color: #1b1b1b;
+}
+
+.tb-light #bar-rest .tclock i,
+.tb-light #bar-rest .wpop .wx,
+.tb-light #bar-rest .wpop .whead,
+.tb-light #bar-rest .wpop .irow .iname {
+  color: #5d5d5d;
+}
+
+.tb-light #bar-rest .win.min,
+.tb-light #bar-rest .kbd .ime.unknown {
+  color: #8a8a8a;
+}
+
+.tb-light #bar-rest .start:hover,
+.tb-light #bar-rest .ticon:hover,
+.tb-light #bar-rest .tquick:hover,
+.tb-light #bar-rest .tclock:hover,
+.tb-light #bar-rest .win:hover,
+.tb-light #bar-rest .kbd .ime:hover,
+.tb-light #bar-rest .tchev:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.tb-light #bar-rest .win.front {
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.tb-light #bar-rest .win::after {
+  background: #868686;
+}
+
+.tb-light #bar-rest .win.front::after {
+  background: var(--win-accent, #0067c0);
+}
+
+.tb-light #bar-rest .win .letter,
+.tb-light #bar-rest .win .count {
+  background: #d6d6d6;
+  color: #1b1b1b;
+}
+
+.tb-light #bar-rest.icons .win .count {
+  background: var(--win-accent, #0067c0);
+  color: #fff;
+  box-shadow: 0 0 0 1.5px #f3f3f3;
+}
+
+.tb-light #bar-rest .wpop,
+.tb-light #bar-rest .tfly {
+  background: #f9f9f9;
+  color: #1b1b1b;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.tb-light #bar-rest .wpop .wrow:hover,
+.tb-light #bar-rest .wpop .witem:hover,
+.tb-light #bar-rest .wpop .wcard:hover,
+.tb-light #bar-rest .tfly .ticon:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.tb-light #bar-rest .wpop .wrow.front {
+  box-shadow: inset 2px 0 0 var(--win-accent, #0067c0);
+}
+
+.tb-light #bar-rest .wpop .wcard.front {
+  box-shadow: inset 0 0 0 1.5px var(--win-accent, #0067c0);
+}
+
+.tb-light #bar-rest .wpop .wthumb {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.tb-light #bar-rest .tdesk:hover {
+  border-left-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Her island, light as Windows' own flyouts are: the capsule a light pill
+   in the strip, what it grows into a light card, the prompt's parts light;
+   the moods in their deeper colours (island.js COLOR_LIGHT); the settings
+   in it light as well (settings.css). */
+.tb-light #island {
+  background: #fbfbfb;
+}
+
+/* Its words dark on a light ground (island.js inkLight: as Windows' mode, or as
+   its own ground when the settings give it one). */
+.isl-light #island {
+  color: #1b1b1b;
+}
+
+.tb-light.home-taskbar.tb-capsule #island[data-view='compact']:not(.shrinking) {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.tb-light.home-taskbar.tb-capsule #island:not([data-view='compact']):not([data-view='settings']),
+.tb-light.home-taskbar.tb-capsule #island.shrinking {
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.tb-light #goo div {
+  background: #fbfbfb;
+}
+
+.isl-light #island-compact .label,
+.isl-light #island-expanded .reply {
+  color: #3a3a3a;
+}
+
+.isl-light #island-compact .pinned {
+  border-left-color: rgba(0, 0, 0, 0.12);
+}
+
+.isl-light #island-compact .more {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.isl-light #island-expanded [data-jump]:hover,
+.isl-light #island-expanded .wrow.on {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.isl-light #island-expanded .sub,
+.isl-light #island-expanded .progress .item,
+.isl-light #island-expanded .other .what,
+.isl-light #island-expanded .wrow {
+  color: #5d5d5d;
+}
+
+.isl-light #island-expanded .other .who,
+.isl-light #island-expanded .wrow.on {
+  color: #1b1b1b;
+}
+
+.isl-light #island-expanded .other.rest {
+  color: #8a8a8a;
+}
+
+.isl-light #island-expanded .bar {
+  background: #e3e3e3;
+}
+
+.isl-light #island-expanded .others,
+.isl-light #island-expanded .wlist {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.isl-light #island-expanded .wrow:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.isl-light #island .portrait,
+.isl-light #island .still-her {
+  background-color: #e8e8e8;
+}
+
+.isl-light.island #panel {
+  color: #1b1b1b;
+}
+
+.isl-light.island #panel .chip,
+.isl-light.island #panel .more {
+  background: #ececec;
+  color: #3a3a3a;
+}
+
+.isl-light.island #panel .code {
+  background: #f0f0f0;
+  color: #1b1b1b;
+}
+
+.isl-light.island #panel .btn {
+  border-color: #d6d6d6;
+  background: #ffffff;
+  color: #1b1b1b;
+}
+
+.isl-light.island #panel .btn.primary {
+  border-color: #34d27b;
+  background: #34d27b;
+  color: #04220f;
+}
+
+.isl-light.island #panel .btn.always {
+  border-color: #5e9bff;
+  background: #5e9bff;
+  color: #04122b;
+}
+
+.isl-light.island #panel .btn.danger {
+  color: #c42b3c;
+}
+
+.isl-light.island #panel .btn.option.picked {
+  border-color: #0067c0;
+  background: #e6f0fb;
+}
+
+.isl-light.island #panel .btn.ghost {
+  background: none;
+  color: #6e6e73;
+}
+
+.isl-light.island #panel .input {
+  border-color: #d6d6d6;
+  background: #ffffff;
+  color: #1b1b1b;
+}
+
+.isl-light.island #panel .note,
+.isl-light.island #panel .unit,
+.isl-light.island #panel .hint,
+.isl-light.island #panel .qdesc,
+.isl-light.island #panel .btn.option .desc {
+  color: #6e6e73;
+}
+
+/* A tray icon in one colour drawn for the other kind of taskbar (island.js
+   markMono): turned over to read, white to black on the light taskbar,
+   black to white on the dark. */
+.tb-light #bar-rest .ticon[data-mono='light'] img,
+body:not(.tb-light) #bar-rest .ticon[data-mono='dark'] img {
+  filter: invert(1);
+}
+
+/* --- Start, as Windows 11's (island.js startButton) -------------------------------
+   Its mark's blues as measured on Windows' own (26200, both modes), light
+   at the top left, deep at the bottom right (deeper on the light taskbar);
+   pressed in under the pointer and springing back; bouncing once when the
+   Start menu opens by the Windows key; lit while it is open. */
+#bar-rest .start .s0 {
+  stop-color: #77f3ff;
+}
+
+#bar-rest .start .s1 {
+  stop-color: #0c9eff;
+}
+
+.tb-light #bar-rest .start .s0 {
+  stop-color: #4bcffe;
+}
+
+.tb-light #bar-rest .start .s1 {
+  stop-color: #0179d4;
+}
+
+#bar-rest .start svg {
+  transition: transform 0.42s cubic-bezier(0.3, 1.45, 0.5, 1);
+}
+
+#bar-rest .start.down svg {
+  transform: scale(0.8);
+  transition-duration: 0.08s;
+  transition-timing-function: ease-out;
+}
+
+#bar-rest .start.bounce svg {
+  animation: start-bounce 0.46s cubic-bezier(0.3, 1.45, 0.5, 1);
+}
+
+@keyframes start-bounce {
+  30% {
+    transform: scale(0.78);
+  }
+}
+
+#bar-rest .start.open {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.tb-light #bar-rest .start.open {
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+/* --- The pointer's glide (island.js glideTo) --------------------------------------
+   One highlight under the pointer for all the taskbar's buttons, behind
+   them, sliding from one to the next with its edges at their own pace;
+   squashed a little on the way, giving a little under a press. Their own
+   hover colours give way to it (the window in front, and Start while its
+   menu is open, keep theirs). */
+.home-taskbar #bar-rest .hdrop {
+  position: absolute;
+  z-index: -1;
+  left: 0;
+  right: 100%;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.11);
+  opacity: 0;
+  transform: scale(0.9);
+  transition:
+    opacity 0.16s ease,
+    transform 0.3s cubic-bezier(0.3, 1.45, 0.5, 1);
+  pointer-events: none;
+}
+
+.home-taskbar #bar-rest .hdrop.on {
+  opacity: 1;
+  transform: none;
+}
+
+.home-taskbar #bar-rest .hdrop.on.down {
+  transform: scale(0.94);
+}
+
+.home-taskbar #bar-rest .hdrop.squash {
+  animation: drop-squash 0.42s ease;
+}
+
+@keyframes drop-squash {
+  30% {
+    scale: 1.03 0.82;
+  }
+  70% {
+    scale: 0.99 1.04;
+  }
+}
+
+.tb-light.home-taskbar #bar-rest .hdrop {
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.tray-dragging #bar-rest .hdrop,
+.win-dragging #bar-rest .hdrop {
+  opacity: 0;
+}
+
+.home-taskbar #bar-rest .start:not(.open):hover,
+.home-taskbar #bar-rest .win:not(.front):hover,
+.home-taskbar #bar-rest .tout .ticon:hover,
+.home-taskbar #bar-rest .tchev:hover,
+.home-taskbar #bar-rest .tpriv:hover,
+.home-taskbar #bar-rest .kbd .ime:hover,
+.home-taskbar #bar-rest .tquick:hover,
+.home-taskbar #bar-rest .tclock:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* --- The clear taskbar (island.js isClear, tb-clear) --------------------------------
+   The desktop itself through the strip, its words, glyphs and small icons
+   ringed close and shadowed so they read on any picture, even a bright one;
+   while a window is maximized or full screen on its display (tb-filled) it
+   fills in, the change a short fade: as the Mica strip (tb-clear-mica, its
+   layer drawn all along, unseen till then) or as the solid one (tb-solid).
+   What opens above it stays as it is. */
+.tb-clear #island-row {
+  background: transparent;
+  box-shadow: none;
+  transition:
+    background-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.tb-clear.tb-solid #island-row {
+  background: #000;
+  box-shadow: inset var(--hair-x, 0) var(--hair-y, 1px) 0 rgba(255, 255, 255, 0.12);
+}
+
+.tb-light.tb-clear.tb-solid #island-row {
+  background: #eeeeee;
+  box-shadow: inset var(--hair-x, 0) var(--hair-y, 1px) 0 rgba(0, 0, 0, 0.08);
+}
+
+/* Filled in as Mica: its tint under it until the picture comes, as on the
+   Mica strip. */
+.tb-clear-mica #mica {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.tb-clear-mica.tb-filled #mica {
+  opacity: 1;
+}
+
+.tb-clear-mica #mica::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset var(--hair-x, 0) var(--hair-y, 1px) 0 rgba(255, 255, 255, 0.1);
+}
+
+.tb-light.tb-clear-mica #mica::after {
+  box-shadow: inset var(--hair-x, 0) var(--hair-y, 1px) 0 rgba(0, 0, 0, 0.06);
+}
+
+.tb-clear-mica.tb-filled #island-row {
+  background: #202020;
+}
+
+.tb-light.tb-clear-mica.tb-filled #island-row {
+  background: #f3f3f3;
+}
+
+/* Clear: a close ring and a soft shadow, dark under the dark taskbar's
+   white, light under the light one's black; the icons drawn as pictures
+   (the tray's, the monitor's) take it as a filter (--halo), after the
+   turn of one drawn in one colour for the other kind of taskbar. */
+.tb-clear:not(.tb-filled) #bar-rest {
+  --halo: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+  text-shadow:
+    0 0 1px rgba(0, 0, 0, 0.95),
+    0 0 2px rgba(0, 0, 0, 0.8),
+    0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.tb-light.tb-clear:not(.tb-filled) #bar-rest {
+  --halo: drop-shadow(0 0 1px rgba(255, 255, 255, 0.95)) drop-shadow(0 1px 2px rgba(255, 255, 255, 0.6));
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 1),
+    0 0 2px rgba(255, 255, 255, 0.9),
+    0 1px 4px rgba(255, 255, 255, 0.65);
+}
+
+.tb-clear:not(.tb-filled) #bar-rest .ticon img {
+  filter: var(--halo);
+}
+
+.tb-light.tb-clear:not(.tb-filled) #bar-rest .ticon[data-mono='light'] img,
+.tb-clear:not(.tb-light):not(.tb-filled) #bar-rest .ticon[data-mono='dark'] img {
+  filter: invert(1) var(--halo);
+}
+
+/* The date as plain as the time: grey on a picture is lost. */
+.tb-clear:not(.tb-filled) #bar-rest .tclock i {
+  color: #e5e5ea;
+}
+
+.tb-light.tb-clear:not(.tb-filled) #bar-rest .tclock i {
+  color: #2b2b2b;
+}
+
+.tb-clear #bar-rest .wpop,
+.tb-clear #bar-rest .tfly {
+  --halo: opacity(1);
+  text-shadow: none;
+}
+
+/* --- The windows' list moving (island.js slidePop, risePop) --------------------------
+   From one program's button to the next it slides over and takes its new
+   size, as Windows' own does, the new cards coming in from the side it
+   moves to; opening, it rises a little into place. The live pictures come
+   once it is there. */
+#bar-rest .wpop.sliding {
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+#bar-rest .wpop.sliding.list {
+  flex-wrap: nowrap;
+}
+
+#bar-rest .wpop.sliding .wcard {
+  animation: wcard-in 0.26s ease both;
+}
+
+@keyframes wcard-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--come, 0px));
+  }
+}
+
+#bar-rest .wpop.rising {
+  animation: wpop-rise 0.18s ease both;
+}
+
+@keyframes wpop-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* --- Her island on the taskbar, as Windows' own flyouts (tb-capsule) -------------
+   Its ground as Windows 11's own flyouts have it: their grey in the dark
+   mode, their light grey in the light, a hairline round it; black only on
+   the black strip, where it is part of it, and at the top of the screen.
+   Set by these (island.js drawIslandLook, from the settings' islandLook, may
+   put others): --i-bg the ground, --i-blur what is behind it blurred (none:
+   solid), --i-edge its edge (a hairline, the session's colour round it, or
+   none); island-bare: collapsed, no capsule of its own, part of the strip
+   (a wash under the pointer, as its buttons have) until it opens. */
+.home-taskbar.tb-capsule {
+  --i-bg: #2c2c2c;
+  --i-blur: none;
+  --i-line: rgba(255, 255, 255, 0.1);
+  --i-edge: 0 0 0 1px var(--i-line);
+}
+
+.tb-light.home-taskbar.tb-capsule {
+  --i-bg: #f3f3f3;
+}
+
+/* The hairline as its words are: dark on a light ground (isl-light). */
+.isl-light.home-taskbar.tb-capsule {
+  --i-line: rgba(0, 0, 0, 0.08);
+}
+
+.home-taskbar.tb-capsule #island:not([data-view='settings']),
+.home-taskbar.tb-capsule #goo div {
+  background: var(--i-bg);
+}
+
+.home-taskbar.tb-capsule #island:not([data-view='settings']) {
+  -webkit-backdrop-filter: var(--i-blur);
+  backdrop-filter: var(--i-blur);
+}
+
+/* Collapsing, the open island's ground, edge and shadow are kept while it
+   shrinks (island.js holdGround, shrinking), then fade to the capsule's: a
+   bare one's ground gone at once left the open island's words over the
+   desktop as it shrank (zhoupengjie/Wakuwaku#16). */
+.home-taskbar.tb-capsule #island[data-view='compact']:not(.shrinking) {
+  box-shadow: var(--i-edge);
+}
+
+.tb-light.home-taskbar.tb-capsule #island[data-view='compact']:not(.shrinking) {
+  box-shadow:
+    var(--i-edge),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.home-taskbar.tb-capsule #island:not([data-view='compact']):not([data-view='settings']),
+.home-taskbar.tb-capsule #island.shrinking {
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.5),
+    var(--i-edge);
+}
+
+.tb-light.home-taskbar.tb-capsule #island:not([data-view='compact']):not([data-view='settings']),
+.tb-light.home-taskbar.tb-capsule #island.shrinking {
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.18),
+    var(--i-edge);
+}
+
+/* Windows' acrylic under her island (island.js sendPlate, plated): the band
+   between the island's edge and the acrylic's, set in so DWM's smaller
+   corners lie inside the island's (--rim wide), in the ground nearly solid
+   (--i-rim: three quarters of the way to solid), fading inwards so it
+   reads as the glass's edge, not a frame; under its own edge line, over
+   its ground, under what it shows (the appearance session's, 2026-10-14). */
+#island::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 calc(var(--rim, 4px) - 1px) var(--i-rim, transparent),
+    inset 0 0 3px var(--rim, 4px) var(--i-rim-half, transparent);
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    box-shadow 0.15s ease;
+  pointer-events: none;
+}
+
+.plated #island:not([data-view='settings'])::before {
+  opacity: 1;
+}
+
+/* While the island springs to another size, the acrylic further in under
+   it (island.js movePlate), its ground as solid as over a maximized window
+   (--i-bg-deep, 90 %; solider stays as it is), at once; back once it settles. */
+.isl-firm.home-taskbar.tb-capsule #island:not([data-view='compact']):not([data-view='settings']),
+.isl-firm.home-island #island:not([data-view='settings']) {
+  background: var(--i-bg-deep, var(--i-bg));
+}
+
+/* Open over a maximized window, a see-through ground with nothing to blur
+   what is behind it deepens (island.js setDeep, zhoupengjie/Wakuwaku#20). */
+.isl-deep.home-taskbar.tb-capsule #island:not([data-view='compact']):not([data-view='settings']) {
+  background: var(--i-bg-deep, var(--i-bg));
+}
+
+.island-bare.home-taskbar.tb-capsule #island[data-view='compact']:not(.shrinking) {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.island-bare.home-taskbar.tb-capsule #island[data-view='compact']:not(.shrinking):hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tb-light.island-bare.home-taskbar.tb-capsule #island[data-view='compact']:not(.shrinking):hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* --- Her island at the top of the screen (home-island) ---------------------------
+   Black as the iPhone's, its faint line, unless the settings give it a look
+   of its own (islandTopLook, island.js drawIslandLook,
+   zhoupengjie/Wakuwaku#27): --i-bg, --i-edge as on the taskbar, the line
+   dark on a light ground; deeper over a maximized window (isl-deep). No
+   blur of the page's: behind it is other programs' windows, only Windows'
+   acrylic under it blurs them (backplate.rs). The settings as ever. */
+.home-island {
+  --i-bg: #000;
+  --i-line: rgba(255, 255, 255, 0.07);
+  --i-edge: 0 0 0 1px var(--i-line);
+}
+
+.isl-light.home-island {
+  --i-line: rgba(0, 0, 0, 0.08);
+}
+
+.home-island #island:not([data-view='settings']) {
+  background: var(--i-bg);
+  box-shadow: var(--i-edge);
+}
+
+.home-island #goo div {
+  background: var(--i-bg);
+}
+
+.isl-deep.home-island #island:not([data-view='settings']) {
+  background: var(--i-bg-deep, var(--i-bg));
+}
+
+.home-island #island .hint-dot {
+  box-shadow: 0 0 0 2px var(--i-bg);
+}
+
+/* Up out of the way of the window under it (island.js setStow,
+   zhoupengjie/Wakuwaku#49): its foot 2 px into the screen, above it the
+   8 px it hangs below the window's top (#island-bar) and its whole height
+   (the row's, the island's: so one closing as it goes ends up there too);
+   nothing of it takes the pointer, which the page never hears over it
+   then (bridge.js chainAt), so the window lets every press through. Up
+   quickly, down with a little of the spring; at once with Windows'
+   animation effects off. */
+.home-island #island-row {
+  transition: transform 0.32s cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+.isl-stowed.home-island #island-row {
+  transform: translateY(calc(2px - 8px - 100%));
+  transition-duration: 0.22s;
+  transition-timing-function: cubic-bezier(0.5, 0, 0.75, 0);
+}
+
+.isl-stowed #island,
+.isl-stowed #island * {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-island #island-row {
+    transition: none;
+  }
+}
+
+/* The settings as Windows' own Settings in the dark mode too, as they are
+   in the light: its grey ground, the cards a step lighter. */
+.home-taskbar.tb-capsule:not(.tb-light) #island[data-view='settings'] {
+  background: #202020;
+}
+
+.home-taskbar.tb-capsule:not(.tb-light) #island-settings {
+  --g1: #2b2b2b;
+  --g2: #373737;
+  --g3: #454545;
+}
+
+/* A prompt's parts on a dark ground: a step lighter than it, whatever it is
+   (on black they were greys of their own), what is quoted too. */
+.home-taskbar.tb-capsule:not(.isl-light) #panel .chip,
+.home-taskbar.tb-capsule:not(.isl-light) #panel .more {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.home-taskbar.tb-capsule:not(.isl-light) #panel .code,
+.home-taskbar.tb-capsule:not(.isl-light) #panel .input {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.home-taskbar.tb-capsule:not(.isl-light) #panel .btn:not(.primary):not(.always):not(.ghost):not(.picked) {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.home-taskbar.tb-capsule:not(.isl-light) #panel .btn.option.picked {
+  border-color: #5e9bff;
+  background: rgba(94, 155, 255, 0.2);
+}
+
+/* On the light grey: what is quoted white, as Windows' own fields are. */
+.isl-light.island.home-taskbar.tb-capsule #panel .code {
+  background: #ffffff;
+}
+
+/* --- The taskbar's layout (island.js tbLayout) --------------------------------------
+   Its parts in three runs: from the left end, in the middle (alignApps
+   moves it there by its margin), and up to the right end. Her island lies
+   over its slot (placeSlot, --isl-x): first at the left end, at the strip's
+   very edge; past the middle, held by its right edge (isl-right), so what
+   it grows into (the open island, a prompt, the settings) goes leftwards. */
+#bar-rest .tzone {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 100%;
+}
+
+#bar-rest .tpair {
+  display: flex;
+  align-items: center;
+}
+
+#bar-rest .tslot {
+  flex: none;
+  align-self: stretch;
+}
+
+#bar-rest .tslot.first {
+  margin-left: -4px;
+}
+
+body.isl-right.home-taskbar #island:not([data-view='settings']) {
+  left: auto;
+  right: var(--isl-x, 0px);
+}
+
+body.isl-right.home-taskbar #island[data-view='settings'] {
+  left: auto;
+  right: 8px;
+}
+
+/* Editing it (island.js editTaskbar): each part outlined, to be dragged;
+   each run a soft box (an empty one a place to drop into); her island lets
+   the pointer through to its slot. */
+.tb-editing #island {
+  pointer-events: none;
+  outline: 1.5px solid rgba(94, 155, 255, 0.85);
+  outline-offset: -2px;
+}
+
+/* A part with nothing in it now (the monitor not pinned): its name, to be
+   seen and dragged all the same. */
+.tb-editing #bar-rest [data-part]:empty:not(.tslot)::before {
+  content: attr(data-label);
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 10px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+}
+
+.tb-light.tb-editing #bar-rest [data-part]:empty:not(.tslot)::before {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.tb-editing #bar-rest .tzone {
+  min-width: 72px;
+  height: 42px;
+  margin: 0 4px;
+  border-radius: 10px;
+  background: rgba(94, 155, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(94, 155, 255, 0.35);
+}
+
+.tb-editing #bar-rest [data-part] {
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1.5px rgba(94, 155, 255, 0.8);
+  cursor: grab;
+}
+
+.tb-editing #bar-rest .tb-dragging {
+  opacity: 0.35;
+}
+
+/* Where the part goes, and the part, by its name, under the pointer. */
+.tbmark {
+  position: fixed;
+  bottom: 6px;
+  z-index: 30;
+  width: 3px;
+  height: 36px;
+  border-radius: 2px;
+  background: #5e9bff;
+  pointer-events: none;
+}
+
+.tbghost {
+  position: fixed;
+  z-index: 31;
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: #2c2c2c;
+  color: #f5f5f7;
+  font-size: 12px;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+/* Above the strip, over the chosen widget's tools: what to do, and add
+   widgets, reset, cancel, done. */
+.tbedit {
+  position: fixed;
+  left: 50%;
+  bottom: 100px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  border-radius: 14px;
+  background: #2c2c2c;
+  color: #f5f5f7;
+  font-size: 13px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.tbedit .hint {
+  margin-right: 6px;
+  color: #c7c7cc;
+}
+
+.tbedit .tbe {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tbedit .tbe:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.tbedit .tbe-done {
+  border-color: #0a84ff;
+  background: #0a84ff;
+  color: #fff;
+}
+
+.tb-light .tbedit,
+.tb-light .tbghost {
+  background: #f3f3f3;
+  color: #1b1b1b;
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.tb-light .tbedit .hint {
+  color: #5d5d5d;
+}
+
+.tb-light .tbedit .tbe {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: #fff;
+}
+
+.tb-light .tbedit .tbe-done {
+  border-color: #005fb8;
+  background: #005fb8;
+  color: #fff;
+}
+
+/* --- Widgets on the taskbar (island.js drawEntries) ---------------------------------
+   A button as the clock is: S its icon and value, M its value over its
+   name (the clock's time over its date); one with nothing to say greyed.
+   The spacers: one taking the room left in its run (its run takes the
+   room there is, .stretch), a little fixed room, a thin line. */
+/* The spec's §5: small, a 16px glyph, white (black on the light strip) and
+   one colour as the tray's icons, and the value, 40 high, 9 at its sides;
+   medium, the value (12px) over its name (11.5px, grey), as the clock. Only
+   ups and downs in colour (wcards.js faceHTML). */
+#bar-rest .tw-widget,
+#bar-rest .tw-plugin,
+#bar-rest .tw-group {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 9px;
+  border-radius: 6px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+}
+
+#bar-rest .tw .twg,
+#bar-rest .tw .wgl {
+  flex: none;
+  width: 16px;
+  color: #f5f5f7;
+  font: normal 16px/1 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  text-align: center;
+}
+
+#bar-rest .tw .wsvg {
+  display: flex;
+}
+
+#bar-rest .tw .wsvg .wicon {
+  width: 16px;
+  height: 16px;
+}
+
+#bar-rest .tw .wher {
+  display: flex;
+}
+
+#bar-rest .tw .twt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#bar-rest .tw .twv {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 500;
+  color: #f5f5f7;
+}
+
+#bar-rest .tw[data-size='S'],
+#bar-rest .tw.S {
+  gap: 6px;
+}
+
+#bar-rest .tw[data-size='S'] .twv,
+#bar-rest .tw.S .twv {
+  max-width: 96px;
+}
+
+#bar-rest .tw .twt i {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  font-style: normal;
+  color: #a1a1a6;
+}
+
+/* Nothing to say: greyed, its name. */
+#bar-rest .tw.empty .twg,
+#bar-rest .tw.empty .wsvg,
+#bar-rest .tw .tws:has(.wshim) .twg {
+  opacity: 0.45;
+}
+
+#bar-rest .tw.empty .twv {
+  font-weight: 400;
+  color: #a1a1a6;
+}
+
+#bar-rest .tw-widget:hover,
+#bar-rest .tw-plugin:hover,
+#bar-rest .tw-group:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+#bar-rest .tzone.stretch {
+  flex: 1 1 auto;
+}
+
+#bar-rest.tb-stretch .grow {
+  display: none;
+}
+
+#bar-rest .tw-flex {
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 8px;
+}
+
+#bar-rest .tw-gap {
+  flex: none;
+  align-self: stretch;
+  width: 16px;
+}
+
+#bar-rest .tw-sep {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  margin: 0 6px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.tb-light #bar-rest .tw .twv,
+.tb-light #bar-rest .tw .twg,
+.tb-light #bar-rest .tw .wgl {
+  color: #1b1b1b;
+}
+
+.tb-light #bar-rest .tw .twt i,
+.tb-light #bar-rest .tw.empty .twv {
+  color: #5d5d5d;
+}
+
+.tb-light #bar-rest .tw-widget:hover,
+.tb-light #bar-rest .tw-plugin:hover,
+.tb-light #bar-rest .tw-group:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.tb-light #bar-rest .tw-sep {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* On a picture: the name as plain as the value, the icon ringed. */
+.tb-clear:not(.tb-filled) #bar-rest .tw .twt i {
+  color: #e5e5ea;
+}
+
+.tb-light.tb-clear:not(.tb-filled) #bar-rest .tw .twt i {
+  color: #2b2b2b;
+}
+
+.tb-clear:not(.tb-filled) #bar-rest .tw .twg,
+.tb-clear:not(.tb-filled) #bar-rest .tw .wsvg {
+  filter: var(--halo);
+}
+
+/* Editing: a spacer as wide as its name, to be seen and dragged; the one
+   chosen lit. */
+.tb-editing #bar-rest .tw-sep,
+.tb-editing #bar-rest .tw-gap {
+  width: auto;
+  height: auto;
+  margin: 0;
+  background: none;
+}
+
+.tb-editing #bar-rest .tw.tb-chosen {
+  box-shadow: inset 0 0 0 2px #5e9bff;
+  background: rgba(94, 155, 255, 0.32);
+}
+
+/* A widget dragged over another's middle: let go, the two in one place. */
+.tb-editing #bar-rest .tw.tb-into {
+  box-shadow:
+    inset 0 0 0 2px #5e9bff,
+    0 0 0 3px rgba(94, 155, 255, 0.35);
+  background: rgba(94, 155, 255, 0.24);
+}
+
+.tbt.off {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* --- A widget's card (island.js drawWidgetPop) --------------------------------------
+   Above it, as the windows' list is above a program's button. */
+#bar-rest .wgpop {
+  position: absolute;
+  bottom: 54px;
+  z-index: 3;
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--wg-glass);
+  backdrop-filter: var(--wg-blur);
+  color: var(--wg-fg);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  box-shadow:
+    inset 0 1px 0 var(--wg-hi),
+    0 0 0 1px var(--wg-line),
+    var(--wg-shadow);
+}
+
+/* Its large size in it (wcards.js cardHTML): as wide as a stack opened. */
+#bar-rest .wgpop.carded {
+  width: 300px;
+  box-sizing: border-box;
+}
+
+#bar-rest .wgpop.above-stack {
+  z-index: 4;
+}
+
+#bar-rest .wgpop .wgcard {
+  display: grid;
+  gap: 8px;
+}
+
+#bar-rest .wghead .wgl {
+  flex: none;
+  width: 18px;
+  font: normal 16px/1 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  text-align: center;
+}
+
+#bar-rest .wgpop[hidden] {
+  display: none;
+}
+
+#bar-rest .wghead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#bar-rest .wghead .wicon {
+  width: 18px;
+  height: 18px;
+}
+
+#bar-rest .wghead b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#bar-rest .wgfrom,
+#bar-rest .wgrow span,
+#bar-rest .wgnone {
+  color: #a1a1a6;
+}
+
+#bar-rest .wgrow {
+  display: grid;
+  gap: 2px;
+}
+
+#bar-rest .wgrow b {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+#bar-rest .wgacts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+#bar-rest .wgbtn {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#bar-rest .wgbtn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.tb-light #bar-rest .wgpop {
+  color: var(--wg-fg);
+}
+
+.tb-light #bar-rest .wgfrom,
+.tb-light #bar-rest .wgrow span,
+.tb-light #bar-rest .wgnone {
+  color: #5d5d5d;
+}
+
+.tb-light #bar-rest .wgbtn {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: #fff;
+}
+
+.tb-light #bar-rest .wgbtn:hover {
+  background: #f0f0f0;
+}
+
+.tb-clear #bar-rest .wgpop {
+  --halo: opacity(1);
+  text-shadow: none;
+}
+
+/* --- Editing: the library and the chosen one's tools ----------------------------------
+   The library over the strip on the island's other side, above the edit
+   bar: its kinds, and a card for each widget; one there already dimmed. The
+   tools over the chosen one: its size, or off. */
+.tblib {
+  position: fixed;
+  right: 12px;
+  bottom: 156px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 440px;
+  max-width: calc(100vw - 24px);
+  height: 320px;
+  border-radius: 14px;
+  background: #2c2c2c;
+  color: #f5f5f7;
+  font-size: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+body.isl-right .tblib {
+  right: auto;
+  left: 12px;
+}
+
+.tblhead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px 6px;
+}
+
+.tblhead b {
+  font-size: 13px;
+}
+
+.tblhint {
+  color: #a1a1a6;
+}
+
+.tblkinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 14px 8px;
+}
+
+.tblkind {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tblkind.on {
+  border-color: rgba(94, 155, 255, 0.7);
+  background: rgba(94, 155, 255, 0.22);
+}
+
+.tblgrid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-content: start;
+  gap: 8px;
+  padding: 2px 14px 14px;
+  overflow: auto;
+}
+
+.tblcard {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: grab;
+  user-select: none;
+}
+
+.tblcard:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.tblcard.placed {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.tblcard .wicon {
+  width: 18px;
+  height: 18px;
+}
+
+.tblcard b,
+.tblnote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tblnote {
+  color: #a1a1a6;
+  font-size: 11px;
+}
+
+.tbtools {
+  position: fixed;
+  bottom: 54px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 12px;
+  background: #2c2c2c;
+  color: #f5f5f7;
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.tbtname {
+  max-width: 160px;
+  margin-right: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #c7c7cc;
+}
+
+.tbt {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tbt:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.tbt.on {
+  border-color: rgba(94, 155, 255, 0.7);
+  background: rgba(94, 155, 255, 0.22);
+}
+
+.tbtsep {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Off the strip: let go, it goes. */
+.tbghost.off {
+  background: #5a2a2a;
+}
+
+/* A part that stays (Start, the programs, the tray, the clock, her) dragged
+   off the strip: it says so, dimmed, not red (#53). */
+.tbghost.stays {
+  opacity: 0.8;
+}
+
+.tb-light .tblib,
+.tb-light .tbtools {
+  background: #f3f3f3;
+  color: #1b1b1b;
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.tb-light .tblhint,
+.tb-light .tblnote,
+.tb-light .tbtname {
+  color: #5d5d5d;
+}
+
+.tb-light .tblkind,
+.tb-light .tbt {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: #fff;
+}
+
+.tb-light .tblkind.on,
+.tb-light .tbt.on {
+  border-color: #005fb8;
+  background: rgba(0, 95, 184, 0.12);
+}
+
+.tb-light .tblcard {
+  background: #fff;
+}
+
+.tb-light .tblcard:hover {
+  background: #f9f9f9;
+}
+
+.tb-light .tbtsep {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.tb-light .tbghost.off {
+  background: #f6d5d5;
+}
+
+/* --- The handover with Windows' taskbar (handoff.js) -------------------------------
+   Hers out of sight from the page's start until the picture of Windows'
+   strip is over it, so it never shows over Windows' strip for a frame. */
+html.handoff-wait body #island-row {
+  visibility: hidden;
+}
+
+/* --- The taskbar along the top (island.js tbEdge; taskbarEdge top, tb-top) ----------
+   The bottom one turned over: the strip at the window's top, the room below
+   it; what grows from her end grows down, the settings stand 8 px below
+   the strip, and the pops open down from it (top: 54px); the strip's
+   hairline on its lower edge, the programs' marks on their top edge. */
+.tb-top {
+  --hair-y: -1px;
+}
+
+.tb-top.home-taskbar #island-row,
+.tb-top.home-taskbar #bar-rest {
+  top: 0;
+  bottom: auto;
+}
+
+.tb-top.home-taskbar #island {
+  top: 0;
+  bottom: auto;
+  transition:
+    width 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    height 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    border-radius 0.4s ease,
+    left 0.3s ease,
+    right 0.3s ease,
+    top 0.3s ease;
+}
+
+.tb-top.home-taskbar.tb-capsule #island:not([data-view='settings']) {
+  top: 5px;
+  bottom: auto;
+}
+
+.tb-top.home-taskbar #island[data-view='settings'] {
+  top: 56px;
+  bottom: auto;
+}
+
+.tb-top.home-taskbar #island:not([data-view='compact']) {
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.tb-top #bar-rest .win::after {
+  top: 2px;
+  bottom: auto;
+}
+
+.tb-top #bar-rest :is(.tfly, .wpop, .wgpop, .wstk, .wmenu),
+.tb-top .tbtools {
+  top: 54px;
+  bottom: auto;
+}
+
+.tb-top #bar-rest .wpop.rising {
+  animation-name: wpop-drop;
+}
+
+@keyframes wpop-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.tb-top .tbmark {
+  top: 6px;
+  bottom: auto;
+}
+
+.tb-top .tbedit {
+  top: 100px;
+  bottom: auto;
+}
+
+.tb-top .tblib {
+  top: 156px;
+  bottom: auto;
+}
+
+/* The tray's ^ points down from a top bar (open: up). */
+.tb-top #bar-rest .tchev .fi {
+  transform: rotate(180deg);
+}
+
+.tb-top #bar-rest .tchev.open .fi {
+  transform: none;
+}
+
+/* --- The taskbar along a side (island.js isSide; taskbarEdge left or right,
+   tb-side with tb-left or tb-right) -------------------------------------------------
+   Upright, 48 px wide, the whole screen tall: its runs top, middle and
+   bottom, each part centred across it and one above another (Start and the
+   programs' buttons 40 x 40, icons alone; the monitor's readings one a row;
+   the tray's icons, the input method, the quick settings' two glyphs, the
+   clock's time over a short date, the settings' cog; the show-desktop
+   sliver at its foot). Her capsule upright (A): her portrait in its round
+   end, her session's clock under it. What opens from it grows into the
+   screen, its top at the capsule's (from the bar's lower half its foot at
+   the capsule's foot, isl-low); beside a right bar the island mirrored, she
+   at its right. The settings beside the bar, 8 px off it. Its hairline on
+   its inner edge. */
+.tb-left {
+  --hair-x: -1px;
+  --hair-y: 0px;
+}
+
+.tb-right {
+  --hair-x: 1px;
+  --hair-y: 0px;
+}
+
+.tb-side.home-taskbar #island-row {
+  top: 0;
+  bottom: 0;
+  width: var(--strip-h, 48px);
+  height: auto;
+}
+
+.tb-left.home-taskbar #island-row {
+  left: 0;
+  right: auto;
+}
+
+.tb-right.home-taskbar #island-row {
+  left: auto;
+  right: 0;
+}
+
+.tb-side.home-taskbar #bar-rest {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: auto;
+  height: auto;
+  flex-direction: column;
+  padding: 4px 0 0;
+}
+
+.tb-side #bar-rest .tzone {
+  flex-direction: column;
+  width: 100%;
+  height: auto;
+}
+
+/* Crowded, the middle run gives way: the programs' column scrolls with the
+   wheel. */
+.tb-side #bar-rest .tz-center {
+  flex: 0 1 auto;
+  min-height: 0;
+  transition: margin-top 0.25s ease;
+}
+
+.tb-side #bar-rest .tslot {
+  align-self: stretch;
+}
+
+.tb-side #bar-rest .tslot.first {
+  margin-left: 0;
+  margin-top: -4px;
+}
+
+/* Start and the programs: a column, icons alone, their marks on the
+   screen's side of each, along it. */
+.tb-side.home-taskbar #bar-rest .wins {
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  min-height: 0;
+  overflow: hidden auto;
+  scrollbar-width: none;
+}
+
+.tb-side #bar-rest .start {
+  margin-top: 4px;
+}
+
+.tb-side #bar-rest .win {
+  flex: none;
+  width: 40px;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+}
+
+.tb-side #bar-rest .win .wt,
+.tb-side #bar-rest .win .count {
+  display: none;
+}
+
+.tb-side #bar-rest .win::after {
+  top: 50%;
+  bottom: auto;
+  width: 3px;
+  height: 6px;
+  transform: translateY(-50%);
+  transition:
+    height 0.2s ease,
+    background 0.2s ease;
+}
+
+.tb-left #bar-rest .win::after {
+  left: 2px;
+  right: auto;
+}
+
+.tb-right #bar-rest .win::after {
+  left: auto;
+  right: 2px;
+}
+
+.tb-side #bar-rest .win.front::after {
+  width: 3px;
+  height: 18px;
+}
+
+.tb-side #bar-rest .ticon.drop-before,
+.tb-side #bar-rest .win.drop-before {
+  box-shadow: inset 0 2px 0 #5e9bff;
+}
+
+.tb-side #bar-rest .ticon.drop-after,
+.tb-side #bar-rest .win.drop-after {
+  box-shadow: inset 0 -2px 0 #5e9bff;
+}
+
+/* The monitor: one reading a row, each 42 x 16, in a 46 wide box. */
+.tb-side #bar-rest .faces {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tb-side.home-taskbar #bar-rest .faces:not(:empty),
+.tb-side.home-taskbar #bar-rest .faces:has(.mon.rows) {
+  margin: 0 0 4px;
+}
+
+.tb-side.home-taskbar #bar-rest .mon.rows {
+  width: 46px;
+  height: auto;
+  padding: 3px 0;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 2px;
+}
+
+.tb-side #bar-rest .mon.rows .wcell {
+  --g: 11px;
+  width: 42px;
+  height: 16px;
+  font-size: 10px;
+}
+
+/* The tray: its ^ into the screen, its icons a column; what uses the
+   microphone, camera or location, the input method, the quick settings'
+   glyphs: one above another. */
+.tb-side #bar-rest .tray,
+.tb-side #bar-rest .tout,
+.tb-side #bar-rest .tpriv,
+.tb-side #bar-rest .kbd {
+  flex-direction: column;
+}
+
+.tb-side #bar-rest .tpair {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tb-side #bar-rest .tchev {
+  width: 40px;
+  height: 24px;
+}
+
+.tb-left #bar-rest .tchev .fi {
+  transform: rotate(90deg);
+}
+
+.tb-left #bar-rest .tchev.open .fi {
+  transform: rotate(270deg);
+}
+
+.tb-right #bar-rest .tchev .fi {
+  transform: rotate(-90deg);
+}
+
+.tb-right #bar-rest .tchev.open .fi {
+  transform: rotate(90deg);
+}
+
+.tb-side #bar-rest .ticon {
+  width: 40px;
+  height: 28px;
+}
+
+.tb-side #bar-rest .tpriv .fi {
+  justify-content: center;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  font-size: 15px;
+}
+
+.tb-side #bar-rest .kbd .caps {
+  margin: 3px 0;
+}
+
+.tb-side #bar-rest .kbd .ime {
+  width: 40px;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.tb-side #bar-rest .tquick {
+  flex-direction: column;
+  justify-content: center;
+  width: 40px;
+  height: auto;
+  padding: 8px 0;
+  gap: 8px;
+}
+
+/* The battery's percentage under it, as on Windows' own along a side. */
+.tb-side #bar-rest .tquick .bat {
+  flex-direction: column;
+  gap: 0;
+}
+
+/* The clock: its time over a short date (no year), in the middle. */
+.tb-side #bar-rest .tclock {
+  align-items: center;
+  width: 44px;
+  height: 40px;
+  padding: 0;
+  font-size: 12px;
+}
+
+/* Show the desktop: a sliver along the bar's foot, its line on its top. */
+.tb-side #bar-rest .tdesk {
+  align-self: stretch;
+  width: auto;
+  height: 9px;
+  margin: 3px 0 0;
+  border-left: 0;
+  border-top: 1px solid transparent;
+}
+
+.tb-side #bar-rest .tdesk:hover {
+  border-top-color: rgba(255, 255, 255, 0.35);
+}
+
+.tb-light.tb-side #bar-rest .tdesk:hover {
+  border-top-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Widgets small (its icon over its value, 40 wide); the spacers along. */
+.tb-side #bar-rest :is(.tw-widget, .tw-plugin) {
+  flex-direction: column;
+  justify-content: center;
+  width: 40px;
+  height: auto;
+  min-height: 40px;
+  padding: 4px 0;
+  gap: 2px;
+  box-sizing: border-box;
+  font-size: 10px;
+}
+
+.tb-side #bar-rest .tw .twv {
+  max-width: 40px;
+}
+
+.tb-side #bar-rest .tw-flex {
+  min-width: 0;
+  min-height: 8px;
+}
+
+.tb-side #bar-rest .tw-gap {
+  width: auto;
+  height: 12px;
+}
+
+.tb-side #bar-rest .tw-sep {
+  width: 24px;
+  height: 1px;
+  margin: 6px 0;
+}
+
+/* The pointer's highlight squashes across the bar. */
+.tb-side.home-taskbar #bar-rest .hdrop.squash {
+  animation-name: drop-squash-across;
+}
+
+@keyframes drop-squash-across {
+  30% {
+    scale: 0.82 1.03;
+  }
+  70% {
+    scale: 1.04 0.99;
+  }
+}
+
+/* Her island: over its slot from the bar's side (5 px in on a capsule's
+   strip, the strip's end on the black one), from the capsule's top, or its
+   foot in the bar's lower half. */
+.tb-left.home-taskbar #island {
+  left: 0;
+  right: auto;
+}
+
+.tb-right.home-taskbar #island {
+  left: auto;
+  right: 0;
+}
+
+.tb-side.home-taskbar #island {
+  top: var(--isl-y, 0px);
+  bottom: auto;
+  transition:
+    width 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    height 0.56s cubic-bezier(0.3, 1.45, 0.5, 1),
+    border-radius 0.4s ease,
+    top 0.3s ease,
+    bottom 0.3s ease;
+}
+
+.tb-side.isl-low.home-taskbar #island {
+  top: auto;
+  bottom: var(--isl-y, 0px);
+}
+
+.tb-left.home-taskbar.tb-capsule #island:not([data-view='settings']) {
+  left: 5px;
+  right: auto;
+}
+
+.tb-right.home-taskbar.tb-capsule #island:not([data-view='settings']) {
+  left: auto;
+  right: 5px;
+}
+
+.tb-side.home-taskbar.tb-capsule #island:not([data-view='settings']) {
+  top: var(--isl-y, 6px);
+  bottom: auto;
+}
+
+.tb-side.isl-low.home-taskbar.tb-capsule #island:not([data-view='settings']) {
+  top: auto;
+  bottom: var(--isl-y, 6px);
+}
+
+/* The settings beside the bar, 8 px off it (island.js placeSideSettings). */
+.tb-side.home-taskbar #island[data-view='settings'] {
+  top: var(--set-y, 8px);
+  bottom: auto;
+}
+
+.tb-side.isl-low.home-taskbar #island[data-view='settings'] {
+  top: auto;
+  bottom: var(--set-y, 8px);
+}
+
+.tb-left.home-taskbar #island[data-view='settings'] {
+  left: 56px;
+  right: auto;
+}
+
+.tb-right.home-taskbar #island[data-view='settings'] {
+  left: auto;
+  right: 56px;
+}
+
+.tb-left.home-taskbar #island:not([data-view='compact']) {
+  box-shadow: 12px 0 30px rgba(0, 0, 0, 0.45);
+}
+
+.tb-right.home-taskbar #island:not([data-view='compact']) {
+  box-shadow: -12px 0 30px rgba(0, 0, 0, 0.45);
+}
+
+/* The upright capsule's clock under her portrait (her portrait 4 px in from
+   its round end, on the black strip's end 9). */
+.tb-side.home-taskbar #island-compact {
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
+  height: auto;
+  padding: 4px 0 0;
+  font-size: 11px;
+}
+
+.tb-side.home-taskbar.has-her #island-compact {
+  padding: 38px 0 0;
+}
+
+.tb-side.home-taskbar:not(.tb-capsule).has-her #island-compact {
+  padding-top: 43px;
+}
+
+.tb-side #island-compact .clock {
+  max-width: none;
+  font-weight: 600;
+  line-height: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Beside a right bar, the island mirrored: she at its right, its lines at
+   its left. */
+.tb-right.has-her #island-expanded {
+  padding: 12px 124px 12px 22px;
+}
+
+/* Editing a side bar's layout: its runs boxes one above another, the line
+   where a part goes across the bar, the tools and the library beside the
+   bar, 8 px off it; an empty part's name upright. */
+.tb-side.tb-editing #bar-rest .tzone {
+  width: 42px;
+  min-width: 0;
+  height: auto;
+  min-height: 72px;
+  margin: 4px 0;
+}
+
+.tb-side .tbmark {
+  bottom: auto;
+  width: 36px;
+  height: 3px;
+}
+
+.tb-left .tbmark {
+  left: 6px;
+}
+
+.tb-right .tbmark {
+  left: auto;
+  right: 6px;
+}
+
+.tb-side .tbedit {
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+
+.tb-left .tbedit {
+  left: 56px;
+}
+
+.tb-right .tbedit {
+  left: auto;
+  right: 56px;
+}
+
+.tb-side .tblib {
+  top: 8px;
+  bottom: auto;
+}
+
+.tb-left .tblib {
+  left: 56px;
+  right: auto;
+}
+
+.tb-right .tblib {
+  left: auto;
+  right: 56px;
+}
+
+.tb-side.tb-editing #bar-rest [data-part]:empty:not(.tslot)::before {
+  height: auto;
+  padding: 10px 0;
+  writing-mode: vertical-rl;
+}
+
+.tb-side.tb-editing #bar-rest :is(.tw-sep, .tw-gap) {
+  width: auto;
+  height: auto;
+  margin: 0;
+}
+
+/* --- What opens from a side bar (island.js besideOrOver) ----------------------------
+   Beside the bar, 6 px off its inner edge, centred along it on what it
+   opens from and kept 8 px from the screen's ends: the windows' list and
+   menu, a widget's card, a widget's tools; the tray's folded icons from its
+   ^ up (down from it in the bar's upper half). Moving from one button to
+   the next it slides along the bar; it comes in from the bar's side. */
+.tb-side #bar-rest :is(.wpop, .wgpop, .wstk, .wmenu) {
+  bottom: auto;
+}
+
+.tb-left #bar-rest :is(.wpop, .wgpop, .wstk, .wmenu) {
+  left: 54px;
+}
+
+.tb-right #bar-rest :is(.wpop, .wgpop, .wstk, .wmenu) {
+  left: auto;
+  right: 54px;
+}
+
+.tb-side #bar-rest .wpop.sliding .wcard {
+  animation-name: wcard-in-along;
+}
+
+@keyframes wcard-in-along {
+  from {
+    opacity: 0;
+    transform: translateY(var(--come, 0px));
+  }
+}
+
+.tb-left #bar-rest .wpop.rising {
+  animation-name: wpop-from-left;
+}
+
+.tb-right #bar-rest .wpop.rising {
+  animation-name: wpop-from-right;
+}
+
+@keyframes wpop-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+
+@keyframes wpop-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+.tb-side #bar-rest .tfly {
+  top: auto;
+  bottom: calc(100% - 24px);
+}
+
+.tb-side #bar-rest .tray.upper .tfly {
+  top: 0;
+  bottom: auto;
+}
+
+.tb-left #bar-rest .tfly {
+  left: 50px;
+}
+
+.tb-right #bar-rest .tfly {
+  left: auto;
+  right: 50px;
+}
+
+.tb-side .tbtools {
+  bottom: auto;
+}
+
+.tb-left .tbtools {
+  left: 54px;
+}
+
+.tb-right .tbtools {
+  left: auto;
+  right: 54px;
+}
+
+/* The room kept between the middle run and the last (island.js RUNS_APART):
+   crowded, the programs give way first; on a side bar their column then
+   scrolls, faded 12 px where more lies past an end. */
+.home-taskbar #bar-rest .grow {
+  min-width: 12px;
+}
+
+.tb-side.home-taskbar #bar-rest .grow {
+  min-width: 0;
+  min-height: 12px;
+}
+
+.tb-side #bar-rest .wins.fade-start {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12px);
+  mask-image: linear-gradient(to bottom, transparent, #000 12px);
+}
+
+.tb-side #bar-rest .wins.fade-end {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent);
+}
+
+.tb-side #bar-rest .wins.fade-start.fade-end {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+}
+
+/* --- Not connected yet (island.js isHinting) ----------------------------------------
+   A dot in Windows' accent (--hint-accent) at her portrait's top-right,
+   ringed in the capsule's ground (on none, haloed as the clear strip's words
+   are); the capsule's words "Connect Claude Code ›" in the accent, a side
+   capsule's link glyph in its clock's place; the open island what it is for,
+   a row to go and connect, and "don't remind me" at its foot. */
+#island .hint-dot,
+#island .news-dot {
+  display: none;
+  position: absolute;
+  z-index: 2;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--hint-accent, #4cc2ff);
+  box-shadow: 0 0 0 2px #000;
+  pointer-events: none;
+}
+
+body.hinting #island[data-view='compact'] .hint-dot {
+  display: block;
+}
+
+.home-taskbar.tb-capsule #island .hint-dot,
+.home-taskbar.tb-capsule #island .news-dot {
+  box-shadow: 0 0 0 2px var(--i-bg);
+}
+
+.home-taskbar:not(.tb-capsule) #island .hint-dot,
+.island-bare.home-taskbar.tb-capsule #island .hint-dot,
+.home-taskbar:not(.tb-capsule) #island .news-dot,
+.island-bare.home-taskbar.tb-capsule #island .news-dot {
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.6);
+}
+
+.tb-light.island-bare.home-taskbar.tb-capsule #island .hint-dot,
+.tb-light.island-bare.home-taskbar.tb-capsule #island .news-dot {
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+}
+
+/* --- The flow light (island.js, "The flow light"; flow.js) --------------------------
+   Something happened with the island closed (a turn done, changes to review,
+   an error, a hello, a plugin's nudge): a ring of colour 2 px wide, 1 px off
+   the capsule's edge (its frame 3 px out each side, its corners 3 px
+   rounder: --flow-r), so it reads as a light round it, not an outline; on
+   the black strip, which has no capsule, a circle of 36 round her portrait
+   (round, --flow-x/--flow-y in the island). Laid over the island by anchor
+   positioning, following it as it changes size. A frame cut to a ring by its
+   mask (the content box taken from the whole), in it a square of conic
+   gradient as wide as 1.5 times the frame's longer side (cqmax: its corners
+   always covered) that alone turns; two layers of it, the upper coming up
+   in a new colour (a blend). Under it on a dark ground the same blurred
+   (glow). The page turns it in steps (a new angle 15 times a second, set
+   as a style) and animates its light alone; nothing of it drawn, nor
+   will-change, once it has played (on) or while it is held still (held). Then the dot: as the
+   hint's, in the newest event's colour (--news), until seen. */
+#island {
+  anchor-name: --island;
+}
+
+#flow {
+  display: none;
+  position: absolute;
+  z-index: 3;
+  position-anchor: --island;
+  top: calc(anchor(top) - 3px);
+  left: calc(anchor(left) - 3px);
+  right: calc(anchor(right) - 3px);
+  bottom: calc(anchor(bottom) - 3px);
+  border-radius: var(--flow-r, 21px);
+  container-type: size;
+  pointer-events: none;
+}
+
+#flow.round {
+  top: calc(anchor(top) + var(--flow-y, 6px));
+  left: calc(anchor(left) + var(--flow-x, 6px));
+  right: auto;
+  bottom: auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+#flow.on {
+  display: block;
+  will-change: opacity;
+}
+
+/* Pulled out, reached for, up out of the way: not round what is not there. */
+.pulling #flow,
+.reaching #flow,
+.isl-stowed #flow {
+  visibility: hidden;
+}
+
+/* OLED's guard moves the island a pixel or two (translate): laid over it by
+   its anchor, the ring goes with it already (it went twice as far with this
+   too, the test VM showed); placed from the island's box (no anchors), it
+   is moved the same way. */
+.oled-shift #flow.placed {
+  translate: var(--oled-x) var(--oled-y);
+}
+
+#flow .flow-ring,
+#flow .flow-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+#flow .flow-ring {
+  box-sizing: border-box;
+  padding: 2px;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+}
+
+#flow .flow-glow {
+  display: none;
+  filter: blur(6px);
+  opacity: 0.45;
+}
+
+#flow.glow .flow-glow {
+  display: block;
+}
+
+#flow .flow-spin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150cqmax;
+  height: 150cqmax;
+  translate: -50% -50%;
+}
+
+#flow.on .flow-spin {
+  will-change: transform;
+}
+
+/* Held lit and still after its turns, for as long as the hold setting says
+   (island.js holdRing, zhoupengjie/Wakuwaku#65): nothing of it animated,
+   its light and its gradient set where they stopped, and no layer kept for
+   what does not move. */
+#flow.on.held,
+#flow.on.held .flow-spin {
+  will-change: auto;
+}
+
+#flow .flow-spin b {
+  position: absolute;
+  inset: 0;
+}
+
+#flow .flow-spin b + b {
+  opacity: 0;
+}
+
+body.has-news #island[data-view='compact'] .news-dot {
+  display: block;
+  background: var(--news, #34d27b);
+}
+
+/* In the notch, tucked away: nothing of it in sight. */
+.tucked #island .news-dot {
+  visibility: hidden;
+}
+
+/* It comes as the ring fades (0.25 s, a little past full size and back),
+   and hops in a new colour (another soon after a ring: 1, 1.35, 1, 0.3 s). */
+#island .news-dot.pop {
+  animation: news-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+#island .news-dot.hop {
+  animation: news-hop 0.3s ease;
+}
+
+@keyframes news-pop {
+  from {
+    transform: scale(0);
+  }
+}
+
+@keyframes news-hop {
+  50% {
+    transform: scale(1.35);
+  }
+}
+
+#island-compact .label.hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--hint-accent, #4cc2ff);
+  font-weight: 600;
+}
+
+#island-compact .hchev {
+  font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  font-size: 9px;
+  font-weight: normal;
+}
+
+.tb-side #island-compact .chint {
+  font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  font-size: 12px;
+  line-height: 13px;
+  color: var(--hint-accent, #4cc2ff);
+}
+
+#island-expanded .hintgo {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 2px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hint-accent, #4cc2ff) 16%, transparent);
+  color: var(--hint-accent, #4cc2ff);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+#island-expanded .hintoff {
+  align-self: flex-end;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: #8e8e93;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* The prompt asked for from her capsule on another display's taskbar
+   (island.js onLookHere, bars.rs): a ring in the waiting colour inside the
+   island's edge, twice, so the eye finds it on this display. */
+#island.look-here::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px var(--look, #ffb340);
+  pointer-events: none;
+  animation: look-here 0.8s ease-in-out 2;
+}
+
+@keyframes look-here {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  45% {
+    opacity: 1;
+  }
+}
+
+/* With Windows' animation effects off (reduced motion): no flashing, the
+   ring held still for 1.6 s and then faded (the appearance session). */
+@media (prefers-reduced-motion: reduce) {
+  #island.look-here::after {
+    animation: look-here-still 1.9s linear 1;
+  }
+}
+
+@keyframes look-here-still {
+  0%,
+  84% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Up over an app full screen for the prompts alone (island.rs over_full):
+   her island and its panel, nothing of the strip under them, its ground,
+   Mica or line, nor its parts; the pointer goes through there to what is
+   full screen (the parts take it only while under it). Over every ground
+   the strip may have (tb-clear-mica, tb-solid, tb-light…). */
+.over-full #island-row {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.over-full #mica,
+.over-full #bar-rest {
+  visibility: hidden;
+}
+
+/* --- Widgets by size (the widget design of 2026-10-16; wcards.js) ---------------------
+   One language for them: glass (a dark or light tint, its hairline, a
+   highlight along its top, a soft shadow), one colour each on its glyph,
+   progress and glow, numbers in the text's colour. Over other programs'
+   windows the page's own blur reaches nothing (the plate under her island,
+   backplate.rs, is hers alone): the glass is held at 92-94% there, where the
+   spec has 56-62% over the desktop's picture, as her island's ground is
+   (island-acrylic-plate). */
+:root {
+  --wg-glass: rgba(28, 29, 34, 0.92);
+  --wg-blur: blur(30px) saturate(1.6);
+  --wg-line: rgba(255, 255, 255, 0.11);
+  --wg-hi: rgba(255, 255, 255, 0.08);
+  --wg-shadow: 0 16px 40px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.2);
+  --wg-fg: #f5f5f7;
+  --wg-2: rgba(235, 235, 245, 0.64);
+  --wg-3: rgba(235, 235, 245, 0.34);
+  --wg-track: rgba(255, 255, 255, 0.12);
+  --wg-tile: rgba(255, 255, 255, 0.06);
+  --wg-tile-line: rgba(255, 255, 255, 0.06);
+  --wg-card: rgba(255, 255, 255, 0.05);
+  --wg-on: rgba(255, 255, 255, 0.14);
+  --wg-amber: #ffb340;
+  --wg-num: 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --wg-icon: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+}
+
+.tb-light #bar-rest,
+.isl-light #island {
+  --wg-glass: rgba(250, 250, 252, 0.94);
+  --wg-line: rgba(0, 0, 0, 0.07);
+  --wg-hi: rgba(255, 255, 255, 0.7);
+  --wg-shadow: 0 16px 40px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --wg-fg: #1b1b1f;
+  --wg-2: rgba(30, 30, 36, 0.62);
+  --wg-3: rgba(30, 30, 36, 0.34);
+  --wg-track: rgba(0, 0, 0, 0.09);
+  --wg-tile: rgba(255, 255, 255, 0.55);
+  --wg-tile-line: rgba(0, 0, 0, 0.05);
+  --wg-card: rgba(0, 0, 0, 0.035);
+  --wg-on: rgba(255, 255, 255, 0.9);
+  --wg-amber: #b25e00;
+}
+
+/* Her face for Claude 今天 (a still frame, never played). */
+.still-her.badge {
+  vertical-align: middle;
+}
+
+.tb-light #bar-rest .still-her.badge {
+  background-color: #e8e8e8;
+}
+
+/* An amber glyph: its plugin stopped (the spec's §8). */
+#bar-rest .tw .werr,
+.werr {
+  color: var(--wg-amber) !important;
+}
+
+/* Loading: a shimmer where the value goes, a few times only (an endless one
+   on the 2560-wide strip would paint at the screen's rate all day). */
+.wshim {
+  display: inline-block;
+  width: 38px;
+  height: 9px;
+  border-radius: 4.5px;
+  vertical-align: middle;
+  background: linear-gradient(90deg, var(--wg-track) 20%, color-mix(in srgb, currentColor 30%, transparent) 50%, var(--wg-track) 80%) 0 0 / 220% 100%;
+  animation: wshim 1.3s ease-in-out 4;
+}
+
+@keyframes wshim {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* Private words (a letter's sender and subject): blurred while the
+   specifics may not show, clear under the pointer (the spec's §8). */
+.wpriv.hid {
+  filter: blur(4px);
+  transition: filter 0.15s ease;
+}
+
+:is(.wrow, .cmail, .srow, .cline):hover .wpriv.hid,
+.icard .crow:hover .wpriv.hid {
+  filter: none;
+}
+
+/* --- A carousel on the taskbar (the spec's §5) ----------------------------------------
+   As wide as its widest medium: its slides one over another in a reel moved
+   up a slide every 6 s (0.5 s, the spec's curve), a column of dots at its
+   right, the one shown 8px long. */
+#bar-rest .tw-carousel {
+  align-items: flex-start;
+  overflow: hidden;
+  padding: 0 13px 0 0;
+}
+
+#bar-rest .tw-carousel .reel {
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.5s cubic-bezier(0.3, 1.2, 0.45, 1);
+}
+
+#bar-rest .tw-carousel .tws {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding-left: 9px;
+}
+
+#bar-rest .tw-carousel .dots {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  display: grid;
+  gap: 3px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+#bar-rest .tw-carousel .dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 1.5px;
+  background: currentColor;
+  opacity: 0.3;
+  transition:
+    opacity 0.3s ease,
+    height 0.3s ease;
+}
+
+#bar-rest .tw-carousel .dots i.on {
+  height: 8px;
+  opacity: 1;
+}
+
+/* --- A stack on the taskbar ------------------------------------------------------------
+   The first, with the edges of the others over it: one 3px under its top,
+   62% wide, 40%; one at its top, 44% wide, 20%. Open, its place stays lit. */
+#bar-rest .tw-stack {
+  cursor: pointer;
+}
+
+#bar-rest .tw-stack::before,
+#bar-rest .tw-stack::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+#bar-rest .tw-stack::before {
+  top: 3px;
+  width: 62%;
+  opacity: 0.4;
+}
+
+#bar-rest .tw-stack::after {
+  top: 0;
+  width: 44%;
+  opacity: 0.2;
+}
+
+#bar-rest .tw-stack.open {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.tb-light #bar-rest .tw-stack.open {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* --- A stack, opened (island.js drawStackPop) -----------------------------------------
+   300 wide, 8 px over the strip, round 16, 10 in; its head, then a line
+   each on a tile (round 11): its glyph in a 30px block of its colour (15%),
+   its name, a sentence, its number (18px) and what it counts. Rising in
+   0.32 s, the lines 40 ms apart; with motion reduced, faded in. */
+#bar-rest .wstk {
+  position: absolute;
+  bottom: 56px;
+  z-index: 3;
+  display: grid;
+  gap: 6px;
+  width: 300px;
+  box-sizing: border-box;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--wg-glass);
+  backdrop-filter: var(--wg-blur);
+  color: var(--wg-fg);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  box-shadow:
+    inset 0 1px 0 var(--wg-hi),
+    0 0 0 1px var(--wg-line),
+    var(--wg-shadow);
+  transform-origin: 50% 100%;
+}
+
+#bar-rest .wstk[hidden] {
+  display: none;
+}
+
+#bar-rest .wstk.rising {
+  animation: wstk-rise 0.32s cubic-bezier(0.3, 1.2, 0.45, 1) both;
+}
+
+#bar-rest .wstk.rising .srow {
+  animation: wstk-rise 0.36s cubic-bezier(0.3, 1.2, 0.45, 1) backwards;
+}
+
+@keyframes wstk-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+}
+
+@keyframes wfade {
+  from {
+    opacity: 0;
+  }
+}
+
+#bar-rest .wstk .shead {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 6px 4px;
+  color: var(--wg-2);
+  font-weight: 600;
+}
+
+#bar-rest .wstk .shead span {
+  color: var(--wg-3);
+  font-weight: 500;
+}
+
+#bar-rest .wstk .srow {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: var(--wg-tile);
+  box-shadow: inset 0 0 0 1px var(--wg-tile-line);
+  cursor: grab;
+  touch-action: none;
+}
+
+#bar-rest .wstk .srow.dragging {
+  z-index: 2;
+  cursor: grabbing;
+  box-shadow:
+    inset 0 0 0 1px var(--wg-line),
+    0 8px 20px rgba(0, 0, 0, 0.3);
+}
+
+#bar-rest .wstk .srow.out {
+  opacity: 0.75;
+  outline: 1.5px dashed var(--wg-2);
+  outline-offset: -1.5px;
+}
+
+#bar-rest .wstk .srow.out::after {
+  content: attr(data-say);
+  position: absolute;
+  right: 10px;
+  bottom: -18px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11px;
+}
+
+#bar-rest .wstk .sgl {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--c, var(--wg-2));
+  background: color-mix(in srgb, var(--c, var(--wg-2)) 15%, transparent);
+}
+
+#bar-rest .wstk .sgl .wgl {
+  font: normal 15px/1 var(--wg-icon);
+}
+
+#bar-rest .wstk .sgl .wsvg {
+  display: flex;
+}
+
+#bar-rest .wstk .sgl .wsvg .wicon {
+  width: 15px;
+  height: 15px;
+}
+
+#bar-rest .wstk .sname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+#bar-rest .wstk .sval {
+  grid-row: span 2;
+  text-align: right;
+  font: 400 18px/1.1 var(--wg-num);
+  font-variant-numeric: tabular-nums;
+}
+
+#bar-rest .wstk .sval small {
+  display: block;
+  color: var(--wg-2);
+  font: 600 11px/1.3 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+}
+
+#bar-rest .wstk .ssay {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--wg-2);
+  font-size: 11.5px;
+}
+
+#bar-rest .wstk .srow.empty {
+  opacity: 0.6;
+}
+
+/* --- A widget's menu (island.js openMenu) -----------------------------------------------
+   On the strip over the widget, in the open island at the pointer: its size,
+   where it goes, together or apart; one not there greyed, why at its foot. */
+.wmenu {
+  position: absolute;
+  z-index: 6;
+  display: grid;
+  gap: 1px;
+  min-width: 232px;
+  max-width: 300px;
+  box-sizing: border-box;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--wg-glass);
+  backdrop-filter: var(--wg-blur);
+  color: var(--wg-fg);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-align: left;
+  cursor: default;
+  box-shadow:
+    inset 0 1px 0 var(--wg-hi),
+    0 0 0 1px var(--wg-line),
+    var(--wg-shadow);
+  animation: wfade 0.12s ease-out;
+}
+
+.wmenu[hidden] {
+  display: none;
+}
+
+#bar-rest .wmenu {
+  bottom: 54px;
+}
+
+#bar-rest .wmenu.above-stack {
+  z-index: 5;
+}
+
+.wmenu .wmh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 7px;
+  font-weight: 600;
+}
+
+.wmenu .wmh b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wmenu .wmh .wgl {
+  color: var(--c);
+  font: normal 14px/1 var(--wg-icon);
+}
+
+.wmenu .wmh .wsvg {
+  display: flex;
+  color: var(--c);
+}
+
+.wmenu .wmh .wsvg .wicon {
+  width: 14px;
+  height: 14px;
+}
+
+.wmenu .wmr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px 3px 8px;
+}
+
+.wmenu .wml {
+  flex: 1;
+  color: var(--wg-2);
+}
+
+.wmenu .wms {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--wg-track);
+}
+
+.wmenu button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wmenu .wmo {
+  min-width: 34px;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.wmenu .wmo.on {
+  background: var(--wg-on);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.wmenu .wmo:not(.on):not(.off):hover {
+  background: color-mix(in srgb, var(--wg-on) 50%, transparent);
+}
+
+.wmenu .wmi {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.wmenu .wmi:not(.off):hover {
+  background: var(--wg-track);
+}
+
+.wmenu .off {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.wmenu .wmsep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--wg-line);
+}
+
+.wmenu .wmwhy {
+  padding: 5px 8px 3px;
+  color: var(--wg-2);
+  font-size: 11.5px;
+  white-space: normal;
+}
+
+.wmenu .wmwhy[hidden] {
+  display: none;
+}
+
+/* --- Rows in the open island (the spec's §6; wcards.js rowHTML) ---------------------------
+   Small: a 13px glyph in its colour, its name, its value (its colour,
+   semibold); medium: its name over a second line (11px), a small curve
+   (56x16) when it has one; one with a large size has an 8px ›. */
+#island-expanded .wrow .wrg {
+  flex: none;
+  width: 16px;
+  text-align: center;
+}
+
+#island-expanded .wrow .wgl.wrg {
+  font: normal 13px/1 var(--wg-icon);
+}
+
+#island-expanded .wrow .wsvg {
+  display: flex;
+  justify-content: center;
+}
+
+#island-expanded .wrow .wsvg .wicon {
+  width: 14px;
+  height: 14px;
+}
+
+#island-expanded .wrow .wher {
+  display: flex;
+  justify-content: center;
+}
+
+#island-expanded .wrow.wr-M {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+#island-expanded .wrow .wtwo {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  line-height: 1.35;
+}
+
+#island-expanded .wrow .wtwo .wl,
+#island-expanded .wrow .wsec {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#island-expanded .wrow .wsec {
+  color: #8e8e93;
+  font-size: 11px;
+}
+
+.isl-light #island-expanded .wrow .wsec {
+  color: #6e6e73;
+}
+
+#island-expanded .wrow .wcurve {
+  flex: none;
+  display: flex;
+  margin-left: auto;
+}
+
+#island-expanded .wrow .wchev {
+  flex: none;
+  width: 8px;
+  margin-left: -2px;
+  font: normal 8px/1 var(--wg-icon);
+  opacity: 0.6;
+  transition: transform 0.25s ease;
+}
+
+#island-expanded .wrow .wchev.none {
+  visibility: hidden;
+}
+
+#island-expanded .wrow.open .wchev {
+  transform: rotate(90deg);
+}
+
+#island-expanded .wrow.open {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e5e5ea;
+}
+
+.isl-light #island-expanded .wrow.open {
+  background: rgba(0, 0, 0, 0.04);
+  color: #1b1b1b;
+}
+
+/* A card unfolded: the island at its widest. */
+.has-her #island-expanded.has-card {
+  min-width: 420px;
+}
+
+#island-expanded.has-card {
+  min-width: 360px;
+}
+
+/* --- A card: the large size in the open island (the spec's §4, §6) ------------------------
+   Round 14, 10/12 in, a faint ground of its own, unfolding in 0.34 s; as
+   wide as the island's lines. The same in a widget's card on the strip. */
+#island-expanded .icard {
+  display: grid;
+  gap: 8px;
+  margin: 2px -8px 4px;
+  padding: 10px 12px 12px;
+  border-radius: 14px;
+  background: var(--wg-card);
+  color: var(--wg-fg);
+  white-space: normal;
+  animation: icard-unfold 0.34s cubic-bezier(0.3, 1.2, 0.45, 1) both;
+  transform-origin: 50% 0;
+}
+
+#island-expanded .icard.still {
+  animation: none;
+}
+
+@keyframes icard-unfold {
+  from {
+    opacity: 0;
+    transform: scaleY(0.85);
+  }
+}
+
+#island-expanded .icard,
+#bar-rest .wgcard {
+  --wc-2: var(--wg-2);
+  --wc-3: var(--wg-3);
+  min-width: 0;
+  font-size: 12px;
+}
+
+:is(.icard, .wgcard) .crow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:is(.icard, .wgcard) .crow.nums {
+  align-items: flex-end;
+  gap: 14px;
+}
+
+:is(.icard, .wgcard) .cbig {
+  flex: none;
+  font: 300 30px/1 var(--wg-num);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.icard, .wgcard) .cbig.sm {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+:is(.icard, .wgcard) .cbig small {
+  margin-left: 1px;
+  color: var(--wc-2);
+  font-size: 0.5em;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+:is(.icard, .wgcard) .cwords {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+:is(.icard, .wgcard) .cwords b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+:is(.icard, .wgcard) .cwords > span:not(.cbig),
+:is(.icard, .wgcard) .cter,
+:is(.icard, .wgcard) .ccap {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wc-2);
+  font-size: 11px;
+}
+
+:is(.icard, .wgcard) .cright {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--wc-2);
+  font-size: 11px;
+}
+
+:is(.icard, .wgcard) .cter {
+  margin-left: auto;
+}
+
+:is(.icard, .wgcard) .ccurve {
+  display: flex;
+  min-height: 16px;
+}
+
+:is(.icard, .wgcard) .ccurve svg {
+  display: block;
+  overflow: visible;
+}
+
+:is(.icard, .wgcard) .chours {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+  color: var(--wc-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+:is(.icard, .wgcard) .chours i {
+  display: block;
+  font: normal 13px/1.6 var(--wg-icon);
+  font-style: normal;
+}
+
+:is(.icard, .wgcard) .chours b {
+  display: block;
+  color: var(--wg-fg);
+  font: 500 13px var(--wg-num);
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.icard, .wgcard) .cfoot {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--wc-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+:is(.icard, .wgcard) .cfoot span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:is(.icard, .wgcard) .clines {
+  display: grid;
+  gap: 7px;
+}
+
+:is(.icard, .wgcard) .cline {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 3px 8px;
+}
+
+:is(.icard, .wgcard) .cline .cn {
+  color: var(--wc-2);
+}
+
+:is(.icard, .wgcard) .cline .cd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wc-3);
+  font-size: 11px;
+}
+
+:is(.icard, .wgcard) .cline .cv {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+:is(.icard, .wgcard) .cline .wmeter {
+  grid-column: 1 / -1;
+}
+
+:is(.icard, .wgcard) .cline.st {
+  align-items: center;
+}
+
+:is(.icard, .wgcard) .cline.off {
+  grid-template-columns: auto 1fr;
+  opacity: 0.55;
+}
+
+:is(.icard, .wgcard) .wnone {
+  color: var(--wc-3);
+  font-size: 11px;
+}
+
+:is(.icard, .wgcard) .wmeter {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--wg-track);
+}
+
+:is(.icard, .wgcard) .wmeter i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+/* An up or a down: 18 high, round 9, its colour at 16%. */
+:is(.icard, .wgcard) .cchip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.icard, .wgcard) .ctabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--wg-track);
+  font-size: 11px;
+}
+
+:is(.icard, .wgcard) .ctabs span {
+  padding: 1px 7px;
+  border-radius: 7px;
+  color: var(--wc-2);
+}
+
+:is(.icard, .wgcard) .ctabs span.on {
+  background: var(--wg-on);
+  color: var(--wg-fg);
+  font-weight: 600;
+}
+
+:is(.icard, .wgcard) .ctabs span.off {
+  opacity: 0.45;
+}
+
+:is(.icard, .wgcard) .cnum {
+  display: grid;
+  gap: 2px;
+}
+
+:is(.icard, .wgcard) .cnum b {
+  font: 400 17px/1 var(--wg-num);
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.icard, .wgcard) .cnum:first-child b {
+  font: 300 26px/1 var(--wg-num);
+  letter-spacing: -0.02em;
+}
+
+:is(.icard, .wgcard) .cnum span {
+  color: var(--wc-2);
+  font-size: 11px;
+}
+
+:is(.icard, .wgcard) .cmails {
+  display: grid;
+  gap: 8px;
+}
+
+:is(.icard, .wgcard) .cmail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 8px;
+  min-width: 0;
+}
+
+:is(.icard, .wgcard) .cmail b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+:is(.icard, .wgcard) .cmail em {
+  color: var(--wc-3);
+  font-size: 11px;
+  font-style: normal;
+}
+
+:is(.icard, .wgcard) .cmail span {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wc-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #bar-rest .tw-carousel .reel {
+    transition: none;
+  }
+
+  #bar-rest .wstk.rising,
+  #bar-rest .wstk.rising .srow,
+  #island-expanded .icard {
+    animation-name: wfade;
+  }
+
+  .wshim {
+    animation: none;
+  }
+}
+
+/* Along a side: several in one place as narrow as the rest (40), its slides
+   glyph over value, the dots at its edge; a stack's edges at its top. */
+.tb-side #bar-rest .tw-stack {
+  flex-direction: column;
+  justify-content: center;
+  width: 40px;
+  height: auto;
+  min-height: 40px;
+  padding: 6px 0 4px;
+  gap: 2px;
+  box-sizing: border-box;
+  font-size: 10px;
+}
+
+.tb-side #bar-rest .tw-carousel {
+  width: 40px;
+  padding: 0;
+  font-size: 10px;
+}
+
+.tb-side #bar-rest .tw-carousel .tws {
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  width: 40px;
+  padding: 0;
+}
+
+.tb-side #bar-rest .tw-carousel .dots {
+  right: 1px;
+}
+
+/* One without an icon of its own (widgets.js markHTML): the first character
+   of its name, weight 600, on a 16 px rounded square tinted as the stack
+   cards' icon tiles are: its colour at 18% under it, the letter in its
+   colour; on a light ground 14% and the letter one step deeper; with no
+   colour, a grey tint and the secondary grey (the design session,
+   2026-10-16). Held against each place's own glyph rules. */
+.wmark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px !important;
+  height: 16px !important;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mark) 18%, transparent) !important;
+  color: var(--mark) !important;
+  font: 600 10.5px/1 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif !important;
+  font-style: normal;
+  letter-spacing: 0;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.wmark.none {
+  background: rgba(127, 127, 127, 0.18) !important;
+  color: rgba(235, 235, 245, 0.64) !important;
+}
+
+.tb-light .wmark,
+.isl-light .wmark {
+  background: color-mix(in srgb, var(--mark) 14%, transparent) !important;
+  color: var(--mark-deep, var(--mark)) !important;
+}
+
+.tb-light .wmark.none,
+.isl-light .wmark.none {
+  background: rgba(127, 127, 127, 0.18) !important;
+  color: rgba(30, 30, 36, 0.62) !important;
+}

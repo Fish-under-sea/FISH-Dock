@@ -1,0 +1,6 @@
+# A shell script: LF, or Git Bash reads "sh"
+examples/widgets/waku text eol=lf
+# DeepSeek Harness session logs (zstd) the tests read: bytes as they are
+test/fixtures/dsh/*.zstd binary
+# Zips as Windows' tar and PowerShell's Compress-Archive make them (lhm_setup.rs tests)
+test/fixtures/lhm/*.zip binary

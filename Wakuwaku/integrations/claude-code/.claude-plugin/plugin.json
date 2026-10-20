@@ -1,0 +1,11 @@
+{
+  "name": "wakuwaku",
+  "version": "1.0.0",
+  "description": "Connects Claude Code to FISH Dock, derived from Wakuwaku, for session status and prompt replies.",
+  "author": {
+    "name": "Pengjie Zhou"
+  },
+  "homepage": "https://github.com/Fish-under-sea/FISH-Dock",
+  "repository": "https://github.com/Fish-under-sea/FISH-Dock.git",
+  "license": "MIT"
+}

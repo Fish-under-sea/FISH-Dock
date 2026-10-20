@@ -1,0 +1,10 @@
+{
+  "id": "claude-chan",
+  "displayName": "Claude小姐",
+  "description": "原始角色形象作者：B站UP主 ZipZipPipe（UID：4168597），主页：https://space.bilibili.com/4168597 。本宠物为基于其 Claude小姐形象制作的非官方像素二创。",
+  "author": "zhoupengjie",
+  "source": "https://codex-pets.net/#/pets/claude-chan",
+  "spritesheetPath": "spritesheet.webp",
+  "spriteVersionNumber": 2,
+  "kind": "person"
+}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: http://asset.localhost asset: https://codex-pets.net; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src http://127.0.0.1:*"
+    />
+    <title>DSH-FISH</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="settings.css" />
+    <link rel="stylesheet" href="picker.css" />
+  </head>
+  <body>
+    <div id="stage">
+      <div id="panel" hidden></div>
+      <div id="bubble" class="hidden"></div>
+      <div id="pet"><div id="pet-film"></div></div>
+    </div>
+    <div id="island-bar">
+      <div id="island-row">
+        <div id="island">
+          <div id="island-compact"></div>
+          <div id="island-expanded"></div>
+          <div id="island-her"><div class="sheet"></div></div>
+          <div id="island-settings" tabindex="-1"></div>
+        </div>
+      </div>
+    </div>
+    <div id="goo"><div class="goo-island"></div><div class="goo-neck"></div><div class="goo-drop"></div></div>
+    <div id="drop-her"><div class="sheet"></div></div>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="goo-filter">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="blur" />
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10" />
+      </filter>
+    </svg>
+    <script src="hovers.js"></script>
+    <script src="surfaces.js"></script>
+    <script src="bridge.js"></script>
+    <script src="../shared/i18n.js"></script>
+    <script src="sprite.js"></script>
+    <script src="status.js"></script>
+    <script src="widgets.js"></script>
+    <script src="deskgrid.js"></script>
+    <script src="capsule.js"></script>
+    <script src="placing.js"></script>
+    <script src="wcards.js"></script>
+    <script src="agents.js"></script>
+    <script src="mica.js"></script>
+    <script src="presses.js"></script>
+    <script src="aim.js"></script>
+    <script src="flow.js"></script>
+    <script src="anchor.js"></script>
+    <script src="pet.js"></script>
+    <script src="island.js"></script>
+    <script src="picker.js"></script>
+    <script src="capsule-panel.js"></script>
+    <script src="handoff.js"></script>
+    <script src="models.js"></script>
+    <script src="settings.js"></script>
+    <script src="panel.js"></script>
+  </body>
+</html>

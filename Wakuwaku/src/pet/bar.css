@@ -1,0 +1,534 @@
+/* Her taskbar on another display (bar.js): as the main one looks (style.css
+   #bar-rest), Start and the programs centred or at the start, the clock and
+   the desktop's sliver at the end; along a side, in a column. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font: 12px 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  color: #fff;
+  user-select: none;
+  cursor: default;
+}
+
+#bar {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 0 0 4px;
+  /* Clear filling in as solid, and back (bar.js ground), a short fade as hers. */
+  transition:
+    background-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+/* The ground, by material: black (the line along its inner edge), Mica
+   (this display's wallpaper blurred and tinted, mica.js, under the strip's
+   parts; Mica's own tint until it comes), or none (clear: the words haloed
+   so they read on any desktop). */
+.b-black #bar {
+  background: #000;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+#mica {
+  display: none;
+}
+
+.b-mica #mica,
+.b-clear-mica #mica {
+  display: block;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #202020;
+}
+
+#mica canvas {
+  position: absolute;
+  transition: opacity 0.4s ease;
+}
+
+.b-light.b-mica #mica,
+.b-light.b-clear-mica #mica {
+  background: #f3f3f3;
+}
+
+/* Clear, filling in as Mica (bar.js clearMica): its layer there all along,
+   unseen, faded in while a window fills this display (b-mica) and out after,
+   as hers (style.css tb-clear-mica). */
+.b-clear-mica #mica {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.b-clear-mica.b-mica #mica {
+  opacity: 1;
+}
+
+.b-mica #bar {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.b-light.b-black #bar {
+  background: #eeeeee;
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.b-light.b-mica #bar {
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
+.b-light {
+  color: #1b1b1b;
+}
+
+.b-clear #bar {
+  text-shadow:
+    0 0 1px rgba(0, 0, 0, 0.95),
+    0 0 2px rgba(0, 0, 0, 0.8),
+    0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.b-clear #bar img,
+.b-clear .start svg {
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+
+.b-light.b-clear #bar {
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 1),
+    0 0 2px rgba(255, 255, 255, 0.9),
+    0 1px 4px rgba(255, 255, 255, 0.65);
+}
+
+.b-light.b-clear #bar img,
+.b-light.b-clear .start svg {
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.95)) drop-shadow(0 1px 2px rgba(255, 255, 255, 0.6));
+}
+
+/* Start and the programs: in the middle, or at the start (taskbarAlign left). */
+#apps {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.b-start #apps {
+  justify-content: flex-start;
+}
+
+/* Centred on the whole strip, as the main one's are (island.js alignApps),
+   not on what the clock leaves: as much room before them as the clock and
+   the sliver take after (bar.js, --end-w, --end-h). */
+#lead {
+  flex: none;
+  width: var(--end-w, 0px);
+}
+
+.b-start #lead {
+  display: none;
+}
+
+#wins {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The buttons' row as thick as the strip, their middles where they were:
+   going up from a button to its list (barpop.js, its window against the
+   strip), the pointer is on the row until it is on the list
+   (zhoupengjie/Wakuwaku#56). */
+#apps,
+#wins {
+  align-self: stretch;
+}
+
+.start,
+.win,
+.clock {
+  border-radius: 6px;
+}
+
+.start {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.start .s0 {
+  stop-color: #77f3ff;
+}
+
+.start .s1 {
+  stop-color: #0c9eff;
+}
+
+.b-light .start .s0 {
+  stop-color: #4bcffe;
+}
+
+.b-light .start .s1 {
+  stop-color: #0179d4;
+}
+
+.win {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 40px;
+  cursor: pointer;
+}
+
+.win img {
+  width: 24px;
+  height: 24px;
+}
+
+/* Under the pointer and the one in front: a light wash, as on the main one. */
+.start:hover,
+.win:hover,
+.clock:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.win.front {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.b-light .start:hover,
+.b-light .win:hover,
+.b-light .clock:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.b-light .win.front {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* Running: a mark under it; longer in the accent for the one in front. */
+.win.run::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: #8e8e93;
+  transform: translateX(-50%);
+  transition:
+    width 0.2s ease,
+    background 0.2s ease;
+}
+
+.win.front::after {
+  width: 18px;
+  background: var(--accent, #5e9bff);
+}
+
+/* Asking for attention: orange, as on the main one. */
+.win.flash {
+  background: rgba(255, 179, 64, 0.38);
+}
+
+/* How many windows, at the icon's corner, as the main one's icons
+   (style.css #bar-rest.icons .count); none along a side. */
+.win .count {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--accent, #5e9bff);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+  text-shadow: none;
+  box-shadow: 0 0 0 1.5px #000;
+}
+
+.b-light .win .count {
+  box-shadow: 0 0 0 1.5px #f3f3f3;
+}
+
+.b-side .win .count {
+  display: none;
+}
+
+#end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+}
+
+.clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  height: 40px;
+  padding: 0 10px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.clock b {
+  font-weight: 400;
+}
+
+.clock i {
+  font-style: normal;
+}
+
+/* The desktop's sliver at the very end, as Windows' own. */
+.desk {
+  width: 8px;
+  align-self: stretch;
+  margin-left: 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+}
+
+.b-light .desk {
+  border-left-color: rgba(0, 0, 0, 0.12);
+}
+
+/* Along a side: a column, Start and the programs in the middle of the
+   screen's height (or at the top, taskbarAlign left), as the main one's,
+   the clock at the foot, the sliver below it. */
+.b-side #bar {
+  flex-direction: column;
+  padding: 4px 0 0;
+}
+
+.b-side #lead {
+  width: auto;
+  height: var(--end-h, 0px);
+}
+
+.b-side #apps {
+  flex-direction: column;
+}
+
+.b-side #wins {
+  flex-direction: column;
+}
+
+.b-side #end {
+  flex-direction: column;
+  align-self: stretch;
+  align-items: stretch;
+}
+
+.b-side .clock {
+  align-items: center;
+  padding: 4px 0;
+  height: auto;
+}
+
+.b-side .desk {
+  width: auto;
+  height: 8px;
+  margin: 4px 0 0;
+  border-left: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.b-left #bar,
+.b-right #bar {
+  box-shadow: none;
+}
+
+.b-top.b-black #bar,
+.b-top.b-mica #bar {
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* --- Her capsule while a prompt waits (bar.js drawHer) ------------------------------
+   Where hers is on the main strip, at its start (6 px in, 5 px off its foot):
+   her portrait ringed in the waiting colour, then the words and a small ›,
+   all in it; its ground, blur and edge her island's (--h-bg, --h-blur,
+   --h-edge), none when bare. Along a side, upright: the portrait and the
+   number under it. It comes in with a short fade. */
+#her {
+  position: absolute;
+  left: 6px;
+  top: 5px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  box-sizing: border-box;
+  padding: 0 14px 0 4px;
+  border-radius: 19px;
+  background: var(--h-bg);
+  -webkit-backdrop-filter: var(--h-blur);
+  backdrop-filter: var(--h-blur);
+  box-shadow: var(--h-edge);
+  color: var(--ring);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-shadow: none;
+  cursor: pointer;
+  animation: her-in 0.22s ease-out;
+}
+
+#her[hidden] {
+  display: none;
+}
+
+@keyframes her-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+#her.bare {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+#her.bare:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.b-light #her.bare:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* Bare on the clear strip: its words haloed as the strip's are. */
+.b-clear #her.bare {
+  text-shadow:
+    0 0 1px rgba(0, 0, 0, 0.95),
+    0 0 2px rgba(0, 0, 0, 0.8),
+    0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.b-light.b-clear #her.bare {
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 1),
+    0 0 2px rgba(255, 255, 255, 0.9),
+    0 1px 4px rgba(255, 255, 255, 0.65);
+}
+
+#her .face {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  overflow: hidden;
+  border-radius: 50%;
+}
+
+#her .face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--ring);
+}
+
+#her .sheet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 192px;
+  height: 208px;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+#her .film {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1536px;
+  height: 2288px;
+  background-repeat: no-repeat;
+  will-change: transform;
+}
+
+#her .chev {
+  margin-left: -3px;
+  font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  font-size: 9px;
+  font-weight: normal;
+}
+
+/* Start and the buttons laid from the start make room for it. */
+.b-her.b-start:not(.b-side) #apps {
+  padding-left: calc(var(--her-w, 0px) + 6px);
+}
+
+.b-side #her {
+  left: 5px;
+  top: 6px;
+  flex-direction: column;
+  gap: 2px;
+  width: 38px;
+  height: auto;
+  padding: 4px 0 6px;
+  font-size: 11px;
+}
+
+.b-side #her .chev {
+  display: none;
+}
+
+.b-her.b-side #apps {
+  padding-top: calc(var(--her-h, 0px) + 6px);
+}
+
+/* On the light strip, a soft shadow under it too, as hers on the main one. */
+.b-light #her:not(.bare) {
+  box-shadow:
+    var(--h-edge),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* With Windows' animation effects off: it fades in, no growing. */
+@media (prefers-reduced-motion: reduce) {
+  #her {
+    animation-name: her-fade;
+  }
+}
+
+@keyframes her-fade {
+  from {
+    opacity: 0;
+  }
+}

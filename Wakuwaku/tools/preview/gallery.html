@@ -1,0 +1,124 @@
+<!doctype html>
+<!-- Every scene (scenes.js) live, each in its frame (shot.html), by section:
+     gallery.html?mode=dark|light[&only=capsule-*,flow-*]. Her pages are read
+     from src/pet over file://, which Edge allows only when started with
+     --allow-file-access-from-files (render.ps1 -Open does that). -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Wakuwaku gallery</title>
+    <style>
+      :root {
+        --bg: #1c1c1f;
+        --ink: #ebebf0;
+        --soft: #96969e;
+        --line: #3c3c42;
+        font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+      }
+      :root.light {
+        --bg: #f3f3f3;
+        --ink: #1c1c20;
+        --soft: #64646c;
+        --line: #d2d2d6;
+      }
+      body {
+        margin: 0;
+        padding: 20px 28px 40px;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      header {
+        display: flex;
+        gap: 16px;
+        align-items: baseline;
+        margin-bottom: 8px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      header a {
+        color: var(--soft);
+        text-decoration: none;
+      }
+      header a.on {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      h2 {
+        margin: 28px 0 10px;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        align-items: flex-start;
+      }
+      figure {
+        margin: 0;
+      }
+      figcaption {
+        margin-bottom: 6px;
+        font-size: 12.5px;
+        color: var(--soft);
+      }
+      figcaption code {
+        font: 11.5px Consolas, monospace;
+        margin-left: 6px;
+      }
+      iframe {
+        display: block;
+        border: 1px solid var(--line);
+      }
+    </style>
+    <script src="scenes.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Wakuwaku gallery</h1>
+      <a data-mode="dark" href="?mode=dark">深色</a>
+      <a data-mode="light" href="?mode=light">浅色</a>
+    </header>
+    <main id="sheet"></main>
+    <script>
+      ;(function () {
+        const Q = new URLSearchParams(location.search)
+        const mode = Q.get('mode') === 'light' ? 'light' : 'dark'
+        const only = (Q.get('only') || '*').split(',').map(p => new RegExp(`^${p.trim().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`))
+        document.documentElement.classList.toggle('light', mode === 'light')
+        for (const a of document.querySelectorAll('[data-mode]')) {
+          a.classList.toggle('on', a.dataset.mode === mode)
+          if (Q.get('only')) a.href += `&only=${encodeURIComponent(Q.get('only'))}`
+        }
+        const sheet = document.getElementById('sheet')
+        for (const [key, name] of window.Scenes.SECTIONS) {
+          const scenes = window.Scenes.LIST.filter(s => s.section === key && only.some(r => r.test(s.id)))
+          if (!scenes.length) continue
+          const h = document.createElement('h2')
+          h.textContent = name
+          const row = document.createElement('div')
+          row.className = 'row'
+          for (const s of scenes) {
+            const fig = document.createElement('figure')
+            const cap = document.createElement('figcaption')
+            cap.textContent = s.title
+            const id = document.createElement('code')
+            id.textContent = s.id
+            cap.append(id)
+            const frame = document.createElement('iframe')
+            frame.loading = 'lazy'
+            frame.width = s.view[2]
+            frame.height = s.view[3]
+            frame.src = `shot.html?scene=${encodeURIComponent(s.id)}&mode=${mode}`
+            fig.append(cap, frame)
+            row.append(fig)
+          }
+          sheet.append(h, row)
+        }
+      })()
+    </script>
+  </body>
+</html>

@@ -1,0 +1,65 @@
+<!doctype html>
+<!-- One scene as a part of the screen (shot.js): shot.html?scene=<id>&mode=dark|light.
+     render.ps1 shoots this page at the scene's view size. -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Wakuwaku scene</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #101014;
+      }
+      #screen {
+        position: relative;
+        overflow: hidden;
+      }
+      #screen > * {
+        position: absolute;
+      }
+      #wall {
+        background: #1b2533 center / cover no-repeat;
+      }
+      iframe {
+        border: 0;
+        background: transparent;
+        color-scheme: normal;
+      }
+      .plate {
+        backdrop-filter: blur(30px) saturate(1.25);
+        background: rgba(32, 32, 32, 0.3);
+      }
+      .plate.light {
+        background: rgba(243, 243, 243, 0.3);
+      }
+      /* Until the page says it is frozen: a shot with this mark was taken too soon (a longer budget). */
+      #pending {
+        left: 0;
+        top: 0;
+        width: 10px;
+        height: 10px;
+        background: #ff00d4;
+        z-index: 10;
+      }
+      #notes {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 11;
+        margin: 0;
+        padding: 4px 6px;
+        font: 11px/1.35 Consolas, monospace;
+        color: #fff;
+        background: rgba(176, 0, 32, 0.92);
+        white-space: pre-wrap;
+      }
+    </style>
+    <script src="scenes.js"></script>
+  </head>
+  <body>
+    <div id="screen"><div id="wall"></div><div id="pending"></div></div>
+    <script src="shot.js"></script>
+  </body>
+</html>

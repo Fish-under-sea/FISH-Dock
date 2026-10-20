@@ -1,0 +1,8 @@
+{
+  "name": "wakuwaku-dsh-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Wakuwaku's plugin for DeepSeek Harness: tells her what its sessions do. Written and removed by Wakuwaku (Connect → DeepSeek Harness).",
+  "type": "module",
+  "main": "wakuwaku.js"
+}

@@ -1,0 +1,814 @@
+// Mail in the island, built in. Accounts are set up in the settings the way
+// Thunderbird does it: an address and a password, then the server looked up
+// (the domain's own autoconfig, Thunderbird's database ISPDB, the database's
+// entry for the provider of the domain's MX host, then a guess) or typed in.
+// Each account that is on is kept on this computer, as Thunderbird keeps
+// an account offline (store.rs: its inbox and Sent folder, headers and
+// whole letters), by a thread of its own that syncs it with the server and
+// then waits for it to say something changed (sync.rs; IDLE where it can,
+// else every minute): the unread count and the newest unread letter (who,
+// what about) as a widget, and the island opened for a new one. The sync
+// reads only: folders are EXAMINEd and letters PEEKed, so nothing is marked
+// read. Passwords are kept in Windows' Credential Manager ("Wakuwaku mail
+// <id>"), never in the settings.
+//
+// The Mail page lists the inbox as conversations from what is kept
+// (letters.rs, threads.rs) and reads a letter (opening one marks it read,
+// as any mail program does), hands a letter to Claude Code, Codex or
+// Antigravity (agent.rs), and writes letters: new ones, replies, letters passed on
+// (send.rs, over SMTP: smtp.rs). IMAP is io-imap's (imap.rs), the library
+// under himalaya; finding the servers is discover.rs; reaching them through
+// a proxy, proxy.rs.
+//
+// Settings: "mail": [{ id, address, name, host, port, security: ssl |
+// starttls | plain, username, auth, smtp: { host, port, security, username,
+// auth } | null, on, proxy }], changed only through the commands below (smtp
+// null: one set up before the pet sent mail, or none to send with; proxy
+// null: as the Mail page has it); one password for both servers;
+// "mailProxy": { mode: system | manual | none, kind, address }, how mail
+// reaches its servers (proxy.rs; Windows' proxy unless set);
+// "mailAgent": "claude" | "codex" | "agy", who a letter goes to first;
+// "mailAgentConf": { claude | codex | agy: { access, model, effort,
+// sumModel, sumEffort } }, what a session may do and the models (agent.rs);
+// "mailPanes": "two" | "one", the Mail page as list and letter side by side
+// (the default), or one under the other (settings.js);
+// "mailOffline": "year" (the default) | "90d" | "all" | "opened", how much
+// is kept whole on this computer ahead (store.rs Offline).
+use std::collections::HashMap;
+use std::net::{Shutdown, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use serde_json::{json, Value};
+use tauri::AppHandle;
+
+use crate::{i18n, now_ms, settings, shared, Shared};
+
+pub mod agent;
+mod discover;
+mod imap;
+pub mod letters;
+pub mod proxy;
+pub mod send;
+mod smtp;
+mod store;
+mod sync;
+mod threads;
+
+use imap::Fail;
+use proxy::Via;
+
+// How long a connection may take, how long the server may be quiet while it
+// pushes (then the push is asked for again), how often one that cannot push
+// is asked.
+const CONNECT: Duration = Duration::from_secs(15);
+const IDLE_FOR: Duration = Duration::from_secs(9 * 60);
+const POLL: Duration = Duration::from_secs(60);
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Security {
+    Ssl,
+    StartTls,
+    Plain,
+}
+
+impl Security {
+    fn parse(s: &str) -> Option<Security> {
+        match s {
+            "ssl" => Some(Security::Ssl),
+            "starttls" => Some(Security::StartTls),
+            "plain" => Some(Security::Plain),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Security::Ssl => "ssl",
+            Security::StartTls => "starttls",
+            Security::Plain => "plain",
+        }
+    }
+}
+
+// How to sign in, as Thunderbird's "Authentication method" has it: auto
+// (AUTHENTICATE PLAIN where offered, else LOGIN), or one of them always.
+// Both are Thunderbird's "Normal password"; the others it offers (NTLM,
+// Kerberos, OAuth2, an encrypted password) are not here.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Auth {
+    #[default]
+    Auto,
+    Plain,
+    Login,
+}
+
+impl Auth {
+    fn parse(s: &str) -> Auth {
+        match s {
+            "plain" => Auth::Plain,
+            "login" => Auth::Login,
+            _ => Auth::Auto,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Auth::Auto => "auto",
+            Auth::Plain => "plain",
+            Auth::Login => "login",
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Server {
+    pub host: String,
+    pub port: u16,
+    pub security: Security,
+    pub username: String,
+    pub auth: Auth,
+    // How it is reached (proxy.rs): the account's own way, else the Mail
+    // page's. Not kept with the server: the account keeps its own.
+    pub via: Via,
+}
+
+// A host name as one is written: letters, digits, dots, dashes.
+fn host_of(v: &Value) -> Option<String> {
+    let host = v.as_str()?.trim().to_ascii_lowercase();
+    (!host.is_empty() && host.len() <= 253 && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')).then_some(host)
+}
+
+fn port_of(v: &Value) -> Option<u16> {
+    v.as_u64().or_else(|| v.as_str()?.trim().parse().ok()).filter(|p| (1..=65535).contains(p)).map(|p| p as u16)
+}
+
+impl Server {
+    fn json(&self) -> Value {
+        json!({ "host": self.host, "port": self.port, "security": self.security.name(), "username": self.username, "auth": self.auth.name() })
+    }
+
+    // As the page sent it, checked: a host name, a port, a way, a user, how
+    // to sign in; reached as `via` says.
+    fn from_json(v: &Value, via: &Via) -> Option<Server> {
+        let host = host_of(&v["host"])?;
+        let port = port_of(&v["port"])?;
+        let username = v["username"].as_str()?.trim();
+        let is_user = !username.is_empty() && username.chars().count() <= 320 && !username.chars().any(char::is_control);
+        let security = Security::parse(v["security"].as_str().unwrap_or("")).unwrap_or(Security::Ssl);
+        let auth = Auth::parse(v["auth"].as_str().unwrap_or(""));
+        is_user.then(|| Server { host, port, security, username: username.into(), auth, via: via.clone() })
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Account {
+    pub id: String,
+    pub address: String,
+    // The name letters from it go out with (may be empty).
+    pub name: String,
+    pub server: Server,
+    // The outgoing server.
+    pub smtp: Option<Server>,
+    pub on: bool,
+    // Its own way to its servers; none, the Mail page's (both servers go as
+    // `via` in them says).
+    pub proxy: Option<Via>,
+}
+
+impl Account {
+    fn json(&self) -> Value {
+        let mut v = self.server.json();
+        v["id"] = json!(self.id);
+        v["address"] = json!(self.address);
+        v["name"] = json!(self.name);
+        v["smtp"] = self.smtp.as_ref().map_or(Value::Null, Server::json);
+        v["on"] = json!(self.on);
+        v["proxy"] = self.proxy.as_ref().map_or(Value::Null, Via::json);
+        v
+    }
+}
+
+// A name as one is written to go with an address: one line, not too long.
+fn name_of(v: &Value) -> String {
+    v.as_str().unwrap_or("").chars().filter(|c| !c.is_control()).take(100).collect::<String>().trim().to_string()
+}
+
+fn accounts(sh: &Shared) -> Vec<Account> {
+    let all = sh.setting("mail");
+    let page = proxy::setting(sh);
+    all.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| {
+            let own = Via::of(&a["proxy"]);
+            let via = own.clone().unwrap_or_else(|| page.clone());
+            Some(Account {
+                id: a["id"].as_str()?.into(),
+                address: a["address"].as_str()?.into(),
+                name: name_of(&a["name"]),
+                server: Server::from_json(a, &via)?,
+                smtp: Server::from_json(&a["smtp"], &via),
+                on: a["on"] != false,
+                proxy: own,
+            })
+        })
+        .collect()
+}
+
+// local@domain, the domain in lower case.
+fn split(address: &str) -> Option<(&str, String)> {
+    let (local, domain) = address.trim().rsplit_once('@')?;
+    let ok = !local.is_empty() && local.len() <= 64 && !local.chars().any(|c| c.is_whitespace() || c.is_control());
+    let domain = domain.to_ascii_lowercase();
+    let ok_domain = domain.contains('.') && domain.len() <= 253 && domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    (ok && ok_domain).then_some((local, domain))
+}
+
+
+// A try before an account is kept: signed in, the inbox opened read-only,
+// and the unread counted; or what went wrong, with how the server lets one
+// sign in (the page says more when that is a Windows domain's).
+fn test(server: &Server, password: &str) -> Result<usize, (Fail, Vec<&'static str>)> {
+    let mut s = imap::Session::open(server, CONNECT).map_err(|f| (f, Vec::new()))?;
+    let auths = discover::auths_of(s.caps());
+    let tried = (|| {
+        s.login(&server.username, password, server.auth)?;
+        s.inbox(false)?;
+        s.unseen()
+    })();
+    match tried {
+        Ok(unseen) => {
+            s.logout();
+            Ok(unseen.len())
+        }
+        Err(fail) => Err((fail, auths)),
+    }
+}
+
+// The same for the outgoing server: reached, and signed in where it asks
+// one to.
+fn test_smtp(server: &Server, password: &str) -> Result<(), (Fail, Vec<&'static str>)> {
+    let mut s = smtp::Smtp::open(server, CONNECT).map_err(|f| (f, Vec::new()))?;
+    let auths = discover::smtp_auths(&s.auths());
+    match s.login(&server.username, password, server.auth) {
+        Ok(()) => {
+            s.quit();
+            Ok(())
+        }
+        Err(fail) => Err((fail, auths)),
+    }
+}
+
+// An account's password, as kept.
+fn password_of(account: &Account) -> Result<String, Fail> {
+    secret::read(&account.id).ok_or_else(|| Fail::Login("no password kept".into()))
+}
+
+// The account with this id.
+fn account(sh: &Shared, id: &str) -> Option<Account> {
+    accounts(sh).into_iter().find(|a| a.id == id)
+}
+
+// --- Keeping an account's mail (sync.rs) ------------------------------------------------------------
+
+#[derive(Default)]
+struct Watch {
+    stop: AtomicBool,
+    // Asked to look again at once (a letter was sent: its Sent folder).
+    kick: AtomicBool,
+    // The connection's socket, shut down to stop at once.
+    socket: Mutex<Option<TcpStream>>,
+    // The proxy it went through (its address), if any.
+    via: Mutex<Option<String>>,
+    // connecting | ok | error, the unread count, what went wrong.
+    status: Mutex<Value>,
+}
+
+impl Watch {
+    fn stop(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(s) = self.socket.lock().unwrap().take() {
+            let _ = s.shutdown(Shutdown::Both);
+        }
+    }
+
+    fn stopped(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
+    }
+
+    // A rest that ends early when stopped, or kicked.
+    fn rest(&self, d: Duration) {
+        let until = Instant::now() + d;
+        while !self.stopped() && !self.kick.load(Ordering::SeqCst) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+
+    fn set(&self, status: Value) {
+        *self.status.lock().unwrap() = status;
+    }
+}
+
+#[derive(Default)]
+pub struct Runner {
+    watches: HashMap<String, (Account, Arc<Watch>)>,
+    // Talks with an agent about a letter (agent.rs).
+    talks: agent::Talks,
+    // The mail kept on this computer (store.rs).
+    stores: store::Stores,
+}
+
+// The mail kept changed (the page asks for its list again when it did).
+pub fn rev() -> u64 {
+    store::rev()
+}
+
+// An account's sync to look again at once.
+fn kick(sh: &Shared, id: &str) {
+    if let Some((_, w)) = sh.mail.lock().unwrap().watches.get(id) {
+        w.kick.store(true, Ordering::SeqCst);
+    }
+}
+
+// Refresh on the page: an account's sync (every one's: "*") looks at the
+// server now; the list follows as the store changes.
+#[tauri::command]
+pub fn mail_kick(app: AppHandle, id: String) {
+    let sh = shared(&app);
+    let ids: Vec<String> = sh.mail.lock().unwrap().watches.keys().filter(|k| id == "*" || **k == id).cloned().collect();
+    for id in ids {
+        kick(&sh, &id);
+    }
+}
+
+// Every account's sync at it now (how much is kept offline changed).
+pub fn kick_all(sh: &Shared) {
+    for (_, w) in sh.mail.lock().unwrap().watches.values() {
+        w.kick.store(true, Ordering::SeqCst);
+    }
+}
+
+// The letter being written on the Mail page, kept in the data folder: each
+// copy of the pet its own (the page's storage is every copy's on this
+// machine, a test copy's draft would show in the one in use). As the page
+// sent it, its files left out; none, and the file goes.
+fn draft_path(sh: &Shared) -> std::path::PathBuf {
+    sh.dir.join("mail-draft.json")
+}
+
+#[tauri::command]
+pub fn mail_draft(app: AppHandle) -> Value {
+    std::fs::read(draft_path(&shared(&app))).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)
+}
+
+#[tauri::command]
+pub fn mail_keep_draft(app: AppHandle, draft: Value) {
+    let path = draft_path(&shared(&app));
+    match serde_json::to_vec(&draft) {
+        Ok(bytes) if draft.is_object() && bytes.len() <= 4 << 20 => {
+            let _ = std::fs::write(path, bytes);
+        }
+        _ => {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+// How an account's sync is going (null when it is off).
+fn status_of(sh: &Shared, id: &str) -> Value {
+    sh.mail.lock().unwrap().watches.get(id).map_or(Value::Null, |(_, w)| w.status.lock().unwrap().clone())
+}
+
+fn widget_id(account: &str) -> String {
+    format!("inbox-{account}")
+}
+
+// Each account watched as it is set: started, stopped, started again when
+// its settings changed. True when what the island shows changed.
+pub fn sync(sh: &Arc<Shared>) -> bool {
+    let want: Vec<Account> = accounts(sh).into_iter().filter(|a| a.on).collect();
+    let mut gone = Vec::new();
+    {
+        let mut r = sh.mail.lock().unwrap();
+        // A watch goes on while its inbox is as it was (its name or
+        // outgoing server changed, it is the same inbox).
+        r.watches.retain(|id, (account, watch)| {
+            let keep = want.iter().any(|a| a.id == account.id && a.address == account.address && a.server == account.server);
+            if !keep {
+                watch.stop();
+                gone.push(id.clone());
+            }
+            keep
+        });
+        for account in want {
+            if r.watches.contains_key(&account.id) {
+                continue;
+            }
+            let watch = Arc::new(Watch::default());
+            watch.set(json!({ "state": "connecting" }));
+            let (sh, a, w) = (sh.clone(), account.clone(), watch.clone());
+            crate::spawn_named("mail", move || {
+                crate::power::thread_eco();
+                sync::run(&sh, &a, &w)
+            });
+            r.watches.insert(account.id.clone(), (account, watch));
+        }
+    }
+    let mut widgets = sh.widgets.lock().unwrap();
+    gone.iter().fold(false, |changed, id| widgets.remove(&widget_id(id)) || changed)
+}
+
+pub fn stop_all(sh: &Shared) {
+    for (_, (_, watch)) in sh.mail.lock().unwrap().watches.drain() {
+        watch.stop();
+    }
+}
+
+
+// The account's widget: the newest unread letter (private: who and what
+// about) and how many; "can't get mail" when it keeps failing. A new
+// letter opens the island. Its larger sizes: the newest unread letters
+// (who, what about, when sent: widgets.rs detail_of), newest first.
+fn show(sh: &Shared, account: &Account, unread: Option<usize>, letters: &[(String, String, Option<i64>)], is_new: bool) {
+    let zh = sh.lang() == "zh";
+    let label = match letters.first() {
+        Some((from, subject, _)) if !subject.is_empty() => format!("{}{}{}", if from.is_empty() { &account.address } else { from }, if zh { "：" } else { ": " }, subject),
+        Some((from, _, _)) if !from.is_empty() => from.clone(),
+        _ => account.address.clone(),
+    };
+    let rows: Vec<Value> = letters
+        .iter()
+        .map(|(from, subject, at)| {
+            let mut row = json!({ "from": if from.is_empty() { &account.address } else { from }, "subject": subject });
+            if let Some(at) = at.filter(|t| *t > 0) {
+                row["at"] = json!(at);
+            }
+            row
+        })
+        .collect();
+    let detail = crate::widgets::detail_of(Some(&json!({ "sizes": ["s", "m", "l"], "rows": rows })));
+    let (value, color) = match unread {
+        Some(0) => (json!({ "key": "mail.none" }), "#8e8e93"),
+        Some(n) => (json!({ "key": "mail.unread", "vars": { "n": n.to_string() } }), "#5e9bff"),
+        None => (json!({ "key": "mail.cannot" }), "#ff5c6c"),
+    };
+    let id = widget_id(&account.id);
+    if sh.widgets.lock().unwrap().put_owned(&id, "mail", color, json!(label.chars().take(60).collect::<String>()), value, detail, true, now_ms()) {
+        sh.redraw();
+    }
+    if is_new {
+        let words = i18n::t(sh.lang(), "mail.new").replace("{what}", &label);
+        sh.nudge_widget(&id, &words.chars().take(60).collect::<String>());
+    }
+}
+
+// Each account for the settings, with how its watch is going.
+pub fn view(sh: &Shared) -> Value {
+    let all = accounts(sh);
+    let r = sh.mail.lock().unwrap();
+    Value::Array(
+        all.iter()
+            .map(|a| {
+                let mut v = a.json();
+                v["status"] = r.watches.get(&a.id).map_or(Value::Null, |(_, w)| w.status.lock().unwrap().clone());
+                v
+            })
+            .collect(),
+    )
+}
+
+// --- From the settings ---------------------------------------------------------------------------
+
+// The accounts are read, changed and written back by one command at a time:
+// two saves at once (the sign-in between taking seconds) would each write
+// back the list as it was before the other.
+static EDITING: Mutex<()> = Mutex::new(());
+
+// An id no account has: the time, a count and the process, mixed.
+fn new_id(all: &[Account]) -> String {
+    use std::hash::{BuildHasher, Hasher};
+    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    loop {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(now_ms());
+        h.write_u64(COUNT.fetch_add(1, Ordering::SeqCst));
+        h.write_u32(std::process::id());
+        let id = format!("{:08x}", h.finish() & 0xffff_ffff);
+        if !all.iter().any(|a| a.id == id) {
+            return id;
+        }
+    }
+}
+
+fn keep_accounts(sh: &Arc<Shared>, all: &[Account]) {
+    sh.change(json!({ "mail": all.iter().map(Account::json).collect::<Vec<_>>() }));
+    if sync(sh) {
+        sh.redraw();
+    }
+}
+
+// The way an account being set up goes (its own in the form, or null: the
+// Mail page's); a way that is not one, said so.
+fn way_of(sh: &Shared, own: &Value) -> Result<Via, Value> {
+    proxy::chosen(sh, own).ok_or_else(|| json!({ "ok": false, "error": { "kind": "proxyFields", "text": "" } }))
+}
+
+#[tauri::command]
+pub async fn mail_discover(app: AppHandle, address: String, proxy: Option<Value>) -> Value {
+    let via = match way_of(&shared(&app), &proxy.unwrap_or(Value::Null)) {
+        Ok(via) => via,
+        Err(refused) => return refused,
+    };
+    tauri::async_runtime::spawn_blocking(move || discover::discover(&address, &via)).await.unwrap_or_else(|e| json!({ "ok": false, "error": e.to_string() }))
+}
+
+// "Re-test", as Thunderbird has it: the server tried without signing in,
+// the port and the way as given or (empty, "auto") found; the incoming
+// one, or ("smtp") the outgoing.
+#[tauri::command]
+pub async fn mail_probe(app: AppHandle, host: Value, port: Value, security: String, kind: Option<String>, proxy: Option<Value>) -> Value {
+    let Some(host) = host_of(&host) else { return json!({ "ok": false, "error": { "kind": "fields", "text": "" } }) };
+    let via = match way_of(&shared(&app), &proxy.unwrap_or(Value::Null)) {
+        Ok(via) => via,
+        Err(refused) => return refused,
+    };
+    let port = port_of(&port);
+    let security = Security::parse(&security);
+    let smtp = kind.as_deref() == Some("smtp");
+    tauri::async_runtime::spawn_blocking(move || discover::probe_server(&host, port, security, smtp, &via)).await.unwrap_or_else(|e| json!({ "ok": false, "error": { "kind": "other", "text": e.to_string() } }))
+}
+
+// An account added or changed: signed in once on each server to see that
+// it works (both at once), then kept, its password in the Credential
+// Manager. An empty password keeps the one kept before. What went wrong
+// with the outgoing server says so ("out").
+#[tauri::command]
+pub async fn mail_save(app: AppHandle, account: Value, password: String) -> Value {
+    let sh = shared(&app);
+    let address = account["address"].as_str().unwrap_or("").trim().to_string();
+    // Its own way to its servers, or (null) the Mail page's.
+    let own = match &account["proxy"] {
+        Value::Null => None,
+        v => match Via::of(v) {
+            Some(via) => Some(via),
+            None => return json!({ "ok": false, "error": { "kind": "proxyFields", "text": "" } }),
+        },
+    };
+    let via = own.clone().unwrap_or_else(|| proxy::setting(&sh));
+    let Some(server) = Server::from_json(&account, &via).filter(|_| split(&address).is_some()) else {
+        return json!({ "ok": false, "error": { "kind": "fields", "text": "" } });
+    };
+    // The outgoing server: none (no host), or one whole.
+    let out = &account["smtp"];
+    let smtp = Server::from_json(out, &via);
+    if smtp.is_none() && !out["host"].as_str().unwrap_or("").trim().is_empty() {
+        return json!({ "ok": false, "out": true, "error": { "kind": "fields", "text": "" } });
+    }
+    // One being changed: its id, and the password kept for it.
+    let known = account["id"].as_str().filter(|id| accounts(&sh).iter().any(|a| a.id == *id)).map(String::from);
+    let password = if password.is_empty() { known.as_deref().and_then(secret::read).unwrap_or_default() } else { password };
+    if password.is_empty() {
+        return json!({ "ok": false, "error": { "kind": "password", "text": "" } });
+    }
+    let (s, o, p) = (server.clone(), smtp.clone(), password.clone());
+    let tried = tauri::async_runtime::spawn_blocking(move || {
+        let sending = o.map(|o| {
+            let p = p.clone();
+            std::thread::spawn(move || test_smtp(&o, &p))
+        });
+        let receiving = test(&s, &p);
+        (receiving, sending.map(|t| t.join().unwrap_or_else(|_| Err((Fail::Other("the try stopped".into()), Vec::new())))))
+    })
+    .await;
+    let (receiving, sending) = match tried {
+        Ok(both) => both,
+        Err(e) => return json!({ "ok": false, "error": Fail::Other(e.to_string()).json() }),
+    };
+    let unread = match receiving {
+        Ok(n) => n,
+        Err((fail, auths)) => return json!({ "ok": false, "error": fail.json(), "auths": auths }),
+    };
+    if let Some(Err((fail, auths))) = sending {
+        return json!({ "ok": false, "out": true, "error": fail.json(), "auths": auths });
+    }
+    let name = name_of(&account["name"]);
+    // Kept against the accounts as they are now, others saved meanwhile included.
+    {
+        let _editing = EDITING.lock().unwrap();
+        let mut all = accounts(&sh);
+        let id = known.filter(|id| all.iter().any(|a| a.id == *id)).unwrap_or_else(|| new_id(&all));
+        if let Err(e) = secret::write(&id, &password) {
+            return json!({ "ok": false, "error": { "kind": "keep", "text": e } });
+        }
+        let kept = Account { id: id.clone(), address, name, server, smtp, on: true, proxy: own };
+        match all.iter_mut().find(|a| a.id == id) {
+            Some(a) => *a = kept,
+            None => all.push(kept),
+        }
+        keep_accounts(&sh, &all);
+    }
+    json!({ "ok": true, "unread": unread, "snapshot": settings::snapshot(&sh) })
+}
+
+#[tauri::command]
+pub async fn mail_remove(app: AppHandle, id: String) -> Value {
+    let sh = shared(&app);
+    {
+        let _editing = EDITING.lock().unwrap();
+        let all: Vec<Account> = accounts(&sh).into_iter().filter(|a| a.id != id).collect();
+        secret::delete(&id);
+        keep_accounts(&sh, &all);
+        store::forget(&sh, &id);
+    }
+    settings::snapshot(&sh)
+}
+
+#[tauri::command]
+pub async fn mail_switch(app: AppHandle, id: String, on: bool) -> Value {
+    let sh = shared(&app);
+    {
+        let _editing = EDITING.lock().unwrap();
+        let mut all = accounts(&sh);
+        if let Some(a) = all.iter_mut().find(|a| a.id == id) {
+            a.on = on;
+        }
+        keep_accounts(&sh, &all);
+    }
+    settings::snapshot(&sh)
+}
+
+// --- Passwords, in Windows' Credential Manager ----------------------------------------------------
+
+#[cfg(windows)]
+pub(crate) mod secret {
+    #[repr(C)]
+    pub struct Credential {
+        flags: u32,
+        kind: u32,
+        target: *const u16,
+        comment: *const u16,
+        last_written: [u32; 2],
+        blob_size: u32,
+        blob: *const u8,
+        persist: u32,
+        attribute_count: u32,
+        attributes: *const u8,
+        target_alias: *const u16,
+        user_name: *const u16,
+    }
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn CredWriteW(credential: *const Credential, flags: u32) -> i32;
+        fn CredReadW(target: *const u16, kind: u32, flags: u32, credential: *mut *mut Credential) -> i32;
+        fn CredDeleteW(target: *const u16, kind: u32, flags: u32) -> i32;
+        fn CredFree(buffer: *mut Credential);
+    }
+    const GENERIC: u32 = 1;
+    const PERSIST_LOCAL_MACHINE: u32 = 2;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain([0]).collect()
+    }
+
+    // A mail account's, by its id.
+    fn target(id: &str) -> String {
+        format!("Wakuwaku mail {id}")
+    }
+
+    pub fn write(id: &str, password: &str) -> Result<(), String> {
+        write_named(&target(id), password)
+    }
+
+    pub fn read(id: &str) -> Option<String> {
+        read_named(&target(id))
+    }
+
+    pub fn delete(id: &str) {
+        delete_named(&target(id))
+    }
+
+    // One by its whole name there (LibreHardwareMonitor's, lhm.rs).
+    pub fn write_named(name: &str, password: &str) -> Result<(), String> {
+        let (target, user) = (wide(name), wide("wakuwaku"));
+        let blob = password.as_bytes();
+        let credential = Credential {
+            flags: 0,
+            kind: GENERIC,
+            target: target.as_ptr(),
+            comment: std::ptr::null(),
+            last_written: [0, 0],
+            blob_size: blob.len() as u32,
+            blob: blob.as_ptr(),
+            persist: PERSIST_LOCAL_MACHINE,
+            attribute_count: 0,
+            attributes: std::ptr::null(),
+            target_alias: std::ptr::null(),
+            user_name: user.as_ptr(),
+        };
+        // SAFETY: every pointer is to a buffer alive for the call.
+        if unsafe { CredWriteW(&credential, 0) } != 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error().to_string())
+        }
+    }
+
+    pub fn read_named(name: &str) -> Option<String> {
+        let target = wide(name);
+        let mut found: *mut Credential = std::ptr::null_mut();
+        // SAFETY: the credential Windows gives is read while it is its, then freed.
+        unsafe {
+            if CredReadW(target.as_ptr(), GENERIC, 0, &mut found) == 0 || found.is_null() {
+                return None;
+            }
+            let bytes = std::slice::from_raw_parts((*found).blob, (*found).blob_size as usize).to_vec();
+            CredFree(found);
+            String::from_utf8(bytes).ok()
+        }
+    }
+
+    pub fn delete_named(name: &str) {
+        let target = wide(name);
+        // SAFETY: a name ending in 0.
+        unsafe { CredDeleteW(target.as_ptr(), GENERIC, 0) };
+    }
+
+    #[cfg(test)]
+    pub fn credential_size() -> usize {
+        std::mem::size_of::<Credential>()
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) mod secret {
+    pub fn write(_id: &str, _password: &str) -> Result<(), String> {
+        Err("not on this system".into())
+    }
+    pub fn read(_id: &str) -> Option<String> {
+        None
+    }
+    pub fn delete(_id: &str) {}
+    pub fn write_named(_name: &str, _password: &str) -> Result<(), String> {
+        Err("not on this system".into())
+    }
+    pub fn read_named(_name: &str) -> Option<String> {
+        None
+    }
+    pub fn delete_named(_name: &str) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_letter_says_who_and_what_about() {
+        let head = "From: =?UTF-8?B?546L5oC7?= <boss@example.com>\r\nSubject: =?GBK?B?1tzO5bXEt72wuA==?=\r\n\r\n";
+        let e = store::Entry::from_head(1, (false, false, false), 0, None, head.as_bytes());
+        assert_eq!((e.from.name.as_str(), e.from.address.as_str(), e.subject.as_str()), ("王总", "boss@example.com", "周五的方案"));
+    }
+
+    #[test]
+    fn two_accounts_at_once_get_ids_of_their_own() {
+        let server = Server { host: "h".into(), port: 993, security: Security::Ssl, username: "u".into(), auth: Auth::Auto, via: Via::Straight };
+        let mut all = Vec::new();
+        for _ in 0..2000 {
+            let id = new_id(&all);
+            assert!(id.len() == 8 && !all.iter().any(|a: &Account| a.id == id), "{id}");
+            all.push(Account { id, address: "a@b.c".into(), name: String::new(), server: server.clone(), smtp: None, on: true, proxy: None });
+        }
+    }
+
+    #[test]
+    fn what_the_page_sends_is_checked() {
+        let ok = json!({ "host": "IMAP.Example.com ", "port": "993", "security": "ssl", "username": "me@example.com" });
+        assert_eq!(Server::from_json(&ok, &Via::System).map(|s| (s.host, s.port)), Some(("imap.example.com".into(), 993)));
+        assert!(Server::from_json(&json!({ "host": "a b", "port": 993, "username": "x" }), &Via::System).is_none());
+        assert!(Server::from_json(&json!({ "host": "a.b", "port": 0, "username": "x" }), &Via::System).is_none());
+        assert_eq!(split("x@TU-Dresden.de").map(|(_, d)| d), Some("tu-dresden.de".into()));
+        assert!(split("no-at-sign").is_none());
+        // An account as kept: its name and outgoing server, or none.
+        let kept = json!({ "id": "a1", "address": "me@example.com", "name": " Me\n ", "host": "imap.example.com", "port": 993, "security": "ssl", "username": "me", "smtp": { "host": "smtp.example.com", "port": 587, "security": "starttls", "username": "me" } });
+        let a = Account { id: "a1".into(), address: "me@example.com".into(), name: name_of(&kept["name"]), server: Server::from_json(&kept, &Via::System).unwrap(), smtp: Server::from_json(&kept["smtp"], &Via::System), on: true, proxy: None };
+        assert_eq!((a.name.as_str(), a.smtp.as_ref().map(|s| s.port)), ("Me", Some(587)));
+        assert_eq!(a.json()["smtp"]["security"], "starttls");
+        // Its own way to its servers kept with it; none, the Mail page's.
+        assert_eq!(a.json()["proxy"], Value::Null);
+        assert_eq!(Account { proxy: Some(Via::Straight), ..a }.json()["proxy"], json!({ "mode": "none" }));
+        assert!(Server::from_json(&json!(null), &Via::System).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_password_is_kept_and_forgotten() {
+        assert_eq!(secret::credential_size(), if cfg!(target_pointer_width = "64") { 80 } else { 52 });
+        let id = format!("test-{}", std::process::id());
+        secret::write(&id, "授权码 x\"y").unwrap();
+        assert_eq!(secret::read(&id).as_deref(), Some("授权码 x\"y"));
+        secret::delete(&id);
+        assert_eq!(secret::read(&id), None);
+    }
+}

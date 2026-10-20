@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: http://asset.localhost asset:; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>DSH-FISH bar</title>
+    <link rel="stylesheet" href="bar.css" />
+  </head>
+  <body>
+    <!-- Her taskbar on another display (bars.rs, bar.js): Start, the windows there, the clock;
+         her capsule at its start while a prompt waits. -->
+    <div id="mica"></div>
+    <div id="bar">
+      <div id="her" hidden>
+        <span class="face"><span class="sheet"><span class="film"></span></span></span><span class="words"></span><span class="chev">&#xE76C;</span>
+      </div>
+      <div id="lead"></div>
+      <div id="apps"><button class="start" data-bar="start"></button><div id="wins"></div></div>
+      <div id="end">
+        <div class="clock" data-bar="notifications"></div>
+        <div class="desk" data-bar="desktop"></div>
+      </div>
+    </div>
+    <script src="../shared/i18n.js"></script>
+    <script src="sprite.js"></script>
+    <script src="mica.js"></script>
+    <script src="presses.js"></script>
+    <script src="aim.js"></script>
+    <script src="bar.js"></script>
+  </body>
+</html>
