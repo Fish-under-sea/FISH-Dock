@@ -1,0 +1,24 @@
+{
+  "format": "fish-dock/source-snapshot",
+  "version": "1.0.0",
+  "projects": [
+    {
+      "path": "Wakuwaku",
+      "repository": "https://github.com/zhoupengjie/Wakuwaku",
+      "baseCommit": "f1441cbbcf6801d18c27a1d241fd4e5475086e3b",
+      "selectedUpstreamThrough": "896f6ba29f98c1c310a5a7c137c3881af5078d66",
+      "license": "Wakuwaku/LICENSE"
+    },
+    {
+      "path": "dsh-our-free-model",
+      "repository": "https://github.com/Ebony-Vinyl/dsh-our-free-model",
+      "baseCommit": "e465d73733ae7000b21d86ccb2bdfb8c0616c2b9",
+      "selectedUsageFix": "f7a02f15bb3375b605f6c13bcf05a2de3d589afd",
+      "license": "dsh-our-free-model/LICENSE"
+    }
+  ],
+  "notes": [
+    "Snapshot includes FISH Dock integration modifications, not an unmodified upstream mirror.",
+    "Upstream deployment workflows and local state are excluded. Original licenses remain in each subtree."
+  ]
+}
