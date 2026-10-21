@@ -1,4 +1,5 @@
 import { createOfmBackup } from './backup.mjs'
+import { modelAvailability } from '../../src/model-test.js'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { buildStats } from '../../src/core/stats.js'
@@ -51,7 +52,7 @@ async function readBody(req, limit = MAX_BODY_BYTES) {
 
 function validateSettings(patch) {
   const visibility = validateModelVisibility(patch)
-  const booleans = new Set(['enabled', 'exposeRegionModels', 'streamRecovery', 'standaloneProbe', 'standaloneLanEnabled'])
+  const booleans = new Set(['enabled', 'exposeRegionModels', 'streamRecovery', 'standaloneProbe', 'standaloneLanEnabled', 'workbuddyValidationEnabled'])
   const numbers = { probeIntervalMinutes: [1, 1440], defaultMaxTokens: [512, 131072], standaloneLanPort: [0, 65535] }
   const result = {}
   for (const [key, value] of Object.entries(patch)) {
@@ -74,6 +75,7 @@ export function managementSettings(value) {
     exposeRegionModels: value.exposeRegionModels !== false,
     streamRecovery: value.streamRecovery !== false,
     standaloneProbe: value.standaloneProbe === true,
+    workbuddyValidationEnabled: value.workbuddyValidationEnabled === true,
     standaloneLanEnabled: value.standaloneLanEnabled === true,
     standaloneLanPort: value.standaloneLanPort ?? 0,
     probeIntervalMinutes: value.probeIntervalMinutes ?? 15,
@@ -82,7 +84,7 @@ export function managementSettings(value) {
 }
 
 /** 管理读写要求鉴权；登录恢复仅允许同源页面触发固定本机动作。 */
-export function createManagement({ stores, runtime, channels, eac, info, onSettingsChanged, loginTerminal = openLoginTerminal, embedAncestors = [] }) {
+export function createManagement({ stores, runtime, channels, eac, info, onSettingsChanged, workbuddyValidation, loginTerminal = openLoginTerminal, embedAncestors = [] }) {
   let bootstrap = { token: crypto.randomBytes(32).toString('base64url'), until: Date.now() + BOOTSTRAP_MS }
   const sessions = new Map()
   let cookieName
@@ -157,18 +159,20 @@ export function createManagement({ stores, runtime, channels, eac, info, onSetti
       channels: channels?.state(),
       eacAuth: eac?.cached(),
       settings: managementSettings(stores.settings.get()),
+      workbuddyValidation: workbuddyValidation?.state(),
       catalogSyncedAt: stores.settings.get().catalogSyncedAt ?? 0,
       probedAt: available.at ?? 0,
-      catalog: state.catalog.map(entry => ({
+      catalog: state.catalog.map(entry => {
+        const measured = modelAvailability(entry.id, available, Boolean(entry.channel))
+        return ({
         id: entry.id, name: entry.name, channel: entry.channel ?? 'anonymous',
         vision: entry.vision === true, reasoning: entry.reasoning === true || (entry.reasoning !== null && typeof entry.reasoning === 'object'),
         contextWindow: entry.contextWindow ?? entry.context_window, maxOutput: entry.maxOutput ?? entry.max_tokens,
         routable: routable.has(entry.id),
         hiddenByUser: isModelHidden(entry, state.settings),
         hiddenByGroup: isModelHidden(entry, { ...state.settings, hiddenModelIds: [] }),
-        availability: entry.channel ? 'listed' : available.results?.[entry.id]?.state ?? 'unknown',
-        ttftMs: available.results?.[entry.id]?.ttftMs ?? null,
-      })),
+        ...measured, availability: measured.availabilitySource === 'listing' ? 'listed' : measured.availability,
+      }) }),
     }
   }
 
@@ -270,7 +274,12 @@ export function createManagement({ stores, runtime, channels, eac, info, onSetti
       } finally { backupBusy = false }
     } else if (method === 'POST' && pathname === `${PREFIX}/settings`) {
       const patch = validateSettings(await readBody(req))
+      if (Object.hasOwn(patch, 'workbuddyValidationEnabled')) {
+        if (workbuddyValidation?.state().busy) throw fail(409, '验证执行中，请先等待或取消，再修改开关。')
+        if (patch.workbuddyValidationEnabled === true && stores.settings.get().workbuddyValidationEnabled !== true) patch.workbuddyValidationStopped = false
+      }
       persist(patch)
+      workbuddyValidation?.settingsChanged()
       await onSettingsChanged()
       json(res, 200, { settings: managementSettings(stores.settings.get()), lan: info().lan })
     } else if (method === 'GET' && pathname === `${PREFIX}/lan/key`) {
@@ -293,6 +302,19 @@ export function createManagement({ stores, runtime, channels, eac, info, onSetti
       if (until) sessions.set(id, until)
       bootstrap = null
       json(res, 200, { key: stores.settings.get().forwardKey })
+    } else if (method === 'POST' && pathname === `${PREFIX}/workbuddy/validate` && workbuddyValidation) {
+      const body = await readBody(req)
+      if (body.confirm !== true || Object.keys(body).some(key => !['model', 'confirm'].includes(key)) || typeof body.model !== 'string' || !/^workbuddy\/[A-Za-z0-9._/-]{1,250}$/.test(body.model)) throw fail(400, '请选择 WorkBuddy 模型并确认一次真实调用。')
+      if (stores.settings.get().enabled === false) throw fail(503, '推理服务已暂停。')
+      if (!workbuddyValidation.state().enabled) throw fail(409, '请先开启并保存透明验证模式。')
+      const controller = new AbortController()
+      const abort = () => controller.abort()
+      const timeout = setTimeout(abort, 300000)
+      res.once('close', abort)
+      try {
+        await runtime.complete({ model: body.model, signal: controller.signal, openAi: { messages: [{ role: 'user', content: 'Reply with exactly: OK' }], max_tokens: 256 } })
+        if (!controller.signal.aborted) json(res, 200, workbuddyValidation.state().last)
+      } finally { clearTimeout(timeout); res.removeListener('close', abort) }
     } else if (method === 'POST' && pathname === `${PREFIX}/models/refresh`) {
       const body = await readBody(req)
       if (body.probe !== undefined && typeof body.probe !== 'boolean') throw fail(400, 'probe 必须是布尔值')
@@ -305,18 +327,12 @@ export function createManagement({ stores, runtime, channels, eac, info, onSetti
       const controller = new AbortController()
       const abort = () => controller.abort()
       res.once('close', abort)
-      const deadline = setTimeout(abort, 60_000)
-      deadline.unref?.()
-      const started = Date.now()
       try {
-        const outcome = await runtime.complete({
-          model: body.model, signal: controller.signal,
-          openAi: { messages: [{ role: 'user', content: 'Reply with OK.' }], max_tokens: 64 },
-        })
-        if (outcome.error) throw fail(502, outcome.error)
-        json(res, 200, { ok: true, text: outcome.text.slice(0, 2000), latencyMs: Date.now() - started })
+        const result = await runtime.testModel(body.model, undefined, { signal: controller.signal })
+        if (!controller.signal.aborted) json(res, 200, result)
+      } catch (error) {
+        if (!controller.signal.aborted) throw fail(error.status === 404 ? 404 : error.code === 'TIMEOUT' ? 504 : 502, String(error.message ?? '模型测试失败'))
       } finally {
-        clearTimeout(deadline)
         res.removeListener('close', abort)
       }
     } else throw fail(404, '管理接口不存在')

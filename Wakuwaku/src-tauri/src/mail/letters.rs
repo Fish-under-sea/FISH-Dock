@@ -124,7 +124,7 @@ pub fn raw(sh: &Shared, account: &Account, folder: Folder, uid: u32) -> Result<O
         return Ok(kept);
     }
     let mailbox = imap::mailbox(&name).ok_or_else(|| Fail::Other("no such folder".into()))?;
-    let mut s = session(&account.server, &password_of(account)?, CONNECT)?;
+    let mut s = session(&account.server, &password_of(sh, account)?, CONNECT)?;
     s.folder(mailbox, false)?;
     let got = s.letter(uid)?;
     s.logout();
@@ -147,7 +147,7 @@ pub fn set_flag(sh: &Shared, account: &Account, folder: Folder, uid: u32, flag: 
     };
     let told = (|| -> Result<(), Fail> {
         let mailbox = imap::mailbox(&name).ok_or_else(|| Fail::Other("no such folder".into()))?;
-        let mut s = session(&account.server, &password_of(account)?, CONNECT)?;
+        let mut s = session(&account.server, &password_of(sh, account)?, CONNECT)?;
         s.folder(mailbox, true)?;
         s.set_flag(uid, flag, on)?;
         s.logout();

@@ -6,19 +6,19 @@
 </p>
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark.png"><img src="assets/readme/hero-zh-light.png" width="1440" alt="FISH Dock：AI 会话有处停靠，模型连接集中管理。原图标与用户指定透明挂件。"></picture></h1>
 <p>
-<a href="Wakuwaku/docs/release-1.0.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" width="23%" alt="源码版本 1.0.0"></picture></a>
+<a href="Wakuwaku/docs/release-1.0.1.md"><strong>v1.0.1</strong></a>
 <a href="#开始使用"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" width="23%" alt="任务栏与灵动岛两种停靠模式"></picture></a>
 <a href="#局域网访问"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-lan-zh-dark.png"><img src="assets/readme/stat-lan-zh-light.png" width="23%" alt="LAN 仅推理 API，默认关闭"></picture></a>
 <a href="#配置与凭据迁移"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-backup-zh-dark.png"><img src="assets/readme/stat-backup-zh-light.png" width="23%" alt="OFM ZIP 迁移备份含明文凭据"></picture></a>
 </p>
 <p>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/releases"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" width="168" alt="下载与 Releases，未发布时无安装包"></picture></a>
-<a href="Wakuwaku/docs/release-1.0.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" width="112" alt="更新记录"></picture></a>
+<a href="Wakuwaku/docs/release-1.0.1.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" width="112" alt="更新记录"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" width="160" alt="问题反馈"></picture></a>
 </p>
 </div>
 
-FISH Dock **1.0.0** · Windows x64 · MIT 代码许可。README 排版与素材来源见 [说明](assets/readme/SOURCES.md)。
+FISH Dock **1.0.1** · Windows x64 · MIT 代码许可。README 排版与素材来源见 [说明](assets/readme/SOURCES.md)。
 
 > **这是二次开发集成，不是上游官方发行版。** FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 的桌面与 AI 会话体验，集成 [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的模型渠道与 API 工作台。桌面核心与模型服务核心来自上游，原作者、版权和许可证见「来源与致谢」。
 
@@ -32,21 +32,21 @@ FISH Dock **1.0.0** · Windows x64 · MIT 代码许可。README 排版与素材�
 
 **「本地」不等于本机离线推理。** 工作台、代理和数据在本机运行；模型请求仍发送到所选渠道的服务商。资格、额度、计费和可用性由服务商决定。本项目不承诺永久免费、无限额度或绕过服务限制。
 
-## 1.0.0 更新
+## 1.0.1 更新
 
-- **可信局域网共享**：在 OFM 的「API 接入」中启用 LAN，与本机服务使用相同端口号、不同监听地址；默认关闭，设置持久保存。LAN Key 独立查看、复制和轮换。
-- **仅共享推理**：LAN 不提供管理页面、账号管理或备份接口。绑定失败会明确报错，不暗中换端口，不自动修改防火墙。
-- **OFM 迁移 ZIP**：在「服务设置」中确认后下载 OFM 配置、账号索引及关联凭据、现有 EAC 授权和固定迁移说明，不导出整个 DSH 凭据库。
-- **选择性跟进上游**：网络代理设置与测试、任务栏冲突回退、Codex 信任及后台 hooks、Gmail 授权提示，以及 `kilo-auto/free` 异常多模态 Token 计量修正。不引入广告，不恢复上游更新下载或崩溃上传。
-- **保持原有习惯**：保留用户提供的原图标、首次任务栏与后续模式恢复、粒子入场、独立安装和旧数据目录。
+- **统一身份目录**：OFM 账号、密钥、用量与邮件身份保存到 `%USERPROFILE%\.fish-dock`。旧资料复制并校验后保留原件；已有新目录不自动合并。
+- **完整身份 ZIP**：支持导入预览、二次确认、可编辑的系统「下载」默认位置及替换前恢复副本。邮件密码在本机由当前用户 DPAPI 加密，导入时重新加密；OFM 专项包不影响邮件。
+- **硬件监控安装**：提权前显示并聚焦普通桌面设置窗口，结束后恢复置顶策略，新增托盘入口和超时结果提示；不覆盖 Windows 安全桌面。
+- **选择性接入 OFM 2.5.7**：CodeArts 专用签名传输、严格测速与结果持久化。
+- **兼容保留**：原图标、桌面布局、启动动画和仅推理的 LAN 功能保持；不引入广告，不启用上游更新器与崩溃上传。
 
-详细来源、适用范围和测试边界见 [1.0.0 更新记录](Wakuwaku/docs/release-1.0.0.md)。桌面代理设置不是 OFM 渠道通用代理开关。
+准确来源与验证边界见 [1.0.1 更新记录](Wakuwaku/docs/release-1.0.1.md)。验证使用本机替身；未执行真实账号联调。
 
 ## 安装与更新
 
 适用平台：**Windows 10/11 x64**。系统任务栏集成主要面向 Windows 11；其他系统版本与第三方任务栏软件组合需要单独验证。
 
-1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases) 下载 `FISH-Dock-Setup-1.0.0.exe`，核对随包提供的 SHA-256。未发布 Release 时不会凭空出现下载文件。
+1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases) 下载 `FISH-Dock-Setup-1.0.1.exe`，核对随包提供的 SHA-256。未发布 Release 时不会凭空出现下载文件。
 2. 从托盘完全退出旧版，再运行安装器并选择目录。新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock`；已有安装沿用登记目录覆盖升级，不自动搬迁。
 3. 通过桌面或开始菜单启动 **FISH Dock**。完整 Node.js、固定版 WebView2、模型服务和许可随包安装，无需另装运行时。
 4. 首次启动需要确认运行时许可并校验资源；后续使用安装目录中的文件，不重复解压整套依赖。
@@ -78,11 +78,11 @@ Agent、邮件和第三方插件仍需要各自客户端、账号和权限；安
 
 ### 配置与凭据迁移
 
-在 OFM「服务设置 → OFM 迁移备份」确认后导出 ZIP。**ZIP 未加密，属于密码文件**，可能含账号 Token、本机 API Key、LAN Key 和 EAC 授权。不要提交到 GitHub、工单、群聊或公共网盘。
+在 OFM「服务设置 → OFM 迁移备份」确认后，可下载 **OFM 专项 ZIP**。它包含 OFM 配置、账号索引及关联凭据、现有 EAC 授权，不含邮件身份或调用统计。ZIP 未加密，可能包含账号 Token、本机 API Key 和 LAN Key，应像密码文件一样保管。
 
-备份仅含 OFM 的服务配置、账号状态、关联凭据、已有 EAC 授权及完整性清单；不含 DSH 凭据库、邮件、聊天记录、桌面布局、浏览器资料、日志或调用统计。导出与管理仅在本机提供。
+完整迁移请从 FISH Dock「通用 → 身份与备份」导出 **完整身份 ZIP**。它包含 OFM 用量与 Token 账本、邮件账号和密码；密码仅在本机静态保存时使用当前 Windows 用户 DPAPI 加密，ZIP 内为明文。导出前会显示系统「下载」目录，路径可以编辑，保存时还可另选位置。不要上传任何备份 ZIP。
 
-迁移时先完全退出两端程序，备份目标 OFM 目录，再按 ZIP 中固定的 `README.txt` 恢复相对路径。此操作是替换而非合并，没有自动导入功能。账号设备绑定、授权过期和防火墙不会随文件迁移；目标网络不可信时，启动前先关闭备份设置中的 LAN 开关。详见 [固定迁移说明](dsh-our-free-model/packages/standalone/backup-readme.txt)。
+导入前先退出独立 OFM；保持 FISH Dock 打开，在「身份与备份」选择 ZIP 并检查预览。程序会暂停自己的模型服务和邮件同步。完整身份包会替换白名单中的 OFM 与邮件文件，并保留替换前副本；旧版 OFM 专项包只替换 OFM 文件，邮件保持不变。导入需要再次确认；启动失败时程序会尝试回滚。旧 `%USERPROFILE%\.dsh-fish` 会迁移到 `%USERPROFILE%\.fish-dock`，原目录保留，不自动合并；两者同时存在时以新目录为准。详见 ZIP 内固定的 `README.md`。
 
 ## 数据与卸载
 
@@ -92,7 +92,7 @@ Agent、邮件和第三方插件仍需要各自客户端、账号和权限；安
 | 设置、宠物、布局与日志 | `%LOCALAPPDATA%\DSH-FISH\data` |
 | WebView2 用户数据 | `%LOCALAPPDATA%\DSH-FISH\webview` |
 | 许可确认及资源校验状态 | `%LOCALAPPDATA%\DSH-FISH\state` |
-| OFM 账号、密钥与用量 | `%USERPROFILE%\.dsh-fish` |
+| OFM 账号、密钥、用量与邮件身份 | `%USERPROFILE%\.fish-dock` |
 
 内部程序名 `DSH-FISH.exe`、应用标识、卸载登记和旧数据路径保留兼容，不代表显示名称未更新。卸载只移除自身安装文件与登记，保留用户数据；只清理确认属于本安装的自启动任务。手动删除数据前应先备份。
 
@@ -100,7 +100,7 @@ Agent、邮件和第三方插件仍需要各自客户端、账号和权限；安
 
 ### Gemini OAuth 客户端配置
 
-公开源码已移除上游内嵌的 Google OAuth 客户端 ID 和 Secret。使用 Gemini OAuth 前，请自行注册并配置 `CMDC_PAK_GOOGLE_CLIENT_ID` 与 `CMDC_PAK_GOOGLE_CLIENT_SECRET`，然后在相同环境中启动程序；不配置时无法完成该渠道的 OAuth 授权。不要把真实值写入源码、提交记录或工单。此变更仅针对公开源码，本次未重新构建或替换已交付安装包。
+公开源码已移除上游内嵌的 Google OAuth 客户端 ID 和 Secret。使用 Gemini OAuth 前，请自行注册并配置 `CMDC_PAK_GOOGLE_CLIENT_ID` 与 `CMDC_PAK_GOOGLE_CLIENT_SECRET`，然后在相同环境中启动程序；不配置时无法完成该渠道的 OAuth 授权。不要把真实值写入源码、提交记录或工单。1.0.1 源码和本次重建的安装包均沿用这项约束；不包含真实 OAuth 客户端秘密。
 
 桌面使用 **Rust + Tauri 2 + HTML/CSS/JavaScript**，模型管理使用 **Node.js + React**，安装器使用 **NSIS 3**。需要 Windows x64、MSVC/Rust、Node.js、NSIS，以及锁定的官方运行时下载件。离线构建要求依赖已缓存，不能忽略锁文件。
 
@@ -113,7 +113,7 @@ FISH本地模型工作台/
 先在 `dsh-our-free-model/packages/standalone` 执行 `npm ci`，再在模型服务根目录执行 `node scripts/build-standalone-ui.mjs`。然后在桌面源码目录执行：
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <运行时缓存> --source ../dsh-our-free-model --out <新的资源目录> --version 1.0.0
+node scripts/prepare-installer.mjs --downloads <运行时缓存> --source ../dsh-our-free-model --out <新的资源目录> --version 1.0.1
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <资源目录> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>

@@ -164,6 +164,18 @@ function page({ open = true, box = { left: 200, top: 100, width: 1120, height: 7
 // let it settle.
 const settled = () => new Promise(resolve => setImmediate(resolve))
 
+test('身份文件变更后重新取得管理会话，不复用旧 iframe', async () => {
+  const p = page()
+  p.enter()
+  await settled()
+  const old = p.frame()
+  p.Models.invalidate?.()
+  p.enter()
+  await settled()
+  assert.notEqual(p.frame(), old)
+  assert.equal(p.frames().length, 1)
+})
+
 // --- The layer, as the Rust side is told where to take the mouse ----------------
 
 test('shown, the console layer is a solid rect over its own pixels: the window takes the mouse there', async () => {

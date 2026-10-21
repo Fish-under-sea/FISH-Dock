@@ -185,6 +185,9 @@ export const SETTINGS_INITIAL = {
   defaultMaxTokens: 32768,
   /** 所有模型默认允许一次纯推理检查点续写，false 可关闭。 */
   streamRecovery: true,
+  workbuddyValidationEnabled: false,
+  workbuddyValidationStopped: false,
+  workbuddyValidationLast: null,
   /** Token savers. Tool-output compaction is on by default — it is invisible to
    *  the model's reasoning (the compacted text is what the model reads) and the
    *  result is auditable in the transcript. Prompt-level shaping changes the

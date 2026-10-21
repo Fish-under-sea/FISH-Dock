@@ -34,6 +34,7 @@ pub fn t(lang: &str, key: &str) -> String {
         "menu.letOut" => if zh { "放她出来" } else { "Let her out" },
         "menu.callBack" => if zh { "叫她回家" } else { "Call her back home" },
         "menu.settings" => if zh { "设置…" } else { "Settings…" },
+        "menu.hardwareSettings" => if zh { "硬件监控设置…" } else { "Hardware monitoring settings…" },
         "menu.winSettings" => if zh { "Windows 设置" } else { "Windows Settings" },
         "menu.controlPanel" => if zh { "控制面板" } else { "Control Panel" },
         "menu.taskManager" => if zh { "任务管理器" } else { "Task Manager" },

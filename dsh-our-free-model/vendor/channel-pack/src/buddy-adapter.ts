@@ -1795,12 +1795,18 @@ export class BuddyAdapter extends LlmAdapter {
       headers.set('X-Conversation-Request-ID', crypto.randomUUID())
     }
     try {
-      return await this.fetchImpl(`${this.product.endpoint}/v2/chat/completions`, {
+      const response = await this.fetchImpl(`${this.product.endpoint}/v2/chat/completions`, {
         method: 'POST',
         headers,
         body,
         signal: options.signal,
       })
+      // 不根据用户提示词猜测身份。仅对本次响应停止，避免风控拒绝后跨账号重复提交。
+      if (this.product.id === 'workbuddy' && response.status >= 400 && response.status < 500) {
+        await response.body?.cancel().catch(() => {})
+        throw Object.assign(new LlmError(`WorkBuddy 拒绝或限制了本次请求（HTTP ${response.status}）。已停止自动续期、重试和换号；请先在服务提供方确认账号状态。`, 'WORKBUDDY_REJECTED'), {status:response.status})
+      }
+      return response
     } catch (error) {
       if (options.signal?.aborted) throw error
       if (isTransportError(error)) {

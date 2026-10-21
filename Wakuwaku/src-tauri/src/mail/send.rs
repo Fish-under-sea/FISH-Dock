@@ -8,7 +8,7 @@
 // gets the outgoing server the lookup finds, kept once a letter went
 // through it. Only the page sends, when Send is pressed; an agent never
 // does.
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 
 use base64::Engine;
 use io_imap::types::flag::Flag;
@@ -211,12 +211,13 @@ fn keeps_sent_itself(host: &str) -> bool {
 }
 
 // The outgoing server found for an account that had none, kept with it.
-fn keep_outgoing(sh: &Arc<Shared>, id: &str, server: Server) {
+fn keep_outgoing(sh: &Arc<Shared>, id: &str, server: Server, generation: u64) {
     let _editing = EDITING.lock().unwrap();
+    if sh.identity_busy.load(Ordering::Acquire) || sh.identity_generation.load(Ordering::Acquire) != generation { return; }
     let mut all = accounts(sh);
     if let Some(a) = all.iter_mut().find(|a| a.id == id && a.smtp.is_none()) {
         a.smtp = Some(server);
-        keep_accounts(sh, &all);
+        if keep_accounts(sh, &all, None).is_err() { sh.log("mail: outgoing server was not saved to identity storage"); }
     }
 }
 
@@ -255,7 +256,8 @@ fn keep_copy(sh: &Shared, account: &Account, mailbox: &str, uid: u32, copy: &[u8
 }
 
 fn send(sh: &Arc<Shared>, mut d: Draft) -> Value {
-    let password = match password_of(&d.account) {
+    let generation = sh.identity_generation.load(Ordering::Acquire);
+    let password = match password_of(sh, &d.account) {
         Ok(p) => p,
         Err(fail) => return json!({ "ok": false, "error": fail.json() }),
     };
@@ -300,7 +302,7 @@ fn send(sh: &Arc<Shared>, mut d: Draft) -> Value {
     }
     sh.log(&format!("mail {}: sent to {} ({} files)", d.account.id, to.len(), d.files.len()));
     if found {
-        keep_outgoing(sh, &d.account.id, server);
+        keep_outgoing(sh, &d.account.id, server, generation);
     }
     // The letter answered, marked so (here and on its server).
     if let Some((a, folder, uid)) = d.answered.take() {

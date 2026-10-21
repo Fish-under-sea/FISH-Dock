@@ -1077,6 +1077,33 @@ pub enum Asked {
 
 static ASKED_N: AtomicU32 = AtomicU32::new(0);
 
+fn with_visible_owner(prepare: impl FnOnce() -> Result<isize,String>, run: impl FnOnce(isize)->Asked, restore: impl FnOnce()) -> Asked {
+    let result=match prepare(){Ok(owner) if owner!=0=>run(owner),Ok(_)=>Asked::Failed("设置窗口尚未就绪，请从托盘打开硬件监控设置后重试".into()),Err(error)=>Asked::Failed(error)};
+    restore();
+    result
+}
+
+fn visible_owner(sh:&Shared)->Result<isize,String>{
+    let (send,receive)=std::sync::mpsc::sync_channel(1);
+    let state=crate::shared(&sh.app);
+    sh.app.run_on_main_thread(move||{
+        use tauri::Manager;
+        crate::island::open_settings(&state,Some("widgets:monitor"));
+        let result=(||{
+            let window=state.app.get_webview_window("island").ok_or("设置窗口尚未就绪")?;
+            window.show().map_err(|_|"设置窗口未能显示")?;
+            window.set_always_on_top(true).map_err(|_|"设置窗口未能置顶")?;
+            window.set_focus().map_err(|_|"设置窗口未能取得焦点")?;
+            let handle=owner(&state);
+            if handle==0{return Err("设置窗口尚未就绪".to_string())}
+            crate::tasks::raise_top(handle);
+            Ok(handle)
+        })();
+        let _=send.send(result);
+    }).map_err(|_|"无法唤起设置窗口")?;
+    receive.recv_timeout(Duration::from_secs(3)).map_err(|_|"设置窗口响应超时，请从托盘打开后重试")?
+}
+
 // `file` run as administrator (Windows asks the person), waited for up to
 // `wait_ms` if given; for a test, written down and its answer waited for
 // (WAKUWAKU_TEST_ELEVATE).
@@ -1089,7 +1116,15 @@ fn elevate(sh: &Shared, file: &Path, params: &str, dir: &Path, wait_ms: Option<u
         sh.log(&format!("lhm: the test answered for Windows: {asked:?}"));
         return asked;
     }
-    imp::elevate(owner(sh), file, params, dir, wait_ms)
+    with_visible_owner(
+        || visible_owner(sh),
+        |handle| imp::elevate(handle, file, params, dir, wait_ms),
+        || {
+            let state=crate::shared(&sh.app);
+            let app=sh.app.clone();
+            let _=app.run_on_main_thread(move||crate::island::keep_on_top(&state));
+        },
+    )
 }
 
 // For a test machine where no one answers Windows' question: what would be
@@ -1892,7 +1927,11 @@ mod imp {
                 }
                 CloseHandle(info.process);
             }
-            Asked::Ran(code)
+            if wait_ms.is_some() && code.is_none() {
+                Asked::Failed("管理员步骤在等待期限内未完成；请检查 Windows 提示及硬件监控窗口，然后从托盘的硬件监控设置重试".into())
+            } else {
+                Asked::Ran(code)
+            }
         }
     }
 }
@@ -1941,6 +1980,21 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admin_prompt_has_a_visible_owner_and_restores_after_decline() {
+        let steps=std::cell::RefCell::new(Vec::new());
+        let result=with_visible_owner(||{steps.borrow_mut().push("visible");Ok(77)},|owner|{assert_eq!(owner,77);steps.borrow_mut().push("ask");Asked::Declined},||steps.borrow_mut().push("restore"));
+        assert_eq!(result,Asked::Declined);
+        assert_eq!(*steps.borrow(),vec!["visible","ask","restore"]);
+    }
+    #[test]
+    fn missing_owner_prevents_uac_and_restores_visibility() {
+        let ran=std::cell::Cell::new(false);let restored=std::cell::Cell::new(false);
+        let result=with_visible_owner(||Err("设置窗口未能显示".into()),|_|{ran.set(true);Asked::Ran(Some(0))},||restored.set(true));
+        assert_eq!(result,Asked::Failed("设置窗口未能显示".into()));
+        assert!(!ran.get());assert!(restored.get());
+    }
 
     // LHM 0.9.6's release as GitHub's API gives it (2026-02-14; digests as
     // there, and as winget's manifest has the first), and 0.9.4's (no digest).

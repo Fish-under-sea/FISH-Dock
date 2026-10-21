@@ -62,8 +62,8 @@ test('用户原始 ICO 与 PNG 保持不变，托盘直接复用 ICO 内的原�
   assert.equal(png.readUInt32BE(20), 256)
 })
 
-test('1.0.0 正式版与双语关于页完整标明集成来源', () => {
-  assert.equal(config.version, '1.0.0')
+test('1.0.1 正式版与双语关于页完整标明集成来源', () => {
+  assert.equal(config.version, '1.0.1')
   for (const lang of ['zh', 'en']) {
     assert.match(t(lang, 'home.intro'), /FISH Dock/)
     assert.match(t(lang, 'home.upstream'), /Wakuwaku/)

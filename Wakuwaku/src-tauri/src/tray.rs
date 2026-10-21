@@ -67,6 +67,7 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
     if is_tray {
         let label = if sh.is_visible() { t("menu.hide") } else { t("menu.show") };
         menu.append(&MenuItem::with_id(app, "toggle", label, !flag("dnd"), None::<&str>)?)?;
+        menu.append(&MenuItem::with_id(app, "hardwareSettings", t("menu.hardwareSettings"), true, None::<&str>)?)?;
     }
     if home != "taskbar" {
         menu.append(&MenuItem::with_id(app, "addWidgets", t("menu.addWidgets"), isle_up, None::<&str>)?)?;
@@ -158,6 +159,7 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
         "out" => crate::set_out(sh, !sh.flag("out")),
         "corner" => crate::come_home(sh),
         "settings" => crate::island::open_settings(sh, None),
+        "hardwareSettings" => crate::island::open_settings(sh, Some("widgets:monitor")),
         // The taskbar's parts dragged about, on the strip itself (island.js).
         "editTaskbar" => {
             let _ = sh.app.emit_to("island", "taskbar:edit", ());

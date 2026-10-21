@@ -1,6 +1,6 @@
 {
   "format": "fish-dock/source-snapshot",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "projects": [
     {
       "path": "Wakuwaku",
@@ -14,11 +14,19 @@
       "repository": "https://github.com/Ebony-Vinyl/dsh-our-free-model",
       "baseCommit": "e465d73733ae7000b21d86ccb2bdfb8c0616c2b9",
       "selectedUsageFix": "f7a02f15bb3375b605f6c13bcf05a2de3d589afd",
-      "license": "dsh-our-free-model/LICENSE"
+      "license": "dsh-our-free-model/LICENSE",
+      "selectedCompatibilityTag": "v2.5.7",
+      "selectedCompatibilityCommit": "d857f8ecb6236608dd97f8f2aa81beacc4994a8d",
+      "selectedFunctionalMerge": "761babf6508e2c87ce6a4c86e9a5f98708d785c2",
+      "selectedFunctionalChanges": [
+        "Isolated signed CodeArts transport and scoped cancellation",
+        "Strict model tests with durable manual results and probe race ordering"
+      ]
     }
   ],
   "notes": [
     "Snapshot includes FISH Dock integration modifications, not an unmodified upstream mirror.",
-    "Upstream deployment workflows and local state are excluded. Original licenses remain in each subtree."
+    "Upstream deployment workflows and local state are excluded. Original licenses remain in each subtree.",
+    "OFM remains a selective integration on the recorded base, not a wholesale v2.5.7 merge; ads and upstream updater/crash endpoints are excluded."
   ]
 }

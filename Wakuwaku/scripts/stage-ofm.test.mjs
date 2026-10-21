@@ -8,7 +8,7 @@ import test from 'node:test'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const ofm = path.resolve(root, '../dsh-our-free-model')
-const required = ['packages/standalone/backup.mjs', 'packages/standalone/backup-readme.txt', 'packages/standalone/vendor/fflate/fflate.mjs', 'packages/standalone/vendor/fflate/LICENSE']
+const required = ['packages/standalone/backup.mjs', 'packages/standalone/backup-readme.md', 'packages/standalone/vendor/fflate/fflate.mjs', 'packages/standalone/vendor/fflate/LICENSE']
 
 test('两套桌面打包入口都包含 ZIP 备份及其许可，打包后的服务可以导入', async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'fish-stage-regression-'))

@@ -1026,7 +1026,7 @@ export function apply(ctx, config) {
       if (stopped) return
       pack.apply(scoped, {
         disableOpencode: true,
-        outlet: { active: egressActive, fetch: egressFetch },
+        outlet: { active: egressActive, fetch: egressFetch, fetchSigned: egressFetch },
       })
       channelPack = { state: 'ready', error: '' }
       logger.info?.('our-free-model: free-channel pack mounted (CodeArts, CodeBuddy, and 11 more)')

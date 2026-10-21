@@ -233,15 +233,9 @@ fn service_directory() -> Result<PathBuf, OflmFailure> {
 /// Her own data directory, apart from Our Free Model's desktop app: `%USERPROFILE%\.dsh-fish`
 /// (`~/.dsh-fish`), so both can run at once with their own accounts and locks.
 pub(crate) fn data_directory() -> Result<PathBuf, OflmFailure> {
-    if let Some(configured) = std::env::var_os("DSH_FISH_DATA") {
-        if !configured.is_empty() {
-            return Ok(PathBuf::from(configured));
-        }
-    }
-    let home = std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .ok_or_else(|| OflmFailure::new("DATA_DIRECTORY_MISSING", "找不到用户目录，放不了本地模型的数据"))?;
-    Ok(PathBuf::from(home).join(".dsh-fish"))
+    crate::identity::from_environment()
+        .map(|location| location.root)
+        .map_err(|error| OflmFailure::new("DATA_DIRECTORY_INVALID", "本机身份目录配置无效").detail(error))
 }
 
 /// The address in a handshake, checked as the desktop app checks it: plain http,
@@ -458,7 +452,18 @@ pub fn shutdown() {
 /// The console's address: the service started the first time, and reused after.
 #[tauri::command]
 pub fn oflm_ensure(app: tauri::AppHandle, origin: String) -> Result<OflmReady, OflmFailure> {
+    if crate::shared(&app).identity_busy.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(OflmFailure::new("IDENTITY_BUSY", "正在处理身份文件，请稍后重试"));
+    }
+    resume_identity(app, origin)
+}
+
+pub(crate) fn resume_identity(app: tauri::AppHandle, origin: String) -> Result<OflmReady, OflmFailure> {
     let ancestors = embed_ancestors(&origin)?;
+    let sh = crate::shared(&app);
+    if let Some(error) = sh.identity_error.lock().unwrap().clone() {
+        return Err(OflmFailure::new("IDENTITY_NOT_READY", "身份迁移尚未完成，请打开身份设置").detail(error));
+    }
     let mut held = held();
     // Already up (and the address still good): the frame is left as it is.
     if let Some(url) = held.url.clone() {
@@ -474,11 +479,10 @@ pub fn oflm_ensure(app: tauri::AppHandle, origin: String) -> Result<OflmReady, O
     let version = check_node(&node)?;
     let directory = service_directory()?;
     let host = directory.join("packages/desktop/service-host.mjs");
-    let data_dir = data_directory()?;
-    std::fs::create_dir_all(&data_dir).map_err(|error| {
-        OflmFailure::new("DATA_DIRECTORY_UNWRITABLE", "建不了本地模型的数据目录")
-            .detail(format!("{}：{error}", data_dir.display()))
-    })?;
+    let data_dir = sh.identity_dir.clone();
+    if !data_dir.is_dir() {
+        return Err(OflmFailure::new("IDENTITY_NOT_READY", "身份目录尚未准备完成"));
+    }
     let started = Instant::now();
     let (child, url, drain) = launch(&ancestors, &data_dir, &host, &node)?;
     crate::shared(&app).log(&format!(

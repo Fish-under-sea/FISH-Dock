@@ -262,8 +262,10 @@ fn test_smtp(server: &Server, password: &str) -> Result<(), (Fail, Vec<&'static 
 }
 
 // An account's password, as kept.
-fn password_of(account: &Account) -> Result<String, Fail> {
-    secret::read(&account.id).ok_or_else(|| Fail::Login("no password kept".into()))
+fn password_of(sh: &Shared, account: &Account) -> Result<String, Fail> {
+    if sh.identity_busy.load(Ordering::SeqCst) || sh.identity_error.lock().unwrap().is_some() { return Err(Fail::Other("身份操作尚未完成，请稍后重试".into())); }
+    crate::mail_secrets::read(&sh.identity_dir, &account.id).map_err(Fail::Other)?
+        .ok_or_else(|| Fail::Login("请重新填写该账号的授权码；旧凭据未被删除".into()))
 }
 
 // The account with this id.
@@ -388,7 +390,7 @@ fn widget_id(account: &str) -> String {
 // Each account watched as it is set: started, stopped, started again when
 // its settings changed. True when what the island shows changed.
 pub fn sync(sh: &Arc<Shared>) -> bool {
-    let want: Vec<Account> = accounts(sh).into_iter().filter(|a| a.on).collect();
+    let want: Vec<Account> = if sh.identity_busy.load(Ordering::SeqCst) || sh.identity_error.lock().unwrap().is_some() { Vec::new() } else { accounts(sh).into_iter().filter(|a| a.on).collect() };
     let mut gone = Vec::new();
     {
         let mut r = sh.mail.lock().unwrap();
@@ -467,12 +469,16 @@ fn show(sh: &Shared, account: &Account, unread: Option<usize>, letters: &[(Strin
 // Each account for the settings, with how its watch is going.
 pub fn view(sh: &Shared) -> Value {
     let all = accounts(sh);
+    let missing = sh.mail_missing.lock().unwrap().clone();
     let r = sh.mail.lock().unwrap();
     Value::Array(
         all.iter()
             .map(|a| {
                 let mut v = a.json();
-                v["status"] = r.watches.get(&a.id).map_or(Value::Null, |(_, w)| w.status.lock().unwrap().clone());
+                v["status"] = if missing.contains(&a.id) {
+                    json!({"state":"error","error":{"kind":"login","text":"需要重新填写授权码；旧数据已保留"}})
+                } else { r.watches.get(&a.id).map_or(Value::Null, |(_, w)| w.status.lock().unwrap().clone()) };
+                v["needsAuthorization"] = json!(missing.contains(&a.id));
                 v
             })
             .collect(),
@@ -484,7 +490,7 @@ pub fn view(sh: &Shared) -> Value {
 // The accounts are read, changed and written back by one command at a time:
 // two saves at once (the sign-in between taking seconds) would each write
 // back the list as it was before the other.
-static EDITING: Mutex<()> = Mutex::new(());
+pub(crate) static EDITING: Mutex<()> = Mutex::new(());
 
 // An id no account has: the time, a count and the process, mixed.
 fn new_id(all: &[Account]) -> String {
@@ -502,11 +508,21 @@ fn new_id(all: &[Account]) -> String {
     }
 }
 
-fn keep_accounts(sh: &Arc<Shared>, all: &[Account]) {
-    sh.change(json!({ "mail": all.iter().map(Account::json).collect::<Vec<_>>() }));
-    if sync(sh) {
-        sh.redraw();
+pub fn accept_snapshot(sh: &Arc<Shared>, snapshot: crate::mail_identity::Snapshot) {
+    let mut accounts = snapshot.accounts;
+    for account in &mut accounts {
+        if account["id"].as_str().is_some_and(|id| snapshot.missing.iter().any(|m| m == id)) { account["on"] = json!(false); }
     }
+    sh.settings.lock().unwrap().insert("mail".into(), json!(accounts));
+    *sh.mail_missing.lock().unwrap() = snapshot.missing;
+}
+
+fn keep_accounts(sh: &Arc<Shared>, all: &[Account], password: Option<(&str, &str)>) -> Result<(), String> {
+    if sh.identity_busy.load(Ordering::SeqCst) || sh.identity_error.lock().unwrap().is_some() { return Err("身份操作尚未完成".into()); }
+    let snapshot = crate::mail_identity::replace(&sh.identity_dir, &all.iter().map(Account::json).collect::<Vec<_>>(), password)?;
+    accept_snapshot(sh, snapshot);
+    if sync(sh) { sh.redraw(); }
+    Ok(())
 }
 
 // The way an account being set up goes (its own in the form, or null: the
@@ -547,6 +563,10 @@ pub async fn mail_probe(app: AppHandle, host: Value, port: Value, security: Stri
 #[tauri::command]
 pub async fn mail_save(app: AppHandle, account: Value, password: String) -> Value {
     let sh = shared(&app);
+    let identity_generation = sh.identity_generation.load(Ordering::SeqCst);
+    if sh.identity_busy.load(Ordering::SeqCst) || sh.identity_error.lock().unwrap().is_some() {
+        return json!({"ok":false,"error":{"kind":"keep","text":"身份操作尚未完成，请稍后重试"}});
+    }
     let address = account["address"].as_str().unwrap_or("").trim().to_string();
     // Its own way to its servers, or (null) the Mail page's.
     let own = match &account["proxy"] {
@@ -568,7 +588,12 @@ pub async fn mail_save(app: AppHandle, account: Value, password: String) -> Valu
     }
     // One being changed: its id, and the password kept for it.
     let known = account["id"].as_str().filter(|id| accounts(&sh).iter().any(|a| a.id == *id)).map(String::from);
-    let password = if password.is_empty() { known.as_deref().and_then(secret::read).unwrap_or_default() } else { password };
+    let password = if password.is_empty() {
+        match known.as_deref().map(|id| crate::mail_secrets::read(&sh.identity_dir, id)).transpose() {
+            Ok(secret) => secret.flatten().unwrap_or_default(),
+            Err(error) => return json!({ "ok": false, "error": { "kind": "keep", "text": error } }),
+        }
+    } else { password };
     if password.is_empty() {
         return json!({ "ok": false, "error": { "kind": "password", "text": "" } });
     }
@@ -597,17 +622,19 @@ pub async fn mail_save(app: AppHandle, account: Value, password: String) -> Valu
     // Kept against the accounts as they are now, others saved meanwhile included.
     {
         let _editing = EDITING.lock().unwrap();
+        if sh.identity_generation.load(Ordering::SeqCst) != identity_generation || sh.identity_busy.load(Ordering::SeqCst) {
+            return json!({"ok":false,"error":{"kind":"keep","text":"身份在测试期间已变更，请重新保存邮件账号"}});
+        }
         let mut all = accounts(&sh);
         let id = known.filter(|id| all.iter().any(|a| a.id == *id)).unwrap_or_else(|| new_id(&all));
-        if let Err(e) = secret::write(&id, &password) {
-            return json!({ "ok": false, "error": { "kind": "keep", "text": e } });
-        }
         let kept = Account { id: id.clone(), address, name, server, smtp, on: true, proxy: own };
         match all.iter_mut().find(|a| a.id == id) {
             Some(a) => *a = kept,
             None => all.push(kept),
         }
-        keep_accounts(&sh, &all);
+        if let Err(error) = keep_accounts(&sh, &all, Some((&id, &password))) {
+            return json!({ "ok": false, "error": { "kind": "keep", "text": error } });
+        }
     }
     json!({ "ok": true, "unread": unread, "snapshot": settings::snapshot(&sh) })
 }
@@ -618,8 +645,9 @@ pub async fn mail_remove(app: AppHandle, id: String) -> Value {
     {
         let _editing = EDITING.lock().unwrap();
         let all: Vec<Account> = accounts(&sh).into_iter().filter(|a| a.id != id).collect();
-        secret::delete(&id);
-        keep_accounts(&sh, &all);
+        if let Err(error) = keep_accounts(&sh, &all, None) {
+            return json!({ "ok": false, "error": { "kind": "keep", "text": error } });
+        }
         store::forget(&sh, &id);
     }
     settings::snapshot(&sh)
@@ -634,7 +662,9 @@ pub async fn mail_switch(app: AppHandle, id: String, on: bool) -> Value {
         if let Some(a) = all.iter_mut().find(|a| a.id == id) {
             a.on = on;
         }
-        keep_accounts(&sh, &all);
+        if let Err(error) = keep_accounts(&sh, &all, None) {
+            return json!({ "ok": false, "error": { "kind": "keep", "text": error } });
+        }
     }
     settings::snapshot(&sh)
 }
@@ -680,6 +710,24 @@ pub(crate) mod secret {
 
     pub fn write(id: &str, password: &str) -> Result<(), String> {
         write_named(&target(id), password)
+    }
+
+    pub fn read_legacy(id: &str) -> Result<Option<String>, String> {
+        if !crate::mail_secrets::valid_id(id) { return Err("旧邮件账号 ID 无效".into()); }
+        let target = wide(&target(id));
+        let mut found: *mut Credential = std::ptr::null_mut();
+        unsafe {
+            if CredReadW(target.as_ptr(), GENERIC, 0, &mut found) == 0 {
+                return if std::io::Error::last_os_error().raw_os_error() == Some(1168) { Ok(None) } else { Err("无法读取旧邮件凭据，旧数据未修改".into()) };
+            }
+            if found.is_null() { return Err("旧邮件凭据返回无效结果".into()); }
+            let size = (*found).blob_size as usize;
+            if size > 65536 || (size > 0 && (*found).blob.is_null()) { CredFree(found); return Err("旧邮件凭据大小或格式无效".into()); }
+            let bytes = if size == 0 { vec![] } else { std::slice::from_raw_parts((*found).blob, size).to_vec() };
+            CredFree(found);
+            let password = String::from_utf8(bytes).map_err(|_| "旧邮件凭据不是有效 UTF-8")?;
+            Ok((!password.is_empty()).then_some(password))
+        }
     }
 
     pub fn read(id: &str) -> Option<String> {
@@ -747,6 +795,7 @@ pub(crate) mod secret {
     pub fn write(_id: &str, _password: &str) -> Result<(), String> {
         Err("not on this system".into())
     }
+    pub fn read_legacy(_id: &str) -> Result<Option<String>, String> { Ok(None) }
     pub fn read(_id: &str) -> Option<String> {
         None
     }

@@ -8,6 +8,11 @@
 .sharing-section .cx-field { min-width: 0; flex: 1; }
 .sharing-section .cx-field input { min-width: 0; width: 100%; }
 .sharing-section .ui-button { min-height: 36px; }
+.validation-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.validation-controls select { min-width: 0; max-width: 100%; flex: 1 1 240px; min-height: 36px; border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 8px; background: var(--background, #fff); color: inherit; }
+.validation-controls select:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.validation-result { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin-top: 16px; font-size: 14px; }
+.validation-result dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .sharing-section .copy-field { flex-wrap: wrap; }
   .sharing-section .cx-field { flex-basis: 100%; }

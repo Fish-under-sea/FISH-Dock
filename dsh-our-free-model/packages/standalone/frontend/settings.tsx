@@ -6,6 +6,7 @@ import { settingsDraft, settingsChanged, syncSettings, validateSettingsDraft } f
 import { visibilityCopy } from './visibility-data.mjs'
 import type { Host, Summary } from './types'
 import { BackupExport } from './backup'
+import { WorkBuddyValidation } from './workbuddy-validation'
 import './settings.css'
 
 type Draft = ReturnType<typeof settingsDraft>
@@ -116,6 +117,7 @@ export function Settings({ summary, host, active }: { summary: Summary; host: Ho
       </fieldset>
       {error && <p className="settings-save-error" role="alert"><CircleAlert size={16} /><span>{error}</span></p>}
     </form>
+    <WorkBuddyValidation summary={summary} host={host} />
     <BackupExport host={host} />
     <p className="footnote">配置保存在当前独立服务的数据目录中。页面读取和保存设置不会直接发送模型推理请求。</p>
   </div>

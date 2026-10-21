@@ -2778,6 +2778,19 @@
   animation: s-models-breath 1.4s ease-in-out infinite;
 }
 
+/* 身份备份与原生文件窗口；长目录不撑开设置面板。 */
+#island-settings .identity-panel { margin: 14px 0; padding: 14px; border-radius: 12px; background: var(--g1); }
+#island-settings .identity-panel h3 { margin: 0 0 8px; font-size: 14px; }
+#island-settings .identity-panel p { margin: 8px 0; overflow-wrap: anywhere; }
+#island-settings .identity-label { display: block; margin: 12px 0 6px; }
+#island-settings .identity-directory { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--g3); border-radius: 7px; background: var(--g2); color: var(--fg); }
+#island-settings .identity-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+#island-settings .identity-panel button { min-height: 32px; }
+#island-settings .identity-panel :focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+#island-settings .identity-preview { border-top: 1px solid var(--g3); margin-top: 14px; padding-top: 12px; }
+#island-settings .identity-error, #island-settings .identity-warning { color: #ffad79; }
+.tb-light #island-settings .identity-error, .tb-light #island-settings .identity-warning { color: #8e3d08; }
+
 @keyframes s-models-breath {
   0%,
   100% {

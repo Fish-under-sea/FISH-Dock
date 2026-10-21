@@ -113,6 +113,7 @@
     // anywhere else (the tray, her double-click), what they show, what they change.
     onSettings: on('island:settings'),
     onSettingsChanged: on('settings:changed'),
+    onIdentityChanged: on('identity:changed'),
     // The island's window lost the keyboard (a click elsewhere).
     onBlur: on('island:blur'),
     openSettings: tab => send('settings_open', { tab: tab || null }),

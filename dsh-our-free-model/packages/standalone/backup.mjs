@@ -5,7 +5,7 @@ import { zipSync } from './vendor/fflate/fflate.mjs'
 import { SETTINGS_INITIAL } from '../../src/store.js'
 
 const LIMIT = 16 * 1024 * 1024
-const README = fs.readFileSync(new URL('./backup-readme.txt', import.meta.url))
+const README = fs.readFileSync(new URL('./backup-readme.md', import.meta.url))
 const settingKeys = [...Object.keys(SETTINGS_INITIAL), 'forwardKey', 'standalonePort', 'standaloneProbe', 'standaloneLanEnabled', 'standaloneLanPort', 'standaloneLanKey']
 const jsonBytes = value => Buffer.from(`${JSON.stringify(value, null, 2)}\n`)
 
@@ -44,7 +44,7 @@ export async function createOfmBackup({ dataDir, settings, channels, serviceVers
     ...Array.isArray(preferences.providerOrder) ? { providerOrder: preferences.providerOrder.filter(value => typeof value === 'string') } : {},
   }
   const files = {
-    'README.txt': README,
+    'README.md': README,
     'settings.json': jsonBytes(Object.fromEntries(settingKeys.filter(key => Object.hasOwn(settings, key)).map(key => [key, settings[key]]))),
     'channel-pack/accounts-backup.json': jsonBytes(payload),
     'channel-pack/state.json': jsonBytes(state),

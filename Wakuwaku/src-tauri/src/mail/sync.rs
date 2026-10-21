@@ -57,7 +57,7 @@ pub fn run(sh: &Arc<Shared>, account: &Account, watch: &Watch) {
         // Letters that would not come down (the server said no): not asked again this time.
         let mut skip: HashSet<(Folder, u32)> = HashSet::new();
         let result = (|| -> Result<(), Fail> {
-            let mut conn = session(&account.server, &password_of(account)?, CONNECT)?;
+            let mut conn = session(&account.server, &password_of(sh, account)?, CONNECT)?;
             *watch.socket.lock().unwrap() = conn.socket.try_clone().ok();
             *watch.via.lock().unwrap() = conn.proxy.as_ref().map(|p| p.at());
             failures = 0;

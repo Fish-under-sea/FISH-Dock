@@ -9,6 +9,7 @@ import { isLoopbackHost } from '../../src/trust.js'
 import { createManagement } from './management.mjs'
 import { createStandaloneEac } from './eac.mjs'
 import { createChannelRuntime } from './channels/runtime.mjs'
+import { createWorkBuddyValidation } from './channels/validation.mjs'
 
 const PRODUCT = 'our-free-model-standalone'
 const VERSION = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
@@ -260,6 +261,7 @@ export async function startStandalone({
       sealedCredential: eac.credential,
     })
     channels = await createChannelRuntime({ dataDir, logger, stats: stores.stats })
+    const workbuddyValidation = createWorkBuddyValidation({ settings, complete: (request, onChunk) => channels.complete(request, onChunk) })
     const core = runtime
     runtime = {
       ...core,
@@ -268,14 +270,14 @@ export async function startStandalone({
       get catalog() { return [...core.catalog, ...channels.publicModelRows().map(row => ({ ...row, contextWindow: row.context_window, maxOutput: row.max_tokens }))] },
       state: () => ({ ...core.state(), catalog: [...core.catalog, ...channels.publicModelRows()] }),
       publicModelRows: () => [...core.publicModelRows(), ...channels.publicModelRows()],
-      complete: (request, onChunk) => channels.handles(request.model) ? channels.complete(request, onChunk) : core.complete(request, onChunk),
+      complete: (request, onChunk) => channels.handles(request.model) || request.model.startsWith('workbuddy/') ? workbuddyValidation.complete(request, onChunk) : core.complete(request, onChunk),
       async refreshCatalog(options) {
         if (stopped) return
         await Promise.all([core.refreshCatalog(options), channels.refresh().catch(error => { if (!stopped) throw error })])
       },
     }
     management = createManagement({
-      stores, runtime, channels, eac, embedAncestors,
+      stores, runtime, channels, eac, embedAncestors, workbuddyValidation,
       info: () => ({
         product: PRODUCT, version: VERSION, dataDir,
         baseUrl: `http://${host === '::1' ? '[::1]' : host}:${listener?.port ?? requestedPort}`,

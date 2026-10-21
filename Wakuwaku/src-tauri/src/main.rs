@@ -67,6 +67,12 @@ mod gpu;
 mod hw;
 mod i18n;
 mod icons;
+mod identity;
+mod identity_store;
+mod identity_archive;
+mod identity_dialog;
+mod identity_transfer;
+mod identity_api;
 mod inputs;
 mod island;
 mod jump;
@@ -74,6 +80,8 @@ mod lhm;
 mod lhm_setup;
 mod logon;
 mod mail;
+mod mail_identity;
+mod mail_secrets;
 mod notch;
 mod notify;
 mod oflm;
@@ -132,6 +140,11 @@ pub type Responder = Box<dyn FnOnce(Option<Value>) + Send>;
 pub struct Shared {
     pub app: AppHandle,
     pub dir: PathBuf,
+    pub identity_dir: PathBuf,
+    pub identity_error: Mutex<Option<String>>,
+    pub mail_missing: Mutex<Vec<String>>,
+    pub identity_busy: AtomicBool,
+    pub identity_generation: std::sync::atomic::AtomicU64,
     pub port: u16,
     pub settings: Mutex<Map<String, Value>>,
     pub pet: Mutex<state::Pet>,
@@ -608,7 +621,8 @@ impl Shared {
     }
 
     pub fn change(self: &Arc<Self>, patch: Value) {
-        let Value::Object(patch) = patch else { return };
+        let Value::Object(mut patch) = patch else { return };
+        patch.remove("mail");
         let touches_visibility = ["dnd", "display", "out", "hideInFullscreen", "taskbarEdge", "taskbarDisplays"].iter().any(|k| patch.contains_key(*k));
         let touches_top = ["settingsPin", "settingsTop"].iter().any(|k| patch.contains_key(*k));
         let touches_monitor = ["monitor", "monitorSource", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
@@ -1581,6 +1595,24 @@ fn main() {
         return;
     }
 
+    let identity_location = match identity::from_environment() {
+        Ok(location) => location,
+        Err(error) => {
+            #[cfg(feature = "installed")]
+            runtime::show_failure(&error);
+            #[cfg(not(feature = "installed"))]
+            eprintln!("FISH Dock: {error}");
+            return;
+        }
+    };
+    if let Some(warning) = identity_location.warning { eprintln!("FISH Dock: {warning}"); }
+    let mut identity_error = None;
+    match identity::prepare(&identity_location) {
+        Ok(identity::Prepared::Migrated { files, bytes }) => eprintln!("FISH Dock: 已复制并校验 {files} 个 OFM 身份文件（{bytes} 字节）；旧目录保留"),
+        Ok(_) => {}
+        Err(error) => { identity_error = Some(error); }
+    }
+
     let dir = data::folder();
     let _ = std::fs::create_dir_all(&dir);
 
@@ -1634,6 +1666,10 @@ fn main() {
             pet_log,
             session_jump,
             settings::settings_get,
+            identity_api::identity_view,
+            identity_api::identity_export,
+            identity_api::identity_preview,
+            identity_api::identity_import,
             settings::settings_set,
             settings::settings_open,
             settings::settings_closed,
@@ -1722,6 +1758,22 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let mut settings = data::load(&dir);
+            let mut mail_missing = Vec::new();
+            let mut mail_accounts = Vec::new();
+            if identity_error.is_none() {
+                let legacy = settings.get("mail").cloned().unwrap_or_else(|| json!([]));
+                match mail_identity::initialize(&identity_location.root, &legacy, mail::secret::read_legacy) {
+                    Ok(snapshot) => {
+                        mail_missing = snapshot.missing;
+                        mail_accounts = snapshot.accounts;
+                        for account in &mut mail_accounts {
+                            if account["id"].as_str().is_some_and(|id| mail_missing.iter().any(|m| m == id)) { account["on"] = json!(false); }
+                        }
+                    }
+                    Err(error) => identity_error = Some(error),
+                }
+            }
+            settings.insert("mail".into(), json!(mail_accounts));
             // Her pet gone: the first one there is.
             let found = data::pets(&dir);
             let id = settings.get("pet").and_then(Value::as_str).unwrap_or("").to_string();
@@ -1742,6 +1794,11 @@ fn main() {
                 app: app.handle().clone(),
                 is_logging: dir.join("debug.on").exists(),
                 dir,
+                identity_dir: identity_location.root,
+                identity_error: Mutex::new(identity_error),
+                mail_missing: Mutex::new(mail_missing),
+                identity_busy: AtomicBool::new(false),
+                identity_generation: std::sync::atomic::AtomicU64::new(0),
                 port,
                 settings: Mutex::new(settings),
                 pet: Mutex::new(state::Pet::default()),

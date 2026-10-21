@@ -10,10 +10,14 @@ export interface Model {
   reasoning?: boolean
   contextWindow?: number
   maxOutput?: number
+  availabilitySource?: 'listing' | 'probe' | 'manual'
+  detail?: string
+  probedAt?: number
+  latencyMs?: number
   availability?: string
   ttftMs?: number | null
 }
-export interface ModelTestResult { ok: boolean; text: string; latencyMs: number }
+export interface ModelTestResult { ok: boolean; text: string; latencyMs: number; ttftMs?: number; persisted?: boolean }
 export interface ServiceSettings {
   enabled: boolean
   exposeRegionModels: boolean
@@ -25,6 +29,13 @@ export interface ServiceSettings {
   probeIntervalMinutes: number
   defaultMaxTokens: number
   standaloneLanEnabled?: boolean
+  workbuddyValidationEnabled?: boolean
+}
+export interface WorkBuddyValidationState {
+  enabled: boolean
+  stopped: boolean
+  busy: boolean
+  last: { requestId: string; status: number; durationMs: number; at: string } | null
 }
 export interface LanState {
   enabled: boolean
@@ -42,6 +53,7 @@ export interface Summary {
   catalogSyncedAt: number
   settings: ServiceSettings
   lan?: LanState
+  workbuddyValidation?: WorkBuddyValidationState
   channels: { state: string; error?: string }
   eacAuth?: { local?: boolean; authorized?: boolean; login?: string }
   catalog: Model[]
@@ -86,6 +98,7 @@ export interface Host {
   logout(): Promise<void>
   error(error: Error): void
   testModel(model: string, signal: AbortSignal): Promise<ModelTestResult>
+  validateWorkBuddy(model: string, signal: AbortSignal): Promise<NonNullable<WorkBuddyValidationState['last']>>
   refreshModels(probe: boolean, signal: AbortSignal): Promise<void>
   saveSettings(settings: Partial<ServiceSettings>): Promise<ServiceSettings>
 }

@@ -315,7 +315,9 @@ fn adopt_monitor(settings: &mut Map<String, Value>) {
 pub fn save(dir: &Path, settings: &Map<String, Value>) {
     let _ = fs::create_dir_all(dir);
     // A settings file we cannot write only costs the remembered settings.
-    let _ = fs::write(dir.join("config.json"), serde_json::to_string_pretty(settings).unwrap_or_default());
+    let mut desktop = settings.clone();
+    desktop.remove("mail");
+    let _ = fs::write(dir.join("config.json"), serde_json::to_string_pretty(&desktop).unwrap_or_default());
 }
 
 // --- Pets ----------------------------------------------------------------------------
@@ -454,6 +456,20 @@ mod tests {
                 }
             }
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn desktop_saves_do_not_write_mail_identity_back_to_legacy_config() {
+        let dir = std::env::temp_dir().join(format!("fish-dock-config-mail-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("config.json"), br#"{"mail":[{"id":"synthetic"}],"display":"island"}"#).unwrap();
+        let loaded = load(&dir);
+        assert_eq!(loaded["mail"][0]["id"], "synthetic");
+        save(&dir, &loaded);
+        let saved: Value = serde_json::from_slice(&fs::read(dir.join("config.json")).unwrap()).unwrap();
+        assert!(saved.get("mail").is_none());
+        assert_eq!(saved["display"], "island");
         fs::remove_dir_all(dir).unwrap();
     }
 

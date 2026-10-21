@@ -1,8 +1,8 @@
 <p align="center"><img src="src-tauri/icons/dsh-fish.png" width="112" alt="FISH Dock icon"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">A place for AI sessions to dock, and model connections to come together.</p>
-<p align="center"><strong>1.0.0</strong> · Windows x64 · MIT-licensed code</p>
-<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-1.0.0.md">Release notes</a></p>
+<p align="center"><strong>1.0.1</strong> · Windows x64 · MIT-licensed code</p>
+<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-1.0.1.md">Release notes</a></p>
 
 > **A derivative integration, not an official upstream release.** FISH Dock builds on the desktop and AI-session experience of [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) and integrates the model channels and API workspace of [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model). Both core systems remain upstream work. Original authors, copyrights, and licenses are credited below.
 
@@ -16,21 +16,21 @@
 
 **Local does not mean offline model inference.** The workspace, proxy, and stored data run on your computer. Model requests still go to the selected provider. Eligibility, quotas, pricing, and availability are controlled by those providers. This project does not promise unlimited usage, permanently free access, or bypasses for provider restrictions.
 
-## New in 1.0.0
+## New in 1.0.1
 
-- **Trusted-LAN sharing** in OFM's API Access page: the same port number as the local service, on separate interface addresses. Off by default, with persistent settings and independent reveal, copy, and rotate controls for the LAN Key.
-- **Inference only over LAN**: no management page, account-management API, or backup endpoint. Binding failures are explicit; the service does not silently choose another port or modify firewall rules.
-- **OFM migration ZIP**: an explicitly confirmed download of OFM configuration, account indexes and associated credentials, existing EAC authorization, and fixed migration instructions. Not an export of the entire DSH credential store.
-- **Selected upstream fixes**: proxy settings and testing, taskbar-conflict fallback, Codex trust and background hooks, Gmail authorization guidance, and inflated multimodal usage accounting for `kilo-auto/free`. No advertising and no restoration of upstream updater or crash-reporting services.
-- **Continuity**: the user-provided original icon, first-launch taskbar, remembered docking mode, particle entrance, install-once runtime, and existing data directories remain.
+- **Unified identities:** OFM accounts, keys, usage and mail identities live in `%USERPROFILE%\.fish-dock`. Legacy data is copied and verified without deleting it; an existing new folder is never merged.
+- **Full identity ZIP:** preview before replacement, editable system Downloads default, explicit plaintext confirmation and pre-import recovery copies. Mail passwords use current-user DPAPI locally and are re-encrypted when imported. OFM-only ZIPs leave mail unchanged.
+- **Hardware-monitor setup:** show and focus the ordinary desktop owner before elevation, restore its topmost policy afterwards, and provide a tray entry and timeout feedback. This does not draw over the Windows secure desktop.
+- **Selected OFM 2.5.7 fixes:** dedicated signed CodeArts transport and strict model tests with persistent results.
+- **Compatibility:** original artwork, desktop layout, startup animation and inference-only LAN remain. No ads, upstream updater or crash relay are enabled.
 
-See the [1.0.0 notes](docs/release-1.0.0.md) for sources and verification limits. Desktop proxy settings are not a universal proxy switch for OFM providers.
+See the [1.0.1 notes](docs/release-1.0.1.md) for the exact source scope and verification limits. Validation used local fixtures rather than live accounts.
 
 ## Installation and Updates
 
 Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows 11; other Windows releases and third-party taskbar software require separate verification.
 
-1. Download `FISH-Dock-Setup-1.0.0.exe` from [this project's Releases](https://github.com/Fish-under-sea/FISH-Dock/releases), and compare its SHA-256. An unpublished release has no download yet.
+1. Download `FISH-Dock-Setup-1.0.1.exe` from [this project's Releases](https://github.com/Fish-under-sea/FISH-Dock/releases), and compare its SHA-256. An unpublished release has no download yet.
 2. Fully exit the previous version from the tray. Run the installer and choose a destination. Fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock`; upgrades reuse the registered directory instead of moving it.
 3. Start **FISH Dock** from the desktop or Start menu. Full Node.js, Fixed Version WebView2, the service, and license notices are bundled.
 4. The first launch confirms runtime terms and verifies resources. Later launches use installed files without repeatedly extracting the entire runtime.
@@ -62,11 +62,11 @@ Management stays local. Transport uses HTTP and is intended only for trusted net
 
 ### Configuration and Credential Migration
 
-Use **Service Settings → OFM Migration Backup** and explicitly confirm the ZIP download. **The ZIP is unencrypted and must be handled like a password file.** It may contain account tokens, the local API Key, LAN Key, and EAC authorization. Never put it on GitHub, public issues, group chats, or public file shares.
+The OFM **Service Settings → OFM Migration Backup** creates an OFM-only ZIP, excluding mail and usage statistics. It is unencrypted and may contain the local API Key, LAN Key, provider credentials, and EAC authorization.
 
-Only OFM settings, account state, associated credentials, existing EAC authorization, and an integrity manifest are exported. DSH's credential vault, mail, chats, desktop layouts, browser profiles, logs, and usage statistics are excluded. Export and management are local-only.
+For a full move, use **General → Identity and backups**. The full ZIP includes OFM accounts, settings, usage and token ledger, plus mail accounts and passwords. Mail passwords are encrypted at rest with the current Windows user's DPAPI; the exported ZIP is plaintext. Its default folder comes from the system Downloads location, can be edited, and can be changed again in the save dialog. Handle it like a password file; do not upload or share it.
 
-Fully exit both applications, back up the target OFM directory, and follow the fixed `README.txt` inside the ZIP to restore relative paths. This replaces rather than merges state; there is no automatic import. Device binding, expired authorization, and firewall settings cannot be migrated by copying files. Disable the saved LAN setting before first launch on an untrusted target network. See the [fixed migration instructions](../dsh-our-free-model/packages/standalone/backup-readme.txt), currently in Chinese.
+Exit standalone OFM but keep FISH Dock open for import. The app pauses its own model service and mail sync. Review the preview and confirm again. A full archive replaces allowlisted OFM and mail files and keeps a pre-import copy; an older OFM-only archive changes OFM only and leaves mail untouched. The app attempts rollback after activation failure. Existing `%USERPROFILE%\.dsh-fish` data is copied to `%USERPROFILE%\.fish-dock` and the old folder remains; an existing new folder is authoritative and is not merged. The archive supplies a fixed `README.md`.
 
 ## Data and Uninstallation
 
@@ -76,7 +76,7 @@ Fully exit both applications, back up the target OFM directory, and follow the f
 | Settings, pets, layouts, and logs | `%LOCALAPPDATA%\DSH-FISH\data` |
 | WebView2 profile | `%LOCALAPPDATA%\DSH-FISH\webview` |
 | Runtime terms and verification state | `%LOCALAPPDATA%\DSH-FISH\state` |
-| OFM accounts, keys, and usage | `%USERPROFILE%\.dsh-fish` |
+| OFM accounts, keys, usage, and mail identities | `%USERPROFILE%\.fish-dock` |
 
 `DSH-FISH.exe`, the application identifier, uninstall registration, and data directories remain for compatibility. Uninstall removes owned installation files and registration while preserving user data. Startup tasks are deleted only when verified to belong to this installation. Back up data before deleting it manually.
 
@@ -84,7 +84,7 @@ Fully exit both applications, back up the target OFM directory, and follow the f
 
 ### Gemini OAuth Client Configuration
 
-The public source omits the upstream embedded Google OAuth client ID and secret. To use Gemini OAuth, register your own client, configure `CMDC_PAK_GOOGLE_CLIENT_ID` and `CMDC_PAK_GOOGLE_CLIENT_SECRET`, and launch the application in that environment. Without them, this channel cannot complete OAuth authorization. Never put real values in source files, commits, or issues. This change applies to the public source only; previously delivered installers were not rebuilt or replaced in this publication.
+The public source omits the upstream embedded Google OAuth client ID and secret. To use Gemini OAuth, register your own client, configure `CMDC_PAK_GOOGLE_CLIENT_ID` and `CMDC_PAK_GOOGLE_CLIENT_SECRET`, and launch the application in that environment. Without them, this channel cannot complete OAuth authorization. Never put real values in source files, commits, or issues. This requirement also applies to the rebuilt 1.0.1 package; no real OAuth client secrets are embedded.
 
 The desktop uses **Rust + Tauri 2 + HTML/CSS/JavaScript**. The model UI uses **Node.js + React**. Installers use **NSIS 3**. Building requires Windows x64, MSVC/Rust, Node.js, NSIS, and pinned official runtime downloads. Offline builds require cached dependencies; retain lock files.
 
@@ -97,7 +97,7 @@ FISH本地模型工作台/
 Run `npm ci` in `dsh-our-free-model/packages/standalone`, then `node scripts/build-standalone-ui.mjs` in the service root. From the desktop directory:
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <runtime-cache> --source ../dsh-our-free-model --out <new-resource-directory> --version 1.0.0
+node scripts/prepare-installer.mjs --downloads <runtime-cache> --source ../dsh-our-free-model --out <new-resource-directory> --version 1.0.1
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <prepared-directory> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>

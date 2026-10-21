@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { installerScript, resourceDirectories, resourceFiles, scriptSource, REQUIRED } from './installer.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const makensis = path.resolve(root, '../../.tools/nsis-3.13/makensis.exe')
+const makensis = process.env.FISH_DOCK_MAKENSIS || path.resolve(root, '../../.tools/nsis-3.13/makensis.exe')
 
 const LISTED = [...REQUIRED, 'licenses/WebView2-Fixed-Version.html', 'licenses/NOTICE.txt', 'webview2/locales/zh-CN.pak', 'webview2/EBWebView/x.txt']
 

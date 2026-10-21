@@ -16,6 +16,7 @@
 
   // idle → starting → ready, or failed (with the service's own reason).
   let state = 'idle'
+  let generation = 0
   let failure = null
   // The frame and the layer it lives in, made once each.
   let frame = null
@@ -238,11 +239,13 @@
   async function start() {
     if (state === 'starting') return
     state = 'starting'
+    const attempt = ++generation
     failure = null
     paint(document.querySelector('#island-settings .s-models'))
     try {
       // The page's own origin, so only Wakuwaku may show the console in a frame.
       const ready = await invoke('oflm_ensure', { origin: window.location.origin })
+      if (attempt !== generation) return
       if (!ready || typeof ready.url !== 'string') throw new Error('oflm_ensure 没有给出地址')
       makeFrame(ready.url)
       state = 'ready'
@@ -250,6 +253,7 @@
       place()
       startFollowing()
     } catch (error) {
+      if (attempt !== generation) return
       failure = readFailure(error)
       state = 'failed'
       paint(document.querySelector('#island-settings .s-models'))
@@ -290,6 +294,14 @@
     tell()
   }
 
-  window.Models = { enter, park, solids, holds, hovered }
+  function invalidate() {
+    ++generation
+    park()
+    frame?.remove()
+    frame = null
+    state = 'idle'
+    failure = null
+  }
+  window.Models = { enter, park, solids, holds, hovered, invalidate }
 })()
 

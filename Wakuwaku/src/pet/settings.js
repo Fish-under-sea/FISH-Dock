@@ -46,7 +46,7 @@
   // welcome shows is the welcome, at General's top.
   const TABS = ['now', 'agents', 'look', 'widgets', 'mail', 'models']
   const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail', models: 's.tabModels' }
-  const PART_OF = { pets: 'look', place: 'look', alerts: 'now', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
+  const PART_OF = { identity: 'now', pets: 'look', place: 'look', alerts: 'now', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
   const HOMES = ['island', 'taskbar']
@@ -77,6 +77,7 @@
   let tab = 'now'
   let snap = null
   let lang = 'en'
+  const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => window.confirm(message), lang: () => lang, redraw: () => draw() })
   // The crash report shown, as it would be sent (pageCrash).
   let crashShown = false
   // The download box: what is typed, and how the last download went.
@@ -2730,6 +2731,7 @@
         ${row(esc(T('settings.startAtLogin')), esc(T('home.pluginStart')), sw('login', snap.loginAtStart))}
         ${row(esc(T('home.language')), '', seg('lang', [['auto', T('settings.languageAuto')], ['zh', '中文'], ['en', 'EN']], snap.settings.lang))}
       </div>
+      ${part('identity', identityPanel.render())}
       ${part('update', pageUpdate())}
       ${part('net', pageNet())}
       ${part('crash', pageCrash())}
@@ -2802,6 +2804,7 @@
       (box.id ? `#${box.id}` : box.dataset.field ? `[data-field="${box.dataset.field}"]` : box.dataset.mon ? `[data-mon="${box.dataset.mon}"]` : box.dataset.hold ? '[data-hold]' : box.dataset.mf ? `[data-mf="${box.dataset.mf}"]` : box.dataset.w ? `[data-w="${box.dataset.w}"]` : box.dataset.proxyAt !== undefined ? `[data-proxy-at="${box.dataset.proxyAt}"]` : null)
     const caret = which ? box.selectionStart : null
     const changed = setHTML(body, PAGES[tab]())
+    if (tab === 'now') identityPanel.mount(body)
     if (reset) {
       body.scrollTop = 0
       // Two panes: what is on the right from its top; the list stays where it was.
@@ -3895,6 +3898,10 @@
     }
   })
 
+  window.pet.onIdentityChanged(() => {
+    Models.invalidate()
+    if (isOpen && tab === 'models') draw()
+  })
   window.pet.onSettings(({ tab: next } = {}) => open(next))
   window.pet.onSettingsChanged(got => {
     if (!isOpen) return
@@ -3907,7 +3914,7 @@
   // picker (a letter's files, the desktop's picture: its own window takes
   // the focus).
   // Locked (the button by ✕), they stay.
-  window.pet.onBlur(() => !snap?.settings?.settingsPin && !picking && !pickingPaper && !lhmAsks() && (!window.pet.mac || Date.now() - openedAt > BLUR_GRACE_MS) && close('blur'))
+  window.pet.onBlur(() => !snap?.settings?.settingsPin && !picking && !pickingPaper && !identityPanel.busy() && !lhmAsks() && (!window.pet.mac || Date.now() - openedAt > BLUR_GRACE_MS) && close('blur'))
   layer.addEventListener('cancel', e => e.target.matches?.('[data-w-file]') && (picking = false), true)
   window.addEventListener('focus', () => setTimeout(() => (picking = false), 1000))
 
