@@ -6,10 +6,10 @@
 </p>
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark.png"><img src="assets/readme/hero-zh-light.png" width="1440" alt="FISH Dock：AI 会话有处停靠，模型连接集中管理。原图标与用户指定透明挂件。"></picture></h1>
 <p>
-<a href="Wakuwaku/docs/release-1.0.2.md"><strong>v1.0.2</strong></a>
+<a href="Wakuwaku/docs/release-1.0.2.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" width="23%" alt="当前版本 v1.0.2"></picture></a>
 <a href="#开始使用"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" width="23%" alt="任务栏与灵动岛两种停靠模式"></picture></a>
-<a href="#局域网访问"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-lan-zh-dark.png"><img src="assets/readme/stat-lan-zh-light.png" width="23%" alt="LAN 仅推理 API，默认关闭"></picture></a>
-<a href="#配置与凭据迁移"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-backup-zh-dark.png"><img src="assets/readme/stat-backup-zh-light.png" width="23%" alt="OFM ZIP 迁移备份含明文凭据"></picture></a>
+<a href="#邮件管理"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" width="23%" alt="邮件管理：聚合收件箱，一键全部已读"></picture></a>
+<a href="#渠道接入"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark.png"><img src="assets/readme/stat-channels-zh-light.png" width="23%" alt="已接入 14 个渠道入口，其中 Meoo 灰度测试、暂不可使用"></picture></a>
 </p>
 <p>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" width="168" alt="下载与 Releases，未发布时无安装包"></picture></a>
@@ -71,6 +71,14 @@ http://127.0.0.1:18901/v1
 ```
 
 Agent、邮件和第三方插件仍需要各自客户端、账号和权限；安装 FISH Dock 不会授予这些服务的使用资格。第三方登录、下载和图库链接保留真实来源。
+
+### 邮件管理
+
+在「邮件」中绑定自己的邮箱，可查看单个或聚合收件箱，并一键将所选收件箱全部标记为已读。操作显示已确认进度，保留邮件的其他标志。
+
+### 渠道接入
+
+目前展示 **14 个已接入渠道入口**，其中 Meoo 为灰度测试、暂不可使用。其他渠道通过「本地模型 → 添加账号」绑定；登录方式、资格和额度以各服务商为准。
 
 ### 局域网访问
 

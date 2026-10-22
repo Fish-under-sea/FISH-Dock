@@ -6,10 +6,10 @@
 </p>
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark.png"><img src="assets/readme/hero-en-light.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="Wakuwaku/docs/release-1.0.2.md"><strong>v1.0.2</strong></a>
+<a href="Wakuwaku/docs/release-1.0.2.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v1.0.2"></picture></a>
 <a href="#getting-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
-<a href="#lan-access"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-lan-en-dark.png"><img src="assets/readme/stat-lan-en-light.png" width="23%" alt="LAN inference API only, off by default"></picture></a>
-<a href="#configuration-and-credential-migration"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-backup-en-dark.png"><img src="assets/readme/stat-backup-en-light.png" width="23%" alt="OFM migration ZIP contains sensitive plaintext credentials"></picture></a>
+<a href="#mail-management"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
+<a href="#channel-connections"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark.png"><img src="assets/readme/stat-channels-en-light.png" width="23%" alt="14 channel entries, including Meoo in a limited rollout and unavailable for use"></picture></a>
 </p>
 <p>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
@@ -71,6 +71,14 @@ http://127.0.0.1:18901/v1
 ```
 
 Agents, mail, and plugins still need their own clients, accounts, and permissions. Installation grants no service entitlement. Third-party authentication, downloads, and galleries keep their real destinations.
+
+### Mail Management
+
+Connect your mailbox in **Mail** to view individual or combined inboxes and mark the selected inboxes as read in one action. Confirmed progress is displayed while other message flags are preserved.
+
+### Channel Connections
+
+There are **14 integrated channel entries**, including Meoo, which remains in a limited rollout and unavailable for use. Connect other channels through **Local Models → Add account**; login methods, eligibility and quotas depend on each provider.
 
 ### LAN Access
 
