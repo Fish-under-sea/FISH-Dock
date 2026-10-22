@@ -55,7 +55,7 @@ tree('src', file => /\.(js|json)$/.test(file))
 for (const name of ['cli', 'service', 'management', 'login-terminal', 'open-external', 'eac', 'backup']) {
   copy(`packages/standalone/${name}.mjs`)
 }
-copy('packages/standalone/backup-readme.md')
+copy('packages/standalone/backup-readme.txt')
 tree('packages/standalone/vendor', file => file.endsWith('.mjs') || path.basename(file) === 'LICENSE')
 tree('packages/standalone/channels', file => file.endsWith('.mjs'))
 tree('packages/standalone/web', file => /\.(html|js|css|json)$/.test(file))

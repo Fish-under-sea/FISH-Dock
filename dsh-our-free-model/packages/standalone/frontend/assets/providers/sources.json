@@ -1,0 +1,37 @@
+[
+  {
+    "id": "lobsterai",
+    "page": "https://lobsterai.youdao.com/",
+    "url": "https://lobsterai.youdao.com/icon-192.png",
+    "type": "image/png",
+    "file": "lobsterai.png"
+  },
+  {
+    "id": "trae",
+    "page": "https://www.trae.cn/",
+    "url": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/trae_website_prod_cn/favicon.png",
+    "type": "image/png",
+    "file": "trae.png"
+  },
+  {
+    "id": "loomy",
+    "page": "https://loomy.xunfei.cn/",
+    "url": "https://loomy.xunfei.cn/_next/image?url=%2Ficon.png&w=96&q=75",
+    "type": "image/png",
+    "file": "loomy.png"
+  },
+  {
+    "id": "minimax",
+    "page": "https://code.minimax.io/",
+    "url": "https://code.minimax.io/assets/logo/favicon_v2.png?v=7",
+    "type": "image/png",
+    "file": "minimax.png"
+  },
+  {
+    "id": "gemini",
+    "page": "https://developers.google.com/gemini-code-assist",
+    "url": "https://www.gstatic.com/images/branding/productlogos/gemini_2025/v1/web-48dp/logo_gemini_2025_color_1x_web_48dp.png",
+    "type": "image/png",
+    "file": "gemini.png"
+  }
+]

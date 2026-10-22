@@ -34,7 +34,7 @@ test('OFM export requires local authenticated explicit confirmation and only con
     assert.equal(response.headers.get('cache-control'), 'no-store')
     assert.match(response.headers.get('content-disposition'), /^attachment; filename="OFM-backup-[0-9T-]+\.zip"$/)
     const files = unzipSync(new Uint8Array(await response.arrayBuffer()))
-    assert.deepEqual(Object.keys(files).sort(), ['README.md', 'channel-credentials.json', 'channel-pack/accounts-backup.json', 'channel-pack/permanent-locks.json', 'channel-pack/state.json', 'eac-user.json', 'manifest.json', 'settings.json'])
+    assert.deepEqual(Object.keys(files).sort(), ['README.txt', 'channel-credentials.json', 'channel-pack/accounts-backup.json', 'channel-pack/permanent-locks.json', 'channel-pack/state.json', 'eac-user.json', 'manifest.json', 'settings.json'])
     const settings = JSON.parse(strFromU8(files['settings.json']))
     assert.equal(settings.forwardKey, key)
     assert.equal(settings.standaloneLanEnabled, false)
@@ -49,10 +49,10 @@ test('OFM export requires local authenticated explicit confirmation and only con
     assert.ok(!all.includes(outsideSecret))
     assert.ok(!all.includes('must-not-export-debug-log'))
     assert.ok(!all.includes(root), 'do not include local absolute paths')
-    assert.match(strFromU8(files['README.md']), /明文/)
-    assert.match(strFromU8(files['README.md']), /FISH Dock/)
+    assert.match(strFromU8(files['README.txt']), /明文/)
+    assert.match(strFromU8(files['README.txt']), /FISH Dock/)
     const second = unzipSync(new Uint8Array(await (await call(key, { confirm: true })).arrayBuffer()))
-    assert.deepEqual(second['README.md'], files['README.md'], 'migration instructions must be a fixed template')
+    assert.deepEqual(second['README.txt'], files['README.txt'], 'migration instructions must be a fixed template')
     assert.ok(!fs.readdirSync(dir).some(name => name.endsWith('.zip')), 'no plaintext ZIP persists on the server')
     const credential = JSON.stringify({ accessToken: 'synthetic-migration-token' })
     const seed = { format: 'dsh-codearts-auth/backup', version: 1, exportedAt: new Date().toISOString(),
@@ -67,7 +67,7 @@ test('OFM export requires local authenticated explicit confirmation and only con
     const target = path.join(root, 'restored')
     fs.mkdirSync(target)
     for (const [name, bytes] of Object.entries(saved)) {
-      if (name === 'README.md' || name === 'manifest.json') continue
+      if (name === 'README.txt' || name === 'manifest.json') continue
       const destination = path.join(target, name)
       fs.mkdirSync(path.dirname(destination), { recursive: true })
       fs.writeFileSync(destination, bytes)

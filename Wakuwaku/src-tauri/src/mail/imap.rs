@@ -467,6 +467,23 @@ impl Session {
     // The folder sent letters are kept in: the one the server marks \Sent
     // (SPECIAL-USE), else one named as mail programs name it; None when
     // there is neither.
+    pub fn mark_unseen(&mut self, mut applied: impl FnMut(&[u32])) -> Result<(), Fail> {
+        let uids = self.unseen()?;
+        for chunk in uids.chunks(200) {
+            self.mark_seen(chunk)?;
+            applied(chunk);
+        }
+        Ok(())
+    }
+
+    pub fn mark_seen(&mut self, uids: &[u32]) -> Result<(), Fail> {
+        if uids.is_empty() { return Ok(()); }
+        let value = uids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        let set = SequenceSet::try_from(value.as_str()).map_err(|e| Fail::Other(e.to_string()))?;
+        self.client.store(set, StoreType::Add, vec![Flag::Seen], ImapMessageStoreOptions { uid: true }).map_err(fail)?;
+        Ok(())
+    }
+
     pub fn sent_box(&mut self) -> Result<Option<Mailbox<'static>>, Fail> {
         let reference = Mailbox::try_from("").map_err(|e| Fail::Other(e.to_string()))?;
         let pattern = ListMailbox::try_from("*").map_err(|e| Fail::Other(e.to_string()))?;
@@ -606,6 +623,70 @@ pub fn session(server: &Server, password: &str, timeout: Duration) -> Result<Ses
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn batch_probe(count: usize, reject_batch: usize) -> (usize, Result<(), Fail>, Vec<String>) {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpListener;
+        use std::sync::Mutex;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let observed = commands.clone();
+        let server = std::thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut out = socket.try_clone().unwrap();
+            out.write_all(b"* OK [CAPABILITY IMAP4rev1] test\r\n").unwrap();
+            let mut batches = 0;
+            for line in BufReader::new(socket).lines().map_while(Result::ok) {
+                observed.lock().unwrap().push(line.clone());
+                let tag = line.split_whitespace().next().unwrap();
+                if line.contains("UID SEARCH") {
+                    let uids = (1..=count).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
+                    write!(out, "* SEARCH{}\r\n{tag} OK search\r\n", if uids.is_empty() { String::new() } else { format!(" {uids}") }).unwrap();
+                } else if line.contains("UID STORE") {
+                    batches += 1;
+                    write!(out, "{tag} {} store\r\n", if batches == reject_batch { "NO" } else { "OK" }).unwrap();
+                } else { panic!("unexpected command: {line}"); }
+            }
+        });
+        let config = Server { host: "127.0.0.1".into(), port, security: Security::Plain, username: "test".into(), auth: Auth::Login, via: super::super::proxy::Via::Straight };
+        let mut connection = Session::open(&config, Duration::from_secs(3)).unwrap();
+        let mut changed = 0;
+        let result = connection.mark_unseen(|batch| changed += batch.len());
+        drop(connection);
+        server.join().unwrap();
+        let lines = commands.lock().unwrap().clone();
+        (changed, result, lines)
+    }
+
+    #[test]
+    fn unread_snapshot_is_batched_without_fetching_bodies_or_overwriting_other_flags() {
+        let (changed, result, lines) = batch_probe(451, 0);
+        assert!(result.is_ok());
+        assert_eq!(changed, 451);
+        assert_eq!(lines.iter().filter(|s| s.contains("UID SEARCH")).count(), 1);
+        let stores: Vec<_> = lines.iter().filter(|s| s.contains("UID STORE")).collect();
+        assert_eq!(stores.len(), 3);
+        assert!(stores.iter().all(|s| s.contains("+FLAGS (\\Seen)") && !s.contains('*')));
+        assert!(!lines.iter().any(|s| s.contains("FETCH")));
+    }
+
+    #[test]
+    fn empty_unread_snapshot_sends_no_store() {
+        let (changed, result, lines) = batch_probe(0, 0);
+        assert!(result.is_ok());
+        assert_eq!(changed, 0);
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    fn rejected_batch_keeps_only_acknowledged_changes_and_stops_later_batches() {
+        let (changed, result, lines) = batch_probe(451, 2);
+        assert!(result.is_err());
+        assert_eq!(changed, 200);
+        assert_eq!(lines.iter().filter(|s| s.contains("UID STORE")).count(), 2);
+    }
 
     #[test]
     fn a_no_to_signing_in_says_why() {

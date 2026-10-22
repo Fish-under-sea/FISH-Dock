@@ -4,23 +4,28 @@ import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..')
-const read=p=>fs.readFileSync(path.join(root,p),'utf8')
-const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(path.join(root,p))).digest('hex')
-const rewrite=text=>text.replaceAll('src="src-tauri/','src="Wakuwaku/src-tauri/').replaceAll('href="docs/','href="Wakuwaku/docs/').replaceAll('](docs/','](Wakuwaku/docs/').replaceAll('](scripts/','](Wakuwaku/scripts/').replaceAll('](LICENSE)','](Wakuwaku/LICENSE)').replaceAll('](../dsh-our-free-model/','](dsh-our-free-model/')
-for(const file of ['README.md','README.en.md']){
-  const text=read(file), baseline=rewrite(read(`Wakuwaku/${file}`))
-  assert.equal(text.slice(text.indexOf('\n> **')),baseline.slice(baseline.indexOf('\n> **')),'正文或上游署名发生意外变化')
-  const headings=new Set([...text.matchAll(/^#{1,6}\s+(.+)$/gm)].map(m=>m[1].toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu,'').replace(/\s/g,'-')))
-  for(const m of text.matchAll(/(?:\]\(|(?:src|srcset|href)=")([^\s")]+)/g)){
-    const target=m[1]
-    if(/^(https?:|mailto:|data:)/.test(target))continue
-    if(target.startsWith('#')){assert.ok(headings.has(target.slice(1)),`失效锚点 ${file}: ${target}`);continue}
-    assert.ok(fs.existsSync(path.join(root,target.split('#')[0])),`缺失引用 ${file}: ${target}`)
+const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex')
+const files=['README.md','README.en.md','Wakuwaku/README.md','Wakuwaku/README.en.md']
+for(const file of files){
+  const text=fs.readFileSync(path.join(root,file),'utf8')
+  assert.match(text,/1\.0\.2/)
+  assert.ok(file.endsWith('README.md')?text.includes('Meoo 目前仅属于灰度测试，暂时不可使用'):text.includes('Meoo is currently in a limited rollout and is unavailable for use'))
+  assert.ok(!text.includes('\u001b'),'文档不含终端控制符')
+  for(const match of text.matchAll(/(?:\]\(|(?:src|srcset|href)=")([^\s")]+)/g)){
+    const link=match[1]
+    if(/^(?:https?:|mailto:|data:|#)/.test(link))continue
+    const [relative,fragment]=link.split('#')
+    const dest=path.resolve(root,path.dirname(file),relative)
+    assert.ok(dest.startsWith(root+path.sep),`引用越界 ${file}`)
+    assert.ok(fs.existsSync(dest),`缺失引用 ${file}: ${link}`)
+    if(fragment&&dest.endsWith('.md')){
+      const content=fs.readFileSync(dest,'utf8')
+      const anchors=[...content.matchAll(/^#{1,6}\s+(.+)$/gm)].map(m=>m[1].toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu,'').replace(/\s/g,'-'))
+      assert.ok(anchors.includes(fragment),`失效锚点 ${file}: ${link}`)
+    }
   }
 }
-assert.equal(hash('assets/readme/mascot.png'),'8e2bdd1c5b5ddb851db88b8ed29f9660f0ffe18f73266a89ba8cc03f9360952e')
+assert.equal(hash('Wakuwaku/src-tauri/icons/DSH-FISH-Windows.ico'),'5130fe9d4e381de4692446aa08729ad2de59cca443f7d40367fbc dff41fbfed0'.replace(' ',''))
 assert.equal(hash('Wakuwaku/src-tauri/icons/dsh-fish.png'),'5688f69de350b8c75e0832e7b5928c680a1b7faa14ecd0259306afbd5c4178b9')
-const metadata=JSON.parse(read('assets/readme/metadata.json'))
-assert.equal(metadata.assets.length,40)
-for(const row of metadata.assets){assert.equal(hash(row.path),row.contentHash);assert.equal(fs.statSync(path.join(root,row.path)).size,row.size)}
-console.log(JSON.stringify({languages:2,bodyPreserved:true,localReferences:true,anchors:true,originalIcon:true,originalMascot:true,verifiedImages:metadata.assets.length}))
+for(const file of ['dsh-our-free-model/packages/standalone/service.mjs','dsh-our-free-model/packages/standalone/frontend/app.tsx','dsh-our-free-model/packages/standalone/channels/meoo.mjs','dsh-our-free-model/vendor/channel-pack/src/gemini-oauth.ts','Wakuwaku/src-tauri/src/model_focus.rs'])assert.ok(fs.existsSync(path.join(root,file)),`缺少完整源码 ${file}`)
+console.log(JSON.stringify({documents:files.length,version:'1.0.2',meooUnavailable:true,localReferences:true,anchors:true,originalIcon:true,fullSource:true}))

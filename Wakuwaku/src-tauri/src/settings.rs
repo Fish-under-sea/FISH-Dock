@@ -63,8 +63,11 @@ pub fn snapshot(sh: &Shared) -> Value {
     let lhm_status = lhm["status"].as_str().unwrap_or("").to_string();
     let monitor_source = crate::hw::Source::of(&sh.setting("monitor"), &sh.setting("monitorSource"), lhm_status == "found");
     let lhm_shown = monitor_source == crate::hw::Source::Lhm && sh.island.lock().unwrap().settings_open;
+    let mut settings = sh.settings.lock().unwrap().clone();
+    settings.insert("settingsPin".into(), sh.setting("settingsPin"));
+    settings.insert("settingsTop".into(), sh.setting("settingsTop"));
     json!({
-        "settings": Value::Object(sh.settings.lock().unwrap().clone()),
+        "settings": Value::Object(settings),
         "lang": sh.lang(),
         "pets": pets,
         "now": now,
@@ -168,6 +171,7 @@ pub fn snapshot(sh: &Shared) -> Value {
         // Her crash reports: as set, those waiting, the last sent (crash.rs).
         "crash": crate::crash::view(sh),
         "fullscreenAvailable": fullscreen::AVAILABLE,
+        "modelFullscreenPrompt": sh.settings_focus.lock().unwrap().prompt(),
         // Whether Windows' acrylic can go under the open island (backplate.rs).
         "plate": crate::backplate::available(),
         "widgets": sh.widgets_view(),
@@ -684,6 +688,36 @@ pub fn apply_patch(sh: &Arc<Shared>, patch: &Value) -> Value {
 #[tauri::command]
 pub async fn settings_get(app: AppHandle) -> Value {
     snapshot(&shared(&app))
+}
+
+#[tauri::command]
+pub fn settings_focus(app: AppHandle, active: bool) -> Value {
+    let sh = shared(&app);
+    if active && !sh.island.lock().unwrap().settings_open {
+        return snapshot(&sh);
+    }
+    let own = sh.own.lock().unwrap().clone();
+    let full = fullscreen::covering(&own).map(|cover| cover.is_some());
+    {
+        let mut focus = sh.settings_focus.lock().unwrap();
+        let now = std::time::Instant::now();
+        focus.observe(full, now);
+        focus.enter(active, now);
+    }
+    fullscreen::ask();
+    island::keep_on_top(&sh);
+    sh.redraw();
+    snapshot(&sh)
+}
+
+#[tauri::command]
+pub fn settings_fullscreen_answer(app: AppHandle, id: u64, cancel: bool) -> Value {
+    let sh = shared(&app);
+    if sh.settings_focus.lock().unwrap().answer(id, cancel, std::time::Instant::now()) {
+        island::keep_on_top(&sh);
+        sh.redraw();
+    }
+    snapshot(&sh)
 }
 
 #[tauri::command]

@@ -74,6 +74,7 @@ export function managementSettings(value) {
     enabled: value.enabled !== false,
     exposeRegionModels: value.exposeRegionModels !== false,
     streamRecovery: value.streamRecovery !== false,
+    workbuddyValidationEnabled: value.workbuddyValidationEnabled === true,
     standaloneProbe: value.standaloneProbe === true,
     workbuddyValidationEnabled: value.workbuddyValidationEnabled === true,
     standaloneLanEnabled: value.standaloneLanEnabled === true,
@@ -157,6 +158,7 @@ export function createManagement({ stores, runtime, channels, eac, info, onSetti
     return {
       ...info(),
       channels: channels?.state(),
+      workbuddyValidation: workbuddyValidation?.state(),
       eacAuth: eac?.cached(),
       settings: managementSettings(stores.settings.get()),
       workbuddyValidation: workbuddyValidation?.state(),
@@ -310,6 +312,7 @@ export function createManagement({ stores, runtime, channels, eac, info, onSetti
       const controller = new AbortController()
       const abort = () => controller.abort()
       const timeout = setTimeout(abort, 300000)
+      timeout.unref?.()
       res.once('close', abort)
       try {
         await runtime.complete({ model: body.model, signal: controller.signal, openAi: { messages: [{ role: 'user', content: 'Reply with exactly: OK' }], max_tokens: 256 } })

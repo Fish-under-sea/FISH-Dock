@@ -67,6 +67,20 @@ export async function verifyChannelCreditsRpc({ ctx, call, creds }) {
     const freshQuota = await call('credits.balances', { provider: 'gemini', force: true })
     assert.equal(quotaRequests, 2, '手动重试必须真正查询上游替身')
     assert.equal(freshQuota.value.accounts[0].balance.total, 60)
+    const geminiRefresh = ctx.geminiAuth.refreshAccountCredential
+    try {
+      quotaFailed = true
+      await call('credits.balances', { provider: 'gemini', force: true })
+      await ctx.accountPool.updateAccount('fixture-credits-gemini', { refreshable: true, expiresAt: Date.now() - 1000 })
+      ctx.geminiAuth.refreshAccountCredential = async (ref, pool, id) => {
+        quotaFailed = false
+        await pool.updateAccount(id, { expiresAt: Date.now() + 86400000 })
+      }
+      const recovered = await call('credits.balances', { provider: 'gemini' })
+      assert.equal(recovered.value.accounts[0].balance?.total, 60, '续期成功必须绕过旧的鉴权失败缓存')
+      assert.equal(quotaRequests, 4)
+    } finally { ctx.geminiAuth.refreshAccountCredential = geminiRefresh }
+    await verifyBalanceRefresh({ ctx, call, creds })
     await verifyRefreshDispatch({ ctx, call })
   } finally {
     ctx.credentials.resolve = originalResolve
@@ -76,6 +90,59 @@ export async function verifyChannelCreditsRpc({ ctx, call, creds }) {
       creds.delete(`FIXTURE_CREDITS_${provider.toUpperCase()}`)
     }
   }
+}
+
+async function verifyBalanceRefresh({ ctx, call, creds }) {
+  const service = ctx.workbuddyAuth
+  const saved = service.refreshAccountCredential
+  const expired = 'fixture-balance-expired', failed = 'fixture-balance-failed'
+  const before = Date.now() - 1000, after = Date.now() + 86400000
+  const refreshes = []
+  try {
+    for (const id of [expired, failed]) {
+      creds.set(id, { value: JSON.stringify({ access_token: 'expired-fixture', refresh_token: 'refresh-fixture' }) })
+      await ctx.accountPool.addAccount({ id, provider: 'workbuddy', credentialRef: id, nickname: id,
+        expiresAt: before, refreshable: true, enabled: false, createdAt: 1 })
+    }
+    service.refreshAccountCredential = async (ref, pool, id) => {
+      refreshes.push(id)
+      if (id === failed) throw new Error('续期网络暂时断开，请重试')
+      creds.set(ref, { value: JSON.stringify({ access_token: 'fresh-fixture', refresh_token: 'rotated-fixture' }) })
+      await pool.updateAccount(id, { expiresAt: after })
+    }
+    const result = await call('credits.balances', { provider: 'workbuddy', force: true })
+    assert.equal(result.ok, true)
+    assert.deepEqual(refreshes, [expired, failed], '到期账号在读余额前按自己的 ref 续期，停用不影响续期')
+    assert.equal(result.value.accounts.find(row => row.accountId === expired).balance?.total, 123)
+    assert.match(result.value.accounts.find(row => row.accountId === failed).error, /续期网络暂时断开/)
+    assert.equal(result.value.accounts.find(row => row.accountId === failed).balance, null)
+    assert.equal(ctx.accountPool.listAccountsByProvider('workbuddy').find(row => row.id === failed).refreshable, true, '网络故障不废弃账号')
+    assert.equal(result.value.accounts.find(row => row.accountId === 'fixture-credits-workbuddy').balance.total, 123, '单账号故障不影响其他账号')
+    refreshes.length = 0
+    await call('credits.balances', { provider: 'workbuddy' })
+    assert.deepEqual(refreshes, [failed], '已经续期的账号不重复消耗 refresh_token')
+    await ctx.accountPool.removeAccount(failed)
+    await ctx.accountPool.updateAccount(expired, { expiresAt: before })
+    refreshes.length = 0
+    let release
+    const gate = new Promise(resolve => { release = resolve })
+    service.refreshAccountCredential = async (ref, pool, id) => {
+      refreshes.push(id)
+      await gate
+      await pool.updateAccount(id, { expiresAt: after })
+    }
+    const first = call('credits.balances', { provider: 'workbuddy' })
+    const second = call('credits.balances', { provider: 'workbuddy' })
+    await new Promise(resolve => setImmediate(resolve))
+    const observed = [...refreshes]
+    release()
+    await Promise.all([first, second])
+    assert.deepEqual(observed, [expired], '同账号的并发余额请求共享一次在途续期')
+  } finally {
+    service.refreshAccountCredential = saved
+    for (const id of [expired, failed]) { await ctx.accountPool.removeAccount(id); creds.delete(id) }
+  }
+  console.log('ok  余额读取前续期：按账号 ref、停用账号、失败隔离、网络故障保留认证、有效令牌不重复续期')
 }
 
 async function verifyRefreshDispatch({ ctx, call }) {

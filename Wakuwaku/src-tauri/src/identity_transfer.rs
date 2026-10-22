@@ -31,7 +31,12 @@ fn commit_with(root:&Path, changes:crate::identity_store::Changes, mut activate:
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn root()->PathBuf { let path=std::env::temp_dir().join(format!("fish-dock-transfer-{}-{}",std::process::id(),crate::now_ms()));fs::create_dir(&path).unwrap();path }
+    fn root()->PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let next = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path=std::env::temp_dir().join(format!("fish-dock-transfer-{}-{}-{next}",std::process::id(),crate::now_ms()));
+        fs::create_dir(&path).unwrap();path
+    }
     #[test]
     fn cancelling_save_creates_nothing_and_existing_file_is_never_overwritten(){
         let root=root();

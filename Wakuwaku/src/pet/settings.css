@@ -1100,7 +1100,22 @@
 /* Which inbox and which letters: the picker on the left, the filter on the right. */
 #island-settings .inbox .mail-tools {
   padding: 8px 10px 8px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
+#island-settings .mail-tools-actions { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+#island-settings .mail-tools-actions .pick { min-width: 0; flex: 1 1 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#island-settings .mail-filter { min-width: 0; }
+#island-settings .mail-filter .seg { display: flex; max-width: 100%; }
+#island-settings .mail-filter .seg button { min-width: 0; flex: 1; }
+#island-settings .mail-read-all { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 30px; }
+#island-settings .pbtn:not(:disabled):active { transform: translateY(1px) scale(.96); filter: brightness(.85); }
+#island-settings .pbtn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+#island-settings .mail-progress { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: mail-spin .8s linear infinite; }
+@keyframes mail-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #island-settings .mail-progress { animation: none; } }
 
 #island-settings .mail-tools .pick {
   max-width: 260px;
@@ -2800,3 +2815,15 @@
     opacity: 1;
   }
 }
+
+/* 全屏确认留在 Dock 内；原生 dialog 限定键盘焦点并覆盖模型 iframe。 */
+#island-settings .s-fullscreen-dialog { box-sizing: border-box; width: min(420px, calc(100vw - 48px)); max-height: calc(100vh - 48px); padding: 22px; border: 1px solid var(--g3); border-radius: 16px; background: var(--g1); color: var(--fg); box-shadow: 0 20px 60px #0008; overflow: auto; }
+#island-settings .s-fullscreen-dialog:not([open]) { display: none; }
+#island-settings .s-fullscreen-dialog::backdrop { background: #0007; }
+#island-settings .s-fullscreen-dialog h2 { margin: 0 0 12px; font-size: 17px; }
+#island-settings .s-fullscreen-dialog p { margin: 0 0 18px; line-height: 1.6; }
+#island-settings .s-fullscreen-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+#island-settings .s-fullscreen-actions button { min-height: 36px; padding: 8px 12px; border: 1px solid var(--g3); border-radius: 9px; background: var(--g2); color: var(--fg); cursor: pointer; }
+#island-settings .s-fullscreen-actions button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+#island-settings .s-fullscreen-actions button:disabled { opacity: .5; cursor: progress; }
+#island-settings .s-fullscreen-error { margin-top: 14px; color: #ffad79; overflow-wrap: anywhere; }

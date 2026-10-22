@@ -67,7 +67,7 @@ export function Settings({ summary, host, active }: { summary: Summary; host: Ho
       if (mounted.current) setSaving(false)
     }
   }
-  const toggle = (name: 'enabled' | 'exposeRegionModels' | 'streamRecovery' | 'standaloneProbe' | 'hideFreeModels' | 'hideEacModels', label: string, help: string) =>
+  const toggle = (name: 'enabled' | 'exposeRegionModels' | 'streamRecovery' | 'standaloneProbe' | 'hideFreeModels' | 'hideEacModels' | 'workbuddyValidationEnabled', label: string, help: string) =>
     <label className="settings-field" key={name}>
       <span><strong>{label}</strong><small>{help}</small></span>
       <input type="checkbox" role="switch" name={name} className="settings-toggle"

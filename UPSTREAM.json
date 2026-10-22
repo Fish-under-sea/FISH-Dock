@@ -1,6 +1,6 @@
 {
   "format": "fish-dock/source-snapshot",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "projects": [
     {
       "path": "Wakuwaku",
@@ -27,6 +27,7 @@
   "notes": [
     "Snapshot includes FISH Dock integration modifications, not an unmodified upstream mirror.",
     "Upstream deployment workflows and local state are excluded. Original licenses remain in each subtree.",
-    "OFM remains a selective integration on the recorded base, not a wholesale v2.5.7 merge; ads and upstream updater/crash endpoints are excluded."
+    "OFM remains a selective integration on the recorded base, not a wholesale v2.5.7 merge; ads and upstream updater/crash endpoints are excluded.",
+    "Includes current Dock and OFM service/frontend/channel source. Meoo integration is experimental, limited rollout and unavailable for general use. Public OAuth client defaults are empty."
   ]
 }

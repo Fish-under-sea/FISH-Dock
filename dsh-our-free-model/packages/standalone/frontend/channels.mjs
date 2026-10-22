@@ -2,9 +2,11 @@ import * as React from 'react'
 import { createRoot } from 'react-dom/client'
 import { shared } from 'ofm-shared-client'
 import { ChannelBrowser } from './components/channel-browser'
+import { providers } from 'ofm-provider-list'
+const CHANNEL_PROVIDERS = providers.filter(row => row.id !== 'meoo')
 import 'ofm-shared-styles.css'
 
-const { EacAuth, useEacLogin, DICT, Tank, usePool, poolReading, capacityText, CHANNEL_PROVIDERS, LedgerPage, LogsPage } = shared
+const { EacAuth, useEacLogin, DICT, Tank, usePool, poolReading, capacityText, LedgerPage, LogsPage } = shared
 const h = React.createElement
 const t = key => DICT.zh[key] ?? key
 t.locale = 'zh'

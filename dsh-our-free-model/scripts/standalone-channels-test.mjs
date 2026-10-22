@@ -133,8 +133,14 @@ try {
   service = await startStandalone({ dataDir, port: 0, refresh: false, logger: { warn: message => warnings.push(message), info() {} } })
   await service.ready
   key = JSON.parse(fs.readFileSync(service.keyFile)).forwardKey
-  await check('十三个真实渠道注册，独立目录、统一模型目录和机读能力可用', async () => {
-    assert.equal(service.channels.providers.length, 13)
+  await check('十四个渠道注册，独立目录、统一模型目录和机读能力可用', async () => {
+    assert.equal(service.channels.providers.length, 14)
+    assert.ok(service.channels.providers.includes('meoo'))
+    assert.deepEqual(await rpc('meoo.status'), { accounts: [] })
+    assert.deepEqual(await rpc('raccoon.daily.status'), { accounts: [] })
+    const meooStatus = (await rpc('provider.status', { providers: ['meoo', 'buddy'] })).statuses.meoo
+    assert.equal(meooStatus.accounts.total, 0)
+    assert.equal(meooStatus.models.total, 0)
     assert.equal(service.channels.providers.includes('opencode'), false)
     assert.equal((await rpc('account.list', { provider: 'buddy' })).accounts.length, 1)
     const { value } = await api('/v1/models')
@@ -151,6 +157,20 @@ try {
     assert.equal(fs.readFileSync(path.join(dshHome, '.credentials.yaml'), 'utf8'), 'SENTINEL_DO_NOT_READ')
     assert.equal(fs.existsSync(path.join(dshHome, 'channel-pack')), false)
     assert.equal((await api('/api/management/eac/status')).value.local, false)
+  })
+  await check('总览积分核验逐账号返回，缺少当日账单时不把余额当作领取', async () => {
+    const audit = await rpc('credits.daily.audit')
+    assert.match(audit.day, /^\d{4}-\d{2}-\d{2}$/)
+    assert.equal(audit.accounts.length, 2)
+    const workbuddy = audit.accounts.find(row => row.provider === 'workbuddy')
+    assert.equal(workbuddy.accountId, 'workbuddy-fixture')
+    assert.equal(workbuddy.grantedToday, null)
+    assert.ok(workbuddy.balance === null || Number.isFinite(workbuddy.balance))
+    assert.equal(JSON.stringify(audit).includes('fixture-refresh'), false)
+    const empty = await rpc('credits.claimAll', { provider: 'raccoon' })
+    assert.equal(empty.results.length, 0)
+    assert.equal(empty.summary.claimed, 0)
+    assert.equal(empty.summary.failed, 0)
   })
   await check('同源鉴权覆盖渠道与 EAC 操作，跨域和无密钥访问失败', async () => {
     for (const endpoint of ['/api/management/eac/status', '/api/management/channels/rpc']) {
@@ -177,6 +197,22 @@ try {
     assert.equal(stats.grand.input, 33)
     const ledger = await rpc('usage.tokenLedger', {})
     assert.ok(JSON.stringify(ledger).includes('fixture-free'))
+  })
+  await check('WorkBuddy 验证设置保存、真实适配器调用及脱敏状态贯通', async () => {
+    const enabled = await api('/api/management/settings', { workbuddyValidationEnabled: true })
+    assert.equal(enabled.response.status, 200)
+    assert.equal(enabled.value.settings.workbuddyValidationEnabled, true)
+    assert.equal((await api('/api/management/workbuddy/validate', { model: 'buddy/fixture-free', confirm: true })).response.status, 400)
+    assert.equal((await api('/api/management/workbuddy/validate', { model: 'workbuddy/fixture-free' })).response.status, 400)
+    const result = await api('/api/management/workbuddy/validate', { model: 'workbuddy/fixture-free', confirm: true })
+    assert.equal(result.response.status, 200)
+    assert.equal(result.value.status, 200)
+    const summary = (await api('/api/management/summary')).value
+    assert.equal(summary.workbuddyValidation.stopped, false)
+    assert.equal(summary.workbuddyValidation.last.status, 200)
+    assert.equal(JSON.stringify(summary.workbuddyValidation).includes('fixture-refresh'), false)
+    await api('/api/management/settings', { workbuddyValidationEnabled: false })
+    assert.equal((await api('/api/management/workbuddy/validate', { model: 'workbuddy/fixture-free', confirm: true })).response.status, 409)
   })
   await check('Anthropic Messages 经真实渠道适配器保留消息、系统提示、工具与生成参数', async () => {
     const before = requests.length

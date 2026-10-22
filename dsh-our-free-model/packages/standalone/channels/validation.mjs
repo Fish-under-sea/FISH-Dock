@@ -2,24 +2,30 @@ import { randomUUID } from 'node:crypto'
 
 const failure = (statusCode, message) => Object.assign(new Error(message), { statusCode })
 const safeStatus = value => Number.isInteger(value) && value >= 400 && value <= 599 ? value : 502
+const transient = status => status === 408 || status === 429 || status >= 500
 
-/** 只改变验证调度和诊断，不修改请求正文、客户端身份或请求头。 */
-export function createWorkBuddyValidation({ settings, complete }) {
+/** 只记录验证结果，不改变原请求，也不把暂时故障变成永久停用。 */
+export function createWorkBuddyValidation({ settings, complete, log = () => {} }) {
   let busy = false
   let stopped = settings.get().workbuddyValidationStopped === true
   let enabled = settings.get().workbuddyValidationEnabled === true
+  let last = settings.get().workbuddyValidationLast ?? null
   const persist = patch => {
-    settings.update(patch)
-    settings.flush()
-    if (settings.writeFailed) throw failure(500, '验证状态未能保存；已在当前进程停止，请检查配置目录权限。')
+    try {
+      settings.update(patch)
+      settings.flush()
+      if (settings.writeFailed) log('WorkBuddy 验证诊断暂未落盘；当前请求结果保持不变。')
+    } catch {
+      log('WorkBuddy 验证诊断保存失败；当前请求结果保持不变。')
+    }
+  }
+  // 仅迁移有明确临时故障证据的旧锁停；鉴权失败和未知原因保持原状态。
+  if (stopped && transient(last?.status ?? 0)) {
+    stopped = false
+    persist({ workbuddyValidationStopped: false })
   }
   return {
-    state: () => ({
-      enabled: settings.get().workbuddyValidationEnabled === true,
-      stopped: stopped || settings.get().workbuddyValidationStopped === true,
-      busy,
-      last: settings.get().workbuddyValidationLast ?? null,
-    }),
+    state: () => ({ enabled: settings.get().workbuddyValidationEnabled === true, stopped, busy, last }),
     settingsChanged() {
       const next = settings.get().workbuddyValidationEnabled === true
       if (!enabled && next && settings.get().workbuddyValidationStopped !== true) stopped = false
@@ -27,7 +33,7 @@ export function createWorkBuddyValidation({ settings, complete }) {
     },
     async complete(request, onChunk) {
       if (!request.model?.startsWith('workbuddy/') || settings.get().workbuddyValidationEnabled !== true) return complete(request, onChunk)
-      if (stopped || settings.get().workbuddyValidationStopped === true) throw failure(409, 'WorkBuddy 验证已停止。请先确认服务方的账号状态，再手动关闭并重新开启验证模式。')
+      if (stopped) throw failure(409, 'WorkBuddy 鉴权验证已停止，请重新绑定账号，或关闭并重新开启验证模式。')
       if (busy) throw failure(429, '已有一个 WorkBuddy 验证请求在执行；未发送本次请求。')
       busy = true
       const started = Date.now()
@@ -35,14 +41,24 @@ export function createWorkBuddyValidation({ settings, complete }) {
       const record = status => ({ requestId, status, durationMs: Math.max(0, Date.now() - started), at: new Date().toISOString() })
       try {
         const result = await complete(request, onChunk)
-        if (result?.error) throw failure(safeStatus(result.error?.statusCode ?? result.error?.status), '验证未成功')
-        persist({ workbuddyValidationLast: record(200) })
+        if (result?.error) {
+          const detail = result.error
+          throw Object.assign(failure(safeStatus(detail?.statusCode ?? detail?.status), 'WorkBuddy 上游返回错误'), {
+            code: detail?.code, cause: detail,
+          })
+        }
+        last = record(200)
+        persist({ workbuddyValidationStopped: false, workbuddyValidationLast: last })
         return result
       } catch (error) {
-        stopped = true
-        const status = safeStatus(error?.statusCode ?? error?.status)
-        persist({ workbuddyValidationStopped: true, workbuddyValidationLast: record(status) })
-        throw failure(status, `WorkBuddy 验证停止（HTTP ${status}，本地关联号 ${requestId}）。未重试或切换账号。`)
+        const cancelled = request.signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR'
+        const status = cancelled ? 499 : safeStatus(error?.statusCode ?? error?.status)
+        stopped = status === 401 || status === 403
+        last = record(status)
+        persist({ workbuddyValidationStopped: stopped, workbuddyValidationLast: last })
+        // 原始错误保留 Retry-After、业务码与取消语义；调度层负责既有退避策略。
+        if (error && (typeof error === 'object' || typeof error === 'function')) throw error
+        throw failure(status, `WorkBuddy 请求失败（HTTP ${status}，关联号 ${requestId}）`)
       } finally { busy = false }
     },
   }

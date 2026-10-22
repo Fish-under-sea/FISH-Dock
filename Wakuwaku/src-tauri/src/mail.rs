@@ -320,6 +320,7 @@ pub struct Runner {
     talks: agent::Talks,
     // The mail kept on this computer (store.rs).
     stores: store::Stores,
+    reading_all: std::collections::HashSet<String>,
 }
 
 // The mail kept changed (the page asks for its list again when it did).

@@ -1,7 +1,7 @@
 import { Activity, Boxes, Cable, ChevronRight, Handshake, LayoutDashboard, LogOut, Moon, Network, Settings2, ShieldCheck, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { flushSync } from 'react-dom'
-import brandMark from '../../../../icon.svg?inline'
+import brandMark from '../assets/dsh-fish.png?inline'
 import { Badge, Button } from './ui'
 import type { Host, Page, Summary } from '../types'
 
@@ -72,9 +72,9 @@ export const pageNames: Record<Page, string> = {
 
 export function Sidebar({ page, summary, host }: { page: Page; summary?: Summary; host: Host }) {
   return <>
-    <a className="console-brand" href="/" aria-label="Our Free Model 首页">
-      <img className="console-mark" src={brandMark} alt="" width={34} height={36} />
-      <span>Our Free Model<small>本地模型工作台</small></span>
+    <a className="console-brand" href="/" aria-label="FISH Dock 首页">
+      <img className="console-mark" src={brandMark} alt="" width={36} height={36} />
+      <span>FISH Dock<small>本地模型工作台</small></span>
     </a>
     <div className="workspace-switch"><span className="workspace-avatar"><ShieldCheck size={17} /></span>
       <span>个人工作空间<small>独立本地服务</small></span><Badge>本机</Badge>

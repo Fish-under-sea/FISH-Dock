@@ -1726,55 +1726,31 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
     }
   }
 
-  // 启动时只要账号池非空，就安排首轮续期 + 定期续期。
-  //
-  // ⚠️ 判据是「**池里有账号**」，不是「有 `refreshable` 的账号」（2026-10-02 修订）。
-  // 原先写成 `accounts.some(a => a.refreshable)`，于是这个定时器**是否武装**
-  // 取决于那批可能已经被误标成 false 的布尔 —— 而它存在的意义恰恰是去修正误标。
-  // 本次事故实测：36 条账号只剩 3 条 `true`（raccoon / minimax / cline 各一），
-  // 只要那三条被删或被同样误标，**codearts 的自愈与启动首轮会一起消失**，
-  // 且日志里一个字都不会有。各家 `refreshAll` 内部本来就按凭据材料 / 是否过期
-  // 过滤（`loomy` 只探已过期的、其余看 `refreshableOf(credential)`），
-  // 所以放宽这里的判据最多多一次本地遍历，不会白发请求。
-  //
-  // ⚠️ 仍然**不看 `enabled`**（AGENTS.md 既有铁律）：停用只影响自动选号，
-  // 不该让凭据停止续期。早期写成 `a.refreshable && a.enabled`，于是
-  // 「所有账号都被停用」时续期定时器根本不启动，凭据一路烂到 refresh_token 失效。
-  //
-  // ⚠️ **必须立刻先跑一轮**（issue !IKIRTT 的主缺陷）：早先这里只有
-  // `setInterval`，第一次处理要等满一个周期。短寿命 provider（cline 1 小时、
-  // codearts 约 2 小时、raccoon 3 小时）的凭据在宿主关闭期间早就到期了，
-  // 于是重启后**最长 30 分钟**一直显示「已过期」、积分行一直 401。
-  // 现在这一轮与 lead-time 过滤配合（`src/expiry-sync.ts` 的 `shouldRefreshNow`），
-  // 只对「距过期不足 1 小时」的账号发续期请求，其余只做一次本地对账 ——
-  // 既补上了首轮，又不会在启动时打出几十个无谓请求。
+  // 先注册周期任务：空池之后新增账号、首轮存储暂时失败，都仍能自动续期。
+  // 各渠道内部按凭据和 lead-time 过滤；停用账号只影响选号，不影响续期。
+  const refreshTimer = setInterval(() => void refreshAllCredentials(), REFRESH_INTERVAL_MS)
+  refreshTimer.unref?.()
+  ctx.effect(() => () => {
+    clearInterval(refreshTimer)
+    service.stop()
+    buddy.stop()
+    workbuddy.stop()
+    lobsterai.stop()
+    qoder.stop()
+    qoderCn.stop()
+    trae.stop()
+    cline.stop()
+    loomy.stop()
+    zcode.stop()
+    zcodeAdapter.stop()
+  }, 'channel-pack: multi-account refresh scheduler')
+
+  // 已有账号立即检查，避免重启后带着过期令牌等待第一个周期。
   pool.listAllAccounts().then(accounts => {
-    if (accounts.length === 0) return
-    void refreshAllCredentials()
-    const refreshTimer = setInterval(() => void refreshAllCredentials(), REFRESH_INTERVAL_MS)
-    refreshTimer.unref?.()
-    ctx.effect(() => () => {
-      clearInterval(refreshTimer)
-      service.stop()
-      buddy.stop()
-      workbuddy.stop()
-      lobsterai.stop()
-      qoder.stop()
-      qoderCn.stop()
-      trae.stop()
-      cline.stop()
-      loomy.stop()
-      zcode.stop()
-      // ⚠ 必须 dispose captcha 浏览器 —— 否则会留下孤儿 chromium
-      //（约 200-400MB，且用户没有界面能关掉它）。
-      zcodeAdapter.stop()
-    }, 'channel-pack: multi-account refresh scheduler')
+    if (accounts.length > 0) return refreshAllCredentials()
   }).catch((error: unknown) => {
-    // ⚠️ 原来这个 `.then()` **没有** `.catch()`：`listAllAccounts()` 一旦 reject
-    // （存储层异常），续期定时器就**永远不武装**，且日志里一个字都没有 ——
-    // 那时上面的「最长 30 分钟」会恶化成「永不自愈」。
     ctx.logger?.warn?.(
-      `[channel-pack] 多账号续期调度器启动失败（本次会话不会自动续期）：`
+      `[channel-pack] 首轮账号续期检查失败，将在后续周期重试：`
       + `${error instanceof Error ? error.message : String(error)}`,
     )
   })

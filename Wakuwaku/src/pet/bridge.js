@@ -235,6 +235,8 @@
     onStart: on('taskbar:start'),
     settings: {
       get: () => invoke('settings_get'),
+      focus: active => invoke('settings_focus', { active: active === true }),
+      fullscreenAnswer: (id, cancel) => invoke('settings_fullscreen_answer', { id, cancel: cancel === true }),
       set: patch => invoke('settings_set', { patch }),
       showPet: on => invoke('settings_show_pet', { on: on === true }),
       login: on => invoke('settings_login', { on: on === true }),
@@ -288,6 +290,7 @@
       save: (account, password) => invoke('mail_save', { account, password: String(password || '') }),
       remove: id => invoke('mail_remove', { id: String(id) }),
       switch: (id, on) => invoke('mail_switch', { id: String(id), on: on === true }),
+      readAll: id => invoke('mail_read_all', { id: String(id) }),
       letters: (id, count, filter) => invoke('mail_letters', { id: String(id), count: Number(count) || 50, filter: String(filter || 'all') }),
       flag: (id, uid, on, folder) => invoke('mail_flag', { id: String(id), uid: Number(uid), on: on === true, folder: String(folder || 'inbox') }),
       say: (key, text) => invoke('mail_say', { key: String(key), text: String(text || '') }),

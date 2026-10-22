@@ -54,6 +54,7 @@ const result = await esbuild.build({
   bundle: true,
   format: 'esm',
   platform: 'node',
+  nodePaths: (process.env.NODE_PATH ?? '').split(path.delimiter).filter(Boolean),
   target: ['node22'],
   // The kernel's own modules must resolve at run time, to the host's copies.
   external: ['@deepseek-ai/*', 'node:*'],

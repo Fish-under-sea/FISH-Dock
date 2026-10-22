@@ -1,137 +1,143 @@
-<div align="center">
-<p>
-<a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark.png"><img src="assets/readme/key-zh-zh-light.png" width="74" alt="中文"></picture></a>
-<a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark.png"><img src="assets/readme/key-en-zh-light.png" width="108" alt="English"></picture></a>
-<a href="#开始使用"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-zh-dark.png"><img src="assets/readme/key-start-zh-light.png" width="126" alt="入门指南"></picture></a>
-</p>
-<h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark.png"><img src="assets/readme/hero-zh-light.png" width="1440" alt="FISH Dock：AI 会话有处停靠，模型连接集中管理。原图标与用户指定透明挂件。"></picture></h1>
-<p>
-<a href="Wakuwaku/docs/release-1.0.1.md"><strong>v1.0.1</strong></a>
-<a href="#开始使用"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" width="23%" alt="任务栏与灵动岛两种停靠模式"></picture></a>
-<a href="#局域网访问"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-lan-zh-dark.png"><img src="assets/readme/stat-lan-zh-light.png" width="23%" alt="LAN 仅推理 API，默认关闭"></picture></a>
-<a href="#配置与凭据迁移"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-backup-zh-dark.png"><img src="assets/readme/stat-backup-zh-light.png" width="23%" alt="OFM ZIP 迁移备份含明文凭据"></picture></a>
-</p>
-<p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" width="168" alt="下载与 Releases，未发布时无安装包"></picture></a>
-<a href="Wakuwaku/docs/release-1.0.1.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" width="112" alt="更新记录"></picture></a>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" width="160" alt="问题反馈"></picture></a>
-</p>
-</div>
+<p align="center"><img src="Wakuwaku/src-tauri/icons/dsh-fish.png" width="104" alt="FISH Dock"></p>
+<h1 align="center">FISH Dock</h1>
+<p align="center">把 AI 会话、模型渠道和桌面工具收进一个工作台。</p>
+<p align="center"><strong>v1.0.2</strong> · Windows 10/11 x64 · Rust / Tauri / Node.js / React</p>
+<p align="center"><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2">下载安装包</a> · <a href="Wakuwaku/docs/release-1.0.2.md">更新记录</a> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈问题</a></p>
 
-FISH Dock **1.0.1** · Windows x64 · MIT 代码许可。README 排版与素材来源见 [说明](assets/readme/SOURCES.md)。
+> **Meoo 目前仅属于灰度测试，暂时不可使用。** 本版保留实验入口和相关源码，不代表已开放登录、项目绑定或模型调用。请使用其他渠道，后续可用状态以本仓库公告为准。
 
-> **这是二次开发集成，不是上游官方发行版。** FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 的桌面与 AI 会话体验，集成 [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的模型渠道与 API 工作台。桌面核心与模型服务核心来自上游，原作者、版权和许可证见「来源与致谢」。
+FISH Dock 将任务栏、灵动岛、AI 会话状态、邮件和模型服务放在同一个桌面入口。仓库包含 **完整 Dock 与内置 OFM 源码**，服务端、React 前端、渠道适配、测试和安装脚本均在同一仓库维护。
 
-## 一个工作台，两组能力
+## 能做什么
 
-| 桌面停靠，来自 Wakuwaku | 模型接入，来自 OFM |
+| 桌面工作台 | 内置模型工作台（OFM） |
 | --- | --- |
-| 任务栏、灵动岛、宠物与 AI 会话状态 | 账号渠道、模型清单与 OpenAI 兼容 API |
-| Agent 接入、插件、邮件与桌面组件 | 调用用量、本机 API Key 与独立 LAN Key |
-| 保存模式、位置与屏幕，每次启动播放入场 | 按需启动独立服务，退出时回收自己的进程 |
+| 任务栏与灵动岛、桌面宠物、Agent 会话状态 | 多渠道账号池、模型清单、用量与请求日志 |
+| 邮件聚合、筛选和一键全部已读 | OpenAI 兼容 API、本机密钥、可选局域网推理 |
+| 模型页锁定及置顶、其他应用全屏时提示 | 积分领取、余额刷新、凭据续期与故障诊断 |
+| 身份管理、导入导出、更新后沿用原数据 | 统一厂商卡片、账号及模型折叠区、渠道备份 |
 
-**「本地」不等于本机离线推理。** 工作台、代理和数据在本机运行；模型请求仍发送到所选渠道的服务商。资格、额度、计费和可用性由服务商决定。本项目不承诺永久免费、无限额度或绕过服务限制。
+工作台与代理服务在本机运行，模型请求发送到所选服务商；安装包不含模型权重。渠道资格、额度、支持模型及实际可用性由服务商决定。
 
-## 1.0.1 更新
+## v1.0.2 更新
 
-- **统一身份目录**：OFM 账号、密钥、用量与邮件身份保存到 `%USERPROFILE%\.fish-dock`。旧资料复制并校验后保留原件；已有新目录不自动合并。
-- **完整身份 ZIP**：支持导入预览、二次确认、可编辑的系统「下载」默认位置及替换前恢复副本。邮件密码在本机由当前用户 DPAPI 加密，导入时重新加密；OFM 专项包不影响邮件。
-- **硬件监控安装**：提权前显示并聚焦普通桌面设置窗口，结束后恢复置顶策略，新增托盘入口和超时结果提示；不覆盖 Windows 安全桌面。
-- **选择性接入 OFM 2.5.7**：CodeArts 专用签名传输、严格测速与结果持久化。
-- **兼容保留**：原图标、桌面布局、启动动画和仅推理的 LAN 功能保持；不引入广告，不启用上游更新器与崩溃上传。
+- **WorkBuddy 恢复**：透明验证区分鉴权与暂时故障，429、超时、5xx 不再持久锁停；保留诊断和手动恢复入口。
+- **邮件全部已读**：支持当前邮箱和聚合邮箱，分批确认、保留星标；窄窗口下筛选仍可见，操作有忙态与结果反馈。
+- **窗口行为**：进入 OFM 默认锁定并置顶，关闭或离开顶级标签时解除。其他应用全屏时可选择保持，或取消两者；已关置顶但仍锁定时，连续全屏 2 秒后解除锁定。
+- **账号与余额**：查询前按账号续期，并发请求合并，故障按账号隔离；新增账号也进入续期调度。
+- **每日积分**：商汤增加「一键领取」，总览按厂商折叠核验今日到账与当前余额。实际金额以账单或领取回执为准，证据不足显示待确认。
+- **界面统一**：14 个渠道入口统一图标、卡片和「添加账号」文案，保留各渠道已有功能；Qoder 明确区分国际版和国内版。
+- **品牌与源码**：使用指定立绘图标，同步完整 Dock / OFM 源码和构建入口。
 
-准确来源与验证边界见 [1.0.1 更新记录](Wakuwaku/docs/release-1.0.1.md)。验证使用本机替身；未执行真实账号联调。
+Meoo 相关界面及授权流程属于实验代码，**本版暂不可使用**。完整变化与验证范围见 [版本说明](Wakuwaku/docs/release-1.0.2.md)。
 
 ## 安装与更新
 
-适用平台：**Windows 10/11 x64**。系统任务栏集成主要面向 Windows 11；其他系统版本与第三方任务栏软件组合需要单独验证。
+1. 从 [v1.0.2 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2) 下载 `FISH-Dock-Setup-1.0.2.exe` 和同名 SHA-256 文件。
+2. 从托盘正常退出旧 FISH Dock，同时退出单独运行的 OFM。
+3. 运行安装器，沿用原安装目录直接更新，无需先卸载。新安装默认位于 `%LOCALAPPDATA%\Programs\FISH Dock`。
+4. 启动后核对原渠道账号、API Key 和邮件身份，再使用新功能。
 
-1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases) 下载 `FISH-Dock-Setup-1.0.1.exe`，核对随包提供的 SHA-256。未发布 Release 时不会凭空出现下载文件。
-2. 从托盘完全退出旧版，再运行安装器并选择目录。新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock`；已有安装沿用登记目录覆盖升级，不自动搬迁。
-3. 通过桌面或开始菜单启动 **FISH Dock**。完整 Node.js、固定版 WebView2、模型服务和许可随包安装，无需另装运行时。
-4. 首次启动需要确认运行时许可并校验资源；后续使用安装目录中的文件，不重复解压整套依赖。
+安装包包含 Node.js、固定版 WebView2 和 OFM 服务，无需另外安装这些运行时。首次启动校验资源并确认运行时许可，后续直接使用安装目录内资源。安装器尚未进行 Authenticode 签名，Windows 可能显示未知发布者提示。
 
-**安装器尚未进行 Authenticode 代码签名。** Windows 可能提示未知发布者或 SmartScreen。改名、换图标、自签名都不能可靠消除信誉提示。仅使用可信来源，核对摘要，不要关闭系统防护、导入不明根证书或绕过组织策略。通常不要求以管理员身份运行。
+校验下载文件：
 
-若出现 `Error writing temporary file. Make sure your temp folder is valid.`，这是 NSIS 执行安装脚本之前的临时目录错误，应检查临时目录、权限、磁盘空间和安全软件日志。覆盖安装出现 DLL 写入失败时，先确认旧版与其子进程已退出，不要忽略写入错误。
+```powershell
+Get-FileHash .\FISH-Dock-Setup-1.0.2.exe -Algorithm SHA256
+```
+
+请与 Release 附带的 `.exe.sha256` 比对。若覆盖安装提示文件占用，先确认旧程序及其子进程已退出。
 
 ## 开始使用
 
-**桌面**：首次默认任务栏；通过设置或托盘切换任务栏／灵动岛、边缘和左中右位置。退出重启保留选择，保存的显示器不可用时回退主屏。减少动态效果时使用短淡入。
+**桌面**：在设置或托盘切换任务栏／灵动岛、边缘、位置和显示器。保存的显示器不可用时回退主屏。
 
-**模型**：打开设置中的「本地模型」，添加有权使用的渠道，然后从「API 接入」复制本机地址与密钥。常见地址如下，实际端口以页面为准：
+**模型**：打开「本地模型」，为可用渠道添加账号，在「API 接入」查看本机地址与密钥，然后配置兼容客户端。常见地址如下，实际端口以页面为准：
 
 ```text
 http://127.0.0.1:18901/v1
 ```
 
-Agent、邮件和第三方插件仍需要各自客户端、账号和权限；安装 FISH Dock 不会授予这些服务的使用资格。第三方登录、下载和图库链接保留真实来源。
+**邮件**：「全部已读」会修改服务器端已读状态。批量操作按固定未读快照执行，新到邮件不并入此前批次；部分失败会报告已经确认的数量。
 
-### 局域网访问
+**每日积分**：商汤先查当日账单，未确认时续期并复查；只有实际到账才显示成功。某些账号仍需在官网完成当日登录，不保证仅续期就触发发放。
 
-1. 打开 OFM「API 接入 → 局域网访问」，在可信网络中启用开关。
-2. 复制页面列出的当前设备地址和 **局域网 API Key**。远端客户端不能使用 `127.0.0.1`，也不能使用本机 API Key 代替 LAN Key。
-3. 在另一设备配置 OpenAI 兼容客户端。轮换 LAN Key 后旧 Key 立即失效，需同步更新客户端。
-4. 不用时关闭开关。地址不可用、端口被占用或网卡变化时，关闭后重新开启以重新绑定；只有成功绑定的地址才会显示。
+### 局域网推理
 
-管理页面仍仅允许本机访问。网络传输为 HTTP，只用于受信任的局域网；不要映射公网。程序不自动创建防火墙规则，也不承诺手机或另一台电脑一定可达，需检查网络隔离及系统规则。相同端口号不等于把本机管理监听开放到所有地址。
+在「API 接入 → 局域网访问」中开启，复制设备地址和独立 LAN Key 到另一设备。LAN 默认关闭，仅开放推理接口，管理页和备份仍限本机。程序不自动添加防火墙规则；网络为 HTTP，适用于受信任局域网。轮换密钥后需同步更新客户端。
 
-### 配置与凭据迁移
+### 身份与备份
 
-在 OFM「服务设置 → OFM 迁移备份」确认后，可下载 **OFM 专项 ZIP**。它包含 OFM 配置、账号索引及关联凭据、现有 EAC 授权，不含邮件身份或调用统计。ZIP 未加密，可能包含账号 Token、本机 API Key 和 LAN Key，应像密码文件一样保管。
+完整迁移使用 Dock「通用 → 身份与备份」的完整身份 ZIP，可预览导入内容，并在替换前保留恢复副本。OFM「服务设置」中的迁移包仅包含 OFM，不替换邮件身份。
 
-完整迁移请从 FISH Dock「通用 → 身份与备份」导出 **完整身份 ZIP**。它包含 OFM 用量与 Token 账本、邮件账号和密码；密码仅在本机静态保存时使用当前 Windows 用户 DPAPI 加密，ZIP 内为明文。导出前会显示系统「下载」目录，路径可以编辑，保存时还可另选位置。不要上传任何备份 ZIP。
+ZIP 可能包含明文账号令牌和密钥，请按密码文件保管。邮件密码在本机静态保存时使用当前 Windows 用户 DPAPI 加密。
 
-导入前先退出独立 OFM；保持 FISH Dock 打开，在「身份与备份」选择 ZIP 并检查预览。程序会暂停自己的模型服务和邮件同步。完整身份包会替换白名单中的 OFM 与邮件文件，并保留替换前副本；旧版 OFM 专项包只替换 OFM 文件，邮件保持不变。导入需要再次确认；启动失败时程序会尝试回滚。旧 `%USERPROFILE%\.dsh-fish` 会迁移到 `%USERPROFILE%\.fish-dock`，原目录保留，不自动合并；两者同时存在时以新目录为准。详见 ZIP 内固定的 `README.md`。
-
-## 数据与卸载
-
-| 内容 | 位置 |
+| 数据 | 默认位置 |
 | --- | --- |
-| 主程序和内置依赖 | 用户选择的安装目录，新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock` |
-| 设置、宠物、布局与日志 | `%LOCALAPPDATA%\DSH-FISH\data` |
-| WebView2 用户数据 | `%LOCALAPPDATA%\DSH-FISH\webview` |
-| 许可确认及资源校验状态 | `%LOCALAPPDATA%\DSH-FISH\state` |
 | OFM 账号、密钥、用量与邮件身份 | `%USERPROFILE%\.fish-dock` |
+| Dock 设置、布局、日志 | `%LOCALAPPDATA%\DSH-FISH\data` |
+| WebView2 数据 | `%LOCALAPPDATA%\DSH-FISH\webview` |
+| 许可和资源校验状态 | `%LOCALAPPDATA%\DSH-FISH\state` |
 
-内部程序名 `DSH-FISH.exe`、应用标识、卸载登记和旧数据路径保留兼容，不代表显示名称未更新。卸载只移除自身安装文件与登记，保留用户数据；只清理确认属于本安装的自启动任务。手动删除数据前应先备份。
+保留 `FISH_DOCK_DATA`、旧 `DSH_FISH_DATA` 覆盖值。旧 `.dsh-fish` 仅在新目录缺失时复制校验，原件保留；两者同时存在时不自动合并。更新沿用账号 ID、credentialRef 和密钥索引；卸载保留用户数据。
+
+## 源码结构
+
+```text
+FISH-Dock/
+├─ Wakuwaku/                 # Rust / Tauri 桌面、邮件、身份、窗口、安装器
+├─ dsh-our-free-model/        # 完整 OFM 服务、React 前端、渠道、测试及构建脚本
+├─ tools/                    # 公开源码配置与文档检查
+├─ SOURCE.md                 # 集成范围和发布说明
+└─ UPSTREAM.json             # 上游版本、提交及许可来源
+```
+
+没有 Git 子模块或指向本机目录的源码链接。运行数据、真实账号、密钥、开发依赖缓存和安装二进制不放入 Git；安装包见 Releases。
 
 ## 从源码构建
 
-### Gemini OAuth 客户端配置
-
-公开源码已移除上游内嵌的 Google OAuth 客户端 ID 和 Secret。使用 Gemini OAuth 前，请自行注册并配置 `CMDC_PAK_GOOGLE_CLIENT_ID` 与 `CMDC_PAK_GOOGLE_CLIENT_SECRET`，然后在相同环境中启动程序；不配置时无法完成该渠道的 OAuth 授权。不要把真实值写入源码、提交记录或工单。1.0.1 源码和本次重建的安装包均沿用这项约束；不包含真实 OAuth 客户端秘密。
-
-桌面使用 **Rust + Tauri 2 + HTML/CSS/JavaScript**，模型管理使用 **Node.js + React**，安装器使用 **NSIS 3**。需要 Windows x64、MSVC/Rust、Node.js、NSIS，以及锁定的官方运行时下载件。离线构建要求依赖已缓存，不能忽略锁文件。
-
-```text
-FISH本地模型工作台/
-  Wakuwaku/              # 桌面源码与此 README
-  dsh-our-free-model/     # 集成的服务源码与上游许可
-```
-
-先在 `dsh-our-free-model/packages/standalone` 执行 `npm ci`，再在模型服务根目录执行 `node scripts/build-standalone-ui.mjs`。然后在桌面源码目录执行：
+需要 Windows x64、Rust / MSVC、Node.js 22.19+ 或 24+、NSIS 3。官方运行时版本和摘要锁定在 [runtime-sources.json](Wakuwaku/scripts/runtime-sources.json)。先将其中列出的 Node、WebView2 和许可文件下载到本机缓存目录；离线构建还需先缓存 Cargo 依赖。
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <运行时缓存> --source ../dsh-our-free-model --out <新的资源目录> --version 1.0.1
-cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
-node --test "test/*.test.js" "scripts/*.test.mjs"
-./scripts/build-installer.ps1 -Resources <资源目录> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
+git clone https://github.com/Fish-under-sea/FISH-Dock.git
+Set-Location FISH-Dock
+npm --prefix dsh-our-free-model/packages/standalone ci
+node dsh-our-free-model/scripts/build-standalone-ui.mjs
+
+# 新建安装资源目录：完整打入本仓库的 OFM 服务
+node Wakuwaku/scripts/prepare-installer.mjs --downloads C:/build/runtime-cache --source dsh-our-free-model --out C:/build/fish-resources-102 --version 1.0.2
+
+# 首次联网解析并缓存锁定依赖；后续可使用 --offline
+cargo fetch --locked --manifest-path Wakuwaku/src-tauri/Cargo.toml
+./Wakuwaku/scripts/build-installer.ps1 -Resources C:/build/fish-resources-102 -Node (Get-Command node).Source -Cargo (Get-Command cargo).Source -Makensis 'C:/Program Files (x86)/NSIS/makensis.exe' -Output C:/build/FISH-Dock-Setup-1.0.2.exe
 ```
 
-版本和官方摘要锁定在 [runtime-sources.json](Wakuwaku/scripts/runtime-sources.json)。测试证据、环境限制和历史包见 [安装版构建记录](Wakuwaku/docs/installer-build.md)。安装包不是模型权重包，也不包含开发工具链。
+已提交构建后的管理页面，直接打包使用仓库版本；修改前端时请先重建。渠道包修改需按 OFM 自带构建脚本生成对应产物。
+
+### Gemini OAuth 配置
+
+公开源码和此 Release 不携带 Google OAuth 默认客户端参数。使用该渠道前自行配置 `CMDC_PAK_GOOGLE_CLIENT_ID` 和 `CMDC_PAK_GOOGLE_CLIENT_SECRET`，并在相同环境中启动服务；其他渠道不依赖这两项配置。不要把实际值写入 Git 或问题反馈。
+
+### 检查与验证
+
+```powershell
+node tools/check-readme.mjs
+node --test tools/oauth-publication.test.mjs
+node --test Wakuwaku/test/settings-focus.test.js Wakuwaku/test/mail-read-all.test.js Wakuwaku/scripts/branding.test.mjs
+node dsh-our-free-model/scripts/workbuddy-validation-test.mjs
+node dsh-our-free-model/scripts/meoo-test.mjs
+node dsh-our-free-model/scripts/raccoon-daily-test.mjs
+cargo test --locked --offline --features installed --manifest-path Wakuwaku/src-tauri/Cargo.toml model_focus -- --test-threads=1
+```
+
+自动化覆盖协议、状态机、隔离 RPC 及浏览器渲染。真实 Windows 全屏行为、邮箱服务器、服务商账号授权和跨日到账仍需实机验证；测试通过不代表所有渠道随时可用。具体结果见 [版本说明](Wakuwaku/docs/release-1.0.2.md)。
 
 ## 来源与致谢
 
-| 项目 | 原作者／维护者 | 保留的核心能力 | 许可 |
-| --- | --- | --- | --- |
-| [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) | Pengjie Zhou / zhoupengjie | 任务栏、灵动岛、宠物、会话与桌面功能 | [MIT](Wakuwaku/LICENSE)，Copyright 2026 Pengjie Zhou |
-| [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) | Ebony-Vinyl 及贡献者 | 模型渠道、账号、用量与兼容 API | MIT，Copyright 2026 Ebony-Vinyl；发行包保留其 LICENSE 和第三方声明 |
+FISH Dock 是基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 和 [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的集成与二次开发，由 [Fish-under-sea](https://github.com/Fish-under-sea) 维护。
 
-**Fish-under-sea** 负责 FISH Dock 集成与维护。新增集成代码使用 MIT，上游版权声明原样保留。不能将全部功能描述为 FISH Dock 原创，也不应让上游维护者承担本发行版的支持责任。
+- **Wakuwaku**：Pengjie Zhou / zhoupengjie，桌面、会话及桌面组件核心；[MIT](Wakuwaku/LICENSE)。
+- **OFM**：Ebony-Vinyl 及贡献者，模型渠道与服务核心；[MIT](dsh-our-free-model/LICENSE)。
+- Node.js、WebView2、fflate 及各组件保留原有许可。角色、宠物和厂商图标不自动适用源码 MIT 许可；Claude 小姐原设计来自 ZipZipPipe，像素二创来自 zhoupengjie。
 
-应用沿用用户提供的蓝发角色原图标，未重新绘制，也不宣称其为原创 MIT 素材。宠物精灵图、应用图标和图库资源不自动适用源码的 MIT 许可；再分发前应核实素材授权。Claude 小姐原角色设计来自 **ZipZipPipe**，像素二创来自 **zhoupengjie**。Node.js、WebView2、fflate 及其他第三方组件保留各自许可。
-
-## 反馈与安全
-
-在 [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues) 提供系统与应用版本、停靠模式、复现步骤和脱敏日志。不要上传真实密钥、完整 Cookies、私人邮件或备份 ZIP。漏洞报告也不要公开附上可用凭据。本仓库的准备不等于已创建 Release，本地构建不会自动发布或推送。
+集成范围见 [SOURCE.md](SOURCE.md) 和 [UPSTREAM.json](UPSTREAM.json)。反馈请到 [Issues](https://github.com/Fish-under-sea/FISH-Dock/issues)，附版本、复现步骤与脱敏日志。

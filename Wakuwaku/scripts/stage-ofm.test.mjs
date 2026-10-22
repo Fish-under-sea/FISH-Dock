@@ -8,9 +8,12 @@ import test from 'node:test'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const ofm = path.resolve(root, '../dsh-our-free-model')
-const required = ['packages/standalone/backup.mjs', 'packages/standalone/backup-readme.md', 'packages/standalone/vendor/fflate/fflate.mjs', 'packages/standalone/vendor/fflate/LICENSE']
+const required = ['packages/standalone/backup.mjs', 'packages/standalone/backup-readme.txt', 'packages/standalone/vendor/fflate/fflate.mjs', 'packages/standalone/vendor/fflate/LICENSE',
+  'packages/standalone/service.mjs', 'packages/standalone/management.mjs', 'packages/standalone/channels/worker.mjs',
+  'packages/standalone/channels/validation.mjs', 'packages/standalone/channels/meoo.mjs', 'packages/standalone/channels/raccoon-daily.mjs',
+  'packages/standalone/channels/business.mjs', 'packages/standalone/web/app.js', 'packages/standalone/web/app.css', 'packages/standalone/web/assets.json']
 
-test('两套桌面打包入口都包含 ZIP 备份及其许可，打包后的服务可以导入', async () => {
+test('两套桌面打包入口包含新增渠道与验证修复，资源逐字节一致且服务可以导入', async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'fish-stage-regression-'))
   try {
     const integrated = path.join(temporary, 'integrated')
@@ -21,7 +24,12 @@ test('两套桌面打包入口都包含 ZIP 备份及其许可，打包后的服
     const upstream = path.join(temporary, 'upstream')
     stageDesktopService(upstream)
     for (const destination of [integrated, upstream]) {
-      for (const relative of required) assert.ok(fs.statSync(path.join(destination, relative)).isFile(), relative)
+      for (const relative of required) {
+        assert.ok(fs.statSync(path.join(destination, relative)).isFile(), relative)
+        assert.deepEqual(fs.readFileSync(path.join(destination, relative)), fs.readFileSync(path.join(ofm, relative)), relative)
+      }
+      const assets = JSON.parse(fs.readFileSync(path.join(destination, 'packages/standalone/web/assets.json'), 'utf8'))
+      for (const name of assets) assert.deepEqual(fs.readFileSync(path.join(destination, 'packages/standalone/web', name)), fs.readFileSync(path.join(ofm, 'packages/standalone/web', name)), name)
       const service = await import(pathToFileURL(path.join(destination, 'packages/standalone/service.mjs')))
       assert.equal(typeof service.startStandalone, 'function')
     }

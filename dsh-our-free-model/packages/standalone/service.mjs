@@ -261,7 +261,7 @@ export async function startStandalone({
       sealedCredential: eac.credential,
     })
     channels = await createChannelRuntime({ dataDir, logger, stats: stores.stats })
-    const workbuddyValidation = createWorkBuddyValidation({ settings, complete: (request, onChunk) => channels.complete(request, onChunk) })
+    const workbuddyValidation = createWorkBuddyValidation({ settings, complete: (request, onChunk) => channels.complete(request, onChunk), log: message => logger.warn?.(message) })
     const core = runtime
     runtime = {
       ...core,

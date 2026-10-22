@@ -1,67 +1,101 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import { createWorkBuddyValidation } from '../packages/standalone/channels/validation.mjs'
-import { createRuntimeStores } from '../src/core/runtime.js'
 
-const request = { model: 'workbuddy/deepseek-v4.1-flash', openAi: { messages: [{ role: 'system', content: 'User identity: DeepSeek Harness.' }, { role: 'user', content: 'PRIVATE_PROMPT' }] } }
-const fixture = () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-validation-'))
-  const stores = createRuntimeStores({ dataDir: dir, logger: { warn() {} } })
-  return { ...stores, dir, close() { stores.dispose(); if (!fs.realpathSync(dir).startsWith(fs.realpathSync(os.tmpdir()) + path.sep)) throw Error('unexpected fixture'); fs.rmSync(dir, { recursive: true, force: true }) } }
+const moduleArgument = process.argv.find(value => value.startsWith('--module='))
+const { createWorkBuddyValidation } = await import(moduleArgument?.slice(9) ?? '../packages/standalone/channels/validation.mjs')
+const request = () => ({ model: 'workbuddy/example', openAi: { messages: [{ role: 'user', content: 'OK' }] } })
+function store(initial = {}) {
+  let value = { workbuddyValidationEnabled: true, ...initial }
+  return { get: () => value, update: patch => { value = { ...value, ...patch } }, flush() {}, writeFailed: false }
 }
 
-test('开启后的成功调用保持请求原样，诊断只记录本地关联号和状态', async () => {
-  const f = fixture()
-  try {
-    f.settings.update({ workbuddyValidationEnabled: true })
+for (const status of [408, 429, 500, 502, 503, 504]) {
+  test(`HTTP ${status} 不永久锁停，后续请求可恢复`, async () => {
+    const settings = store()
     let calls = 0
-    const guard = createWorkBuddyValidation({ settings: f.settings, complete: async value => { calls++; assert.strictEqual(value, request); return { text: 'PRIVATE_REPLY' } } })
-    await guard.complete(request)
-    assert.equal(calls, 1)
-    const state = guard.state()
-    assert.equal(state.enabled, true); assert.equal(state.stopped, false)
-    assert.equal(state.last.status, 200); assert.match(state.last.requestId, /^[\da-f-]{36}$/)
-    assert.ok(state.last.durationMs >= 0)
-    assert.doesNotMatch(JSON.stringify(state), /PRIVATE|User identity|Harness/)
-  } finally { f.close() }
+    const validation = createWorkBuddyValidation({ settings, complete: async () => {
+      if (++calls === 1) throw Object.assign(new Error('temporary'), { statusCode: status, code: 'UPSTREAM' })
+      return { text: 'OK' }
+    } })
+    await assert.rejects(validation.complete(request()), error => error.statusCode === status)
+    assert.equal(validation.state().stopped, false)
+    assert.equal(settings.get().workbuddyValidationStopped, false)
+    assert.deepEqual(await validation.complete(request()), { text: 'OK' })
+    assert.equal(calls, 2)
+  })
+}
+
+test('旧版 429 锁停在启动时迁移，保留历史诊断', async () => {
+  const last = { status: 429, requestId: 'old', at: '2026-10-22T00:00:00.000Z' }
+  const settings = store({ workbuddyValidationStopped: true, workbuddyValidationLast: last })
+  const validation = createWorkBuddyValidation({ settings, complete: async () => ({ text: 'OK' }) })
+  assert.equal(validation.state().stopped, false)
+  assert.deepEqual(validation.state().last, last)
+  assert.equal((await validation.complete(request())).text, 'OK')
 })
 
-test('遇到拒绝立即锁停，重复调用和重启均不再发送，错误不泄漏响应正文', async () => {
-  const f = fixture()
-  try {
-    f.settings.update({ workbuddyValidationEnabled: true })
+for (const status of [401, 403]) {
+  test(`HTTP ${status} 保留鉴权锁停，显式关闭后重新开启可恢复`, async () => {
+    const settings = store()
     let calls = 0
-    const fail = async () => { calls++; throw Object.assign(new Error('PRIVATE_PROMPT PRIVATE_REPLY'), { statusCode: 403 }) }
-    const guard = createWorkBuddyValidation({ settings: f.settings, complete: fail })
-    await assert.rejects(guard.complete(request), error => error.statusCode === 403 && !/PRIVATE/.test(error.message))
-    await assert.rejects(guard.complete(request), /已停止/)
+    const validation = createWorkBuddyValidation({ settings, complete: async () => {
+      if (++calls === 1) throw Object.assign(new Error('authentication'), { statusCode: status })
+      return { text: 'OK' }
+    } })
+    await assert.rejects(validation.complete(request()))
+    assert.equal(validation.state().stopped, true)
+    await assert.rejects(validation.complete(request()), error => error.statusCode === 409)
     assert.equal(calls, 1)
-    assert.equal(guard.state().stopped, true)
-    const restarted = createWorkBuddyValidation({ settings: f.settings, complete: fail })
-    await assert.rejects(restarted.complete(request), /已停止/)
-    assert.equal(calls, 1)
-    assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'settings.json'), 'utf8')).workbuddyValidationStopped, true)
-  } finally { f.close() }
+    settings.update({ workbuddyValidationEnabled: false }); validation.settingsChanged()
+    settings.update({ workbuddyValidationEnabled: true, workbuddyValidationStopped: false }); validation.settingsChanged()
+    assert.equal((await validation.complete(request())).text, 'OK')
+  })
+}
+
+test('取消保留原始异常，不写入账号锁停', async () => {
+  const cancelled = new DOMException('cancelled', 'AbortError')
+  const settings = store()
+  const validation = createWorkBuddyValidation({ settings, complete: async () => { throw cancelled } })
+  await assert.rejects(validation.complete(request()), error => error === cancelled)
+  assert.equal(validation.state().stopped, false)
 })
 
-test('验证中的并行请求不发出，开关关闭和其他渠道保持原有流程', async () => {
-  const f = fixture()
-  try {
-    f.settings.update({ workbuddyValidationEnabled: true })
-    let finish, calls = 0
-    const guard = createWorkBuddyValidation({ settings: f.settings, complete: async () => { calls++; return new Promise(resolve => { finish = resolve; setTimeout(() => resolve({ text: 'OK' }), 200) }) } })
-    const first = guard.complete(request)
-    await assert.rejects(guard.complete(request), error => error.statusCode === 429)
-    assert.equal(calls, 1)
-    finish({ text: 'OK' }); await first
-    let raw = 0
-    const ordinary = createWorkBuddyValidation({ settings: f.settings, complete: async () => { raw++; return { text: 'OK' } } })
-    await ordinary.complete({ model: 'buddy/fixture' })
-    f.settings.update({ workbuddyValidationEnabled: false, workbuddyValidationStopped: true })
-    await ordinary.complete(request)
-    assert.equal(raw, 2)
-  } finally { f.close() }
+test('诊断落盘失败不把已成功的推理改成失败', async () => {
+  const settings = store()
+  settings.writeFailed = true
+  const validation = createWorkBuddyValidation({ settings, complete: async () => ({ text: 'OK' }) })
+  assert.equal((await validation.complete(request())).text, 'OK')
+  assert.equal(validation.state().stopped, false)
+})
+
+test('非 WorkBuddy 与关闭验证时原样传递请求和回调', async () => {
+  const settings = store({ workbuddyValidationStopped: true })
+  const input = { ...request(), model: 'other/example' }
+  const callback = () => {}
+  const validation = createWorkBuddyValidation({ settings, complete: async (value, onChunk) => {
+    assert.equal(value, input); assert.equal(onChunk, callback)
+    return { text: 'OK' }
+  } })
+  assert.equal((await validation.complete(input, callback)).text, 'OK')
+})
+
+test('流内错误也按真实 HTTP 状态记录，不误认为成功', async () => {
+  const settings = store()
+  const validation = createWorkBuddyValidation({ settings, complete: async () => ({ error: { statusCode: 429, code: 'RATE_LIMIT' } }) })
+  await assert.rejects(validation.complete(request()), error => error.statusCode === 429)
+  assert.equal(validation.state().stopped, false)
+  assert.equal(validation.state().last.status, 429)
+})
+
+test('重复验证不重复调用上游，忙状态在完成后释放', async () => {
+  const settings = store()
+  let finish
+  let calls = 0
+  const validation = createWorkBuddyValidation({ settings, complete: () => { calls++; return new Promise(resolve => { finish = resolve }) } })
+  const first = validation.complete(request())
+  await assert.rejects(validation.complete(request()), error => error.statusCode === 429)
+  assert.equal(calls, 1)
+  assert.equal(validation.state().stopped, false)
+  finish({ text: 'OK' }); await first
+  assert.equal(validation.state().busy, false)
 })

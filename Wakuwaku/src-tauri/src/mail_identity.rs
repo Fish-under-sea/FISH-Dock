@@ -84,8 +84,10 @@ mod tests {
     use super::*;
     use std::fs;
     fn root() -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("fish-dock-mail-{}-{}", std::process::id(), crate::now_ms()));
-        fs::create_dir_all(&path).unwrap(); path
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let next = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("fish-dock-mail-{}-{}-{next}", std::process::id(), crate::now_ms()));
+        fs::create_dir(&path).unwrap(); path
     }
     fn account(id: &str) -> Value { json!({"id":id,"address":"fixture@example.test","host":"imap.example.test","port":993,"security":"ssl","username":"fixture@example.test","auth":"auto","on":true,"smtp":null,"proxy":null,"name":"合成账号"}) }
     #[test]

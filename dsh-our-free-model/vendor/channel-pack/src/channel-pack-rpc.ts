@@ -1039,6 +1039,7 @@ function registerChannelPackEndpoints(
    * 登录完成后即无意义；写进 `ctx.credentials` 会污染凭据命名空间，
    * 且它不含任何秘密（不能用于认证）。
    */
+  const balanceRefreshes = new Map<string, Promise<void>>()
   const pendingSmsMsgid = new Map<string, { phone: string; msgid: string }>()
 
   /**
@@ -2919,8 +2920,34 @@ function registerChannelPackEndpoints(
       // account.list 是打开面板就会调的轻量操作。混在一起会让账号列表被
       // 网络耗时拖慢，且一次查询失败会让整份列表都取不到。
       case 'credits.balances': {
-        const req = payload as RpcCreditsBalancesRequest
-        const accounts = await pool.listAccounts(req.provider)
+        const req = { ...payload as RpcCreditsBalancesRequest }
+        const original = await pool.listAccounts(req.provider)
+        const accounts: ProviderAccountEntry[] = []
+        const failures = new Map<string, RpcCreditsBalancesResponse['accounts'][number]>()
+        const auths = { codearts, buddy, workbuddy, lobsterai, qoder, qodercn: qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini }
+        const auth = auths[req.provider as keyof typeof auths]
+        for (const entry of original) {
+          try {
+            if (auth && entry.refreshable && typeof entry.expiresAt === 'number' && Number.isFinite(entry.expiresAt) && entry.expiresAt > 0 && entry.expiresAt <= Date.now() + 30_000) {
+              let pending = balanceRefreshes.get(entry.credentialRef)
+              if (!pending) {
+                pending = Promise.resolve().then(() => auth.refreshAccountCredential(entry.credentialRef, pool, entry.id))
+                balanceRefreshes.set(entry.credentialRef, pending)
+              }
+              try { await pending; req.force = true } finally {
+                if (balanceRefreshes.get(entry.credentialRef) === pending) balanceRefreshes.delete(entry.credentialRef)
+              }
+            }
+            accounts.push(entry)
+          } catch (error) {
+            failures.set(entry.id, { accountId: entry.id, nickname: entry.nickname, balance: null,
+              error: error instanceof Error ? error.message : '账号续期暂未完成，请重试' })
+          }
+        }
+        const mergeBalances = (values: RpcCreditsBalancesResponse['accounts']): RpcCreditsBalancesResponse['accounts'] => {
+          const rows = new Map(values.map(row => [row.accountId, row]))
+          return original.flatMap(entry => { const row = failures.get(entry.id) ?? rows.get(entry.id); return row ? [row] : [] })
+        }
         if (req.provider === 'codearts') {
           // 余额来自 `statistics/plugin`（与账户类型检测同一个响应），
           // 故用带原因的钩子：非积分账户要显示「Token 计费账户」而不是
@@ -2950,7 +2977,7 @@ function registerChannelPackEndpoints(
             },
             warn: (msg) => ctx.logger?.warn?.(msg),
           })
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         if (req.provider === LOBSTERAI.id) {
           const values = await collectCreditBalances(accounts, LOBSTERAI, {
@@ -2965,7 +2992,7 @@ function registerChannelPackEndpoints(
           return {
             ok: true,
             value: {
-              accounts: values,
+              accounts: mergeBalances(values),
               windowDays: buddyExpiringWindowDays(),
             } satisfies RpcCreditsBalancesResponse,
           }
@@ -3005,7 +3032,7 @@ function registerChannelPackEndpoints(
               ...balance === null ? { error: '积分查询失败（凭据失效或响应异常）' } : {},
             })
           }
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         if (req.provider === OPENCODE.id) {
           // ⚠️⚠️ **这里不查远端余额**（设计决定，2026-10-02，与用户确认走「限额状态」路 A）。
@@ -3067,7 +3094,7 @@ function registerChannelPackEndpoints(
                   : {}),
             }
           })
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         if (req.provider === TRAE.id) {
           const values = await collectCreditBalances(accounts, TRAE, {
@@ -3084,7 +3111,7 @@ function registerChannelPackEndpoints(
           return {
             ok: true,
             value: {
-              accounts: values,
+              accounts: mergeBalances(values),
               windowDays: buddyExpiringWindowDays(),
             } satisfies RpcCreditsBalancesResponse,
           }
@@ -3103,7 +3130,7 @@ function registerChannelPackEndpoints(
             fetchBalance: (credential) => fetchMinimaxCreditBalance(credential),
             warn: (msg) => ctx.logger?.warn?.(msg),
           })
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         if (req.provider === GEMINI.id) {
           // 余额 = **配额窗口**（不是充值积分）：`POST
@@ -3141,7 +3168,7 @@ function registerChannelPackEndpoints(
             },
             warn: (msg) => ctx.logger?.warn?.(msg),
           })
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         if (req.provider === CLINE.id) {
           // 余额来自 `GET /api/v1/users/{accountId}/balance`（实测
@@ -3184,7 +3211,7 @@ function registerChannelPackEndpoints(
                 : {},
             })
           }
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         if (req.provider === LOOMY.id) {
           // 余额来自 `GET /points/records`（**只读**，无副作用）。
@@ -3219,7 +3246,7 @@ function registerChannelPackEndpoints(
               ...balance === null ? { error: '积分查询失败（凭据失效或响应异常）' } : {},
             })
           }
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         if (req.provider === RACCOON.id) {
           // 余额来自 `GET /points/v1/balance`（**只读**，无副作用）。
@@ -3253,7 +3280,7 @@ function registerChannelPackEndpoints(
               ...balance === null ? { error: '积分查询失败（凭据失效或响应异常）' } : {},
             })
           }
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         if (req.provider === ZCODE.id) {
           /**
@@ -3325,7 +3352,7 @@ function registerChannelPackEndpoints(
               balance: buildZcodeBalance(result),
             })
           }
-          return { ok: true, value: { accounts: values } satisfies RpcCreditsBalancesResponse }
+          return { ok: true, value: { accounts: mergeBalances(values) } satisfies RpcCreditsBalancesResponse }
         }
         const product = productById(req.provider)
         if (product === undefined) {
@@ -3342,7 +3369,7 @@ function registerChannelPackEndpoints(
         return {
           ok: true,
           value: {
-            accounts: values,
+            accounts: mergeBalances(values),
             windowDays: buddyExpiringWindowDays(),
           } satisfies RpcCreditsBalancesResponse,
         }

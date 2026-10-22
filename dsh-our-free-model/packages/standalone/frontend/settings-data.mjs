@@ -7,6 +7,7 @@ export function settingsDraft(settings) {
     hideEacModels: settings.hideEacModels === true,
     streamRecovery: settings.streamRecovery,
     standaloneProbe: settings.standaloneProbe,
+    workbuddyValidationEnabled: settings.workbuddyValidationEnabled === true,
     defaultMaxTokens: String(settings.defaultMaxTokens),
     probeIntervalMinutes: String(settings.probeIntervalMinutes),
   }
@@ -48,6 +49,7 @@ export function validateSettingsDraft(draft) {
       enabled: draft.enabled, exposeRegionModels: draft.exposeRegionModels,
       hideFreeModels: draft.hideFreeModels, hideEacModels: draft.hideEacModels,
       streamRecovery: draft.streamRecovery, standaloneProbe: draft.standaloneProbe,
+      workbuddyValidationEnabled: draft.workbuddyValidationEnabled,
       defaultMaxTokens: Number(draft.defaultMaxTokens), probeIntervalMinutes: Number(draft.probeIntervalMinutes),
     },
   }

@@ -1392,6 +1392,10 @@ pub fn open_settings(sh: &Arc<Shared>, tab: Option<&str>) {
 // (she was hidden, or do not disturb turned on, while they were open).
 pub fn settings_closed(sh: &Arc<Shared>) {
     sh.island.lock().unwrap().settings_open = false;
+    {
+        let mut focus = sh.settings_focus.lock().unwrap();
+        if focus.flags.is_some() { focus.enter(false, std::time::Instant::now()); }
+    }
     sh.log("island: settings closed");
     keep_on_top(sh);
     // Set up once Claude Code or Codex is connected, not as the settings
@@ -1491,7 +1495,8 @@ static WATCHING_TOP: AtomicBool = AtomicBool::new(false);
 pub fn keep_on_top(sh: &Arc<Shared>) {
     let open = sh.island.lock().unwrap().settings_open;
     let (locked, top) = (sh.flag("settingsPin"), sh.flag("settingsTop"));
-    let topmost = !(open && locked && !top);
+    let model_focus = sh.settings_focus.lock().unwrap().active();
+    let topmost = if open && model_focus { locked && top } else { !(open && locked && !top) };
     if TOPMOST.swap(topmost, Ordering::SeqCst) != topmost {
         if let Some(win) = window(sh) {
             let _ = win.set_always_on_top(topmost);

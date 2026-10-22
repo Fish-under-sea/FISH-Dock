@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { installerScript, resourceDirectories, resourceFiles, scriptSource, REQUIRED } from './installer.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const makensis = process.env.FISH_DOCK_MAKENSIS || path.resolve(root, '../../.tools/nsis-3.13/makensis.exe')
+const makensis = path.resolve(root, '../../.tools/nsis-3.13/makensis.exe')
 
 const LISTED = [...REQUIRED, 'licenses/WebView2-Fixed-Version.html', 'licenses/NOTICE.txt', 'webview2/locales/zh-CN.pak', 'webview2/EBWebView/x.txt']
 
@@ -91,7 +91,7 @@ test('卸载只删安装器放下的文件，绝不递归删除目录、绝不�
   try {
     const { files, text } = await script(env)
     assert.doesNotMatch(text, /RMDir \/r/i, '卸载不得递归删目录：用户可能把程序装进别的目录')
-    assert.doesNotMatch(text, /DSH-FISH\\data|DSH-FISH\\webview|\.dsh-fish/, '账号、密钥、用量、设置与 WebView 数据不在安装目录里，卸载不得提到删除它们')
+    assert.doesNotMatch(text, /DSH-FISH\\data|DSH-FISH\\webview|\.dsh-fish|\.fish-dock|mail-secrets|channel-credentials|channel-pack/, '账号、密钥、用量、设置与 WebView 数据不在安装目录里，卸载不得提到删除它们')
     const uninstall = text.slice(text.indexOf('Section "Uninstall"'))
     const inner = [...uninstall.matchAll(/^\s*Delete "(\$INSTDIR\\[^"]+)"/gm)].map(m => m[1].replace(/^\$INSTDIR\\/, '').replace(/\\/g, '/'))
     const owned = new Set(['DSH-FISH.exe', 'uninstall.exe', ...files.map(name => `resources/${name}`)])

@@ -68,6 +68,8 @@
 
   const layer = document.getElementById('island-settings')
   let isOpen = false
+  let modelFocus = false
+  let openRevision = 0
   // When they last opened: on a Mac the loss of focus that comes with taking
   // the keyboard is not a click outside (opened from her menu, the menu going
   // away gave a blur at once, and they shut as they opened, 2026-10-14). On
@@ -121,7 +123,7 @@
   // total: how many there are; letters: how many letters the inbox holds;
   // rev: the store's revision they are of (a newer one, asked again);
   // syncing: a first sync still under way. The conversations folded out.
-  const inbox = { id: '', for: '', filter: 'all', threads: [], total: 0, letters: 0, count: 50, busy: false, error: null, errors: [], rev: 0, syncing: false }
+  const inbox = { readingAll: false, readNote: null, id: '', for: '', filter: 'all', threads: [], total: 0, letters: 0, count: 50, busy: false, error: null, errors: [], rev: 0, syncing: false }
   const expanded = new Set()
   // A letter to open once the Mail page shows (a click on the island's word that an agent answered).
   let letterToOpen = null
@@ -171,13 +173,56 @@
     <div class="s-tabs"><span class="ind"></span>${TABS.map(k => `<button data-tab="${k}"><span></span><i class="n" hidden></i></button>`).join('')}</div>
     <div class="s-ask"></div>
     <div class="s-body"></div>
-    <div class="s-foot"><span class="foot-text"></span><span class="grow"></span><span class="ver"></span></div>`
+    <div class="s-foot"><span class="foot-text"></span><span class="grow"></span><span class="ver"></span></div>
+    <dialog class="s-fullscreen-dialog" aria-labelledby="s-fullscreen-title">
+      <h2 id="s-fullscreen-title">检测到其他应用全屏</h2>
+      <p>是否取消本地模型面板的置顶和锁定，让全屏应用完整显示？</p>
+      <div class="s-fullscreen-actions"><button type="button" data-fullscreen-keep autofocus>保持</button><button type="button" data-fullscreen-cancel>取消置顶和锁定</button></div>
+      <p class="s-fullscreen-error" role="alert" hidden></p>
+    </dialog>`
   const head = layer.querySelector('.s-head')
   const tabs = layer.querySelector('.s-tabs')
   tabs.style.setProperty('--tabs', TABS.length)
   const askSlot = layer.querySelector('.s-ask')
   const body = layer.querySelector('.s-body')
   const foot = layer.querySelector('.s-foot')
+  const fullscreenDialog = layer.querySelector('.s-fullscreen-dialog')
+  let fullscreenPrompt = null
+  let fullscreenAnswering = false
+  const fullscreenError = fullscreenDialog.querySelector('.s-fullscreen-error')
+  function syncFullscreenPrompt() {
+    const id = isOpen && tab === 'models' ? snap?.modelFullscreenPrompt ?? null : null
+    fullscreenPrompt = id
+    if (id === null) {
+      if (fullscreenDialog.open) fullscreenDialog.close()
+      fullscreenError.hidden = true
+    } else if (!fullscreenDialog.open) {
+      fullscreenError.hidden = true
+      fullscreenDialog.showModal()
+    }
+  }
+  async function answerFullscreen(cancel) {
+    if (fullscreenPrompt === null || fullscreenAnswering) return
+    const id = fullscreenPrompt
+    const revision = openRevision
+    fullscreenAnswering = true
+    fullscreenDialog.querySelectorAll('button').forEach(button => { button.disabled = true })
+    try {
+      const got = await window.pet.settings.fullscreenAnswer(id, cancel)
+      if (isOpen && revision === openRevision && id === fullscreenPrompt) { snap = got; draw() }
+    } catch (error) {
+      if (isOpen && revision === openRevision && id === fullscreenPrompt) {
+        fullscreenError.textContent = `操作失败，请重试：${error.message || error}`
+        fullscreenError.hidden = false
+      }
+    } finally {
+      fullscreenAnswering = false
+      fullscreenDialog.querySelectorAll('button').forEach(button => { button.disabled = false })
+    }
+  }
+  fullscreenDialog.addEventListener('cancel', event => { event.preventDefault(); void answerFullscreen(false) })
+  fullscreenDialog.querySelector('[data-fullscreen-keep]').addEventListener('click', () => { void answerFullscreen(false) })
+  fullscreenDialog.querySelector('[data-fullscreen-cancel]').addEventListener('click', () => { void answerFullscreen(true) })
 
   // The new markup, changed in place: only what differs is touched, so a
   // number that changed (a plugin's reading) does not redraw the page around
@@ -1410,7 +1455,9 @@
     const setup = two ? `<span class="link" data-mail-setup title="${esc(T('mail.setupTip'))}">${esc(T('mail.setup'))}</span>` : ''
     const panes = two ? `<span class="link" data-mail-panes="one">${esc(T('mail.panes.one'))}</span>` : roomForTwo() ? `<span class="link" data-mail-panes="two">${esc(T('mail.panes.two'))}</span>` : ''
     const head = `<div class="sec row-sec"><span class="ellip">${esc(T('mail.inbox'))}${inbox.letters ? ` · ${inbox.letters}` : ''}</span><span class="grow"></span><span class="link" data-w-new>${esc(T('mail.write'))}</span><span class="link" data-mail-refresh>${esc(T(inbox.busy ? 'mail.loading' : 'mail.refresh'))}</span>${setup}${panes}</div>`
-    const tools = `<div class="r mail-tools">${pick}<span class="grow"></span>${filters}</div>`
+    const unread = (every ? all : all.filter(a => a.id === id)).reduce((n, a) => n + unreadOf(a), 0)
+    const readAll = `<button class="pbtn sm mail-read-all" data-mail-read-all ${inbox.readingAll || !unread ? 'disabled' : ''} aria-busy="${inbox.readingAll ? 'true' : 'false'}" title="${esc(T(every ? 'mail.readAll.all' : 'mail.readAll.one'))}" aria-label="${esc(T('mail.readAll'))}">${inbox.readingAll ? '<span class="mail-progress" aria-hidden="true"></span>' : Widgets.icon('check')}<span>${esc(T(inbox.readingAll ? 'mail.loading' : 'mail.readAll'))}</span></button>`
+    const tools = `<div class="r mail-tools"><div class="mail-tools-actions">${pick}${readAll}</div><div class="mail-filter">${filters}</div></div>`
     // The letter put aside, to go on with (not while it is written beside the list).
     const kept = draft && !(two && writing)
       ? `<div class="r draft-row" data-w-open><span class="chip">${esc(T('mail.w.draft'))}</span><div class="grow ellip">${esc(draft.subject || T('mail.noSubject'))}${draft.to ? ` · ${esc(draft.to)}` : ''}</div><span class="link">${esc(T('mail.w.goOn'))}</span></div>`
@@ -1424,7 +1471,8 @@
     else list = inbox.threads.map(t => (t.count > 1 ? threadHTML(t, every) : letterRow(t.letters[0], every))).join('')
     const left = inbox.total - inbox.threads.length
     const more = !inbox.error && left > 0 ? `<div class="r"><button class="pbtn wide" data-mail-more ${inbox.busy ? 'disabled' : ''}>${esc(T('mail.moreThreads', { n: Math.min(50, left) }))}</button></div>` : ''
-    return `${head}<div class="grp inbox">${tools}${kept}${note}${missed}${list}${more}</div>`
+    const readNote = inbox.readNote?.id === id ? `<div class="note${inbox.readNote.bad ? ' err' : ''}" role="status">${esc(inbox.readNote.text)}</div>` : ''
+    return `${head}<div class="grp inbox">${tools}${kept}${note}${readNote}${missed}${list}${more}</div>`
   }
 
   // Mail's AI, one for every letter of every mailbox (the user, 2026-10-14:
@@ -2002,6 +2050,26 @@
 
   // The inbox's conversations as kept, as filtered; with more, 50 more.
   // Asked again, quietly, whenever what is kept changed (snap.mailRev).
+  async function readAllMail() {
+    const id = inboxId()
+    if (!id || inbox.readingAll) return
+    inbox.readingAll = true
+    inbox.readNote = null
+    redrawMail()
+    try {
+      const got = await window.pet.mail.readAll(id)
+      const failures = (got.accounts || []).filter(a => a.error)
+      const detail = failures.map(a => `${accountOf(a.account)?.address || a.account}: ${mailError(a.error, accountOf(a.account))}`).join(' · ')
+      inbox.readNote = { id, bad: !got.ok, text: got.error ? mailError(got.error, accountOf(id)) : T(got.ok ? 'mail.readAll.done' : 'mail.readAll.partial', { n: got.changed || 0, failed: got.failed || failures.length }) + (detail ? ` · ${detail}` : '') }
+      if (id === inboxId()) await loadInbox(false, true)
+    } catch (error) {
+      inbox.readNote = { id, bad: true, text: String(error.message || error) }
+    } finally {
+      inbox.readingAll = false
+      if (isOpen && tab === 'mail') redrawMail()
+    }
+  }
+
   async function loadInbox(more, quiet = false) {
     const id = inboxId()
     if (!id || inbox.busy) return
@@ -2838,6 +2906,7 @@
     drawHead()
     drawTabs()
     drawBody(reset)
+    syncFullscreenPrompt()
     // Locked (the button by ✕), a click outside closes them no more.
     foot.querySelector('.foot-text').textContent = T(snap.settings.settingsPin ? 's.footLocked' : 's.foot')
     foot.querySelector('.ver').textContent = `v${snap.version}`
@@ -2895,7 +2964,9 @@
       tab = next
     }
     const wasOpen = isOpen
+    const revision = ++openRevision
     isOpen = true
+    syncModelFocus()
     if (!wasOpen) openedAt = Date.now()
     if (!wasOpen) {
       window.pet.keyboard(true)
@@ -2906,6 +2977,7 @@
       window.pet.keyboard(true)
     }
     window.pet.settings.get().then(got => {
+      if (!isOpen || revision !== openRevision) return
       snap = got
       // Connecting while the welcome card shows (nothing connected yet):
       // the card, at General's top; else the Agent page.
@@ -2926,10 +2998,25 @@
     window.Island?.changed()
   }
 
+  function syncModelFocus() {
+    const active = isOpen && tab === 'models'
+    if (active === modelFocus) return
+    modelFocus = active
+    if (snap?.settings) {
+      snap.modelFullscreenPrompt = null
+      snap.settings.settingsPin = active
+      snap.settings.settingsTop = active
+    }
+    window.pet.settings.focus(active).catch(e => console.log('[settings focus]', e))
+  }
+
   function close(why = 'asked') {
     if (!isOpen) return
     console.log('settings close:', why)
     isOpen = false
+    syncFullscreenPrompt()
+    ++openRevision
+    syncModelFocus()
     // The console's frame waits off screen, as it does on any other page.
     Models.park()
     // The welcome opened again only for this time: "not now" said since
@@ -2952,6 +3039,7 @@
   function setTab(next) {
     if (next === tab || !TABS.includes(next)) return
     tab = next
+    syncModelFocus()
     draw(true)
     if (tab === 'look') loadGallery(false)
     relayout()
@@ -3414,6 +3502,10 @@
       relayout()
       return true
     }
+    if (at('[data-mail-read-all]')) {
+      readAllMail()
+      return true
+    }
     if (at('[data-mail-refresh]')) {
       // The server asked now (the list follows as the store changes).
       window.pet.mail.kick(inboxId())
@@ -3865,6 +3957,7 @@
 
   document.addEventListener('keydown', e => {
     if (!isOpen) return
+    if (fullscreenDialog.open) return
     if (e.key === 'Escape') {
       e.preventDefault()
       if (!menuEl.hidden) return closeMenu()

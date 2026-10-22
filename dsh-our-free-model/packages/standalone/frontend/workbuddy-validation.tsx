@@ -21,7 +21,7 @@ export function WorkBuddyValidation({ summary, host }: { summary: Summary; host:
   useEffect(() => { if (status?.last) setLast(status.last) }, [status?.last])
   const toggle = async (next: boolean) => {
     if (changing.current || pending.current) return
-    if (next && !window.confirm('开启 WorkBuddy 透明验证模式？客户端身份与用户指令保持原样。每次请求仅发送一次，拒绝或失败后锁停；不会自动换号。此操作本身不发送推理请求。')) return
+    if (next && !window.confirm('开启 WorkBuddy 透明验证模式？客户端身份与用户指令保持原样。每次请求仅发送一次；超时、限流和服务故障可恢复，401/403 会锁停。此操作本身不发送推理请求。')) return
     changing.current = true; setSaving(true); setError('')
     try {
       await host.saveSettings({ workbuddyValidationEnabled: next })
@@ -31,13 +31,13 @@ export function WorkBuddyValidation({ summary, host }: { summary: Summary; host:
   }
   const run = async () => {
     if (!enabled || !model || pending.current || changing.current || status?.stopped) return
-    if (!window.confirm(`使用当前已启用的 WorkBuddy 账号，向 ${model} 发送一次验证请求？将产生真实上游调用，遇到拒绝立即停止。`)) return
+    if (!window.confirm(`使用当前已启用的 WorkBuddy 账号，向 ${model} 发送一次验证请求？将产生一次真实上游调用；鉴权失败会锁停，暂时故障可重试。`)) return
     const controller = new AbortController(); pending.current = controller; setRunning(true); setError('')
     try {
       const result = await host.validateWorkBuddy(model, controller.signal)
       if (mounted.current && !controller.signal.aborted) setLast(result)
     } catch (reason) {
-      if (mounted.current) setError(controller.signal.aborted ? '已取消，验证已停止。' : reason instanceof Error ? reason.message : '验证失败，已停止。')
+      if (mounted.current) setError(controller.signal.aborted ? '已取消，验证已停止。' : reason instanceof Error ? reason.message : '验证失败，请查看状态后重试。')
     } finally {
       pending.current = null
       if (mounted.current) {

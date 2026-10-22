@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, CircleAlert, Network, Search, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { providers } from 'ofm-provider-list'
+import { MeooAccounts } from './meoo'
 import { shared } from 'ofm-shared-client'
 import { Badge, Button, Card, Input } from './ui'
 import type { Summary } from '../types'
@@ -17,6 +18,15 @@ export function ChannelBrowser({ rpc, summary }: { rpc: Rpc; summary: Summary & 
   const [selected, select] = useState<string>()
   const [auto, setAuto] = useState<{ enabled: boolean; running?: boolean; ranToday?: boolean }>()
   const [busy, setBusy] = useState(false)
+  const [auditing, setAuditing] = useState(false)
+  const [audit, setAudit] = useState<{ day: string; accounts: Array<{ provider: string; accountId: string; nickname: string; grantedToday: number | null; balance: number | null; unit: string; error?: string; dailyError?: string }> }>()
+  const verifyDaily = async () => {
+    if (auditing) return
+    setAuditing(true); setError('')
+    try { const result = await rpc('credits.daily.audit'); if (mounted.current) setAudit(result) }
+    catch (failure) { if (mounted.current) setError((failure as Error).message) }
+    finally { if (mounted.current) setAuditing(false) }
+  }
   const mounted = useRef(false)
   const sequence = useRef(0)
   const detailHeading = useRef<HTMLHeadingElement>(null)
@@ -85,8 +95,23 @@ export function ChannelBrowser({ rpc, summary }: { rpc: Rpc; summary: Summary & 
             void rpc('usage.autoCheckin', { enabled: !auto?.enabled }).then(value => { if (mounted.current) setAuto(value.autoCheckin) })
               .catch(failure => { if (mounted.current) setError(failure.message) }).finally(() => { if (mounted.current) setBusy(false) })
           }}><span /></button>
+        <Button size="sm" variant="outline" busy={auditing} onClick={() => { void verifyDaily() }}>{auditing ? '核验中…' : '核验今日积分'}</Button>
       </div>
     </div>
+    {audit && <Card className="daily-audit" aria-label="今日积分核验结果"><div className="card-heading"><h3>{audit.day} 今日积分</h3><Button variant="ghost" size="sm" onClick={() => setAudit(undefined)}>收起</Button></div>
+      <p className="ofm_note">今日已领以渠道账单或领取回执为准；未返回金额时显示待确认。当前余额包含历史积分。</p>
+      <div className="daily-audit-providers">{audit.accounts.length === 0 ? <p role="status">尚未绑定账号</p> : [...providers.map(p => p.id), ...new Set(audit.accounts.map(row => row.provider).filter(id => !providers.some(p => p.id === id)))].map(id => {
+        const rows = audit.accounts.filter(row => row.provider === id)
+        const provider = providers.find(p => p.id === id)
+        return rows.length > 0 && <details className="daily-audit-provider" key={`${audit.day}/${id}`}>
+          <summary><span className="daily-audit-provider-name">{provider?.logo && <img src={provider.logo} alt="" width={24} height={24} />}<span>{provider?.name ?? id}</span></span><span className="daily-audit-provider-count">{rows.length} 个账号</span></summary>
+          <div className="daily-audit-accounts">{rows.map(row => <div className="daily-audit-row" key={row.accountId}>
+            <span className="daily-audit-account-name">{row.nickname}</span>
+            <span>{row.dailyError ?? `今日已领：${row.grantedToday === null ? '待确认' : `${row.grantedToday} ${row.unit}`}`}</span>
+            <span>{row.error ?? `当前余额：${row.balance === null ? '待确认' : `${row.balance} ${row.unit}`}`}</span>
+          </div>)}</div>
+        </details>
+      })}</div></Card>}
     {error && <div className="channel-error" role="alert"><CircleAlert size={16} /><span>{error}</span><Button variant="ghost" onClick={() => { void reload() }}>重试</Button></div>}
     {selectedProvider ? <div className="provider-detail" data-testid="provider-detail">
       <div className="provider-detail-top"><Button variant="outline" onClick={() => select(undefined)}><ArrowLeft size={15} />返回全部渠道</Button>
@@ -95,7 +120,7 @@ export function ChannelBrowser({ rpc, summary }: { rpc: Rpc; summary: Summary & 
         <div className="detail-label">切换渠道</div>{providers.map(provider => <button className={`detail-provider-link ${provider.id === selected ? 'active' : ''}`} key={provider.id}
           onClick={() => select(provider.id)}><span>{provider.name}</span>{provider.id === selected && <Check size={14} />}</button>)}</Card>
         <div className="provider-detail-main"><div className="provider-detail-description"><h2>账号与模型</h2><p>添加账号，管理免费额度与可用模型。</p></div>
-          <shared.ChannelCard key={selectedProvider.id} channel={selectedProvider} status={statuses?.[selectedProvider.id]} rpc={rpc} t={t} onChanged={onChanged} onError={onError} />
+          {selectedProvider.id === 'meoo' ? <MeooAccounts rpc={rpc} onChanged={onChanged} /> : <shared.ChannelCard key={selectedProvider.id} channel={selectedProvider} status={statuses?.[selectedProvider.id]} creditCapability={selectedProvider.id === 'raccoon' ? { claim: true } : undefined} rpc={rpc} t={t} onChanged={onChanged} onError={onError} />}
           <div className="detail-security-note"><ShieldCheck size={16} />沿用原渠道的登录、续期与额度规则。账号备份和供应商设置位于「供应商与备份」。</div>
         </div></div>
     </div> : <>
@@ -108,7 +133,7 @@ export function ChannelBrowser({ rpc, summary }: { rpc: Rpc; summary: Summary & 
         const status = statuses?.[provider.id]
         const state = status === undefined ? '读取中' : status.closed ? '已关闭' : (status.accounts?.enabled ?? 0) > 0 ? '已接入' : '待接入'
         return <Card className="provider-card" key={provider.id}>
-          <div className="provider-card-top"><span className="provider-logo" style={{ color: provider.accent, backgroundColor: `${provider.accent}0d` }}>{provider.name.slice(0, 2).toUpperCase()}</span>
+          <div className="provider-card-top"><span className="provider-logo" style={{ color: provider.accent, backgroundColor: `${provider.accent}0d` }}>{provider.logo ? <img src={provider.logo} width={38} height={38} alt="" /> : provider.name.slice(0, 2).toUpperCase()}</span>
             <Badge tone={state === '已接入' ? 'success' : 'neutral'}>{state === '已接入' && <span className="status-dot" />}{state}</Badge></div>
           <h2>{provider.name}</h2><div className="provider-org">{provider.org}</div><p className="provider-description">{provider.note}</p>
           <div className="provider-counts"><span>账号 <strong>{status ? status.accounts?.total ?? 0 : '—'}</strong></span>

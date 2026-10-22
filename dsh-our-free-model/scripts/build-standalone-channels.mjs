@@ -22,7 +22,7 @@ replaceOnce('export {\n  Config,', `export {
   toGenerateOptions, toResponsesGenerateOptions, normalizeReasoningEffort,
   responsesReasoningEffort, normalizeMaxTokens, responsesMaxOutputTokens,
   markGatewayChannel,
-  collectGatewayModels, collectGatewayEffortViews, toOpenAiModels,
+  collectGatewayModels, collectGatewayEffortViews, toOpenAiModels, raccoonHeaders,
   Config,`)
 if (/@deepseek-ai\/.*["'];/.test(output)) throw new Error('独立产物仍存在宿主 import')
 output = `// 由 scripts/build-standalone-channels.mjs 生成，请勿手改。\n// 原渠道包 SHA256: ${crypto.createHash('sha256').update(source).digest('hex')}\n${output}`

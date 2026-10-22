@@ -25,11 +25,11 @@ export interface ServiceSettings {
   hideFreeModels: boolean
   hideEacModels: boolean
   streamRecovery: boolean
+  workbuddyValidationEnabled?: boolean
   standaloneProbe: boolean
   probeIntervalMinutes: number
   defaultMaxTokens: number
   standaloneLanEnabled?: boolean
-  workbuddyValidationEnabled?: boolean
 }
 export interface WorkBuddyValidationState {
   enabled: boolean

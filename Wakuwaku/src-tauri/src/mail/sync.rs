@@ -197,6 +197,15 @@ fn tell(sh: &Shared, account: &Account, watch: &Watch, st: &Mutex<Store>, state:
     sh.push_settings();
 }
 
+pub(super) fn flags_changed(sh: &Shared, account: &Account) {
+    let watch = sh.mail.lock().unwrap().watches.get(&account.id).map(|(_, w)| w.clone());
+    if let Some(watch) = watch {
+        let st = super::store::of(sh, account);
+        let mut newest = Some(u32::MAX);
+        tell(sh, account, &watch, &st, "ok", &mut newest);
+    }
+}
+
 // A folder made as the server has it (see the top).
 fn sync_folder(sh: &Shared, conn: &mut Session, st: &Mutex<Store>, folder: Folder, mailbox: Mailbox<'static>) -> Result<(), Fail> {
     let name = imap::name_of(&mailbox);

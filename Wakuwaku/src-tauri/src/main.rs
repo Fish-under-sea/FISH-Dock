@@ -63,6 +63,7 @@ mod events_zcode;
 mod fetch;
 mod focus;
 mod fullscreen;
+mod model_focus;
 mod gpu;
 mod hw;
 mod i18n;
@@ -147,6 +148,7 @@ pub struct Shared {
     pub identity_generation: std::sync::atomic::AtomicU64,
     pub port: u16,
     pub settings: Mutex<Map<String, Value>>,
+    pub settings_focus: Mutex<model_focus::ModelFocus>,
     pub pet: Mutex<state::Pet>,
     pub win: Mutex<pet::Win>,
     pub island: Mutex<island::Island>,
@@ -198,6 +200,11 @@ pub struct Shared {
 
 impl Shared {
     pub fn setting(&self, key: &str) -> Value {
+        if matches!(key, "settingsPin" | "settingsTop") {
+            if let Some((pin, top)) = self.settings_focus.lock().unwrap().flags {
+                return json!(if key == "settingsPin" { pin } else { top });
+            }
+        }
         self.settings.lock().unwrap().get(key).cloned().unwrap_or(Value::Null)
     }
 
@@ -625,6 +632,14 @@ impl Shared {
         patch.remove("mail");
         let touches_visibility = ["dnd", "display", "out", "hideInFullscreen", "taskbarEdge", "taskbarDisplays"].iter().any(|k| patch.contains_key(*k));
         let touches_top = ["settingsPin", "settingsTop"].iter().any(|k| patch.contains_key(*k));
+        {
+            let mut focus = self.settings_focus.lock().unwrap();
+            if focus.flags.is_some() {
+                let pin = patch.remove("settingsPin").and_then(|v| v.as_bool());
+                let top = patch.remove("settingsTop").and_then(|v| v.as_bool());
+                focus.set(pin, top, Instant::now());
+            }
+        }
         let touches_monitor = ["monitor", "monitorSource", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
         let touches_stow = patch.contains_key("islandHideUnder");
         {
@@ -650,6 +665,7 @@ impl Shared {
         desk::sync(self);
         if touches_top {
             island::keep_on_top(self);
+            fullscreen::ask();
         }
     }
 
@@ -680,6 +696,10 @@ impl Shared {
             None => "timer".to_string(),
         };
         let changed = is_full.is_some_and(|f| self.by_fullscreen.swap(f, Ordering::SeqCst) != f);
+        if self.settings_focus.lock().unwrap().observe(cover.map(|c| c.is_some()), Instant::now()) {
+            island::keep_on_top(self);
+            self.push_settings();
+        }
         if !changed {
             if CHANGED.lock().unwrap().is_some_and(|at| at.elapsed() < Duration::from_secs(10)) {
                 let saw = is_full.map_or("one of hers in front".to_string(), |f| f.to_string());
@@ -1666,6 +1686,8 @@ fn main() {
             pet_log,
             session_jump,
             settings::settings_get,
+            settings::settings_focus,
+            settings::settings_fullscreen_answer,
             identity_api::identity_view,
             identity_api::identity_export,
             identity_api::identity_preview,
@@ -1720,6 +1742,7 @@ fn main() {
             mail::mail_remove,
             mail::mail_switch,
             mail::letters::mail_letters,
+            mail::letters::mail_read_all,
             mail::letters::mail_letter,
             mail::agent::mail_hand,
             mail::agent::mail_say,
@@ -1801,6 +1824,7 @@ fn main() {
                 identity_generation: std::sync::atomic::AtomicU64::new(0),
                 port,
                 settings: Mutex::new(settings),
+                settings_focus: Mutex::new(model_focus::ModelFocus::default()),
                 pet: Mutex::new(state::Pet::default()),
                 win: Mutex::new(pet::Win::default()),
                 island: Mutex::new(island::Island::default()),
@@ -2027,7 +2051,8 @@ fn main() {
             // island's display, and one under it.
             let watcher = sh.clone();
             spawn_named("fullscreen", move || loop {
-                let asked = fullscreen::wait(Duration::from_millis(1500));
+                let wait = watcher.settings_focus.lock().unwrap().wait(Instant::now());
+                let asked = fullscreen::wait(wait);
                 watcher.look_fullscreen(asked);
                 island::look_over_max(&watcher);
                 island::look_under(&watcher);

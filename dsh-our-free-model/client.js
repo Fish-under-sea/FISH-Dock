@@ -4079,7 +4079,7 @@ window.__ModuleLoader__.load({
       const balancePending = useRef(null)
       const balanceGeneration = useRef(0)
       const claimPending = useRef(false)
-      const creditCapability = CHANNEL_CREDITS[channel.id]
+      const creditCapability = props.creditCapability ?? CHANNEL_CREDITS[channel.id]
       const [zcodeProvider, setZcodeProvider] = useState(() => {
         try { return window.localStorage?.getItem(ZCODE_PROVIDER_KEY) === 'zai' ? 'zai' : 'bigmodel' } catch { return 'bigmodel' }
       })
@@ -4395,14 +4395,14 @@ window.__ModuleLoader__.load({
           creditCapability?.claim ? h('button', {
             type: 'button', className: 'ofm_btn ghost', disabled: busy !== '' || !rpc, 'aria-busy': busy === 'claim' ? 'true' : undefined,
             onClick: claim,
-          }, busy === 'claim' ? '…' : t('chan.act.claim')) : null,
+          }, busy === 'claim' ? '领取中…' : t('chan.act.claim')) : null,
           h('button', { type: 'button', className: 'ofm_foldtoggle', 'data-open': open === 'accounts' ? 'true' : 'false', onClick: () => void toggle('accounts') },
             h('svg', { viewBox: '0 0 12 12', 'aria-hidden': 'true' }, h('path', { d: 'M3 1.5l6 4.5-6 4.5z' })),
             t('chan.fold.accounts'), accounts === undefined ? null : ` (${accounts.length})`),
           h('button', { type: 'button', className: 'ofm_foldtoggle', 'data-open': open === 'models' ? 'true' : 'false', onClick: () => void toggle('models') },
             h('svg', { viewBox: '0 0 12 12', 'aria-hidden': 'true' }, h('path', { d: 'M3 1.5l6 4.5-6 4.5z' })),
             t('chan.fold.models'), models === undefined ? null : ` (${models.length})`)),
-        notice !== '' ? h('p', { className: 'ofm_note' }, notice) : null,
+        notice !== '' ? h('p', { className: 'ofm_note', role: 'status', 'aria-live': 'polite' }, notice) : null,
         balanceError !== '' ? h('p', { className: 'ofm_balanceerror', role: 'alert' },
           t('chan.credits.failed').replace('{reason}', balanceError))
           : balanceFailures > 0 ? h('p', { className: 'ofm_balanceerror', role: 'status' },

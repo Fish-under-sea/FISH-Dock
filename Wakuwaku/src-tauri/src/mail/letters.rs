@@ -200,6 +200,65 @@ pub async fn mail_letters(app: AppHandle, id: String, count: u32, filter: String
     tauri::async_runtime::spawn_blocking(move || list(&sh, all, count, filter)).await.unwrap_or_else(|e| failed(Fail::Other(e.to_string())))
 }
 
+struct ReadingAll {
+    sh: Arc<Shared>,
+    id: String,
+}
+impl Drop for ReadingAll {
+    fn drop(&mut self) { self.sh.mail.lock().unwrap().reading_all.remove(&self.id); }
+}
+
+fn read_all_account(sh: &Arc<Shared>, account: &Account) -> Value {
+    if !sh.mail.lock().unwrap().reading_all.insert(account.id.clone()) {
+        return json!({ "account": account.id, "changed": 0, "error": { "kind": "busy", "text": "" } });
+    }
+    let _guard = ReadingAll { sh: sh.clone(), id: account.id.clone() };
+    let mut changed = 0;
+    let result = (|| -> Result<(), Fail> {
+        let mut conn = session(&account.server, &password_of(sh, account)?, CONNECT)?;
+        let st = store::of(sh, account);
+        let validity = st.lock().unwrap().inbox.validity;
+        let current = conn.folder(imap::mailbox("INBOX").unwrap(), true)?;
+        if validity != 0 && validity != current.validity {
+            conn.logout();
+            return Err(Fail::Other("UIDVALIDITY changed; refresh the inbox and retry".into()));
+        }
+        if current.exists > 0 {
+            conn.mark_unseen(|chunk| {
+                changed += chunk.len();
+                let mut s = st.lock().unwrap();
+                if s.inbox.validity == current.validity {
+                    for &uid in chunk { s.set_flag(Folder::Inbox, uid, "seen", true); }
+                    s.save();
+                }
+            })?;
+        }
+        conn.logout();
+        Ok(())
+    })();
+    if changed > 0 { super::sync::flags_changed(sh, account); }
+    super::kick(sh, &account.id);
+    sh.push_settings();
+    match result {
+        Ok(()) => json!({ "account": account.id, "changed": changed }),
+        Err(error) => json!({ "account": account.id, "changed": changed, "error": error.json() }),
+    }
+}
+
+#[tauri::command]
+pub async fn mail_read_all(app: AppHandle, id: String) -> Value {
+    let sh = shared(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let _editing = super::EDITING.lock().unwrap();
+        let all: Vec<Account> = accounts(&sh).into_iter().filter(|a| id == "*" || a.id == id).collect();
+        if all.is_empty() && id != "*" { return gone(); }
+        let results: Vec<Value> = all.iter().map(|a| read_all_account(&sh, a)).collect();
+        let changed: u64 = results.iter().filter_map(|r| r["changed"].as_u64()).sum();
+        let failed = results.iter().filter(|r| r.get("error").is_some()).count();
+        json!({ "ok": failed == 0, "changed": changed, "failed": failed, "accounts": results })
+    }).await.unwrap_or_else(|e| failed(Fail::Other(e.to_string())))
+}
+
 // A letter starred, or not any more.
 #[tauri::command]
 pub async fn mail_flag(app: AppHandle, id: String, uid: u32, on: bool, folder: Option<String>) -> Value {
