@@ -101,12 +101,64 @@
   const TITLES = { weather: 'card.weather', monitor: 'card.monitor', today: 'card.today', mail: 'card.mail', pomodoro: 'card.pomodoro', countdown: 'card.countdown' }
   function titleOf(w, ctx) {
     const kind = kindOf(w)
-    // Whose day it was, by its brand: "DeepSeek 今天" after a day in DeepSeek
-    // Harness (widgets.rs: brand of the agent that last worked), else hers.
-    const who = varsOf(w).who
+    // Whose day it is: the agent the card shows (swiped to), else the one
+    // that last worked (widgets.rs: brand of the agent that last worked),
+    // by its brand.
+    const v = varsOf(w)
+    const who = (kind === 'today' && todayOf(w)?.who) || v.who
     if (kind === 'today' && who) return t(ctx, 'card.todayWho', { who })
     if (TITLES[kind]) return t(ctx, TITLES[kind])
     return Widgets.words(ctx.lang, w, ctx.detailed).label || Widgets.words(ctx.lang, w, true).value
+  }
+
+  // The today card swipes between the agents that worked today (widgets.rs
+  // words: agents beside its vars, busiest first): the one swiped to, else
+  // the busiest.
+  let todaySel = ''
+  let todayAgents = []
+  function todayOf(w) {
+    const list = Array.isArray(w?.value?.agents) ? w.value.agents : []
+    if (list.length) todayAgents = list
+    if (!list.length) return null
+    if (!list.some(a => a.id === todaySel)) todaySel = list[0].id
+    return list.find(a => a.id === todaySel)
+  }
+
+  // The turn under way adds to the day's time while it runs (the clock by
+  // her name runs too): the busy sessions of that agent, each since its
+  // turn began (island.js busyNow).
+  function busyOf(ctx, id) {
+    return (ctx.busy || []).filter(b => b.agent === id).reduce((ms, b) => ms + Math.max(0, (ctx.now || Date.now()) - b.since), 0)
+  }
+
+  // The time worked plus the turn under way, as h:mm (under a minute, in
+  // seconds), the way widgets.rs words has it.
+  function liveTime(ctx, workedMs, id) {
+    const ms = (Number(workedMs) || 0) + busyOf(ctx, id)
+    if (ms <= 0) return ''
+    if (ms < 60000) return t(ctx, 'widget.todaySeconds', { n: Math.max(1, Math.floor(ms / 1000)) })
+    const m = Math.floor(ms / 60000)
+    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`
+  }
+
+  // One agent over, wrapping (a swipe). The id it now shows, or none to
+  // swipe between (one agent, or none).
+  function todayCycle(by) {
+    if (todayAgents.length < 2) return null
+    const at = Math.max(0, todayAgents.findIndex(a => a.id === todaySel))
+    todaySel = todayAgents[(at + by + todayAgents.length) % todayAgents.length].id
+    todayAnim = { from: by > 0 ? 'r' : 'l', at: Date.now() }
+    return todaySel
+  }
+
+  // The swipe's trail: for this long after it, the row and its card draw
+  // with the class that plays it (the island redraws each second, so the
+  // class goes away with the window, the animation played out).
+  const SWIPE_MS = 350
+  let todayAnim = null
+  function todayAnimClass() {
+    if (!todayAnim || Date.now() - todayAnim.at > SWIPE_MS) return ''
+    return 'wswipe from-' + todayAnim.from
   }
   // The monitor's readings by their glyph (widgets.rs: cpu, memory, down, up).
   const partText = (w, icon) => (Widgets.partsOf(w) || []).find(p => p.icon === icon)?.text || ''
@@ -143,9 +195,10 @@
       })
     } else if (kind === 'today') {
       const v = varsOf(w)
-      const time = render(ctx.lang, v.time)
-      const turns = v.turns ?? ''
-      const approved = v.approvals ?? ''
+      const a = todayOf(w)
+      const time = a ? liveTime(ctx, a.workedMs, a.id) : render(ctx.lang, v.time)
+      const turns = a ? a.turns : (v.turns ?? '')
+      const approved = a ? a.approvals : (v.approvals ?? '')
       Object.assign(out, {
         value: t(ctx, 'card.turns', { n: turns }),
         top: t(ctx, 'card.turns', { n: turns }),
@@ -301,9 +354,11 @@
       out.second = b.second
     } else if (kind === 'today') {
       const v = varsOf(w)
+      const a = todayOf(w)
       const tokens = varsOf((ctx.all || []).find(x => x.id === 'tokens')).total
-      out.value = [t(ctx, 'card.turns', { n: v.turns ?? '' }), render(ctx.lang, v.time)].filter(Boolean).join(' · ')
-      out.second = [t(ctx, 'card.approved', { n: v.approvals ?? '' }), tokens ? `${tokens} token` : ''].filter(Boolean).join(' · ')
+      const time = a ? liveTime(ctx, a.workedMs, a.id) : render(ctx.lang, v.time)
+      out.value = [t(ctx, 'card.turns', { n: a ? a.turns : (v.turns ?? '') }), time].filter(Boolean).join(' · ')
+      out.second = [t(ctx, 'card.approved', { n: a ? a.approvals : (v.approvals ?? '') }), tokens ? `${tokens} token` : ''].filter(Boolean).join(' · ')
     } else if (kind === 'tokens') {
       out.value = b.value
     } else if (kind === 'stock') {
@@ -423,15 +478,23 @@
   // hour and the busiest session are not counted yet: greyed.
   function todayCard(w, ctx, all = []) {
     const v = varsOf(w)
+    const a = todayOf(w)
     const d = Widgets.detailOf(w)
     const color = colorOf(w, ctx)
     const tokens = all.find(x => x.id === 'tokens')
     const tv = varsOf(tokens)
     const cell = (n, label) => `<span class="cnum"><b>${esc(n)}</b><span>${esc(label)}</span></span>`
-    const top = `<div class="crow nums">${cell(v.turns ?? '—', t(ctx, 'card.turnsUnit'))}${cell(render(ctx.lang, v.time) || '—', t(ctx, 'card.worked'))}${cell(v.approvals ?? '—', t(ctx, 'card.approvals'))}${cell(tv.total || '—', 'token')}</div>`
+    const anim = todayAnimClass()
+    const time = a ? liveTime(ctx, a.workedMs, a.id) : render(ctx.lang, v.time)
+    const turns = (a ? a.turns : v.turns) ?? '—'
+    const approved = (a ? a.approvals : v.approvals) ?? '—'
+    const top = `<div class="crow nums${anim ? ` ${anim}` : ''}">${cell(turns, t(ctx, 'card.turnsUnit'))}${cell(time || '—', t(ctx, 'card.worked'))}${cell(approved, t(ctx, 'card.approvals'))}${cell(tv.total || '—', 'token')}</div>`
     const lit = Number.isFinite(ctx.hour) ? ctx.hour : new Date().getHours()
-    const b = hourBars(d.series?.points, lit, ctx.width, 40, color, track(ctx))
-    const chart = d.series ? `<div class="ccap">${esc(t(ctx, 'card.byHour'))}</div><div class="ccurve">${b.svg}</div><div class="cfoot"><span>${esc(t(ctx, 'card.hour', { h: b.from }))}</span><span>${esc(t(ctx, 'card.hour', { h: b.to }))}</span></div>` : ''
+    // The turns by the hour of the agent shown (its own, widgets.rs words),
+    // the day's when no agent is to show.
+    const points = a && Array.isArray(a.hours) ? a.hours : d.series?.points
+    const b = points ? hourBars(points, lit, ctx.width, 40, color, track(ctx)) : null
+    const chart = points ? `<div class="ccap${anim ? ` ${anim}` : ''}">${esc(t(ctx, 'card.byHour'))}</div><div class="ccurve${anim ? ` ${anim}` : ''}">${b.svg}</div><div class="cfoot"><span>${esc(t(ctx, 'card.hour', { h: b.from }))}</span><span>${esc(t(ctx, 'card.hour', { h: b.to }))}</span></div>` : ''
     const grey = `<div class="cline off"><span class="cn">${esc(t(ctx, 'card.tokenCurve'))}</span>${nodata(ctx)}</div><div class="cline off"><span class="cn">${esc(t(ctx, 'card.busiest'))}</span>${nodata(ctx)}</div>`
     return top + chart + `<div class="clines">${grey}</div>`
   }
@@ -504,7 +567,7 @@
     return `${d.getMonth() + 1}/${d.getDate()}`
   }
 
-  const api = { KINDS, kindOf, colorOf, trendOf, glyphOf, glyphHTML, memberGlyph, titleOf, briefOf, spark, ring, bars, hourSlots, hourBars, faceHTML, emptyFaceHTML, rowHTML, stackRowHTML, hasCard, cardHTML, upFor, whenOf, esc }
+  const api = { KINDS, kindOf, colorOf, trendOf, glyphOf, glyphHTML, memberGlyph, titleOf, briefOf, spark, ring, bars, hourSlots, hourBars, faceHTML, emptyFaceHTML, rowHTML, stackRowHTML, hasCard, cardHTML, todayCycle, todayAnimClass, upFor, whenOf, esc }
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api
