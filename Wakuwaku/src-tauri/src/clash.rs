@@ -166,24 +166,55 @@ fn pick_ports(is_free: impl Fn(u16) -> bool, random: &mut impl FnMut() -> u16) -
 }
 
 /// 生成的 config.yaml（3.3）：没有 tun 段、没有 socks-port（mixed 同端口已
-/// 覆盖 HTTP 与 SOCKS）；secret 全文只此一处。
-fn config_text(mixed: u16, ctl: u16, secret: &str) -> String {
+/// 覆盖 HTTP 与 SOCKS）；secret 全文只此一处。订阅（有 URL 时）走
+/// proxy-provider：节点由内核自己下载与定时更新，控制字段永远不会被
+/// 「导入订阅」的配置替换顶掉（v4 §3.3 的补充：面板的导入是全量替换，
+/// 实测会把控制器字段顶掉，所以订阅只从 dock 这条路进）。
+fn config_text(mixed: u16, secret: &str, subscription: &str) -> String {
+    let sub = subscription.trim();
+    let providers = if sub.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "proxy-providers:\n  \
+             sub:\n    \
+             type: http\n    \
+             url: {sub}\n    \
+             path: ./providers/sub.yaml\n    \
+             interval: 86400\n    \
+             health-check:\n      \
+             enable: true\n      \
+             url: https://www.gstatic.com/generate_204\n      \
+             interval: 600\n"
+        )
+    };
+    let groups = if sub.is_empty() {
+        String::new()
+    } else {
+        "proxy-groups:
+  - name: PROXY
+    type: select
+    use:
+      - sub
+rules:
+  - MATCH,PROXY
+".to_string()
+    };
     format!(
         "mixed-port: {mixed}\n\
-         external-controller: 127.0.0.1:{ctl}\n\
-         secret: {secret}\n\
-         external-ui: ui\n\
          mode: rule\n\
          log-level: warning\n\
          unified-delay: true\n\
          tcp-concurrent: true\n\
+         profile:\n  \
+         store-selected: true\n\
          dns:\n  \
          enable: true\n  \
          ipv6: false\n  \
          enhanced-mode: fake-ip\n  \
          fake-ip-range: 198.18.0.1/16\n  \
          nameserver: [223.5.5.5, 119.29.29.29]\n  \
-         fallback: [1.1.1.1, 8.8.8.8]\n"
+         fallback: [1.1.1.1, 8.8.8.8]\n{providers}{groups}"
     )
 }
 
@@ -454,7 +485,7 @@ fn repair_orphan(dir: &Path) {
 
 // --- 拉起与停止（3.8） ---------------------------------------------------------------
 
-fn spawn_core(core: &Path, dir: &Path) -> Result<(Child, impl Fn() -> String + use<>), ClashFailure> {
+fn spawn_core(core: &Path, dir: &Path, ctl: u16, secret: &str) -> Result<(Child, impl Fn() -> String + use<>), ClashFailure> {
     let mut command = Command::new(core);
     command
         .current_dir(dir)
@@ -462,6 +493,15 @@ fn spawn_core(core: &Path, dir: &Path) -> Result<(Child, impl Fn() -> String + u
         .arg(dir)
         .arg("-f")
         .arg(dir.join("config.yaml"))
+        // 控制面三件用命令行钉死：面板里导入订阅会让内核整体替换运行配置，
+        // 配置文件里的控制器/密钥/面板字段会被机场的顶掉；命令行 flag 优先级
+        // 更高、重载也保持——面板与 dock 因此不失联。
+        .arg("-ext-ctl")
+        .arg(format!("127.0.0.1:{ctl}"))
+        .arg("-secret")
+        .arg(secret)
+        .arg("-ext-ui")
+        .arg(dir.join("ui"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
@@ -494,16 +534,16 @@ fn spawn_core(core: &Path, dir: &Path) -> Result<(Child, impl Fn() -> String + u
 
 /// 拉起一次：写配置、落 ports.json、起进程、轮询控制器就绪。失败把内核杀掉
 /// 并带上它的最后几句话。
-fn start(held: &mut Clash, data: &Path) -> Result<ClashReady, ClashFailure> {
+fn start(held: &mut Clash, data: &Path, subscription: &str) -> Result<ClashReady, ClashFailure> {
     let core = discover(&core_candidates(data))
         .ok_or_else(|| ClashFailure::new("KERNEL_MISSING", "未找到 mihomo 内核").detail("找过托管副本、DSH_FISH_CLASH_CORE、Clash Verge 安装目录、PATH 与 %LOCALAPPDATA%\\Programs，可在页面选择本地文件或下载"))?;
     let version = kernel_version(&core);
     let secret = random_secret();
     std::fs::create_dir_all(data).map_err(|error| ClashFailure::new("DATA_DIRECTORY_INVALID", "数据目录建不出来").detail(error.to_string()))?;
     let (mixed, ctl) = pick_ports(port_free, &mut || random_free().unwrap_or(0));
-    std::fs::write(data.join("config.yaml"), config_text(mixed, ctl, &secret))
+    std::fs::write(data.join("config.yaml"), config_text(mixed, &secret, subscription))
         .map_err(|error| ClashFailure::new("START_FAILED", "配置文件没能落盘").detail(error.to_string()))?;
-    let (mut child, last_words) = spawn_core(&core, data)?;
+    let (mut child, last_words) = spawn_core(&core, data, ctl, &secret)?;
     write_ports(data, mixed, ctl, child.id())
         .map_err(|error| ClashFailure::new("START_FAILED", "ports.json 没能落盘").detail(error.to_string()))?;
     let deadline = Instant::now() + READY_TIMEOUT;
@@ -557,7 +597,7 @@ fn ready_of(run: &Running) -> ClashReady {
 
 // --- 对外（命令、退出、健康） ---------------------------------------------------------
 
-fn ensure(origin: &str) -> Result<ClashReady, ClashFailure> {
+fn ensure(origin: &str, subscription: &str) -> Result<ClashReady, ClashFailure> {
     embed_origin(origin)?;
     let data = base_dir()?;
     {
@@ -573,7 +613,7 @@ fn ensure(origin: &str) -> Result<ClashReady, ClashFailure> {
     // 上次异常退出留下的系统代理接管：先还原再起新内核。
     repair_orphan(&data);
     let mut held = held();
-    match start(&mut held, &data) {
+    match start(&mut held, &data, subscription) {
         Ok(ready) => Ok(ready),
         Err(failure) => {
             held.error = Some(failure.clone());
@@ -607,8 +647,9 @@ pub fn health() -> Value {
 // --- Tauri 命令 -----------------------------------------------------------------------
 
 #[tauri::command]
-pub fn clash_ensure(_app: tauri::AppHandle, origin: String) -> Result<ClashReady, ClashFailure> {
-    ensure(&origin)
+pub fn clash_ensure(app: tauri::AppHandle, origin: String) -> Result<ClashReady, ClashFailure> {
+    let subscription = crate::shared(&app).setting("clashSubscription").as_str().unwrap_or("").to_string();
+    ensure(&origin, &subscription)
 }
 
 #[tauri::command]
@@ -692,13 +733,22 @@ mod tests {
 
     #[test]
     fn config_has_the_contract_and_the_secret_once() {
-        let text = config_text(7899, 9099, "abc123xyz");
-        assert_eq!(text.matches("abc123xyz").count(), 1, "secret 全文只此一处");
-        assert!(text.contains("external-ui: ui"), "同源托管靠它");
+        let text = config_text(7899, "abc123xyz", "");
+        assert_eq!(text.matches("abc123xyz").count(), 0, "secret 只走命令行，不进配置文件");
         assert!(text.contains("mixed-port: 7899"));
-        assert!(text.contains("external-controller: 127.0.0.1:9099"));
+        assert!(!text.contains("external-controller"), "控制器/密钥/面板改由命令行钉死，配置文件不再写");
         assert!(!text.contains("tun:"), "默认不开 TUN");
         assert!(!text.contains("socks-port"), "v4：mixed 已覆盖，不单开 socks");
+    }
+
+    #[test]
+    fn config_with_subscription_uses_a_provider_not_plain_proxies() {
+        let text = config_text(7899, "s1", "https://example.com/sub?token=x");
+        assert!(text.contains("proxy-providers:"), "订阅走 provider，内核自己下载与更新");
+        assert!(text.contains("url: https://example.com/sub?token=x"));
+        assert!(text.contains("MATCH,PROXY"));
+        let none = config_text(7899, "s1", "  ");
+        assert!(!none.contains("proxy-providers"), "没有订阅就没有 provider 段");
     }
 
     #[test]

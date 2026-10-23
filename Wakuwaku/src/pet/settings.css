@@ -2822,6 +2822,26 @@
   min-height: 0;
 }
 
+#clash-host .s-clash-sub {
+  width: 260px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 6px;
+  background: var(--g2, #262628);
+  color: var(--t1, rgba(255, 255, 255, 0.92));
+  outline: none;
+}
+
+#clash-host .s-clash-sub:focus {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+#clash-host .s-clash-sub-label {
+  font-size: 12px;
+  color: var(--t2, rgba(255, 255, 255, 0.72));
+}
+
 #island-settings .s-models-note {
   position: absolute;
   inset: 0;

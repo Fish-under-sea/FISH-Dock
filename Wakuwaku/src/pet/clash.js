@@ -19,6 +19,7 @@
   let frame = null
   let stage = null
   let placed = ''
+  let subValue = ''
   let T = key => key
 
   const escaped = value =>
@@ -44,14 +45,33 @@
       const toggle = document.createElement('button')
       toggle.className = 'pbtn'
       toggle.dataset.clashToggle = '1'
+      // 订阅 URL（v4 §3.3 补充）：节点走内核的 proxy-provider，由内核下载与
+      // 定时更新；面板自己的「导入订阅」是全量替换配置，会把 dock 的控制
+      // 字段顶掉，所以订阅从 dock 这条路进。
+      const subLabel = document.createElement('span')
+      subLabel.className = 's-clash-sub-label'
+      const sub = document.createElement('input')
+      sub.className = 's-clash-sub'
+      sub.type = 'url'
+      sub.placeholder = T('s.clashSubHint')
+      const subSave = document.createElement('button')
+      subSave.className = 'pbtn'
+      subSave.dataset.clashSubSave = '1'
       bar.appendChild(what)
       bar.appendChild(grow)
+      bar.appendChild(subLabel)
+      bar.appendChild(sub)
+      bar.appendChild(subSave)
       bar.appendChild(sys)
       bar.appendChild(toggle)
       stage.appendChild(bar)
       stage.addEventListener('click', event => {
         if (event.target?.closest?.('[data-clash-sysproxy]')) toggleSysproxy()
         else if (event.target?.closest?.('[data-clash-toggle]')) toggleKernel()
+        else if (event.target?.closest?.('[data-clash-sub-save]')) saveSubscription()
+      })
+      sub.addEventListener('keydown', event => {
+        if (event.key === 'Enter') saveSubscription()
       })
       stage.addEventListener('mouseenter', () => {
         onLayer = true
@@ -192,6 +212,12 @@
     sys.disabled = !ready
     toggle.textContent = ready ? T('s.clashStop') : T('s.clashStart')
     toggle.disabled = state === 'starting'
+    const sub = stage.querySelector('.s-clash-sub')
+    const label = stage.querySelector('.s-clash-sub-label')
+    const save = stage.querySelector('[data-clash-sub-save]')
+    if (sub && document.activeElement !== sub) sub.value = subValue
+    if (label) label.textContent = T('s.clashSubLabel')
+    if (save) save.textContent = T('s.clashSubSave')
   }
 
   function paint(box) {
@@ -242,6 +268,10 @@
         controller: Number(state_now?.controller ?? 0),
         sysproxy: !!state_now?.sysproxy,
       }
+      try {
+        const settings = await invoke('settings_get')
+        subValue = String(settings?.settings?.clashSubscription ?? '')
+      } catch {}
     } catch {
       // 内核不在跑：栏里少些字即可，不作为失败。
     }
@@ -295,6 +325,25 @@
       paintBar()
     } else if (state === 'stopped' || state === 'failed') {
       retry()
+    }
+  }
+
+  // 订阅保存：进设置，然后重启内核应用（config.yaml 由 clash_ensure 按
+  // 新订阅重写；provider 的节点由内核自己下载）。空值 = 清除订阅。
+  async function saveSubscription() {
+    const sub = stage?.querySelector('.s-clash-sub')
+    if (!sub) return
+    const url = sub.value.trim()
+    try {
+      await invoke('settings_set', { patch: { clashSubscription: url } })
+      subValue = url
+      await invoke('clash_stop')
+      state = 'idle'
+      start()
+    } catch (error) {
+      failure = readFailure(error)
+      state = 'failed'
+      paint(document.querySelector('#island-settings .s-clash'))
     }
   }
 

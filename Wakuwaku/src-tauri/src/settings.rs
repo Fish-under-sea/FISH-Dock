@@ -612,6 +612,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "mailProxy" => mail::proxy::is_page_way(v),
         // How her requests to the web go (proxy.rs web_ways), mail's too unless it has its own.
         "netProxy" => crate::proxy::Via::of(v).is_some(),
+        // Clash 页的订阅 URL（clash.rs 的 proxy-provider）：http(s) 或空（清除）。
+        "clashSubscription" => v.as_str().is_some_and(|url| url.trim().is_empty() || (url.trim().starts_with("http://") || url.trim().starts_with("https://")) && url.len() <= 2048),
         _ => false,
     }
 }
