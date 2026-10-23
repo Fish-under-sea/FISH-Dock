@@ -212,9 +212,10 @@ fn random_secret() -> String {
 
 // --- ports.json（3.7 的落盘契约） ----------------------------------------------------
 
-/// 生效端口落盘：文件存在 = 内核在跑；不含 secret。字段固定五个。
-fn write_ports(dir: &Path, mixed: u16, ctl: u16) -> std::io::Result<()> {
-    let body = json!({ "mixed": mixed, "controller": ctl, "panel": "/ui/", "pid": std::process::id(), "startedAt": now_ms() });
+/// 生效端口落盘：文件存在 = 内核在跑；不含 secret。字段固定五个；
+/// `pid` 是**内核进程**的，不是 dock 的——消费方按它找/停内核。
+fn write_ports(dir: &Path, mixed: u16, ctl: u16, kernel_pid: u32) -> std::io::Result<()> {
+    let body = json!({ "mixed": mixed, "controller": ctl, "panel": "/ui/", "pid": kernel_pid, "startedAt": now_ms() });
     std::fs::write(dir.join("ports.json"), body.to_string())
 }
 
@@ -500,10 +501,9 @@ fn start(held: &mut Clash, data: &Path) -> Result<ClashReady, ClashFailure> {
     let (mixed, ctl) = pick_ports(port_free, &mut || random_free().unwrap_or(0));
     std::fs::write(data.join("config.yaml"), config_text(mixed, ctl, &secret))
         .map_err(|error| ClashFailure::new("START_FAILED", "配置文件没能落盘").detail(error.to_string()))?;
-    write_ports(data, mixed, ctl)
-        .map_err(|error| ClashFailure::new("START_FAILED", "ports.json 没能落盘").detail(error.to_string()))?;
-
     let (mut child, last_words) = spawn_core(&core, data)?;
+    write_ports(data, mixed, ctl, child.id())
+        .map_err(|error| ClashFailure::new("START_FAILED", "ports.json 没能落盘").detail(error.to_string()))?;
     let deadline = Instant::now() + READY_TIMEOUT;
     loop {
         if controller_ready(ctl, &secret) {
@@ -712,12 +712,12 @@ mod tests {
     fn ports_json_written_and_cleared() {
         let dir = std::env::temp_dir().join(format!("wakuwaku-clash-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        write_ports(&dir, 7899, 9099).unwrap();
+        write_ports(&dir, 7899, 9099, 4242).unwrap();
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("ports.json")).unwrap()).unwrap();
         assert_eq!(saved["mixed"], 7899);
         assert_eq!(saved["controller"], 9099);
         assert_eq!(saved["panel"], "/ui/");
-        assert!(saved["pid"].as_u64().unwrap_or(0) > 0);
+        assert_eq!(saved["pid"], 4242, "pid 是内核进程的");
         assert!(saved.get("secret").is_none(), "契约里没有 secret");
         clear_ports(&dir);
         assert!(!dir.join("ports.json").exists());
