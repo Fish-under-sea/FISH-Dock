@@ -321,8 +321,10 @@ fn controller_ready(ctl: u16, secret: &str) -> bool {
 }
 
 /// 面板地址：同源 zashboard，secret 走参数，禁用面板自己的内核升级。
+/// hostname/port 也要给：zashboard 不自己推断后端，缺了就落回它默认的
+/// 9090，连的就不是这个内核（实测踩过）。
 fn panel_url(ctl: u16, secret: &str) -> String {
-    format!("http://127.0.0.1:{ctl}/ui/?secret={secret}&disableUpgradeCore=1")
+    format!("http://127.0.0.1:{ctl}/ui/?hostname=127.0.0.1&port={ctl}&secret={secret}&disableUpgradeCore=1")
 }
 
 fn now_ms() -> u64 {
