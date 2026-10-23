@@ -46,11 +46,13 @@ mod audio;
 mod backplate;
 mod bars;
 mod clock;
+mod clash;
 mod connection;
 mod crash;
 mod data;
 mod desk;
 mod detach;
+mod zen;
 mod events;
 mod events_agy;
 mod events_codex;
@@ -1477,6 +1479,9 @@ fn main() {
     // end, and gives Windows' taskbar back if she could not; and sees
     // whether she crashed (crash.rs; her data folder is the file's).
     let args: Vec<String> = std::env::args().collect();
+    // The Clash page's system proxy (clash.rs): an orphan takeover left by a
+    // crash is restored before anything else runs off this start.
+    clash::startup_repair();
     // Uninstalling (scripts/installer.mjs): her own logon task taken away
     // before the uninstaller deletes her program, and gone. Early, before the
     // port is taken, the runtime prepared or anything shown: an uninstall must
@@ -1542,6 +1547,11 @@ fn main() {
     // One step for LibreHardwareMonitor run as administrator (lhm_setup.rs
     // admin: put in Program Files, its config, its task, removed), then
     // gone with its exit code; nothing of her started.
+    // One step for ZenDesktop's mod switches as administrator (zen.rs): write
+    // the diffs, leave the result file, gone. Nothing of her started.
+    if let Some(at) = args.iter().position(|a| a == "--wakuwaku-zen") {
+        std::process::exit(zen::admin(&args[at + 1..]));
+    }
     if let Some(at) = args.iter().position(|a| a == lhm_setup::ADMIN_FLAG) {
         std::process::exit(lhm_setup::admin(&args[at + 1..]));
     }
@@ -1756,7 +1766,15 @@ fn main() {
             mail::mail_kick,
             mail::mail_draft,
             mail::mail_keep_draft,
+            zen::zen_state,
+            zen::zen_apply,
+            clash::clash_ensure,
+            clash::clash_state,
+            clash::clash_stop,
+            clash::clash_sysproxy,
             oflm::oflm_ensure,
+            oflm::oflm_open_url,
+            oflm::settings_step_aside,
             oflm::oflm_state,
             oflm::oflm_stop,
             taskbar::taskbar_tray,
@@ -2188,6 +2206,9 @@ fn main() {
                 mail::stop_all(&sh);
                 // The local model service she runs (oflm.rs): no node.exe left.
                 oflm::shutdown();
+                // The Clash page's kernel (clash.rs): no mihomo.exe left, and
+                // the system proxy restored from its snapshot (3.7.1).
+                clash::shutdown();
                 sh.log("quitting: done");
             }
         });
