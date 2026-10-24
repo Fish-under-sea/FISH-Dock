@@ -218,7 +218,25 @@ rules:
     )
 }
 
-/// 控制器口令：本机 loopback 自用，时间、进程号与栈地址搅在一起（SplitMix64），
+/// 控制器口令：生成一次、存 `<data>/clash/secret`、之后一直用它。固定不变
+/// 是刻意的——zashboard 会记住后端（连密钥一起），每次随机换口令面板就
+/// 失忆一次（实测踩过：保存订阅重启内核后「密码不对」）。文件与 config.yaml
+/// 同目录，同机同权限，不进设置存储也不出本机。
+fn load_or_create_secret(dir: &Path) -> Result<String, ClashFailure> {
+    let file = dir.join("secret");
+    if let Ok(saved) = std::fs::read_to_string(&file) {
+        let saved = saved.trim();
+        if saved.len() == 32 && saved.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Ok(saved.to_string());
+        }
+    }
+    let secret = random_secret();
+    std::fs::write(&file, &secret)
+        .map_err(|error| ClashFailure::new("START_FAILED", "密钥文件没能落盘").detail(error.to_string()))?;
+    Ok(secret)
+}
+
+/// 首次生成时的随机源：时间、进程号与栈地址搅在一起（SplitMix64），
 /// 不进设置存储，也不出本机。
 fn random_secret() -> String {
     let anchor = 0u8;
@@ -538,7 +556,7 @@ fn start(held: &mut Clash, data: &Path, subscription: &str) -> Result<ClashReady
     let core = discover(&core_candidates(data))
         .ok_or_else(|| ClashFailure::new("KERNEL_MISSING", "未找到 mihomo 内核").detail("找过托管副本、DSH_FISH_CLASH_CORE、Clash Verge 安装目录、PATH 与 %LOCALAPPDATA%\\Programs，可在页面选择本地文件或下载"))?;
     let version = kernel_version(&core);
-    let secret = random_secret();
+    let secret = load_or_create_secret(data)?;
     std::fs::create_dir_all(data).map_err(|error| ClashFailure::new("DATA_DIRECTORY_INVALID", "数据目录建不出来").detail(error.to_string()))?;
     let (mixed, ctl) = pick_ports(port_free, &mut || random_free().unwrap_or(0));
     std::fs::write(data.join("config.yaml"), config_text(mixed, &secret, subscription))
@@ -749,6 +767,20 @@ mod tests {
         assert!(text.contains("MATCH,PROXY"));
         let none = config_text(7899, "s1", "  ");
         assert!(!none.contains("proxy-providers"), "没有订阅就没有 provider 段");
+    }
+
+    #[test]
+    fn secret_is_created_once_and_reused() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-clash-sec-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = load_or_create_secret(&dir).unwrap();
+        assert_eq!(first.len(), 32);
+        assert_eq!(load_or_create_secret(&dir).unwrap(), first, "第二次读取应同一个，面板的记忆才有效");
+        // 坏文件按无物处理：重新生成。
+        std::fs::write(dir.join("secret"), "bad").unwrap();
+        let again = load_or_create_secret(&dir).unwrap();
+        assert_eq!(again.len(), 32);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
