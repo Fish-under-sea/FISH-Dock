@@ -2817,8 +2817,10 @@
     return ''
   }
 
+  // Clash 页（原生渲染，clash.js）：骨架即时画出，数据由 Clash.mount 拉。
   function pageClash() {
-    return ''
+    setTimeout(() => window.Clash?.mount(document.querySelector('#island-settings [data-clash-page]'), T), 0)
+    return '<div class="s-clashpage" data-clash-page><div class="cp-loading"></div></div>'
   }
 
   // Zen desktop（v4 §4）：Windhawk 状态卡、mod 列表（勾选即入待提交集合）、
@@ -2915,17 +2917,15 @@
     // diff, and never redrawn (a redraw would take the frame out of the document
     // and reload it). Leaving it, the frame is parked first, so the diff below
     // clears an empty box rather than the frame.
-    if (tab === 'models' || tab === 'clash') {
+    if (tab === 'models') {
       // The page before this one is cleared first: the frame is placed over this
       // page's box by its position on screen, and left under that page's markup
       // it would be put where the box would have been below it.
       setHTML(body, '')
-      if (tab === 'models') Models.enter(body, T)
-      else Clash.enter(body, T)
+      Models.enter(body, T)
       body.scrollTop = 0
       return
     }
-    Clash.park()
     Models.park()
     const box = body.contains(document.activeElement) && document.activeElement.matches('input, textarea') ? document.activeElement : null
     const which =
@@ -3079,8 +3079,7 @@
     syncFullscreenPrompt()
     ++openRevision
     syncPinnedFocus()
-    // The consoles' frames wait off screen, as they do on any other page.
-    Clash.park()
+    // The console's frame waits off screen, as it does on any other page.
     Models.park()
     // The welcome opened again only for this time: "not now" said since
     // (the island's 不用提醒), the next open shows it folded (the test session).

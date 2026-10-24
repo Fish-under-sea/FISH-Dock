@@ -2718,54 +2718,6 @@
   background: var(--g1);
 }
 
-/* The Clash page's box and slot, the models page's shape: the slot is what
-   the layer is put over, so without it (height 0) the layer stays away and
-   the page reads as blank (实测踩过：没有这份 CSS 时整页空白). */
-#island-settings .s-clash {
-  position: relative;
-  box-sizing: border-box;
-  height: 100%;
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--g1);
-}
-
-#island-settings .s-clash-slot {
-  width: 100%;
-  height: 100%;
-  background: var(--g1);
-}
-
-#island-settings .s-clash-note {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  text-align: center;
-}
-
-#island-settings .s-clash-note[hidden] {
-  display: none;
-}
-
-#island-settings .s-clash-asking {
-  display: grid;
-  gap: 10px;
-  justify-items: center;
-  max-width: 420px;
-}
-
-#island-settings .s-clash-title {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-#island-settings .s-clash-detail {
-  font-size: 12px;
-  opacity: 0.72;
-  word-break: break-all;
-}
 
 /* The frame itself: a layer of its own on the body, put over the slot and taken
    off screen instead of being moved (models.js says why). Rounded here rather
@@ -2795,32 +2747,6 @@
   display: block;
 }
 
-/* Clash 页的 dock 自己的动作条（zashboard 写不了 Windows 系统代理）：
-   内核与端口一行、系统代理与启停的开关在其右，面板 iframe 吃剩下的高。 */
-#clash-host {
-  display: flex;
-  flex-direction: column;
-}
-
-#clash-host .s-clash-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  font-size: 12.5px;
-  color: var(--t2, rgba(255, 255, 255, 0.72));
-  border-bottom: 1px solid rgba(128, 128, 128, 0.22);
-  flex: none;
-}
-
-#clash-host .s-clash-bar .grow {
-  flex: 1;
-}
-
-#clash-host .s-clash-frame {
-  flex: 1;
-  min-height: 0;
-}
 
 #clash-host .s-clash-sub {
   width: 260px;
@@ -2926,3 +2852,319 @@
 #island-settings .s-fullscreen-actions button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
 #island-settings .s-fullscreen-actions button:disabled { opacity: .5; cursor: progress; }
 #island-settings .s-fullscreen-error { margin-top: 14px; color: #ffad79; overflow-wrap: anywhere; }
+
+
+/* --- The Clash page, drawn by the dock (clash.js): the network cards up
+   top (Clash Verge's shape: an icon, a title, a big switch row, a hint bar
+   under it), then groups at the left and the nodes as a card grid (badge
+   chips, a coloured delay at each card's right, the current one edged). */
+#island-settings .s-clashpage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#island-settings .cp-loading {
+  margin: auto;
+  opacity: 0.6;
+}
+
+#island-settings .cp-top {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+#island-settings .cp-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  grid-column: 1 / -1;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+#island-settings .cp-card {
+  position: relative;
+  padding: 10px 12px 8px 44px;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 10px;
+  background: var(--g2, #242426);
+}
+
+#island-settings .cp-card-icon {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--acc, #2f6fed);
+  font-size: 13px;
+}
+
+#island-settings .cp-card-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+#island-settings .cp-rows {
+  display: grid;
+  gap: 6px;
+}
+
+#island-settings .cp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.14);
+}
+
+#island-settings .cp-row.plain {
+  background: transparent;
+  padding: 2px 0;
+}
+
+#island-settings .cp-row-name {
+  flex: 1;
+  font-size: 13px;
+}
+
+#island-settings .cp-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+}
+
+#island-settings .cp-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+#island-settings .cp-knob {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.45);
+  transition: background 0.15s ease;
+}
+
+#island-settings .cp-knob::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+#island-settings .cp-switch input:checked + .cp-knob {
+  background: var(--acc, #2f6fed);
+}
+
+#island-settings .cp-switch input:checked + .cp-knob::after {
+  transform: translateX(18px);
+}
+
+#island-settings .cp-hint {
+  font-size: 12px;
+  opacity: 0.72;
+  padding: 4px 10px;
+  border: 1px dashed rgba(128, 128, 128, 0.3);
+  border-radius: 8px;
+  text-align: center;
+}
+
+#island-settings .cp-hint.ok {
+  border-color: rgba(90, 200, 120, 0.45);
+  opacity: 0.9;
+}
+
+#island-settings .cp-sub {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  font-size: 12px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 6px;
+  background: var(--g1, #1c1c1e);
+  color: inherit;
+  outline: none;
+}
+
+#island-settings .cp-sub:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+#island-settings .cp-main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  gap: 10px;
+}
+
+#island-settings .cp-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+}
+
+#island-settings .cp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+#island-settings .cp-group:hover {
+  background: rgba(128, 128, 128, 0.16);
+}
+
+#island-settings .cp-group.active {
+  background: rgba(128, 128, 128, 0.22);
+  border-color: rgba(128, 128, 128, 0.3);
+}
+
+#island-settings .cp-group-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#island-settings .cp-group-kind {
+  font-size: 11px;
+  opacity: 0.66;
+}
+
+#island-settings .cp-testing,
+#island-settings .cp-error {
+  font-size: 12px;
+  opacity: 0.75;
+  padding: 4px 8px;
+}
+
+#island-settings .cp-error {
+  color: #ff8a80;
+}
+
+#island-settings .cp-nodes {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+#island-settings .cp-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+
+#island-settings .cp-head-name {
+  font-weight: 700;
+}
+
+#island-settings .cp-head-kind,
+#island-settings .cp-head-now {
+  font-size: 12px;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#island-settings .cp-grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+  align-content: start;
+  padding-right: 4px;
+}
+
+#island-settings .cp-node {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 8px;
+  background: var(--g2, #242426);
+  color: inherit;
+  cursor: pointer;
+}
+
+#island-settings .cp-node:hover {
+  border-color: rgba(128, 128, 128, 0.45);
+}
+
+#island-settings .cp-node.current {
+  border-color: var(--acc, #2f6fed);
+  background: color-mix(in srgb, var(--acc, #2f6fed) 14%, var(--g2, #242426));
+}
+
+#island-settings .cp-node-name {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#island-settings .cp-delay {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .cp-delay.good { color: #58d68d; }
+#island-settings .cp-delay.mid { color: #f5b041; }
+#island-settings .cp-delay.slow, #island-settings .cp-delay.bad { color: #ff8a80; }
+#island-settings .cp-delay.none { opacity: 0.5; }
+
+#island-settings .cp-badges {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+#island-settings .cp-badge {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.22);
+  opacity: 0.85;
+}
+
+#island-settings .cp-empty {
+  grid-column: 1 / -1;
+  padding: 30px 0;
+  text-align: center;
+  opacity: 0.6;
+}
