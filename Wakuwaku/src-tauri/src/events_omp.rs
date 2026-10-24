@@ -153,14 +153,14 @@ mod tests {
     #[test]
     fn omp_events_become_messages() {
         let m = to_message(&event("SessionStart", json!({ "source": "startup" }))).unwrap();
-        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "session": "01a14146", "project": "proj", "agent": "omp" }));
+        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "session": "01a14146", "project": "proj", "agent": "omp", "workspace": "Z:\\nowhere\\proj" }));
         let m = to_message(&event("UserPromptSubmit", json!({ "prompt": "Run the shell command echo hi" }))).unwrap();
         assert_eq!((m["mood"].as_str(), m["event"].as_str(), m["task"].as_str()), (Some("working"), Some("turn-start"), Some("Run the shell command echo hi")));
         let m = tool("bash", json!({ "command": "echo hi", "timeout": 30, "cwd": "C:/waku" }), "Running echo hi");
         assert_eq!(
             m,
             json!({ "mood": "working", "detail": "Bash", "event": "tool-start", "step": { "key": "step.run", "vars": { "what": "Running echo hi" } },
-                    "toolId": "call_1", "session": "01a14146", "project": "proj", "agent": "omp" })
+                    "toolId": "call_1", "session": "01a14146", "project": "proj", "agent": "omp", "workspace": "Z:\\nowhere\\proj" })
         );
         let m = to_message(&event("Stop", json!({ "last_assistant_message": "Done.\nMore." }))).unwrap();
         assert_eq!((m["mood"].as_str(), m["reply"].as_str(), m["agent"].as_str()), (Some("done"), Some("Done. More."), Some("omp")));
