@@ -1768,7 +1768,6 @@ fn main() {
             mail::mail_keep_draft,
             zen::zen_state,
             zen::zen_apply,
-            clash::clash_api,
             clash::clash_ensure,
             clash::clash_state,
             clash::clash_stop,

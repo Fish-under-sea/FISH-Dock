@@ -702,49 +702,6 @@ pub fn clash_stop(_app: tauri::AppHandle) {
     stop_held(&mut held(), data.as_deref());
 }
 
-/// 控制器 API 的白名单代理（原生 Clash 页的数据源）：路径限定在代理/提供者/
-/// 连接/规则/配置这几族，方法只许 GET/PUT；密钥在这里注入，前端永远拿不到。
-/// 前端直 fetch 也可以跨源（mihomo 的 CORS 是开的），但那样 secret 就进了
-/// 页面的请求记录——从 Rust 走一遍，密钥只活在内核与这个进程里。
-#[tauri::command]
-pub fn clash_api(app: tauri::AppHandle, method: String, path: String, body: Option<Value>) -> Result<Value, ClashFailure> {
-    let _ = app;
-    let path = path.trim().to_string();
-    let ok_path = path.starts_with('/')
-        && !path.contains("..")
-        && path.split('?').next().unwrap_or("").split('/').all(|seg| {
-            seg.is_empty() || seg.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'%' | b'=' | b'&' | b'?' | b':'))
-        });
-    let family_ok = ["/proxies", "/providers", "/connections", "/rules", "/configs", "/group"].iter().any(|f| path.starts_with(f));
-    if !ok_path || !family_ok {
-        return Err(ClashFailure::new("API_PATH_BAD", format!("不认识的控制器路径：{path}")));
-    }
-    let method = method.to_ascii_uppercase();
-    if !matches!(method.as_str(), "GET" | "PUT") {
-        return Err(ClashFailure::new("API_METHOD_BAD", format!("只许 GET/PUT，不是 {method}")));
-    }
-    let held = held();
-    let Some(run) = held.running.as_ref() else {
-        return Err(ClashFailure::new("NOT_RUNNING", "内核没有在跑"));
-    };
-    let url = format!("http://127.0.0.1:{}/{}", run.ctl, path.trim_start_matches('/'));
-    let auth = format!("Bearer {}", run.secret);
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(10))).build().into();
-    let api_error = |error: ureq::Error| ClashFailure::new("API_FAILED", "控制器请求失败").detail(error.to_string());
-    let mut response = match (method.as_str(), body) {
-        ("PUT", Some(body)) => agent.put(&url).header("Authorization", &auth).send_json(&body).map_err(api_error)?,
-        _ => agent.get(&url).header("Authorization", &auth).call().map_err(api_error)?,
-    };
-    let status = response.status();
-    if status.as_u16() >= 400 {
-        let text = response.body_mut().read_to_string().unwrap_or_default();
-        return Err(ClashFailure::new("API_STATUS", format!("控制器回了 {status}")).detail(text));
-    }
-    // 无正文的应答（PUT 的 204 之类）也回一个 Null。
-    let value = response.body_mut().read_json::<Value>().unwrap_or(Value::Null);
-    Ok(value)
-}
-
 #[tauri::command]
 pub fn clash_sysproxy(_app: tauri::AppHandle, enable: bool) -> Result<Value, ClashFailure> {
     let data = base_dir()?;
