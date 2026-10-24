@@ -273,6 +273,13 @@
       // Her crash reports: 'yes', 'no' (her asking answered), 'send', 'open' (the last one's issue; crash.rs).
       crash: what => invoke('settings_crash', { what }),
     },
+    // 飞书群机器人（feishu.rs）：单向通知。地址只进不出——存下去，页面
+    // 只看到末尾四位；test 发一条测试消息。
+    feishu: {
+      save: url => invoke('feishu_save', { url: String(url || '') }),
+      clear: () => invoke('feishu_clear'),
+      test: () => invoke('feishu_test'),
+    },
     // Mail accounts (mail.rs): the server for an address, an account kept
     // once it signs in, one removed, one on or off, a server tried without
     // signing in (Re-test); an inbox's newest letters (id "*" every

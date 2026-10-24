@@ -133,7 +133,7 @@ fn write_vault(root: &Path, vault: &Vault) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     #[link(name = "kernel32")]
     unsafe extern "system" { fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32; }
@@ -144,7 +144,7 @@ fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
     fs::rename(from, to).map_err(|_| "无法原子更新邮件凭据文件".into())
 }
 
@@ -153,7 +153,7 @@ fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
 struct DataBlob { size: u32, data: *mut u8 }
 
 #[cfg(windows)]
-fn protect(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn protect(bytes: &[u8]) -> Result<Vec<u8>, String> {
     use std::ffi::c_void;
     #[link(name = "crypt32")]
     unsafe extern "system" { fn CryptProtectData(input: *const DataBlob, description: *const u16, entropy: *const DataBlob, reserved: *mut c_void, prompt: *mut c_void, flags: u32, output: *mut DataBlob) -> i32; }
@@ -170,7 +170,7 @@ fn protect(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(windows)]
-fn unprotect(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn unprotect(bytes: &[u8]) -> Result<Vec<u8>, String> {
     use std::ffi::c_void;
     #[link(name = "crypt32")]
     unsafe extern "system" { fn CryptUnprotectData(input: *const DataBlob, description: *mut *mut u16, entropy: *const DataBlob, reserved: *mut c_void, prompt: *mut c_void, flags: u32, output: *mut DataBlob) -> i32; }
@@ -187,9 +187,9 @@ fn unprotect(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(not(windows))]
-fn protect(_bytes: &[u8]) -> Result<Vec<u8>, String> { Err("邮件凭据的 DPAPI 迁移仅支持 Windows".into()) }
+pub(crate) fn protect(_bytes: &[u8]) -> Result<Vec<u8>, String> { Err("凭据的 DPAPI 加密仅支持 Windows".into()) }
 #[cfg(not(windows))]
-fn unprotect(_bytes: &[u8]) -> Result<Vec<u8>, String> { Err("邮件凭据的 DPAPI 解密仅支持 Windows".into()) }
+pub(crate) fn unprotect(_bytes: &[u8]) -> Result<Vec<u8>, String> { Err("凭据的 DPAPI 解密仅支持 Windows".into()) }
 
 #[cfg(test)]
 mod tests {
