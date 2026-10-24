@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn dsh_events_become_messages() {
         let m = to_message(&event("SessionStart", json!({ "source": "startup" })), &nowhere()).unwrap();
-        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "dsh", "session": "session-c961", "project": "dsh" }));
+        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "dsh", "session": "session-c961", "project": "dsh", "workspace": "Z:\\nowhere\\dsh" }));
         let m = to_message(&event("UserPromptSubmit", json!({ "prompt": "Read note.txt, then create copy.txt" })), &nowhere()).unwrap();
         assert_eq!((m["event"].as_str(), m["task"].as_str()), (Some("turn-start"), Some("Read note.txt, then create copy.txt")));
         let write = json!({ "tool_name": "write", "tool_input": { "file_path": "Z:\\nowhere\\dsh\\copy.txt", "content": "hi\n" }, "tool_use_id": "call_00_CKTB", "tool_response": "<path>…</path>" });
@@ -691,7 +691,7 @@ mod tests {
         // Another session's, or none: no words, nothing else changed.
         let mut other = stop.clone();
         other["session_id"] = json!("session-none");
-        assert_eq!(to_message(&other, &home).unwrap(), json!({ "mood": "done", "agent": "dsh", "session": "session-none", "project": "dsh" }));
+        assert_eq!(to_message(&other, &home).unwrap(), json!({ "mood": "done", "agent": "dsh", "session": "session-none", "project": "dsh", "workspace": "C:\\waku\\agents\\dsh" }));
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -856,7 +856,7 @@ mod tests {
         // Its edits are its session's, within a turn of that one's.
         let write = json!({ "tool_name": "write", "tool_input": { "file_path": "C:\\w\\notes.md" }, "tool_use_id": "call_01", "tool_response": "ok" });
         let m = of(child, "PostToolUse", write.clone()).unwrap();
-        assert_eq!(m, json!({ "mood": "working", "detail": "Write", "event": "tool-done", "file": "C:\\w\\notes.md", "toolId": "call_01", "agent": "dsh", "session": PARENT, "project": "default-workspace", "within": true }));
+        assert_eq!(m, json!({ "mood": "working", "detail": "Write", "event": "tool-done", "file": "C:\\w\\notes.md", "toolId": "call_01", "agent": "dsh", "session": PARENT, "project": "default-workspace", "within": true, "workspace": "C:\\Users\\waku\\Documents\\deepseek-harness\\default-workspace" }));
         assert_eq!(of(grandchild, "PostToolUse", write.clone()).unwrap()["session"], PARENT);
         let ask = of(child, "PreToolUse", json!({ "tool_name": "ask_user_question", "tool_input": { "questions": [] } })).unwrap();
         assert_eq!((ask["mood"].as_str(), ask["session"].as_str(), ask["within"].as_bool()), (Some("waiting"), Some(PARENT), Some(true)));

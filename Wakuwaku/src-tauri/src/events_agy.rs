@@ -103,6 +103,7 @@ pub fn to_message(e: &Value) -> Option<Value> {
     }
     if let Some(folder) = e.get("workspacePaths").and_then(Value::as_array).and_then(|w| w.first()).and_then(Value::as_str).filter(|w| !w.is_empty()) {
         message["project"] = json!(project_of(folder));
+        crate::events::place(&mut message, folder);
     }
     Some(message)
 }
@@ -188,7 +189,7 @@ mod tests {
     #[test]
     fn agy_events_become_messages() {
         let m = to_message(&event("SessionStart", json!({}))).unwrap();
-        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "agy", "session": "5064aa2e", "project": "agyws" }));
+        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "agy", "session": "5064aa2e", "project": "agyws", "workspace": "Z:/nowhere/agyws" }));
         let m = to_message(&event("PreInvocation", json!({ "invocationNum": 0, "initialNumSteps": 1, "prompt": "Create a file named hello.txt" }))).unwrap();
         assert_eq!((m["event"].as_str(), m["task"].as_str()), (Some("turn-start"), Some("Create a file named hello.txt")));
         let m = to_message(&event("PreInvocation", json!({ "invocationNum": 1, "initialNumSteps": 3 }))).unwrap();

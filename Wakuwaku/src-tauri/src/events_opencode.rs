@@ -222,8 +222,10 @@ pub fn to_message(e: &Value) -> Option<Value> {
     if !s(e, "session_id").is_empty() {
         message["session"] = json!(s(e, "session_id"));
     }
-    if !s(e, "cwd").is_empty() {
-        message["project"] = json!(project_of(s(e, "cwd")));
+    let cwd = s(e, "cwd");
+    if !cwd.is_empty() {
+        message["project"] = json!(project_of(cwd));
+        crate::events::place(&mut message, cwd);
     }
     if !s(e, "session_title").is_empty() {
         message["title"] = json!(clip(s(e, "session_title"), 80));
@@ -253,7 +255,7 @@ mod tests {
         let m = message("session.created", json!({})).unwrap();
         assert_eq!(
             m,
-            json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "opencode", "session": "ses_1", "project": "oc3", "title": "Shell echo command" })
+            json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "opencode", "session": "ses_1", "project": "oc3", "title": "Shell echo command", "workspace": "Z:\\nowhere\\oc3" })
         );
         let m = message("session.execution.started", json!({ "prompt": "Run the shell command: echo hi" })).unwrap();
         assert_eq!((m["event"].as_str(), m["task"].as_str()), (Some("turn-start"), Some("Run the shell command: echo hi")));

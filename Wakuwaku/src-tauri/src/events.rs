@@ -342,6 +342,19 @@ fn mood_of(e: &Value) -> Option<Value> {
     Some(m)
 }
 
+// Where a message's work is: the workspace it runs in, and the repository's
+// name where there is one (a message's card shows that line only then; the
+// toast's whose stays the session's name).
+pub(crate) fn place(message: &mut Value, cwd: &str) {
+    if cwd.is_empty() {
+        return;
+    }
+    message["workspace"] = json!(clip(cwd, 260));
+    if let Some(repo) = repo_name(Path::new(cwd)) {
+        message["repo"] = json!(clip(&repo, 80));
+    }
+}
+
 // The message for an event, or None for one that changes nothing.
 pub fn to_message(e: &Value) -> Option<Value> {
     if !e.is_object() {
@@ -353,6 +366,7 @@ pub fn to_message(e: &Value) -> Option<Value> {
     }
     if let Some(cwd) = e.get("cwd").and_then(Value::as_str).filter(|s| !s.is_empty()) {
         message["project"] = json!(project_of(cwd));
+        place(&mut message, cwd);
     }
     // The session's name: given with the event, or else, at the moments it
     // may have changed (a turn begins or ends), read from the transcript.
@@ -377,7 +391,7 @@ mod tests {
         let m = to_message(&json!({ "hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s", "cwd": "Z:\\nowhere\\wakuwaku" })).unwrap();
         assert_eq!(
             m,
-            json!({ "mood": "working", "detail": "Bash", "event": "tool-start", "step": { "key": "step.command", "vars": { "what": "" } }, "session": "s", "project": "wakuwaku" })
+            json!({ "mood": "working", "detail": "Bash", "event": "tool-start", "step": { "key": "step.command", "vars": { "what": "" } }, "session": "s", "project": "wakuwaku", "workspace": "Z:\\nowhere\\wakuwaku" })
         );
         let m = to_message(&json!({ "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion" })).unwrap();
         assert_eq!(m["mood"], "waiting");

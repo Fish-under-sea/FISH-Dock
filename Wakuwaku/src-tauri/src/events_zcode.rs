@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn zcode_events_become_messages() {
         let m = to_message(&event("SessionStart", json!({ "model": "deepseek/deepseek-flash", "source": "startup" }))).unwrap();
-        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "zcode", "session": "sess_fc09", "project": "zc" }));
+        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "zcode", "session": "sess_fc09", "project": "zc", "workspace": "Z:\\nowhere\\zc" }));
         let m = to_message(&event("UserPromptSubmit", json!({ "prompt": "Create a file named note.txt containing hi" }))).unwrap();
         assert_eq!((m["event"].as_str(), m["task"].as_str()), (Some("turn-start"), Some("Create a file named note.txt containing hi")));
         let write = json!({ "file_path": "Z:\\nowhere\\zc\\note.txt", "content": "hi\n" });
