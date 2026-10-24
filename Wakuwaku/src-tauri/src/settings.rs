@@ -51,10 +51,11 @@ pub fn snapshot(sh: &Shared) -> Value {
         (pet.get(now_ms()), pet.list())
     };
     let (win_light, win_accent) = crate::wallpaper::look();
-    // Whether either is connected, as the island tells it (connection.rs).
+    // Whether any of them is connected, as the island tells it (connection.rs):
+    // the same full look the start takes, zcode and DSH and Reasonix included.
     let conn = connection::connection(sh.port);
     let omp = connection::omp_hooks_status(sh.port);
-    if connection::note_connected(conn != "none" || connection::is_codex_connected() || connection::is_agy_connected() || connection::is_opencode_connected(sh.port) || matches!(omp, "ok" | "stale" | "partial")) {
+    if connection::note_connected(connection::any_connected(sh.port)) {
         sh.redraw();
     }
     let omp_files = connection::omp_files();
@@ -611,6 +612,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "mailProxy" => mail::proxy::is_page_way(v),
         // How her requests to the web go (proxy.rs web_ways), mail's too unless it has its own.
         "netProxy" => crate::proxy::Via::of(v).is_some(),
+        // Clash 页的订阅 URL（clash.rs 的 proxy-provider）：http(s) 或空（清除）。
+        "clashSubscription" => v.as_str().is_some_and(|url| url.trim().is_empty() || (url.trim().starts_with("http://") || url.trim().starts_with("https://")) && url.len() <= 2048),
         _ => false,
     }
 }

@@ -739,8 +739,15 @@ pub fn note_connected(connected: bool) -> bool {
     CONNECTED.swap(connected, std::sync::atomic::Ordering::SeqCst) != connected
 }
 
+// Whether any of them is connected, read fresh from their settings files
+// and the plugin's word. One list for both who look (the start, the
+// settings snapshot): they must name the same agents.
+pub fn any_connected(port: u16) -> bool {
+    connection(port) != "none" || is_codex_connected() || is_agy_connected() || is_opencode_connected(port) || is_omp_connected(port) || is_zcode_connected() || is_dsh_connected(port) || is_reasonix_connected()
+}
+
 pub fn look_connected(port: u16) -> bool {
-    let connected = connection(port) != "none" || is_codex_connected() || is_agy_connected() || is_opencode_connected(port) || is_omp_connected(port) || is_zcode_connected() || is_dsh_connected(port) || is_reasonix_connected();
+    let connected = any_connected(port);
     note_connected(connected);
     connected
 }

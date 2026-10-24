@@ -324,7 +324,7 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
             // after it started has no page yet, as one that never gets them
             // (the test VM's two "starts with no page", 2026-10-16).
             let ready = json!({ "pet": pet::is_ready(sh), "island": island::is_ready(sh) });
-            let mut body = json!({ "ok": true, "app": "wakuwaku", "runtime": "tauri", "state": sh.pet.lock().unwrap().get(now_ms()), "ready": ready, "waiting": crate::taskbar::waiting() });
+            let mut body = json!({ "ok": true, "app": "wakuwaku", "runtime": "tauri", "state": sh.pet.lock().unwrap().get(now_ms()), "ready": ready, "waiting": crate::taskbar::waiting(), "clash": crate::clash::health() });
             if is_debug {
                 body["window"] = pet::where_(sh);
                 body["island"] = island::where_(sh);
