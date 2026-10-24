@@ -2173,7 +2173,18 @@ mod imp {
         if HANDING_BACK.load(Ordering::SeqCst) || TUG.lock().unwrap().lost {
             return;
         }
+        let fullscreen = sh().is_some_and(|sh| sh.is_fullscreen());
         if TUG.lock().unwrap().shown(TICKS.load(Ordering::SeqCst)) {
+            // A game or a video full screen: Windows re-shows the bar for
+            // its toasts, the clock, Game Bar — the re-shows come while the
+            // person cannot see the tug's words at all, so a give_up here
+            // reads as "the taskbar mode broke for nothing" when they come
+            // back. Hide it again, and leave the tug out of it: a real
+            // rival still pulls on later looks after the full screen ends.
+            if fullscreen {
+                shell::rehide();
+                return;
+            }
             give_up();
             return;
         }
