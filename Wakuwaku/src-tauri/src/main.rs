@@ -1952,9 +1952,10 @@ fn main() {
                         tokens_at = Some(std::time::Instant::now());
                         let count = watcher.is_widget_wanted("tokens").then(|| {
                             tokens.update(&claude_dir, &codex_dir, &agy_dirs, widgets::local_midnight());
-                            // The local model service counts what it served itself: where it
-                            // has numbers for today, those are the ones to show; a day it
-                            // served nothing in leaves the transcripts to say it.
+                            // magpie counts what it served itself, in its own ledger
+                            // (~/.config/magpie/usage.jsonl): where it has numbers for
+                            // today, those are the ones to show; a day it served
+                            // nothing in leaves the transcripts to say it.
                             match oflm_stats::today(&widgets::local_date()) {
                                 Some(served) => tokens::words(served),
                                 None => tokens::words(tokens.count()),
@@ -2186,7 +2187,7 @@ fn main() {
                 sh.log("quitting: the bar given back, the mail stopped");
                 island::release_bar(&sh);
                 mail::stop_all(&sh);
-                // The local model service she runs (oflm.rs): no node.exe left.
+                // Her models page runs magpie (oflm.rs): no magpie left behind.
                 oflm::shutdown();
                 sh.log("quitting: done");
             }

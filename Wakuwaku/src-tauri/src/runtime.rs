@@ -1,8 +1,8 @@
 //! Installed runtime resources.
 //!
 //! The installer expands Node, the fixed-version WebView2 runtime and the local
-//! model service once, beside the program, and the program uses those files in
-//! place. Nothing is unpacked at start-up: the first start verifies the whole
+//! model service (the OFM resources) once, beside the program, and the program
+//! uses those files in place. Nothing is unpacked at start-up: the first start verifies the whole
 //! tree once (and grants the WebView2 sandbox read access once), then records the
 //! manifest digest; every later start only looks at the few files that must
 //! exist, so a daily start neither hashes ~776 MiB nor touches ACLs again.
@@ -309,9 +309,11 @@ pub fn resources_directory() -> Result<PathBuf, String> {
     Ok(exe.parent().ok_or("找不到程序目录")?.join("resources"))
 }
 
+/// The `resources` root, once the start-up check has found it ready: what a
+/// build that ships a component of its own (`magpie`) looks under.
 #[cfg(feature = "installed")]
-pub fn component(name: &str) -> Result<PathBuf, String> {
-    INSTALLED.get().map(|p| p.join(name)).ok_or_else(|| "内置运行环境尚未就绪".into())
+pub fn installed_root() -> Result<PathBuf, String> {
+    INSTALLED.get().cloned().ok_or_else(|| "内置运行环境尚未就绪".into())
 }
 
 /// Nothing is unpacked here: the installer expands every file beside the program.

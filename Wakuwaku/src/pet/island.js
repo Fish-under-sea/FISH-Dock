@@ -158,7 +158,7 @@
   const TASKBAR_H = 48
   const TASKBAR_ROOM = 640
   // The room the settings keep above the strip (settingsMax), taller than the
-  // island's own: the Local models page is Our Free Model's console, whose own
+  // island's own: the Local models page is magpie's web app, whose own
   // window is 1280×800 and whose page wants the height of it (settings.js
   // MODELS_H). The window keeps it from the start, so opening them never moves
   // it (island.rs SETTINGS_ROOM, the same).
