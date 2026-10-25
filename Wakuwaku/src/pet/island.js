@@ -4594,7 +4594,7 @@
   function sendSolid() {
     if (!isOn()) return
     const on = !!editLayout
-    const parts = [...(editLayout ? [editBar] : []), ...(window.Picker?.solids() || []), ...(window.Models?.solids?.() || [])]
+    const parts = [...(editLayout ? [editBar] : []), ...(window.Picker?.solids() || []), ...(window.Models?.solids?.() || []), ...(window.Clash?.solids?.() || [])]
     const rects = Surfaces.solid(parts)
     const sent = JSON.stringify([on, rects])
     if (sent === solidSent) return
@@ -5765,7 +5765,7 @@
       // it reads as a leave of hers, and in the notch the settings would close
       // and the console go from under the pointer (models.js hovered). She
       // stays as she was while it is on the console.
-      if (window.Models?.hovered?.()) return
+      if (window.Models?.hovered?.() || window.Clash?.hovered?.()) return
       // Open by itself, rested on and left: it has been seen (as Rust
       // counts it once the pointer leaves, island.rs hover), so it closes
       // now, not when its time is up. Only passed across, the hover never

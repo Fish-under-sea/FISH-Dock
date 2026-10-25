@@ -44,8 +44,8 @@
   // (island.rs asks for the pets, or connecting), the page they are part of
   // opens, scrolled to them (PART_OF, showPart); connecting while the
   // welcome shows is the welcome, at General's top.
-  const TABS = ['now', 'agents', 'look', 'widgets', 'mail', 'models']
-  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail', models: 's.tabModels' }
+  const TABS = ['now', 'agents', 'look', 'widgets', 'mail', 'models', 'clash']
+  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail', models: 's.tabModels', clash: 's.tabClash' }
   const PART_OF = { identity: 'now', pets: 'look', place: 'look', alerts: 'now', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
@@ -1439,6 +1439,9 @@
   // the room; never more than the screen leaves (draw()).
   const MODELS_W = 1120
   const MODELS_H = 760
+  const CLASH_W = 1120
+  const CLASH_H = 760
+  const SIZED = { models: [MODELS_W, MODELS_H], clash: [CLASH_W, CLASH_H] }
   const roomForTwo = () => screen.availWidth >= 820
   const twoPanes = () => tab === 'mail' && snap?.settings?.mailPanes !== 'one' && roomForTwo()
 
@@ -2812,7 +2815,11 @@
     return ''
   }
 
-  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail, models: pageModels }
+  function pageClash() {
+    return ''
+  }
+
+  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail, models: pageModels, clash: pageClash }
 
   // --- Drawing --------------------------------------------------------------------------------
 
@@ -2856,15 +2863,17 @@
     // diff, and never redrawn (a redraw would take the frame out of the document
     // and reload it). Leaving it, the frame is parked first, so the diff below
     // clears an empty box rather than the frame.
-    if (tab === 'models') {
+    if (tab === 'models' || tab === 'clash') {
       // The page before this one is cleared first: the frame is placed over this
       // page's box by its position on screen, and left under that page's markup
       // it would be put where the box would have been below it.
       setHTML(body, '')
-      Models.enter(body, T)
+      if (tab === 'models') Models.enter(body, T)
+      else Clash.enter(body, T)
       body.scrollTop = 0
       return
     }
+    Clash.park()
     Models.park()
     const box = body.contains(document.activeElement) && document.activeElement.matches('input, textarea') ? document.activeElement : null
     const which =
@@ -2898,7 +2907,7 @@
     // The Mail page in two panes is wider; the Local models page is the console,
     // as wide as the console's own window.
     const wide = twoPanes()
-    const models = tab === 'models'
+    const models = tab === 'models' || tab === 'clash'
     layer.classList.toggle('wide', wide)
     layer.classList.toggle('models', models)
     const width = wide ? WIDE_W : models ? MODELS_W : 0
@@ -2966,7 +2975,7 @@
     const wasOpen = isOpen
     const revision = ++openRevision
     isOpen = true
-    syncModelFocus()
+    syncPinnedFocus()
     if (!wasOpen) openedAt = Date.now()
     if (!wasOpen) {
       window.pet.keyboard(true)
@@ -2998,8 +3007,9 @@
     window.Island?.changed()
   }
 
-  function syncModelFocus() {
-    const active = isOpen && tab === 'models'
+  const PINNED = new Set(['models', 'clash'])
+  function syncPinnedFocus() {
+    const active = isOpen && PINNED.has(tab)
     if (active === modelFocus) return
     modelFocus = active
     if (snap?.settings) {
@@ -3016,8 +3026,9 @@
     isOpen = false
     syncFullscreenPrompt()
     ++openRevision
-    syncModelFocus()
-    // The console's frame waits off screen, as it does on any other page.
+    syncPinnedFocus()
+    // The consoles' frames wait off screen, as they do on any other page.
+    Clash.park()
     Models.park()
     // The welcome opened again only for this time: "not now" said since
     // (the island's 不用提醒), the next open shows it folded (the test session).
@@ -3039,7 +3050,7 @@
   function setTab(next) {
     if (next === tab || !TABS.includes(next)) return
     tab = next
-    syncModelFocus()
+    syncPinnedFocus()
     draw(true)
     if (tab === 'look') loadGallery(false)
     relayout()
