@@ -3,7 +3,7 @@
 // models.js). Above the frame sits a bar of the dock's own: the kernel cannot
 // set the Windows system proxy and neither can zashboard, so the switch that
 // puts the machine's traffic through the kernel lives here, with the kernel's
-// start and stop.
+// start and stop. Nodes themselves stay on zashboard's own proxy page.
 //
 // The layer is made once and parked off screen rather than moved or hidden —
 // models.js says why (a moved frame is built again, a hidden one is throttled).
@@ -20,7 +20,14 @@
   let stage = null
   let placed = ''
   let subValue = ''
+  let subDraft = null
   let T = key => key
+  let notice = null
+  let saving = false
+  let savedUrl = ''
+  let savedUntil = 0
+  let actionBusy = ''
+  let action = 0
 
   const escaped = value =>
     String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -39,12 +46,32 @@
       what.className = 's-clash-what'
       const grow = document.createElement('span')
       grow.className = 'grow'
+      const switches = document.createElement('div')
+      switches.className = 's-clash-switches'
+      const sysLabel = document.createElement('label')
+      sysLabel.className = 's-clash-switch'
+      const sysText = document.createElement('span')
+      sysText.textContent = T('s.clashSysproxy')
       const sys = document.createElement('button')
-      sys.className = 'pbtn'
+      sys.className = 'sw'
       sys.dataset.clashSysproxy = '1'
+      sys.setAttribute('role', 'switch')
+      sys.setAttribute('aria-label', T('s.clashSysproxy'))
+      sysLabel.appendChild(sysText)
+      sysLabel.appendChild(sys)
+      const kernelLabel = document.createElement('label')
+      kernelLabel.className = 's-clash-switch'
+      const kernelText = document.createElement('span')
+      kernelText.textContent = T('s.clashKernel')
       const toggle = document.createElement('button')
-      toggle.className = 'pbtn'
+      toggle.className = 'sw'
       toggle.dataset.clashToggle = '1'
+      toggle.setAttribute('role', 'switch')
+      toggle.setAttribute('aria-label', T('s.clashKernel'))
+      kernelLabel.appendChild(kernelText)
+      kernelLabel.appendChild(toggle)
+      switches.appendChild(sysLabel)
+      switches.appendChild(kernelLabel)
       // 订阅 URL（v4 §3.3 补充）：节点走内核的 proxy-provider，由内核下载与
       // 定时更新；面板自己的「导入订阅」是全量替换配置，会把 dock 的控制
       // 字段顶掉，所以订阅从 dock 这条路进。
@@ -55,20 +82,30 @@
       sub.type = 'url'
       sub.placeholder = T('s.clashSubHint')
       const subSave = document.createElement('button')
-      subSave.className = 'pbtn'
+      subSave.className = 's-clash-save'
       subSave.dataset.clashSubSave = '1'
       bar.appendChild(what)
       bar.appendChild(grow)
       bar.appendChild(subLabel)
       bar.appendChild(sub)
       bar.appendChild(subSave)
-      bar.appendChild(sys)
-      bar.appendChild(toggle)
+      bar.appendChild(switches)
       stage.appendChild(bar)
+      const feedback = document.createElement('div')
+      feedback.className = 's-clash-feedback'
+      feedback.hidden = true
+      feedback.setAttribute('role', 'status')
+      feedback.setAttribute('aria-live', 'polite')
+      stage.appendChild(feedback)
       stage.addEventListener('click', event => {
-        if (event.target?.closest?.('[data-clash-sysproxy]')) toggleSysproxy()
-        else if (event.target?.closest?.('[data-clash-toggle]')) toggleKernel()
-        else if (event.target?.closest?.('[data-clash-sub-save]')) saveSubscription()
+        const target = event.target?.closest?.('button') || event.target
+        if (target?.dataset?.clashSysproxy) toggleSysproxy()
+        else if (target?.dataset?.clashToggle) toggleKernel()
+        else if (target?.dataset?.clashSubSave) saveSubscription()
+      })
+      sub.addEventListener('input', () => {
+        subDraft = sub.value
+        paintBar()
       })
       sub.addEventListener('keydown', event => {
         if (event.key === 'Enter') saveSubscription()
@@ -203,21 +240,54 @@
     if (!what || !sys || !toggle) return
     const on = !!info.sysproxy
     const ready = state === 'ready'
+    const running = ready && !actionBusy
     what.textContent = ready
       ? `${T('s.clashKernel')} ${info.version} · ${T('s.clashPort')} ${info.mixed}`
       : state === 'stopped'
         ? T('s.clashStopped')
-        : ''
-    sys.textContent = T('s.clashSysproxy') + (on ? ' ·' : '')
-    sys.disabled = !ready
-    toggle.textContent = ready ? T('s.clashStop') : T('s.clashStart')
-    toggle.disabled = state === 'starting'
+        : state === 'failed'
+          ? T('s.clashFailed')
+          : ''
+    sys.classList.toggle('on', on)
+    sys.setAttribute('aria-checked', String(on))
+    sys.setAttribute('aria-label', T('s.clashSysproxy'))
+    sys.setAttribute('aria-busy', String(actionBusy === 'sysproxy'))
+    sys.disabled = !ready || !!actionBusy || saving
+    sys.title = on ? T('s.clashEnabled') : T('s.clashDisabled')
+    toggle.classList.toggle('on', running)
+    toggle.setAttribute('aria-checked', String(running))
+    toggle.setAttribute('aria-label', T('s.clashKernel'))
+    toggle.setAttribute('aria-busy', String((!!actionBusy && actionBusy !== 'sysproxy') || state === 'starting'))
+    toggle.disabled = !!actionBusy || saving || state === 'starting'
+    toggle.title = running ? T('s.clashRunning') : T('s.clashStopped')
+    stage.querySelector('.s-clash-switches')?.classList.toggle('busy', !!actionBusy)
     const sub = stage.querySelector('.s-clash-sub')
     const label = stage.querySelector('.s-clash-sub-label')
     const save = stage.querySelector('[data-clash-sub-save]')
-    if (sub && document.activeElement !== sub) sub.value = subValue
+    if (sub) {
+      if (document.activeElement !== sub) sub.value = subDraft ?? subValue
+      sub.setAttribute('aria-label', T('s.clashSubLabel'))
+    }
     if (label) label.textContent = T('s.clashSubLabel')
-    if (save) save.textContent = T('s.clashSubSave')
+    if (save) {
+      const dirty = sub ? sub.value.trim() !== subValue : false
+      const saved = !dirty && subValue === savedUrl && Date.now() < savedUntil
+      save.textContent = saving ? T('s.clashSaving') : saved ? T('s.clashSaved') : dirty ? T('s.clashSubApply') : T('s.clashSubSave')
+      save.disabled = saving || !dirty || !!actionBusy
+      save.classList.toggle('saved', saved)
+      save.setAttribute('aria-busy', String(saving))
+    }
+    const feedback = stage.querySelector('.s-clash-feedback')
+    if (feedback) {
+      feedback.hidden = !notice
+      feedback.textContent = notice?.text || ''
+      feedback.dataset.kind = notice?.kind || ''
+    }
+  }
+
+  function showNotice(kind, text) {
+    notice = { kind, text: String(text || '') }
+    paintBar()
   }
 
   function paint(box) {
@@ -268,9 +338,18 @@
         controller: Number(state_now?.controller ?? 0),
         sysproxy: !!state_now?.sysproxy,
       }
+      if (state_now?.running === false && state === 'ready') {
+        state = 'stopped'
+        frame?.remove()
+        frame = null
+        paint(document.querySelector('#island-settings .s-clash'))
+        place()
+      }
       try {
         const settings = await invoke('settings_get')
         subValue = String(settings?.settings?.clashSubscription ?? '')
+        subDraft = null
+        if (!saving && state === 'ready') savedUrl = subValue
       } catch {}
     } catch {
       // 内核不在跑：栏里少些字即可，不作为失败。
@@ -310,59 +389,96 @@
   }
 
   async function toggleKernel() {
+    if (actionBusy || saving) return
     if (state === 'ready') {
-      state = 'stopped'
-      paint(document.querySelector('#island-settings .s-clash'))
-      paintBar()
+      const attempt = ++action
+      actionBusy = 'stopping'
+      showNotice('busy', T('s.clashStopping'))
       try {
         await invoke('clash_stop')
-      } catch {
-        // 停止失败极少见（进程已死即目的已达）；下次启动会重写一切。
+        if (attempt !== action) return
+        state = 'stopped'
+        frame?.remove()
+        frame = null
+        info = { ...info, version: '', mixed: 0, controller: 0, sysproxy: false }
+        notice = null
+      } catch (error) {
+        if (attempt !== action) return
+        showNotice('error', String(error?.message ?? error ?? T('s.clashStopFailed')))
+      } finally {
+        if (attempt === action) actionBusy = ''
+        paintBar()
       }
-      frame?.remove()
-      frame = null
-      info = { ...info, version: '', mixed: 0, controller: 0 }
-      paintBar()
+      paint(document.querySelector('#island-settings .s-clash'))
+      place()
     } else if (state === 'stopped' || state === 'failed') {
       retry()
     }
   }
 
-  // 订阅保存：进设置，然后重启内核应用（config.yaml 由 clash_ensure 按
-  // 新订阅重写；provider 的节点由内核自己下载）。空值 = 清除订阅。
+  // 订阅保存：设置快照确实收下 URL 后才重启应用；失败不伪装成成功。
   async function saveSubscription() {
     const sub = stage?.querySelector('.s-clash-sub')
-    if (!sub) return
+    if (!sub || saving || actionBusy) return
     const url = sub.value.trim()
+    subDraft = sub.value
+    if (url === subValue) return
+    saving = true
+    ++generation
+    state = 'starting'
+    failure = null
+    paint(document.querySelector('#island-settings .s-clash'))
+    showNotice('busy', T('s.clashSaving'))
     try {
-      await invoke('settings_set', { patch: { clashSubscription: url } })
+      const settings = await invoke('settings_set', { patch: { clashSubscription: url } })
+      if (String(settings?.settings?.clashSubscription ?? '') !== url) throw new Error(T('s.clashSaveRejected'))
       subValue = url
+      savedUrl = url
+      showNotice('busy', T('s.clashApplying'))
       await invoke('clash_stop')
       state = 'idle'
-      start()
+      await start()
+      if (state !== 'ready') throw new Error(failure?.message || T('s.clashFailed'))
+      savedUntil = Date.now() + 5000
+      showNotice('ok', T('s.clashApplied'))
     } catch (error) {
-      failure = readFailure(error)
-      state = 'failed'
-      paint(document.querySelector('#island-settings .s-clash'))
+      if (state !== 'ready' && state !== 'stopped') {
+        state = 'failed'
+        paint(document.querySelector('#island-settings .s-clash'))
+        place()
+      }
+      showNotice('error', String(error?.message ?? error ?? T('s.clashSaveFailed')))
+    } finally {
+      saving = false
+      paintBar()
     }
   }
 
   async function toggleSysproxy() {
-    if (state !== 'ready') return
-    try {
-      const done = await invoke('clash_sysproxy', { enable: !info.sysproxy })
-      info = { ...info, sysproxy: !!done?.on }
-    } catch (error) {
-      // 没在跑之类：把原因放进失败位，面板不受影响。
-      failure = readFailure(error)
-    }
+    if (state !== 'ready' || actionBusy || saving) return
+    const attempt = ++action
+    const enable = !info.sysproxy
+    actionBusy = 'sysproxy'
     paintBar()
+    try {
+      const done = await invoke('clash_sysproxy', { enable })
+      if (attempt !== action) return
+      info = { ...info, sysproxy: !!done?.on }
+      const from = String(done?.from ?? '')
+      const base = T(enable ? 's.clashProxyEnabled' : 's.clashProxyDisabled')
+      showNotice('ok', enable && from ? `${T('s.clashTookOver').replace('%s', from)}${base}` : base)
+    } catch (error) {
+      if (attempt === action) showNotice('error', String(error?.message ?? error ?? ''))
+    } finally {
+      if (attempt === action) actionBusy = ''
+      paintBar()
+    }
   }
 
   function enter(el, translate) {
     if (translate) T = translate
     paint(ensureBox(el))
-    if (state === 'ready') paintBar()
+    paintBar()
     if (state === 'idle') start()
     else {
       place()
@@ -387,11 +503,15 @@
 
   function invalidate() {
     ++generation
+    ++action
     park()
     frame?.remove()
     frame = null
     state = 'idle'
     failure = null
+    actionBusy = ''
+    saving = false
+    notice = null
   }
   window.Clash = { enter, park, solids, holds, hovered, invalidate }
 })()

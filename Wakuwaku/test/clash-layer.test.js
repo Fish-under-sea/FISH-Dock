@@ -50,10 +50,26 @@ function node(tag) {
     fire(type, event = {}) {
       for (const fn of el.listeners[type] || []) fn({ type, relatedTarget: null, ...event })
     },
-    setAttribute() {},
+    attributes: {},
+    setAttribute(name, value) { el.attributes[name] = String(value) },
+    closest(selector) { return selector === 'button' && el.tagName === 'BUTTON' ? el : null },
+    querySelectorAll(selector) {
+      const found = []
+      const match = selector === '[data-clash-view]' ? child => child.dataset.clashView : child => child.className.split(/\s+/).includes(selector.slice(1))
+      const walk = at => {
+        for (const child of at.children) {
+          if (match(child)) found.push(child)
+          walk(child)
+        }
+      }
+      walk(el)
+      return found
+    },
     // clash.js 会在运行时查自己动态建出来的子元素（动作条按钮），替身要会沿树找。
     querySelector(selector) {
-      if (el.queries[selector]) return el.queries[selector]
+      // 节点网格由 innerHTML 绘制：替身保留最后一块内容，断言不解析完整 DOM。
+      if (selector === '.cp-grid' && el.className.split(/\s+/).includes('cp-nodes')) return { innerHTML: String(el.innerHTML).split('<div class="cp-grid"')[1] || '' }
+      if (el.queries[selector] && !(el.queries[selector].connected === false)) return el.queries[selector]
       const scoped = selector.startsWith(':scope > .') && selector.slice(10)
       if (scoped) return el.children.find(c => c.className.split(/\s+/).includes(scoped)) || null
       const byClass = selector.startsWith('.') && selector.slice(1)
@@ -84,6 +100,11 @@ function node(tag) {
         .join(' ')
     },
     contains: name => el.className.split(/\s+/).includes(name),
+    toggle(name, on) {
+      if (on) el.classList.add(name)
+      else el.classList.remove(name)
+      return !!on
+    },
   }
   Object.defineProperty(el, 'isConnected', {
     get: () => {
@@ -97,9 +118,10 @@ function node(tag) {
 
 // The page with the settings open on the Clash page. `kernel: 'none'` makes
 // clash_ensure fail, to see the failed state and its retry.
-function page({ open = true, box = { left: 200, top: 100, width: 1120, height: 760 }, kernel = 'ready' } = {}) {
+function page({ open = true, box = { left: 200, top: 100, width: 1120, height: 760 }, kernel = 'ready', rejectSettings = false } = {}) {
   const document = {
     body: node('body'),
+    activeElement: null,
     createElement: tag => node(tag),
     querySelector: () => null,
     addEventListener: (type, fn) => (document.listeners[type] ||= []).push(fn),
@@ -132,6 +154,7 @@ function page({ open = true, box = { left: 200, top: 100, width: 1120, height: 7
           if (command === 'clash_ensure') return { url: 'http://127.0.0.1:9099/ui/?secret=s&disableUpgradeCore=1', version: 'v1.19.33', mixed: 7899, controller: 9099 }
           if (command === 'clash_state') return { running: kernel === 'ready', version: 'v1.19.33', mixed: 7899, controller: 9099, sysproxy: false }
           if (command === 'clash_sysproxy') return { on: args?.enable !== false, mixed: 7899 }
+          if (command === 'settings_get' || command === 'settings_set') return { settings: { clashSubscription: command === 'settings_get' ? '' : rejectSettings ? '' : args?.patch?.clashSubscription ?? '' } }
           return null
         },
       },
@@ -148,9 +171,14 @@ function page({ open = true, box = { left: 200, top: 100, width: 1120, height: 7
   const bar = () => (layer() ? layer().children.find(c => c.className.includes('s-clash-bar')) : null)
   // 点动作条上的一个按钮：真点击会冒泡到 stage 的委托，这里照它的判法给一个 target。
   const clickBar = selector => {
-    const target = { closest: sel => (sel === selector ? { dataset: {} } : null) }
+    const button = layer().querySelector(selector)
+    assert.ok(button, `控件存在：${selector}`)
+    const target = { closest: sel => (sel === 'button' || sel === selector ? button : null) }
     layer().fire('click', { target })
   }
+
+  const find = selector => pLayer().querySelector(selector)
+  const pLayer = () => layer()
   // 点 note 里的按钮（重试/启动）：note 的委托在 ensureBox 里。
   const clickNote = selector => {
     // note 的重试/启动按钮是 paint 时 innerHTML 写出来的，替身不解析它：
@@ -170,6 +198,8 @@ function page({ open = true, box = { left: 200, top: 100, width: 1120, height: 7
     frame: () => frames()[0] || null,
     bar,
     clickBar,
+    find,
+    click: (target) => layer().fire('click', { target: { closest: selector => selector === 'button' ? target : null } }),
     clickNote,
     note: () => document.querySelector('#island-settings .s-clash')?.querySelector('.s-clash-note') || null,
     solids: () => Array.from(window.Clash.solids()),
@@ -180,14 +210,16 @@ function page({ open = true, box = { left: 200, top: 100, width: 1120, height: 7
   }
 }
 
-const settled = () => new Promise(resolve => setImmediate(resolve))
+const settled = async () => {
+  // 启动 → frame → 节点请求，以及保存 → 停止 → 再启动各是一串 Promise。
+  // 替身只等宏任务，不用固定毫秒；覆盖这些有限的状态转换。
+  for (let at = 0; at < 10; at++) await new Promise(resolve => setImmediate(resolve))
+}
 
 test('进入即拉内核并建同源 frame，层以实心矩形交给窗口', async () => {
   const p = page()
   p.enter()
   await settled()
-  console.log('DEBUG calls:', JSON.stringify(p.calls))
-  console.log('DEBUG layer:', !!p.layer(), 'frames:', p.frames().length, 'solids:', p.solids().length, 'away:', p.layer() && p.layer().classList.contains('away'))
   assert.equal(p.frames().length, 1, '面板的 frame 建了一个')
   assert.ok(p.frame(), 'frame 对象在')
   assert.ok(p.frame().src.includes('disableUpgradeCore=1'), '面板禁用自己的内核升级')
@@ -209,8 +241,8 @@ test('动作条有系统代理与启停两个按钮，点系统代理走命令�
   await settled()
   const bar = p.bar()
   assert.ok(bar, '动作条存在')
-  const sys = bar.children.find(c => c.dataset.clashSysproxy)
-  const toggle = bar.children.find(c => c.dataset.clashToggle)
+  const sys = p.find('[data-clash-sysproxy]')
+  const toggle = p.find('[data-clash-toggle]')
   assert.ok(sys, '系统代理按钮在')
   assert.ok(toggle, '启停按钮在')
   p.clickBar('[data-clash-sysproxy]')
@@ -219,7 +251,10 @@ test('动作条有系统代理与启停两个按钮，点系统代理走命令�
     p.calls.some(c => c[0] === 'invoke' && c[1] === 'clash_sysproxy' && c[2]?.enable === true),
     '点了开关就走 clash_sysproxy(true)',
   )
-  assert.ok(String(sys.textContent).includes('·'), '回写后的状态标点')
+  assert.equal(sys.attributes['aria-checked'], 'true', '后端确认后系统代理开关进入开启态')
+  assert.ok(sys.classList.contains('on'), '开启后开关变绿')
+  assert.equal(sys.attributes.role, 'switch')
+  assert.equal(toggle.attributes['aria-checked'], 'true', '内核就绪时运行开关开启')
 })
 
 test('park 之后层不再是实心矩形，回到页面又回来', async () => {
@@ -251,12 +286,44 @@ test('停止内核走 clash_stop，停在已停态且不自动拉起；再点启
   assert.equal(p.frames().length, framesBefore + 1, '点了启动，frame 回来')
 })
 
+test('节点页交给 zashboard：动作条之外只有一个面板 frame', async () => {
+  const p = page()
+  p.enter()
+  await settled()
+  assert.equal(p.frames().length, 1, '只有一个 zashboard frame')
+  assert.ok(!p.layer().querySelector('.s-clash-proxy'), '不再保留自制代理页')
+  assert.ok(!p.layer().querySelector('.s-clash-tabs'), '不再保留重复的页签')
+  assert.ok(p.frame().src.includes('/ui/'), '节点选择在 zashboard 原生页')
+})
+
+test('保存核对后端快照；应用后重启并显示成功，无效订阅不会停内核', async () => {
+  const p = page({ rejectSettings: true })
+  p.enter()
+  await settled()
+  const input = p.find('.s-clash-sub')
+  input.value = 'https://example.com/subscription'
+  p.clickBar('[data-clash-sub-save]')
+  await settled()
+  await settled()
+  assert.equal(p.find('[data-clash-sub-save]').disabled, false)
+  assert.ok(p.find('.s-clash-feedback').textContent.includes('s.clashSaveRejected'), '无效订阅给出明确反馈')
+  assert.ok(!p.calls.some(c => c[1] === 'clash_stop'), '没有收下订阅就不重启')
+  const good = page()
+  good.enter()
+  await settled()
+  good.find('.s-clash-sub').value = 'https://example.com/subscription'
+  good.clickBar('[data-clash-sub-save]')
+  await settled()
+  await settled()
+  assert.ok(good.calls.some(c => c[1] === 'clash_stop'))
+  assert.equal(good.calls.filter(c => c[1] === 'clash_ensure').length, 2, '保存后重启一次')
+  assert.ok(good.find('.s-clash-feedback').textContent.includes('s.clashApplied'))
+})
+
 test('失败时给出原因与重试，重试会再走一遍 clash_ensure', async () => {
   const p = page({ kernel: 'none' })
   p.enter()
   await settled()
-  console.log('DEBUG5 kids:', JSON.stringify(p.document().body.children.map(c => c.id + '/' + c.className)))
-  console.log('DEBUG5 note:', !!p.note(), '| calls:', JSON.stringify(p.calls.map(c => c[1] || c[0])))
   assert.ok(p.note().innerHTML.includes('data-clash-retry'), '失败态给出重试按钮')
   assert.ok(p.note().innerHTML.includes('未找到 mihomo 内核'), '失败原因可见')
   const attempts = p.calls.filter(c => c[0] === 'invoke' && c[1] === 'clash_ensure').length

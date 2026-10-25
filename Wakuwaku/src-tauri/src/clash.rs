@@ -12,7 +12,7 @@
 //! set it, and neither can zashboard (3.7.1).
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard};
@@ -21,9 +21,10 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-/// 端口策略（3.7）：固定优先，避开 Clash Verge 的 7897/7898/9097 与 mihomo
-/// 官方默认的 7890；被占用时回退到系统给的随机空闲端口。
-const MIXED_PREFERRED: u16 = 7899;
+/// 端口策略（3.7）：固定优先，避开 Clash Verge 的 7897/7898/7899/9097
+/// （7899 是 Verge 的「HTTP 代理端口」，用户开了它 dock 就再也抢不到）与
+/// mihomo 官方默认的 7890；被占用时回退到系统给的随机空闲端口。
+const MIXED_PREFERRED: u16 = 7895;
 const CTL_PREFERRED: u16 = 9099;
 /// 就绪轮询（3.8）：200ms 一次，上限 20s。
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -169,7 +170,10 @@ fn pick_ports(is_free: impl Fn(u16) -> bool, random: &mut impl FnMut() -> u16) -
 /// 覆盖 HTTP 与 SOCKS）；secret 全文只此一处。订阅（有 URL 时）走
 /// proxy-provider：节点由内核自己下载与定时更新，控制字段永远不会被
 /// 「导入订阅」的配置替换顶掉（v4 §3.3 的补充：面板的导入是全量替换，
-/// 实测会把控制器字段顶掉，所以订阅只从 dock 这条路进）。
+/// 实测会把控制器字段顶掉，所以订阅只从 dock 这条路进）。规则是分流而非
+/// 全局：国内 IP 直连（GEOIP,CN；geoip 库由内核首次启动自动下载，落
+/// data/geoip.metadb），其余走 PROXY 组——dock 的内核这才当得起「日常
+/// 代理」用，而不是只能翻出去的全局管道。
 fn config_text(mixed: u16, secret: &str, subscription: &str) -> String {
     let sub = subscription.trim();
     let providers = if sub.is_empty() {
@@ -197,6 +201,7 @@ fn config_text(mixed: u16, secret: &str, subscription: &str) -> String {
     use:
       - sub
 rules:
+  - GEOIP,CN,DIRECT
   - MATCH,PROXY
 ".to_string()
     };
@@ -376,6 +381,48 @@ fn panel_url(ctl: u16, secret: &str) -> String {
     format!("http://127.0.0.1:{ctl}/ui/?hostname=127.0.0.1&port={ctl}&secret={secret}&disableUpgradeCore=1")
 }
 
+/// 面板仍是官方 zashboard；补一段样式让点开的代理组用满面板区域，再补一个
+/// 开机脚本把侧栏钉成展开宽栏（流量图/统计卡/后端地址/版本）——内核控制器
+/// 端口在 9099 被占时回退随机，面板的 localStorage origin 随之变化，zashboard
+/// 存不住偏好，而它对「折叠侧栏」的出厂默认恰好是 true。每次启动重写补丁
+/// 文件，入口 HTML 只补一次链接。zashboard 的 service worker 会缓存旧
+/// index.html，把它替换成一次性清缓存的空壳，保证补丁和面板更新都能被
+/// WebView 看到。
+fn patch_dashboard(data: &Path) {
+    let ui = data.join("ui");
+    let index = ui.join("index.html");
+    let Ok(html) = std::fs::read_to_string(&index) else { return };
+    let _ = std::fs::write(ui.join("fish-dock.css"), include_str!("../assets/fish-dock-zashboard.css"));
+    let _ = std::fs::write(ui.join("fish-dock.js"), include_str!("../assets/fish-dock-zashboard-boot.js"));
+    let _ = std::fs::write(ui.join("sw.js"), include_str!("../assets/fish-dock-zashboard-sw.js"));
+    let mut patched = html.clone();
+    if !patched.contains(r#"href="./fish-dock.css""#) {
+        if let Some(cut) = patched.rfind("</head>") {
+            patched = format!(
+                "{}
+  <link rel=\"stylesheet\" href=\"./fish-dock.css\">
+{}",
+                &patched[..cut],
+                &patched[cut..],
+            );
+        }
+    }
+    if !patched.contains(r#"src="./fish-dock.js""#) {
+        if let Some(cut) = patched.rfind("</head>") {
+            patched = format!(
+                "{}
+  <script src=\"./fish-dock.js\"></script>
+{}",
+                &patched[..cut],
+                &patched[cut..],
+            );
+        }
+    }
+    if patched != html {
+        let _ = std::fs::write(index, patched);
+    }
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -486,9 +533,80 @@ fn sysproxy_on(dir: &Path, mixed: u16) -> Result<(), ClashFailure> {
     write_inet(&target).map_err(|error| ClashFailure::new("SYSPROXY_FAILED", "系统代理没能写入").detail(error.to_string()))
 }
 
-/// 还原：按快照写回；没有快照（从没接管过）就是无事可做。
+/// 快照里记录的代理服务器，拆成 (host, port)。ProxyServer 可能是单个
+/// "host:port"，也可能是 "http=…;https=…" 的分协议写法（https 优先），
+/// IPv6 要 "[::1]:7897" 这样的括号写法。解析不出来的条目跳过。
+fn snapshot_endpoints(server: &str) -> Vec<(String, u16)> {
+    let mut preferred = Vec::new();
+    let mut plain = Vec::new();
+    for part in server.split(';') {
+        let part = part.trim();
+        let (scheme, entry) = match part.split_once('=') {
+            Some((scheme, rest)) => (scheme.to_ascii_lowercase(), rest.trim()),
+            None => (String::new(), part),
+        };
+        let https = match scheme.as_str() {
+            "" => false,
+            "https" => true,
+            "http" => false,
+            _ => continue,
+        };
+        let (host, port) = if let Some(rest) = entry.strip_prefix('[') {
+            match rest.split_once(']') {
+                Some((host, tail)) => (host, tail.trim_start_matches(':')),
+                None => continue,
+            }
+        } else {
+            match entry.rsplit_once(':') {
+                Some((host, port)) => (host, port),
+                None => continue,
+            }
+        };
+        if host.is_empty() {
+            continue;
+        }
+        let Ok(port) = port.parse::<u16>() else { continue };
+        if https {
+            preferred.push((host.to_string(), port));
+        } else {
+            plain.push((host.to_string(), port));
+        }
+    }
+    preferred.append(&mut plain);
+    preferred
+}
+
+/// 快照里的代理现在还有没有人听。接管前的用户代理（典型：Verge 的 7897）
+/// 在还原时可能已经退出了——把注册表原样写回去等于把系统留在死端口上。
+#[cfg(windows)]
+fn snapshot_alive(snapshot: &SysSnapshot) -> bool {
+    if snapshot.enable == 0 || snapshot.server.trim().is_empty() {
+        return true;
+    }
+    for (host, port) in snapshot_endpoints(&snapshot.server) {
+        let Ok(addrs) = (host.as_str(), port).to_socket_addrs() else { continue };
+        for addr in addrs {
+            if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(600)).is_ok() {
+                return true;
+            }
+        }
+    }
+    false
+}
+#[cfg(not(windows))]
+fn snapshot_alive(_snapshot: &SysSnapshot) -> bool {
+    true
+}
+
+/// 还原：按快照写回；没有快照（从没接管过）就是无事可做。快照里的代理
+/// 已经不在了（比如快照的是 Verge 的 7897，而 Verge 已退出）就不原样写回
+/// ——那等于把系统留在死端口上，浏览器全断。只关掉开关，server/bypass 字段
+/// 按快照留底：用户重开代理软件后自己再开系统代理即可。
 fn sysproxy_off(dir: &Path) -> Result<(), ClashFailure> {
-    let Some(snapshot) = read_snapshot(dir) else { return Ok(()) };
+    let Some(mut snapshot) = read_snapshot(dir) else { return Ok(()) };
+    if !snapshot_alive(&snapshot) {
+        snapshot.enable = 0;
+    }
     write_inet(&snapshot).map_err(|error| ClashFailure::new("SYSPROXY_FAILED", "系统代理没能还原").detail(error.to_string()))?;
     let _ = std::fs::remove_file(snapshot_path(dir));
     Ok(())
@@ -499,6 +617,49 @@ fn repair_orphan(dir: &Path) {
     if snapshot_path(dir).exists() && held().running.is_none() {
         let _ = sysproxy_off(dir);
     }
+}
+
+/// ports.json 里能给的上个实例内核的线索：控制器端口与进程号。
+struct OrphanPorts {
+    ctl: u16,
+    pid: Option<u32>,
+}
+
+fn read_ports(dir: &Path) -> Option<OrphanPorts> {
+    let raw = std::fs::read_to_string(dir.join("ports.json")).ok()?;
+    let value: Value = serde_json::from_str(&raw).ok()?;
+    Some(OrphanPorts {
+        ctl: value.get("controller")?.as_u64()? as u16,
+        pid: value.get("pid").and_then(Value::as_u64).map(|pid| pid as u32),
+    })
+}
+
+/// 上个实例留下的内核是否还在服：控制器应答（带密钥的 /version）即算活着。
+/// 比查进程号可靠——pid 会被复用，控制器答不上来才是真的死了。
+fn orphan_serving(dir: &Path) -> bool {
+    let Some(ports) = read_ports(dir) else { return false };
+    let secret = load_or_create_secret(dir).unwrap_or_default();
+    controller_ready(ports.ctl, &secret)
+}
+
+/// 收掉上个实例的孤儿内核（控制器已确认活着，pid 不会张冠李戴）。
+#[cfg(windows)]
+fn kill_kernel_pid(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let ok = TerminateProcess(handle, 1);
+        let _ = CloseHandle(handle);
+        ok != 0
+    }
+}
+#[cfg(not(windows))]
+fn kill_kernel_pid(_pid: u32) -> bool {
+    false
 }
 
 // --- 拉起与停止（3.8） ---------------------------------------------------------------
@@ -556,8 +717,9 @@ fn start(held: &mut Clash, data: &Path, subscription: &str) -> Result<ClashReady
     let core = discover(&core_candidates(data))
         .ok_or_else(|| ClashFailure::new("KERNEL_MISSING", "未找到 mihomo 内核").detail("找过托管副本、DSH_FISH_CLASH_CORE、Clash Verge 安装目录、PATH 与 %LOCALAPPDATA%\\Programs，可在页面选择本地文件或下载"))?;
     let version = kernel_version(&core);
-    let secret = load_or_create_secret(data)?;
     std::fs::create_dir_all(data).map_err(|error| ClashFailure::new("DATA_DIRECTORY_INVALID", "数据目录建不出来").detail(error.to_string()))?;
+    patch_dashboard(data);
+    let secret = load_or_create_secret(data)?;
     let (mixed, ctl) = pick_ports(port_free, &mut || random_free().unwrap_or(0));
     std::fs::write(data.join("config.yaml"), config_text(mixed, &secret, subscription))
         .map_err(|error| ClashFailure::new("START_FAILED", "配置文件没能落盘").detail(error.to_string()))?;
@@ -628,11 +790,40 @@ fn ensure(origin: &str, subscription: &str) -> Result<ClashReady, ClashFailure> 
         }
         held.error = None;
     }
-    // 上次异常退出留下的系统代理接管：先还原再起新内核。
-    repair_orphan(&data);
+    // 上个实例的遗产：系统代理接管（sysproxy.json）与还在服的孤儿内核。
+    // 内核活着就保留接管——重启 dock 不该把用户的代理关掉；等新内核就绪后
+    // 把注册表接到新端口、再收掉旧内核，流量全程不断。内核死了才在这里
+    // 还原，免得起内核的窗口期注册表指着死端口。
+    let takeover = read_snapshot(&data).is_some();
+    let orphan = read_ports(&data);
+    let serving = orphan_serving(&data);
+    if takeover && !serving {
+        repair_orphan(&data);
+    }
     let mut held = held();
     match start(&mut held, &data, subscription) {
-        Ok(ready) => Ok(ready),
+        Ok(ready) => {
+            if serving {
+                // 注册表先切到新内核（sysproxy_on 见快照还在就不重写），切成了
+                // 才收旧内核；没切成就让旧内核继续服，不断用户的流量。
+                let mut flipped = !takeover;
+                if takeover && sysproxy_on(&data, ready.mixed).is_ok() {
+                    if let Some(run) = held.running.as_mut() {
+                        run.sysproxy = true;
+                    }
+                    flipped = true;
+                }
+                if flipped {
+                    let fresh = held.running.as_ref().map(|run| run.child.id());
+                    if let Some(pid) = orphan.and_then(|ports| ports.pid) {
+                        if Some(pid) != fresh {
+                            let _ = kill_kernel_pid(pid);
+                        }
+                    }
+                }
+            }
+            Ok(ready)
+        }
         Err(failure) => {
             held.error = Some(failure.clone());
             Err(failure)
@@ -646,10 +837,14 @@ pub fn shutdown() {
     stop_held(&mut held(), data.as_deref());
 }
 
-/// 启动时的一次孤儿补还原（3.7.1：上次异常退出可能把系统代理留在死端口上）。
+/// 启动时的孤儿处置（3.7.1）：上次异常退出留下的系统代理接管，若内核还在
+/// 服着（控制器应答）就保留——重启 dock 不该把用户的代理关掉，接管等 clash
+/// 页 ensure 换防；只有内核真的死了（注册表指着死端口）才还原。
 pub fn startup_repair() {
     if let Some(data) = base_dir().ok() {
-        repair_orphan(&data);
+        if !orphan_serving(&data) {
+            repair_orphan(&data);
+        }
     }
 }
 
@@ -670,12 +865,36 @@ pub fn clash_ensure(app: tauri::AppHandle, origin: String) -> Result<ClashReady,
     ensure(&origin, &subscription)
 }
 
+/// 开关的「真实状态」：接管记录在，且注册表此刻确实指向我们的端口（内核
+/// 没跑时：系统代理仍开着，孤儿内核在服的情形）。别的代理软件半路改写了
+/// 注册表（比如 Verge 的守卫）时，这里如实显示关，不再假装开着。
+fn sysproxy_shown(dir: &Path, mixed: Option<u16>) -> bool {
+    if read_snapshot(dir).is_none() {
+        return false;
+    }
+    let inet = read_inet();
+    if inet.enable != 1 {
+        return false;
+    }
+    match mixed {
+        Some(mixed) => inet.server == format!("127.0.0.1:{mixed}"),
+        None => true,
+    }
+}
+
 #[tauri::command]
 pub fn clash_state() -> ClashState {
-    let held = held();
-    let sysproxy = read_snapshot(&base_dir().unwrap_or_default()).is_some();
+    let mut held = held();
+    // 内核死了就说死了（快照与粘性接管的兜底动作在 ensure 一侧，这里只如实
+    // 上报，让页面把状态翻成「已停止」而不是挂着假活着）。
+    let running = match held.running.as_mut() {
+        Some(run) => matches!(run.child.try_wait(), Ok(None)),
+        None => false,
+    };
+    let mixed = if running { held.running.as_ref().map(|run| run.mixed) } else { None };
+    let sysproxy = sysproxy_shown(&base_dir().unwrap_or_default(), mixed);
     match &held.running {
-        Some(run) => ClashState {
+        Some(run) if running => ClashState {
             running: true,
             version: Some(run.version.clone()),
             mixed: Some(run.mixed),
@@ -684,7 +903,7 @@ pub fn clash_state() -> ClashState {
             sysproxy,
             error: None,
         },
-        None => ClashState {
+        _ => ClashState {
             running: false,
             version: None,
             mixed: None,
@@ -710,10 +929,20 @@ pub fn clash_sysproxy(_app: tauri::AppHandle, enable: bool) -> Result<Value, Cla
         ClashFailure::new("NOT_RUNNING", "内核没有在跑：先启动内核，系统代理才有可指向的端口")
     })?;
     if enable {
+        // 从别家代理手里接管（此前注册表开着、指向别的端口，典型：Verge 的
+        // 7897）时把原指向带给 UI，提示用户「关掉时会自动切回」。
+        let previous = read_inet();
+        let fresh = read_snapshot(&data).is_none();
         sysproxy_on(&data, mixed)?;
         if let Some(run) = held.running.as_mut() {
             run.sysproxy = true;
         }
+        let from = if fresh && previous.enable == 1 && previous.server != format!("127.0.0.1:{mixed}") {
+            previous.server
+        } else {
+            String::new()
+        };
+        return Ok(json!({ "on": enable, "mixed": mixed, "from": from }));
     } else {
         sysproxy_off(&data)?;
         if let Some(run) = held.running.as_mut() {
@@ -731,8 +960,8 @@ mod tests {
 
     #[test]
     fn port_policy_prefers_fixed_when_free() {
-        let (mixed, ctl) = pick_ports(|port| port == 7899 || port == 9099, &mut || 41000);
-        assert_eq!((mixed, ctl), (7899, 9099));
+        let (mixed, ctl) = pick_ports(|port| port == 7895 || port == 9099, &mut || 41000);
+        assert_eq!((mixed, ctl), (7895, 9099));
     }
 
     #[test]
@@ -764,9 +993,13 @@ mod tests {
         let text = config_text(7899, "s1", "https://example.com/sub?token=x");
         assert!(text.contains("proxy-providers:"), "订阅走 provider，内核自己下载与更新");
         assert!(text.contains("url: https://example.com/sub?token=x"));
-        assert!(text.contains("MATCH,PROXY"));
+        let rules_at = text.find("rules:").unwrap();
+        let geoip_at = text.find("GEOIP,CN,DIRECT").unwrap();
+        let match_at = text.find("MATCH,PROXY").unwrap();
+        assert!(rules_at < geoip_at && geoip_at < match_at, "国内直连在前，兜底在后");
         let none = config_text(7899, "s1", "  ");
         assert!(!none.contains("proxy-providers"), "没有订阅就没有 provider 段");
+        assert!(!none.contains("GEOIP,CN,DIRECT"), "没有订阅就没有规则（PROXY 组不存在，写规则起不来）");
     }
 
     #[test]
@@ -836,6 +1069,65 @@ mod tests {
         assert_eq!(with_local_bypass("*.lan; 192.168.*"), "*.lan;192.168.*;localhost;127.*;<local>");
         assert_eq!(with_local_bypass("localhost;127.*;<local>"), "localhost;127.*;<local>");
         assert_eq!(with_local_bypass(""), "localhost;127.*;<local>");
+    }
+
+    #[test]
+    fn ports_file_gives_the_orphans_controller_and_pid() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-clash-ports-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(read_ports(&dir).is_none(), "没起过内核就没有 ports.json");
+        write_ports(&dir, 7899, 9099, 4242).unwrap();
+        let ports = read_ports(&dir).unwrap();
+        assert_eq!(ports.ctl, 9099);
+        assert_eq!(ports.pid, Some(4242));
+        std::fs::write(dir.join("ports.json"), "not json").unwrap();
+        assert!(read_ports(&dir).is_none(), "坏的 ports.json 当没有处理");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_server_parses_single_and_per_scheme_forms() {
+        assert_eq!(snapshot_endpoints("127.0.0.1:7897"), vec![("127.0.0.1".into(), 7897)]);
+        assert_eq!(
+            snapshot_endpoints("http=10.0.0.1:8080;https=10.0.0.2:8443"),
+            vec![("10.0.0.2".into(), 8443), ("10.0.0.1".into(), 8080)],
+            "https 条目排前面，先探它"
+        );
+        assert_eq!(snapshot_endpoints("[::1]:7897"), vec![("::1".into(), 7897)]);
+        assert!(snapshot_endpoints("").is_empty());
+        assert!(snapshot_endpoints("ftp=1.2.3.4:21").is_empty(), "ftp 之类的条目不参与探活");
+        assert!(snapshot_endpoints("nonsense").is_empty());
+    }
+
+    #[test]
+    fn sysproxy_restore_knows_when_the_recorded_proxy_is_gone() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let on = SysSnapshot { enable: 1, server: format!("127.0.0.1:{port}"), bypass: String::new() };
+        assert!(snapshot_alive(&on));
+        let dead = SysSnapshot { enable: 1, server: "127.0.0.1:1".into(), bypass: String::new() };
+        assert!(!snapshot_alive(&dead), "回环端口 1 上不会有监听者");
+        let off = SysSnapshot { enable: 0, server: "127.0.0.1:1".into(), bypass: String::new() };
+        assert!(snapshot_alive(&off), "用户本来就没开代理，谈不上死活");
+        drop(listener);
+    }
+
+    #[test]
+    fn dashboard_patch_is_idempotent_and_keeps_the_owner_html() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-clash-ui-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("ui")).unwrap();
+        let index = dir.join("ui/index.html");
+        std::fs::write(&index, "<!doctype html><html><head><title>zashboard</title></head><body></body></html>").unwrap();
+        patch_dashboard(&dir);
+        let first = std::fs::read_to_string(&index).unwrap();
+        assert!(first.contains(r#"href="./fish-dock.css""#));
+        assert!(first.contains(r#"src="./fish-dock.js""#));
+        assert!(first.contains("<title>zashboard</title>"));
+        patch_dashboard(&dir);
+        assert_eq!(std::fs::read_to_string(&index).unwrap(), first);
+        assert!(dir.join("ui/fish-dock.css").is_file());
+        assert!(dir.join("ui/fish-dock.js").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

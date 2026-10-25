@@ -80,7 +80,7 @@ tauri-winrt-notification = "0.8.1"
 winreg = "0.56.0"
 # Clash 页的系统代理开关（clash.rs）：写完注册表要 InternetSetOption 叫
 # WinINET 立即生效，不然浏览器要等下一次自己重读。
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Networking_WinInet"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Networking_WinInet", "Win32_System_Threading"] }
 # WebView2's ProcessFailed: her pages' renderer gone (crash/win.rs); both
 # already in the tree, under Tauri.
 webview2-com = "0.39"
