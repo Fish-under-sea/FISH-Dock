@@ -497,13 +497,14 @@ impl Shared {
             // Antigravity's and Reasonix's approvals never come to her, nor
             // DeepSeek Harness's through its hook bridge (through her plugin
             // they may: those given on her are counted all the same).
+            let agent = msg["agent"].as_str().unwrap_or("");
             let is_agy = msg["agent"] == "agy" || msg["agent"] == "dsh" || msg["agent"] == "reasonix";
             self.count_today(|t| {
-                t.begun(out.turns, msg["agent"].as_str().unwrap_or(""));
+                t.begun(out.turns, agent);
+                t.worked(agent, out.worked_ms);
                 if is_agy {
                     t.agy_turns += out.turns;
                 }
-                t.worked_ms += out.worked_ms;
             });
         }
         if out.changed {
@@ -968,13 +969,17 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
 async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
     let sh = shared(&app);
     let lang = sh.lang();
+    // Whose ask it was, taken before the answer takes it off the list: today's
+    // count keeps each agent's own approvals (widgets.rs approve).
+    let asks = sh.asks.lock().unwrap().views();
+    let agent = asks.as_array().map(|a| a.iter().find(|v| v["id"] == json!(id)).and_then(|v| v["agent"].as_str()).unwrap_or("").to_string()).unwrap_or_default();
     let ok = sh.asks.lock().unwrap().answer(id, &choice, lang);
     sh.log(&format!("answer {id}: {choice} -> {ok}"));
     if ok {
         sh.push_asks();
         // An approval given on her, for today's count.
         if matches!(choice["action"].as_str(), Some("allow" | "always")) {
-            sh.count_today(|t| t.approvals += 1);
+            sh.count_today(|t| t.approve(&agent));
         }
     }
     ok

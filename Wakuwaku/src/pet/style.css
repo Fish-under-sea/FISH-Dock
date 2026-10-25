@@ -2724,6 +2724,23 @@ body:not(.tb-light) #bar-rest .ticon[data-mono='dark'] img {
   }
 }
 
+/* The today card swiped to another agent: its row, numbers and bars slide
+   in from the side the new one comes from, fading (wcards.js wswipe). */
+.wswipe {
+  animation: wswipe 0.3s cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+@keyframes wswipe {
+  from {
+    opacity: 0;
+    transform: translateX(var(--wswipe-from, 26px));
+  }
+}
+
+.wswipe.from-l {
+  --wswipe-from: -26px;
+}
+
 #bar-rest .wpop.rising {
   animation: wpop-rise 0.18s ease both;
 }
@@ -2912,6 +2929,10 @@ body:not(.tb-light) #bar-rest .ticon[data-mono='dark'] img {
 @media (prefers-reduced-motion: reduce) {
   .home-island #island-row {
     transition: none;
+  }
+
+  .wswipe {
+    animation: none;
   }
 }
 
