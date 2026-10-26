@@ -91,8 +91,10 @@ pub fn to_message(e: &Value) -> Option<Value> {
             message[to] = json!(s(e, from));
         }
     }
-    if !s(e, "cwd").is_empty() {
-        message["project"] = json!(project_of(s(e, "cwd")));
+    let cwd = s(e, "cwd");
+    if !cwd.is_empty() {
+        message["project"] = json!(project_of(cwd));
+        crate::events::place(&mut message, cwd);
     }
     Some(message)
 }
@@ -116,7 +118,7 @@ mod tests {
         assert_eq!(
             m,
             json!({ "mood": "working", "detail": "Bash", "event": "tool-start", "step": { "key": "step.command", "vars": { "what": "cargo test" } },
-                    "toolId": "u1", "agent": "codex", "session": "s", "turn": "t1", "project": "pet" })
+                    "toolId": "u1", "agent": "codex", "session": "s", "turn": "t1", "project": "pet", "workspace": "Z:\\nowhere\\pet" })
         );
         let patch = "*** Begin Patch\n*** Add File: D:\\w\\note.txt\n+x\n*** End Patch";
         let m = to_message(&event("PostToolUse", json!({ "tool_name": "apply_patch", "tool_input": { "command": patch } }))).unwrap();

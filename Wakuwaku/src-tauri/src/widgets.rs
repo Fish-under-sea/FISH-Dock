@@ -380,6 +380,16 @@ fn built_in(id: &str) -> Widget {
 
 // --- Today: what the day has seen ---------------------------------------------------
 
+// One agent's own day (the island's today card swipes between them).
+#[derive(Default, Clone, PartialEq, Debug)]
+pub struct AgentDay {
+    pub turns: u64,
+    pub worked_ms: u64,
+    pub approvals: u64,
+    // The turns begun in each hour of the day, its own beside the day's.
+    pub hours: [u64; 24],
+}
+
 #[derive(Default, Clone, PartialEq, Debug)]
 pub struct Today {
     pub date: String,
@@ -394,6 +404,8 @@ pub struct Today {
     pub last: String,
     // The turns begun in each hour of the day, local time (the widget's bars).
     pub hours: [u64; 24],
+    // Each agent's own counts beside the day's sum.
+    pub agents: HashMap<String, AgentDay>,
 }
 
 impl Today {
@@ -407,6 +419,14 @@ impl Today {
         for (h, v) in hours.iter_mut().zip(saved["hours"].as_array().into_iter().flatten()) {
             *h = v.as_u64().unwrap_or(0);
         }
+        let mut agents = HashMap::new();
+        for (id, a) in saved["agents"].as_object().into_iter().flatten() {
+            let mut hours = [0; 24];
+            for (h, v) in hours.iter_mut().zip(a["hours"].as_array().into_iter().flatten()) {
+                *h = v.as_u64().unwrap_or(0);
+            }
+            agents.insert(id.clone(), AgentDay { turns: a["turns"].as_u64().unwrap_or(0), worked_ms: a["workedMs"].as_u64().unwrap_or(0), approvals: a["approvals"].as_u64().unwrap_or(0), hours });
+        }
         Today {
             date: date.into(),
             turns: n("turns"),
@@ -415,22 +435,56 @@ impl Today {
             approvals: n("approvals"),
             last: saved["lastAgent"].as_str().unwrap_or("").into(),
             hours,
+            agents,
         }
     }
 
     pub fn save(&self, dir: &Path) {
-        let body = json!({ "date": self.date, "turns": self.turns, "agyTurns": self.agy_turns, "workedMs": self.worked_ms, "approvals": self.approvals, "lastAgent": self.last, "hours": self.hours });
+        let mut agents = serde_json::Map::new();
+        for (id, a) in &self.agents {
+            agents.insert(id.clone(), json!({ "turns": a.turns, "workedMs": a.worked_ms, "approvals": a.approvals, "hours": a.hours }));
+        }
+        let body = json!({ "date": self.date, "turns": self.turns, "agyTurns": self.agy_turns, "workedMs": self.worked_ms, "approvals": self.approvals, "lastAgent": self.last, "hours": self.hours, "agents": agents });
         let _ = std::fs::write(dir.join("today.json"), body.to_string());
     }
 
-    // Turns begun now, by an agent: counted, in this hour of the day, and it
-    // becomes the one that last worked (a turn of nobody's leaves it alone).
+    // Turns begun now, by an agent: counted, in this hour of the day (the
+    // day's and the agent's own), and it becomes the one that last worked (a
+    // turn of nobody's leaves it alone).
     pub fn begun(&mut self, turns: u64, agent: &str) {
+        let hour = local_hour();
         self.turns += turns;
-        self.hours[local_hour()] += turns;
+        self.hours[hour] += turns;
         if turns > 0 && !agent.is_empty() {
             self.last = agent.into();
+            let day = self.day(agent);
+            day.turns += turns;
+            day.hours[hour] += turns;
         }
+    }
+
+    // How long the turns that ended took, by agent too.
+    pub fn worked(&mut self, agent: &str, ms: u64) {
+        if ms == 0 {
+            return;
+        }
+        self.worked_ms += ms;
+        if !agent.is_empty() {
+            self.day(agent).worked_ms += ms;
+        }
+    }
+
+    // An approval given on her, by agent too.
+    pub fn approve(&mut self, agent: &str) {
+        self.approvals += 1;
+        if !agent.is_empty() {
+            self.day(agent).approvals += 1;
+        }
+    }
+
+    // The agent's day, made when first heard of.
+    fn day(&mut self, agent: &str) -> &mut AgentDay {
+        self.agents.entry(agent.to_string()).or_default()
     }
 
     // What its larger sizes show: the turns hour by hour (bars, the page
@@ -452,13 +506,11 @@ impl Today {
     // Turns, the time as h:mm (under a minute, in seconds: a few short turns
     // are no 0:00), approvals; with Antigravity's or DeepSeek Harness's turns
     // alone, "—" for them. And whose day it was, by its brand (`who`), for the
-    // card's title: none when nobody has worked yet.
+    // card's title: none when nobody has worked yet. Beside the sum, each
+    // agent's own day (the island's card swipes between them, and adds the
+    // turn under way to `workedMs` as it draws).
     pub fn words(&self) -> Value {
-        let minutes = self.worked_ms / 60_000;
-        let time = match self.worked_ms {
-            1..=59_999 => json!({ "key": "widget.todaySeconds", "vars": { "n": (self.worked_ms / 1000).max(1).to_string() } }),
-            _ => json!(format!("{}:{:02}", minutes / 60, minutes % 60)),
-        };
+        let time = today_time(self.worked_ms);
         let key = if self.turns > 0 && self.agy_turns == self.turns && self.approvals == 0 { "widget.todayValueAgy" } else { "widget.todayValue" };
         let mut vars = serde_json::Map::new();
         vars.insert("turns".into(), json!(self.turns.to_string()));
@@ -467,7 +519,23 @@ impl Today {
         if let Some(who) = brand(&self.last) {
             vars.insert("who".into(), json!(who));
         }
-        json!({ "key": key, "vars": Value::Object(vars) })
+        let mut mine: Vec<(&String, &AgentDay)> = self.agents.iter().filter(|(_, a)| a.turns > 0 || a.worked_ms > 0 || a.approvals > 0).collect();
+        mine.sort_by(|a, b| b.1.turns.cmp(&a.1.turns).then(a.0.cmp(b.0)));
+        // Beside the sum, each agent's own day. Beside vars, not in them: a
+        // var the pages render in her words, and an agent is no words.
+        json!({ "key": key, "vars": Value::Object(vars), "agents": mine.into_iter().map(|(id, a)| json!({ "id": id, "who": brand(id).unwrap_or(id), "turns": a.turns.to_string(), "time": today_time(a.worked_ms), "workedMs": a.worked_ms, "approvals": a.approvals.to_string(), "hours": a.hours })).collect::<Vec<_>>() })
+    }
+}
+
+// The time worked as h:mm (under a minute, in seconds: a few short turns are
+// no 0:00).
+fn today_time(worked_ms: u64) -> Value {
+    match worked_ms {
+        1..=59_999 => json!({ "key": "widget.todaySeconds", "vars": { "n": (worked_ms / 1000).max(1).to_string() } }),
+        _ => {
+            let minutes = worked_ms / 60_000;
+            json!(format!("{}:{:02}", minutes / 60, minutes % 60))
+        }
     }
 }
 
@@ -1679,7 +1747,7 @@ mod tests {
         t.approvals = 5;
         t.save(&dir);
         assert_eq!(Today::load(&dir, "2026-10-09"), t);
-        assert_eq!(t.words(), json!({ "key": "widget.todayValue", "vars": { "turns": "12", "time": "1:43", "approvals": "5" } }));
+        assert_eq!(t.words(), json!({ "key": "widget.todayValue", "vars": { "turns": "12", "time": "1:43", "approvals": "5" }, "agents": [] }));
         assert_eq!(Today::load(&dir, "2026-10-10").turns, 0);
         assert!(t.roll("2026-10-10") && t.turns == 0);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1687,7 +1755,7 @@ mod tests {
 
     #[test]
     fn today_under_a_minute_in_seconds_and_antigravity_s_approvals_never_counted() {
-        let words = |turns, agy_turns, worked_ms, approvals| Today { date: String::new(), turns, agy_turns, worked_ms, approvals, last: String::new(), hours: [0; 24] }.words();
+        let words = |turns, agy_turns, worked_ms, approvals| Today { date: String::new(), turns, agy_turns, worked_ms, approvals, last: String::new(), hours: [0; 24], agents: Default::default() }.words();
         let seconds = |n: &str| json!({ "key": "widget.todaySeconds", "vars": { "n": n } });
         assert_eq!(words(3, 0, 45_600, 1)["vars"]["time"], seconds("45"));
         assert_eq!(words(1, 0, 400, 0)["vars"]["time"], seconds("1"));
@@ -1698,9 +1766,50 @@ mod tests {
         assert_eq!(words(0, 0, 0, 0)["key"], "widget.todayValue");
         let dir = std::env::temp_dir().join(format!("wakuwaku-today-agy-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let t = Today { date: "2026-10-14".into(), turns: 4, agy_turns: 3, worked_ms: 1, approvals: 0, last: "codex".into(), hours: [0; 24] };
+        let t = Today { date: "2026-10-14".into(), turns: 4, agy_turns: 3, worked_ms: 1, approvals: 0, last: "codex".into(), hours: [0; 24], agents: Default::default() };
         t.save(&dir);
         assert_eq!(Today::load(&dir, "2026-10-14"), t);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Each agent's day beside the sum: turns, time and approvals by agent,
+    // kept over a save, busiest first in the words.
+    #[test]
+    fn today_keeps_each_agents_own_day() {
+        let mut t = Today { date: "2026-10-14".into(), ..Today::default() };
+        t.begun(1, "zcode");
+        t.worked("zcode", 30_000);
+        t.begun(1, "dsh");
+        t.worked("dsh", 90_000);
+        t.begun(1, "dsh");
+        t.worked("dsh", 11_400);
+        t.approve("dsh");
+        t.approve("dsh");
+        t.approve("zcode");
+        assert_eq!((t.turns, t.worked_ms, t.approvals), (3, 131_400, 3));
+        let dsh = &t.agents["dsh"];
+        assert_eq!((dsh.turns, dsh.worked_ms, dsh.approvals), (2, 101_400, 2));
+        let words = t.words();
+        let agents = words["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 2);
+        assert_eq!(&agents[0]["id"], &json!("dsh"));
+        assert_eq!(&agents[0]["who"], &json!("DeepSeek"));
+        assert_eq!((&agents[0]["turns"], &agents[0]["time"], &agents[0]["approvals"]), (&json!("2"), &json!("0:01"), &json!("2")));
+        assert_eq!((&agents[1]["id"], &agents[1]["who"], &agents[1]["turns"], &agents[1]["approvals"]), (&json!("zcode"), &json!("ZCode"), &json!("1"), &json!("1")));
+        // Each hour of the day is there, its turns under the agent's own.
+        let sum = |a: &Value| a["hours"].as_array().unwrap().iter().map(|h| h.as_u64().unwrap()).sum::<u64>();
+        assert_eq!((agents[0]["hours"].as_array().unwrap().len(), sum(&agents[0])), (24, 2));
+        assert_eq!(sum(&agents[1]), 1);
+        let dir = std::env::temp_dir().join(format!("wakuwaku-today-agents-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        t.save(&dir);
+        assert_eq!(Today::load(&dir, "2026-10-14"), t);
+        // A turn of nobody's: the sum takes it, no agent's day.
+        let mut t = Today { date: String::new(), ..Today::default() };
+        t.begun(1, "");
+        t.worked("", 5_000);
+        t.approve("");
+        assert_eq!(t.words()["agents"], json!([]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

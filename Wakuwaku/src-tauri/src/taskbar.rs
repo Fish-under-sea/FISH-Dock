@@ -2369,8 +2369,17 @@ mod imp {
 
         // Shown again once more, at this tick: whether that makes it the
         // tug of war (once; from then on it is left to the other program).
+        // The same tick counts once: a screenshot's overlay makes Windows
+        // re-show the bar four or five times inside one tick (its show
+        // event, all within 200 ms, 2026-10-24's log) — counted as four or
+        // five pulls, three shots in a row "won" the tug and the home fell
+        // to the island for nothing. A real rival (a program that shows the
+        // bar and keeps it shown) pulls on later ticks and is still caught.
         fn shown(&mut self, tick: u32) -> bool {
             if self.lost {
+                return false;
+            }
+            if self.seen > 0 && self.at[(self.seen + TUG_TIMES - 1) % TUG_TIMES] == tick {
                 return false;
             }
             self.at[self.seen % TUG_TIMES] = tick;
@@ -2387,8 +2396,18 @@ mod imp {
         if HANDING_BACK.load(Ordering::SeqCst) || TUG.lock().unwrap().lost {
             return;
         }
-        // A new Explorer's taskbar showing is no tug of war (zhoupengjie/Wakuwaku#85).
+        let fullscreen = sh().is_some_and(|sh| sh.is_fullscreen());
         if !explorer_check() && TUG.lock().unwrap().shown(TICKS.load(Ordering::SeqCst)) {
+            // A game or a video full screen: Windows re-shows the bar for
+            // its toasts, the clock, Game Bar — the re-shows come while the
+            // person cannot see the tug's words at all, so a give_up here
+            // reads as "the taskbar mode broke for nothing" when they come
+            // back. Hide it again, and leave the tug out of it: a real
+            // rival still pulls on later looks after the full screen ends.
+            if fullscreen {
+                shell::rehide();
+                return;
+            }
             give_up();
             return;
         }
@@ -2429,14 +2448,37 @@ mod imp {
             assert!((0..2000).step_by(3).all(|tick| !tug.shown(tick)));
         }
 
-        // Many times within a tick (its show events, #69's 7 or 8 a second):
-        // a tug of war, told once.
+        // A burst within one tick (a screenshot's overlay: four or five show
+        // events inside 200 ms) is one pull, never the tug: the pulls that
+        // matter span ticks — a rival keeps showing on later ticks too
+        // (#69's 7 or 8 a second reaches later ticks; a shot does not).
         #[test]
-        fn a_burst_is_a_tug_of_war() {
+        fn one_tick_burst_is_one_pull_only() {
             let mut tug = Tug::new();
             let told: Vec<bool> = (0..TUG_TIMES as u32 + 5).map(|i| tug.shown(100 + i / 8)).collect();
-            assert_eq!(told.iter().filter(|t| **t).count(), 1);
-            assert!(told[TUG_TIMES - 1]);
+            assert_eq!(told.iter().filter(|t| **t).count(), 0, "同 tick 的爆发只算一次拉扯");
+            assert!(!told.iter().any(|t| *t));
+        }
+
+        // Shot after shot, each its own burst inside one tick, minutes apart:
+        // never the tug (the user screenshots when they like).
+        #[test]
+        fn screenshot_bursts_never_win_the_tug() {
+            let mut tug = Tug::new();
+            for burst in 0..10 {
+                for _ in 0..6 {
+                    assert!(!tug.shown(burst * 500), "每次截图一簇，永不该触发");
+                }
+            }
+        }
+
+        // A rival that keeps showing on every later tick (the #69 program):
+        // still caught, TUG_TIMES distinct ticks in.
+        #[test]
+        fn rival_across_ticks_is_caught() {
+            let mut tug = Tug::new();
+            let at = (0..TUG_TICKS * 2).find(|&tick| tug.shown(300 + tick));
+            assert_eq!(at, Some(TUG_TIMES as u32 - 1));
         }
 
         // Seen by the timer at every tick, put away and shown again each
@@ -2462,10 +2504,12 @@ mod imp {
         // after (counted from the first, both halves would fall short).
         #[test]
         fn the_window_slides() {
+            // 持续的对手（每 tick 都有回显）：旧拉扯滑出 20-tick 窗口后，
+            // 新的照旧触发。同 tick 的多次只算一次（截屏豁免）。
             let mut tug = Tug::new();
             assert!(!tug.shown(0));
-            assert!((0..TUG_TIMES / 2).all(|_| !tug.shown(TUG_TICKS - 2)));
-            let told: Vec<bool> = (0..TUG_TIMES / 2).map(|_| tug.shown(TUG_TICKS + 2)).collect();
+            assert!((0..TUG_TIMES / 2).all(|i| !tug.shown(TUG_TICKS - 2 + i as u32)));
+            let told: Vec<bool> = (0..TUG_TIMES / 2).map(|i| tug.shown(TUG_TICKS + 2 + i as u32)).collect();
             assert_eq!(told.last(), Some(&true));
         }
 

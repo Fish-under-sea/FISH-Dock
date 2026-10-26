@@ -158,7 +158,7 @@
   const TASKBAR_H = 48
   const TASKBAR_ROOM = 640
   // The room the settings keep above the strip (settingsMax), taller than the
-  // island's own: the Local models page is Our Free Model's console, whose own
+  // island's own: native plugin pages retain their own web layout, whose own
   // window is 1280×800 and whose page wants the height of it (settings.js
   // MODELS_H). The window keeps it from the start, so opening them never moves
   // it (island.rs SETTINGS_ROOM, the same).
@@ -719,7 +719,11 @@
   // as before. A right press: its menu (openMenu). Each row's size is the
   // person's (widgetSize, from the menu); unset, medium where it has more
   // to say than its value, small else.
-  const isleCtx = () => ({ lang, light: inkLight, detailed: isDetailed(), width: cardWidth(), hour: new Date().getHours(), now: Date.now(), all: allWidgets })
+  // The turns under way: each busy session's agent and when its turn began,
+  // for the today card to add theirs to the day's time (wcards.js busyOf),
+  // as the clock by her name runs too.
+  const busyNow = () => (now.list || []).filter(s => (s.mood === 'working' || s.mood === 'waiting') && s.since).map(s => ({ agent: s.agent, since: s.since }))
+  const isleCtx = () => ({ lang, light: inkLight, detailed: isDetailed(), width: cardWidth(), hour: new Date().getHours(), now: Date.now(), all: allWidgets, busy: busyNow() })
   // The card as wide as the open island's lines (the spec: about 270):
   // the island at its widest, less her room and its padding, the card's.
   const cardWidth = () => (isHome() ? OPEN_MAX_W - 124 - 22 : OPEN_BARE_MAX_W - 18 - 22) + 16 - 24
@@ -752,6 +756,9 @@
     const size = rowSize(widget)
     const row = el('span', `wrow wr-${size}${isShown ? ' on' : ''}${open ? ' open' : ''}${card ? ' carded' : ''}`)
     row.dataset.widget = widget.id
+    // The today card swiped a moment ago: its whole row slides to the new agent.
+    const swiped = WCards.kindOf(widget) === 'today' ? WCards.todayAnimClass() : ''
+    if (swiped) row.classList.add(...swiped.split(' '))
     row.innerHTML = WCards.rowHTML(widget, size, ctx, { open, card })
     fillHer(row, 14)
     if (!open) return row
@@ -1777,7 +1784,7 @@
   // drawGroup) or a stack (the first, its others opened over it).
   const ENTRY_TURN_MS = 5000
   // What the widgets on the strip are drawn with (wcards.js ctx).
-  const barCtx = () => ({ lang, light: isLight(), detailed: isDetailed(), width: STACK_CARD_W, hour: new Date().getHours(), now: Date.now() })
+  const barCtx = () => ({ lang, light: isLight(), detailed: isDetailed(), width: STACK_CARD_W, hour: new Date().getHours(), now: Date.now(), busy: busyNow() })
   // Placed this long ago at most, a widget with nothing yet is loading.
   const LOADING_MS = 20000
   const placedAt = new Map()
@@ -5822,6 +5829,11 @@
     target.addEventListener('click', e => {
       // A click in the settings (✕, the head) may just have closed them: not a click to open.
       if (isSetting() || window.Settings?.layer?.contains(e.target) || Date.now() - pulledAt < 500) return
+      // A swipe just went by: not a click to open.
+      if (swipe.done) {
+        swipe.done = false
+        return
+      }
       if (view === 'ask' || panel.contains(e.target) || her.contains(e.target)) return
       // A widget's menu open in it: a press elsewhere closes it, and is all.
       if (menuFor?.where === 'isle') {
@@ -5877,9 +5889,22 @@
       },
       { passive: false },
     )
+    // A horizontal drag on the today row or card swipes between the agents
+    // that worked today (wcards.js todayCycle); the click it would have
+    // made is put aside, so a swipe does not open its settings.
+    let swipe = { x: 0, y: 0, at: 0, on: false, done: false }
     target.addEventListener('pointerdown', e => {
       const session = e.button === 0 && view === 'expanded' && e.target.closest('[data-jump]')
       pressed = { id: session ? session.dataset.jump : '', at: Date.now() }
+      swipe = { x: e.clientX, y: e.clientY, at: Date.now(), on: e.button === 0 && view === 'expanded' && !!e.target.closest('[data-widget="today"],[data-card="today"]'), done: false }
+    })
+    target.addEventListener('pointerup', e => {
+      if (!swipe.on || e.button !== 0 || Date.now() - swipe.at > 1500) return
+      const dx = e.clientX - swipe.x
+      if (Math.abs(dx) >= 28 && Math.abs(dx) > Math.abs(e.clientY - swipe.y) && WCards.todayCycle(dx < 0 ? 1 : -1)) {
+        swipe.done = true
+        update()
+      }
     })
     target.addEventListener('contextmenu', e => {
       if (e.target.matches('input, textarea')) return

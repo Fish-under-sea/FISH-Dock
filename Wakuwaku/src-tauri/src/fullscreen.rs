@@ -82,7 +82,10 @@ mod imp {
     // Windows' own, which cover the screen a moment as they open: search
     // (SearchHost's CoreWindow, some 60 ms: the taskbar flashed, #5), Start,
     // the quick settings and notifications.
-    const SKIP_PROGRAMS: [&str; 3] = ["searchhost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe"];
+    // A screenshot's full-screen overlay too (Win+Shift+S: SnippingTool, and
+    // the Sketch & Snip hosts): a moment long, gone with the shot. Counted,
+    // it made everything fullscreen-driven twitch with every screenshot.
+    const SKIP_PROGRAMS: [&str; 6] = ["searchhost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe", "snippingtool.exe", "screenclippinghost.exe", "screensketch.exe"];
 
     // The file name of the program a window is of, lower case.
     fn program_of(hwnd: Hwnd) -> String {

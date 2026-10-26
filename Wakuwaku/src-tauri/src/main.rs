@@ -541,7 +541,7 @@ impl Shared {
                 if is_agy {
                     t.agy_turns += out.turns;
                 }
-                t.worked_ms += out.worked_ms;
+                t.worked(msg["agent"].as_str().unwrap_or(""), out.worked_ms);
             });
         }
         if out.changed {
@@ -551,9 +551,13 @@ impl Shared {
             self.to_pages("pet:react", react);
         }
         if !self.flag("dnd") {
-            for (mood, project) in out.alerts {
-                if let Some(event)=plugin_events::alert(&mood,&project,msg){plugin_events::publish(event);}
-                self.alert(&mood, &project);
+            for alert in out.alerts {
+                // 保留远程补全的通知上下文，仍由独立插件消费白名单事件。
+                let mut context = msg.clone();
+                if !alert.workspace.is_empty() { context["workspace"] = json!(alert.workspace); }
+                if !alert.repo.is_empty() { context["repo"] = json!(alert.repo); }
+                if let Some(event) = plugin_events::alert(&alert.mood, &alert.whose, &context) { plugin_events::publish(event); }
+                self.alert(&alert.mood, &alert.whose);
             }
         }
         true
@@ -1001,13 +1005,14 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
 async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
     let sh = shared(&app);
     let lang = sh.lang();
+    let agent = sh.asks.lock().unwrap().views().as_array().and_then(|rows| rows.iter().find(|row| row["id"] == json!(id))).and_then(|row| row["agent"].as_str()).unwrap_or("").to_string();
     let ok = sh.asks.lock().unwrap().answer(id, &choice, lang);
     sh.log(&format!("answer {id}: {choice} -> {ok}"));
     if ok {
         sh.push_asks();
         // An approval given on her, for today's count.
         if matches!(choice["action"].as_str(), Some("allow" | "always")) {
-            sh.count_today(|t| t.approvals += 1);
+            sh.count_today(|t| t.approve(&agent));
         }
     }
     ok
