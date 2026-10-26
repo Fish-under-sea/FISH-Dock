@@ -63,6 +63,7 @@ mod events_reasonix;
 mod dsh_bridge;
 mod events_zcode;
 mod fetch;
+mod feishu;
 mod focus;
 mod fullscreen;
 mod model_focus;
@@ -516,8 +517,8 @@ impl Shared {
             self.to_pages("pet:react", react);
         }
         if !self.flag("dnd") {
-            for (mood, project) in out.alerts {
-                self.alert(&mood, &project);
+            for alert in out.alerts {
+                self.alert(&alert);
             }
         }
         true
@@ -598,20 +599,25 @@ impl Shared {
         }
     }
 
-    // A chime from her home, and a system notification if asked for.
-    fn alert(&self, mood: &str, project: &str) {
+    // A chime from her home, a system notification and a Feishu message if
+    // asked for (each with its own switches).
+    fn alert(&self, alert: &state::Alert) {
+        let mood = alert.mood.as_str();
         let _ = self.app.emit_to("island", "pet:alert", json!({ "mood": mood }));
         let group = match mood {
             "waiting" => "waiting",
             "error" => "error",
             _ => "done",
         };
+        let lang = self.lang();
+        let whose = if alert.whose.is_empty() { String::new() } else { i18n::t(lang, "notify.project").replace("{project}", &alert.whose) };
+        let body = i18n::t(lang, &format!("notify.{mood}")).replace("{project}", &whose);
+        // The Feishu page's own switches decide (feishu.rs), and it sends on a
+        // thread of its own: a group's bot must not hold up her toast.
+        crate::feishu::alert(&self.app, alert);
         if self.setting("notify").get(group).and_then(Value::as_bool) != Some(true) {
             return;
         }
-        let lang = self.lang();
-        let whose = if project.is_empty() { String::new() } else { i18n::t(lang, "notify.project").replace("{project}", project) };
-        let body = i18n::t(lang, &format!("notify.{mood}")).replace("{project}", &whose);
         let sh = shared(&self.app);
         // Off this thread: a toast can take a moment.
         std::thread::spawn(move || {
@@ -1703,6 +1709,9 @@ fn main() {
             settings::settings_get,
             settings::settings_focus,
             settings::settings_fullscreen_answer,
+            feishu::feishu_save,
+            feishu::feishu_clear,
+            feishu::feishu_test,
             identity_api::identity_view,
             identity_api::identity_export,
             identity_api::identity_preview,

@@ -92,15 +92,28 @@ pub enum Hold {
     Secs(u64),
 }
 
+// The mood just arrived: what the session is called, and where it works
+// (a repository's name where it is one, the workspace, the chat's name).
+pub struct Alert {
+    pub mood: String,
+    // The session's name, or its project: the toast's words.
+    pub whose: String,
+    // The session's name alone (its title, or the person's words).
+    pub chat: String,
+    // The repository found above the workspace, if any.
+    pub repo: String,
+    // The workspace the agent runs in, if the event said.
+    pub workspace: String,
+}
+
 #[derive(Default)]
 pub struct Outcome {
     // The mood shown may have changed: redraw.
     pub changed: bool,
     // { react, say } to play once.
     pub react: Option<Value>,
-    // Moods just arrived that want a chime (and a notification): (mood,
-    // whose: the session's name, or its project).
-    pub alerts: Vec<(String, String)>,
+    // Moods just arrived that want a chime (and a notification).
+    pub alerts: Vec<Alert>,
     // For today's count: turns begun, and how long the ones that ended took
     // (stopped by the person too, and one that never said it ended, up to
     // its last event, when the next begins).
@@ -125,6 +138,10 @@ struct Todo {
 struct Session {
     id: String,
     project: String,
+    // The workspace the agent runs in, and the repository above it (if it is
+    // one): kept for the card's lines.
+    workspace: String,
+    repo: String,
     mood: String,
     detail: Value,
     at: u64,
@@ -164,6 +181,8 @@ impl Session {
         Session {
             id,
             project: String::new(),
+            workspace: String::new(),
+            repo: String::new(),
             mood: "idle".into(),
             detail: Value::String(String::new()),
             at: now,
@@ -351,6 +370,8 @@ impl Pet {
         if let Some(mood) = mood {
             let id = str_field(msg, "session", 200);
             let project = str_field(msg, "project", 200);
+            let workspace = str_field(msg, "workspace", 260);
+            let repo = str_field(msg, "repo", 80);
             let detail = text(msg.get("detail"), 80);
             let event = msg.get("event").and_then(Value::as_str).unwrap_or("");
             let agent = str_field(msg, "agent", 20);
@@ -366,6 +387,17 @@ impl Pet {
                 let s = self.sessions.entry(id.clone()).or_insert_with(|| Session::new(id, now));
                 if !project.is_empty() {
                     s.project = project;
+                }
+                // Where it works: another folder clears the repository a card
+                // would otherwise name from the one before.
+                if !workspace.is_empty() {
+                    if workspace != s.workspace {
+                        s.repo.clear();
+                    }
+                    s.workspace = workspace;
+                }
+                if !repo.is_empty() {
+                    s.repo = repo;
                 }
                 let chain = jump::chain_from_json(msg.get("chain"));
                 if !chain.is_empty() {
@@ -472,9 +504,14 @@ impl Pet {
                     s.has_edited = false;
                 }
                 let whose = s.whose();
+                let chat = s.name().to_string();
+                let workspace = s.workspace.clone();
+                let repo = s.repo.clone();
                 // How long the turn has gone on, should this end it.
                 let busy_for = s.since.map(|since| now.saturating_sub(since));
-                out.alerts.extend(set(s, mood, detail, now, hold).map(|m| (m, whose)));
+                if let Some(arrived) = set(s, mood, detail, now, hold) {
+                    out.alerts.push(Alert { mood: arrived, whose, chat, repo, workspace });
+                }
                 // Its end: done, or stopped by the person, having worked till then.
                 if is_ending(mood) || (mood == "idle" && event == "turn-end") {
                     out.worked_ms += busy_for.unwrap_or(0);
@@ -632,7 +669,8 @@ mod tests {
         let out = pet.apply(&msg(json!({ "session": "a", "mood": "done" })), 5, Hold::Seen).unwrap();
         assert_eq!(pet.get(6)["mood"], "review");
         assert_eq!(pet.get(6)["took"], 4);
-        assert_eq!(out.alerts, vec![("review".to_string(), String::new())]);
+        assert_eq!(out.alerts.len(), 1);
+        assert_eq!((out.alerts[0].mood.as_str(), out.alerts[0].whose.as_str()), ("review", ""));
     }
 
     #[test]
@@ -739,7 +777,8 @@ mod tests {
     fn a_session_is_named_by_its_title_or_else_its_task() {
         let mut pet = Pet::default();
         let out = pet.apply(&msg(json!({ "session": "a", "project": "pet", "mood": "waiting" })), 1, Hold::Seen).unwrap();
-        assert_eq!(out.alerts, vec![("waiting".to_string(), "pet".to_string())]);
+        assert_eq!(out.alerts.len(), 1);
+        assert_eq!((out.alerts[0].mood.as_str(), out.alerts[0].whose.as_str()), ("waiting", "pet"));
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start", "task": "修复岛" })), 2, Hold::Seen);
         assert_eq!(pet.get(3)["name"], "修复岛");
         pet.apply(&msg(json!({ "session": "a", "mood": "done", "title": "岛的设置" })), 4, Hold::Seen);

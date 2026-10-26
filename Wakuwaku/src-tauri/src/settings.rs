@@ -69,6 +69,8 @@ pub fn snapshot(sh: &Shared) -> Value {
     settings.insert("settingsTop".into(), sh.setting("settingsTop"));
     json!({
         "settings": Value::Object(settings),
+        // 飞书：存没存地址、末尾四位、上一次发送的结果（feishu.rs）。
+        "feishu": crate::feishu::view(sh),
         "lang": sh.lang(),
         "pets": pets,
         "now": now,
@@ -580,6 +582,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // (island.js rowSize).
         "widgetSize" => v.as_object().is_some_and(|m| m.len() <= 64 && m.iter().all(|(id, s)| crate::widgets::is_id(id) && matches!(s.as_str(), Some("S" | "M")))),
         "plugins" => plugins::is_ok(v),
+        // 飞书群机器人的开关与推哪几类（feishu.rs）；webhook 不在这里。
+        "feishu" => crate::feishu::is_ok(v),
         "monitor" => v.as_object().is_some_and(|m| {
             m.iter().all(|(k, v)| match k.as_str() {
                 "cpu" | "mem" | "net" | "battery" | "pin" => v.is_boolean(),

@@ -44,8 +44,8 @@
   // (island.rs asks for the pets, or connecting), the page they are part of
   // opens, scrolled to them (PART_OF, showPart); connecting while the
   // welcome shows is the welcome, at General's top.
-  const TABS = ['now', 'agents', 'look', 'widgets', 'mail', 'models', 'clash', 'zen']
-  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail', models: 's.tabModels', clash: 's.tabClash', zen: 's.tabZen' }
+  const TABS = ['now', 'agents', 'look', 'widgets', 'feishu', 'mail', 'models', 'clash', 'zen']
+  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', feishu: 's.tabFeishu', mail: 's.tabMail', models: 's.tabModels', clash: 's.tabClash', zen: 's.tabZen' }
   const PART_OF = { identity: 'now', pets: 'look', place: 'look', alerts: 'now', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
@@ -1858,6 +1858,121 @@
     </div>`
   }
 
+  // --- Feishu ---------------------------------------------------------------------------
+  // 单向通知（feishu.rs）：webhook 只进不出，页面看见的只是末尾四位。
+  let feishuDraft = ''
+  let feishuBusy = false
+  let feishuSaid = ''
+
+  const feishuAt = ms => (ms ? new Date(ms).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', { hour12: false }) : '')
+
+  // Rust 侧只给码（"invalid"、"network:…"、"http:429"、"api:19024"），这里翻成人话。
+  function feishuWhy(err) {
+    const code = String((err && err.message) || err || '').trim()
+    if (code.startsWith('network:')) return T('feishu.err.network', { why: code.slice(8) })
+    if (code.startsWith('http:')) return T('feishu.err.http', { status: code.slice(5) })
+    if (code.startsWith('api:')) {
+      const n = code.slice(4)
+      if (n === '9499' || n === '19002') return T('feishu.err.bad')
+      if (n === '19021') return T('feishu.err.sign')
+      if (n === '19022') return T('feishu.err.ip')
+      if (n === '19024') return T('feishu.err.keywords')
+      if (['11232', '11233', '11247'].includes(n)) return T('feishu.err.rate')
+      if (n === '19036') return T('feishu.err.big')
+      return T('feishu.err.api', { code: n })
+    }
+    if (code === 'invalid') return T('feishu.err.invalid')
+    if (code === 'missing') return T('feishu.err.missing')
+    if (code === 'write' || code === 'clear') return T('feishu.err.write')
+    return T('feishu.err.other')
+  }
+
+  const feishuSaidText = code =>
+    code === 'ok-save' ? T('feishu.savedOk') : code === 'ok-test' ? T('feishu.testOk') : code === 'ok-clear' ? T('feishu.removed') : feishuWhy(code)
+
+  function pageFeishu() {
+    const f = snap.settings.feishu || {}
+    const view = snap.feishu || {}
+    const saved = view.saved === true
+    const last = view.last
+    const lastText = !last
+      ? T('feishu.never')
+      : last.ok
+        ? T('feishu.sent', { time: feishuAt(last.at) })
+        : T('feishu.failed', { time: feishuAt(last.at), why: feishuWhy(last.code) })
+    const said = feishuSaid ? `<div class="note${feishuSaid.startsWith('ok-') ? '' : ' err'}">${esc(feishuSaidText(feishuSaid))}</div>` : ''
+    return `${sec(T('feishu.section'))}<div class="grp">
+        <div class="note">${esc(T('feishu.note'))}</div>
+        <div class="r"><div class="grow"><div>${esc(T('feishu.url'))}</div></div><input class="in" data-feishu-url value="${esc(feishuDraft)}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" spellcheck="false" autocomplete="off"><button class="pbtn" data-feishu-save>${esc(T('feishu.save'))}</button></div>
+        ${saved ? `<div class="r"><span class="grow">${esc(T('feishu.saved', { tail: view.tail || '' }))}</span><button class="pbtn sm" data-feishu-clear>${esc(T('feishu.remove'))}</button></div>` : ''}
+      </div>
+      ${sec(T('feishu.events'))}<div class="grp">
+        ${row(esc(T('feishu.on')), esc(T('feishu.onNote')), sw('feishu.on', f.on === true))}
+        ${row(esc(T('feishu.waiting')), '', sw('feishu.waiting', f.waiting !== false))}
+        ${row(esc(T('feishu.done')), '', sw('feishu.done', f.done !== false))}
+        ${row(esc(T('feishu.error')), '', sw('feishu.error', f.error !== false))}
+      </div>
+      ${sec(T('feishu.test'))}<div class="grp">
+        <div class="note">${esc(T('feishu.testNote'))}</div>
+        <div class="r"><button class="pbtn wide" data-feishu-test ${saved && !feishuBusy ? '' : 'disabled'}>${esc(feishuBusy ? T('feishu.testing') : T('feishu.test'))}</button></div>
+        <div class="note">${esc(lastText)}</div>${said}
+      </div>`
+  }
+
+  // 飞书页的动作：保存地址、移除、发一条测试。
+  function handleFeishu(at) {
+    const save = at('[data-feishu-save]')
+    if (save) {
+      const box = body.querySelector('[data-feishu-url]')
+      const url = (box ? box.value : '').trim()
+      if (!url) {
+        feishuSaid = 'missing'
+        draw()
+        return true
+      }
+      window.pet.feishu.save(url).then(got => {
+        snap = got
+        feishuDraft = ''
+        feishuSaid = 'ok-save'
+        draw()
+      }).catch(err => {
+        feishuSaid = String((err && err.message) || err)
+        draw()
+      })
+      return true
+    }
+    if (at('[data-feishu-clear]')) {
+      window.pet.feishu.clear().then(got => {
+        snap = got
+        feishuDraft = ''
+        feishuSaid = 'ok-clear'
+        draw()
+      }).catch(err => {
+        feishuSaid = String((err && err.message) || err)
+        draw()
+      })
+      return true
+    }
+    const test = at('[data-feishu-test]')
+    if (test && !test.disabled) {
+      feishuBusy = true
+      feishuSaid = ''
+      draw()
+      window.pet.feishu.test().then(got => {
+        snap = got
+        feishuBusy = false
+        feishuSaid = 'ok-test'
+        draw()
+      }).catch(err => {
+        feishuBusy = false
+        feishuSaid = String((err && err.message) || err)
+        draw()
+      })
+      return true
+    }
+    return false
+  }
+
   // Mail: each account with its switch and setting one up; the inbox
   // (every account's, or one), and a letter open or being written. In two
   // panes the inbox is on the left, and on the right the letter being
@@ -2871,7 +2986,7 @@
     return `<div data-zen-page>${sec(T('s.zenTitle'))}<div class="grp"><div class="note">${esc(T('s.zenLoading'))}</div></div></div>`
   }
 
-  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail, models: pageModels, clash: pageClash, zen: pageZen }
+  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, feishu: pageFeishu, mail: pageMail, models: pageModels, clash: pageClash, zen: pageZen }
 
   // --- Drawing --------------------------------------------------------------------------------
 
@@ -3253,6 +3368,7 @@
     // Mail: an account set up, changed, kept, removed; its server looked
     // up, or typed in.
     if (handleMail(at)) return
+    if (handleFeishu(at)) return
     const toggle = at('[data-sw]')
     if (toggle && !toggle.disabled) {
       const key = toggle.dataset.sw
@@ -3262,6 +3378,13 @@
       if (key === 'paperShuffle') return paperDo('shuffle', !snap.winPaper?.shuffle)
       if (key === 'ilookBare') return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bare: !ilookOf(ilookFor()).bare })
       if (key.startsWith('notify.')) return patch({ notify: { ...s.notify, [key.slice(7)]: !s.notify?.[key.slice(7)] } })
+      // 飞书的四把开关：总开关与「需要确认 / 完成 / 出错」三类。
+      if (key.startsWith('feishu.')) {
+        const f = s.feishu || {}
+        const name = key.slice(7)
+        const current = name === 'on' ? f.on === true : f[name] !== false
+        return patch({ feishu: { ...f, [name]: !current } })
+      }
       if (key === 'widgetNudge') return patch({ widgetNudge: s.widgetNudge === false })
       // One of the monitor's parts on or off.
       if (key.startsWith('mon:')) return patch({ monitor: { ...(s.monitor || {}), [key.slice(4)]: (s.monitor || {})[key.slice(4)] === false } })
@@ -3957,6 +4080,7 @@
 
   layer.addEventListener('input', e => {
     if (e.target.dataset.mf && mailForm) mailForm[e.target.dataset.mf] = e.target.value
+    if (e.target.dataset.feishuUrl !== undefined) feishuDraft = e.target.value
     if (e.target.dataset.proxyAt !== undefined) proxyTyped = { key: e.target.dataset.proxyAt, text: e.target.value, bad: false }
     if (e.target.dataset.w && draft) {
       draft[e.target.dataset.w] = e.target.value
