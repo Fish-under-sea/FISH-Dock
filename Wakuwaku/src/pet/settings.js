@@ -44,8 +44,8 @@
   // (island.rs asks for the pets, or connecting), the page they are part of
   // opens, scrolled to them (PART_OF, showPart); connecting while the
   // welcome shows is the welcome, at General's top.
-  const TABS = ['now', 'agents', 'look', 'widgets', 'mail', 'models']
-  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail', models: 's.tabModels' }
+  const TABS = ['now', 'agents', 'look', 'widgets', 'mail', 'models', 'clash', 'zen']
+  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail', models: 's.tabModels', clash: 's.tabClash', zen: 's.tabZen' }
   const PART_OF = { identity: 'now', pets: 'look', place: 'look', alerts: 'now', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
@@ -79,6 +79,7 @@
   let tab = 'now'
   let snap = null
   let lang = 'en'
+  const zenInvoke = (command, args) => window.__TAURI__.core.invoke(command, args)
   const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => window.confirm(message), lang: () => lang, redraw: () => draw() })
   // The crash report shown, as it would be sent (pageCrash).
   let crashShown = false
@@ -1439,6 +1440,9 @@
   // the room; never more than the screen leaves (draw()).
   const MODELS_W = 1120
   const MODELS_H = 760
+  const CLASH_W = 1120
+  const CLASH_H = 760
+  const SIZED = { models: [MODELS_W, MODELS_H], clash: [CLASH_W, CLASH_H] }
   const roomForTwo = () => screen.availWidth >= 820
   const twoPanes = () => tab === 'mail' && snap?.settings?.mailPanes !== 'one' && roomForTwo()
 
@@ -2550,6 +2554,7 @@
         <div class="note">${esc(T('home.intro'))}</div>
         <div class="note">${esc(T('home.upstream'))}</div>
         <div class="note">${esc(T('home.credits'))}</div>
+        <div class="r"><span class="link" data-thirdparty>${esc(T('settings.thirdParty'))} ›</span></div>
       </div>`
 
   // Her updates (updates.rs): this version and the latest, its notes and
@@ -2812,7 +2817,61 @@
     return ''
   }
 
-  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail, models: pageModels }
+  function pageClash() {
+    return ''
+  }
+
+  // Zen desktop（v4 §4）：Windhawk 状态卡、mod 列表（勾选即入待提交集合）、
+  // 动作条（应用 / 打开 Windhawk）。数据 zen_state 拉一次，应用后重拉。
+  let zenState = null
+  let zenDirty = {}
+  const ZEN_DEPLOYED = [
+    { id: 'local@zen-taskbar-acrylic', url: 'https://raw.githubusercontent.com/foxweb/pixel Fedora/main/PLACEHOLDER' },
+  ]
+  async function zenLoad() {
+    try {
+      zenState = await invoke('zen_state')
+    } catch (error) {
+      zenState = { installed: false, engine_running: false, mods: [], error: String(error) }
+    }
+    if (snap && isOpen && tab === 'zen') {
+      paintZen()
+      window.Island?.changed()
+    }
+  }
+  function zenModState(m) {
+    if (m.libraryFile) return 'compiled'
+    return m.hasSource ? 'uncompiled' : 'nosource'
+  }
+  function zenCard() {
+    if (!zenState) return `<div class="note">${esc(T('s.zenLoading'))}</div>`
+    if (!zenState.installed) return `<div class="note">${esc(T('s.zenNotInstalled'))}</div>`
+    const engine = zenState.engineRunning ? T('s.zenEngineOn') : T('s.zenEngineOff')
+    return `<div class="note">${esc(engine)}</div><div class="note">${esc(zenState.installDir || '')}</div>`
+  }
+  function zenRows() {
+    return (zenState?.mods || [])
+      .map(m => {
+        const kind = zenModState(m)
+        const wanted = zenDirty[m.id] ?? m.disabled
+        const canCheck = kind === 'compiled'
+        const why = kind === 'uncompiled' ? T('s.zenUncompiled') : kind === 'nosource' ? T('s.zenNoSource') : ''
+        return `<div class="r"><input type="checkbox" data-zen-mod="${esc(m.id)}" ${wanted ? 'checked' : ''} ${canCheck ? '' : 'disabled'}><div class="grow d"><b>${esc(m.id)}</b>${why ? `<span class="note"> ${esc(why)}</span>` : ''}</div><span class="d">${esc(m.version || '')}</span></div>`
+      })
+      .join('')
+  }
+  function paintZen() {
+    const body = document.querySelector('#island-settings .s-body') || document.querySelector('.s-body')
+    const box = body?.querySelector('[data-zen-page]')
+    if (!box) return
+    box.innerHTML = `${sec(T('s.zenTitle'))}<div class="grp">${zenCard()}</div><div class="grp">${zenRows()}</div><div class="grp"><div class="r"><button class="pbtn" data-zen-apply ${Object.keys(zenDirty).length ? '' : 'disabled'}>${esc(T('s.zenApply'))}</button><button class="pbtn" data-zen-open>${esc(T('s.zenOpen'))}</button></div><div class="note">${esc(T('s.zenOnceNote'))}</div></div>`
+  }
+  function pageZen() {
+    zenLoad()
+    return `<div data-zen-page>${sec(T('s.zenTitle'))}<div class="grp"><div class="note">${esc(T('s.zenLoading'))}</div></div></div>`
+  }
+
+  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail, models: pageModels, clash: pageClash, zen: pageZen }
 
   // --- Drawing --------------------------------------------------------------------------------
 
@@ -2856,15 +2915,17 @@
     // diff, and never redrawn (a redraw would take the frame out of the document
     // and reload it). Leaving it, the frame is parked first, so the diff below
     // clears an empty box rather than the frame.
-    if (tab === 'models') {
+    if (tab === 'models' || tab === 'clash') {
       // The page before this one is cleared first: the frame is placed over this
       // page's box by its position on screen, and left under that page's markup
       // it would be put where the box would have been below it.
       setHTML(body, '')
-      Models.enter(body, T)
+      if (tab === 'models') Models.enter(body, T)
+      else Clash.enter(body, T)
       body.scrollTop = 0
       return
     }
+    Clash.park()
     Models.park()
     const box = body.contains(document.activeElement) && document.activeElement.matches('input, textarea') ? document.activeElement : null
     const which =
@@ -2898,7 +2959,7 @@
     // The Mail page in two panes is wider; the Local models page is the console,
     // as wide as the console's own window.
     const wide = twoPanes()
-    const models = tab === 'models'
+    const models = tab === 'models' || tab === 'clash'
     layer.classList.toggle('wide', wide)
     layer.classList.toggle('models', models)
     const width = wide ? WIDE_W : models ? MODELS_W : 0
@@ -2966,7 +3027,7 @@
     const wasOpen = isOpen
     const revision = ++openRevision
     isOpen = true
-    syncModelFocus()
+    syncPinnedFocus()
     if (!wasOpen) openedAt = Date.now()
     if (!wasOpen) {
       window.pet.keyboard(true)
@@ -2998,8 +3059,9 @@
     window.Island?.changed()
   }
 
-  function syncModelFocus() {
-    const active = isOpen && tab === 'models'
+  const PINNED = new Set(['models', 'clash', 'zen'])
+  function syncPinnedFocus() {
+    const active = isOpen && PINNED.has(tab)
     if (active === modelFocus) return
     modelFocus = active
     if (snap?.settings) {
@@ -3016,8 +3078,9 @@
     isOpen = false
     syncFullscreenPrompt()
     ++openRevision
-    syncModelFocus()
-    // The console's frame waits off screen, as it does on any other page.
+    syncPinnedFocus()
+    // The consoles' frames wait off screen, as they do on any other page.
+    Clash.park()
     Models.park()
     // The welcome opened again only for this time: "not now" said since
     // (the island's 不用提醒), the next open shows it folded (the test session).
@@ -3039,7 +3102,7 @@
   function setTab(next) {
     if (next === tab || !TABS.includes(next)) return
     tab = next
-    syncModelFocus()
+    syncPinnedFocus()
     draw(true)
     if (tab === 'look') loadGallery(false)
     relayout()
@@ -3150,6 +3213,33 @@
     }
     const tabButton = at('[data-tab]')
     if (tabButton) return setTab(tabButton.dataset.tab)
+    // Zen desktop 的三个动作（v4 §4）：勾选只进待提交集合，应用才写。
+    const zenBox = at('[data-zen-mod]')
+    if (zenBox) {
+      zenDirty[zenBox.dataset.zenMod] = zenBox.checked
+      const apply = layer.querySelector('[data-zen-apply]')
+      if (apply) apply.disabled = !Object.keys(zenDirty).length
+      return
+    }
+    if (at('[data-zen-apply]')) {
+      const changes = Object.entries(zenDirty).map(([id, disabled]) => ({ id, disabled }))
+      return void zenInvoke('zen_apply', { changes })
+        .then(() => {
+          zenDirty = {}
+          return zenLoad()
+        })
+        .catch(error => console.log('[zen apply]', error))
+    }
+    if (at('[data-thirdparty]')) {
+      return void zenInvoke('oflm_open_url', { url: 'https://github.com/Fish-under-sea/FISH-Dock/blob/main/THIRD_PARTY_NOTICES.md' })
+        .catch(error => console.log('[thirdparty]', error))
+    }
+    if (at('[data-zen-open]')) {
+      // 本机装的 Windhawk：直接把它的 exe 路径交给 oflm_open_url（http/https
+      // 之外不放行，所以这里用 ZenDesktop 的网页作兜底入口）。
+      const site = 'https://windhawk.net/'
+      return void zenInvoke('oflm_open_url', { url: site }).catch(error => console.log('[zen open]', error))
+    }
     // A session: to its window (the settings close as it comes to the front).
     const session = at('[data-jump]')
     if (session) {

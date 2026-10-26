@@ -449,6 +449,46 @@ pub fn shutdown() {
     stop(&mut held());
 }
 
+/// 在系统默认浏览器里打开一个网页（v4 §7）：登录页在置顶面板里点不开，
+/// 由 dock 代开。只放行 http/https，别的（file: 之类）一律拒绝。
+#[tauri::command]
+pub fn oflm_open_url(url: String) -> Result<(), String> {
+    let url = url.trim();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(format!("只放行 http/https，不是：{url}"));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // ShellExecuteW 的 "open" 走文件关联，最短路径就是 start 一个 URL；
+        // cmd 的 start 把 & 吃掉，所以这里用 explorer.exe 直开。
+        let mut command = Command::new("explorer.exe");
+        command.arg(url);
+        command.creation_flags(0x0800_0000);
+        command
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("浏览器没能打开：{error}"))
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("xdg-open").arg(url).spawn().map(|_| ()).map_err(|error| format!("浏览器没能打开：{error}"))
+    }
+}
+
+/// 登录前一步（v4 §7）：一次性解除锁定与置顶——自动取消，不走全屏询问。
+#[tauri::command]
+pub fn settings_step_aside(app: tauri::AppHandle) -> Value {
+    let sh = crate::shared(&app);
+    {
+        let mut focus = sh.settings_focus.lock().unwrap();
+        let now = std::time::Instant::now();
+        focus.set(Some(false), Some(false), now);
+    }
+    crate::island::keep_on_top(&sh);
+    serde_json::json!({ "aside": true })
+}
+
 /// The console's address: the service started the first time, and reused after.
 #[tauri::command]
 pub fn oflm_ensure(app: tauri::AppHandle, origin: String) -> Result<OflmReady, OflmFailure> {

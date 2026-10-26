@@ -1,0 +1,29 @@
+/* Fish Dock: keep zashboard's own proxy page, but let an expanded group use
+   the whole panel area instead of staying inside its two-column card slot. */
+.proxies-scrollable-parent:has(.collapse-motion-open) {
+  overflow: hidden !important;
+}
+
+.collapse-motion-open {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 60 !important;
+  grid-template-rows: max-content minmax(0, 1fr) !important;
+  overflow: hidden !important;
+  border-radius: 0 !important;
+  background: var(--color-base-100, #1c1c1e) !important;
+  box-shadow: none !important;
+}
+
+.collapse-motion-open .collapse-motion-body {
+  display: grid !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  min-height: 0 !important;
+}
+
+.collapse-motion-open .collapse-motion-content {
+  align-self: stretch !important;
+  max-height: none !important;
+  height: 100% !important;
+  overflow-y: auto !important;
+}

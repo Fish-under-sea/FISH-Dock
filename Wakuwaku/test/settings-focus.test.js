@@ -15,7 +15,7 @@ function page() {
     setInterval: () => 1, clearInterval() {}, clearTimeout() {},
     document: { hasFocus: () => true, activeElement: null },
     layer: { focus() {}, contains: () => false },
-    Models: { park() {} }, draw: () => calls.push('draw'), relayout() {}, showPart() {}, loadGallery() {},
+    Models: { park() {} }, Clash: { park() {} }, draw: () => calls.push('draw'), relayout() {}, showPart() {}, loadGallery() {},
     cardShows: () => false, openLetter() {}, syncFullscreenPrompt() {},
     window: { pet: {
       keyboard() {}, settingsClosed() {}, settings: {
