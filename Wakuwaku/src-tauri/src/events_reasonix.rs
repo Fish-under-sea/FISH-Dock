@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn reasonix_events_become_messages() {
         let m = to_message(&event("SessionStart", json!({ "source": "startup" }))).unwrap();
-        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "reasonix", "session": "rx-7f3a", "project": "rx" }));
+        assert_eq!(m, json!({ "mood": "idle", "react": "wave", "say": { "key": "say.hello" }, "agent": "reasonix", "session": "rx-7f3a", "project": "rx", "workspace": "Z:\\nowhere\\rx" }));
         let m = to_message(&event("UserPromptSubmit", json!({ "prompt": "Create a file named note.txt containing hi", "turn": 1 }))).unwrap();
         assert_eq!((m["mood"].as_str(), m["event"].as_str(), m["task"].as_str()), (Some("working"), Some("turn-start"), Some("Create a file named note.txt containing hi")));
         // Its tools by Claude Code's names, their arguments too: the step says the file.

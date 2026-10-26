@@ -2,11 +2,23 @@
 **/node_modules/
 **/target/
 **/gen/
-/.tools/
-/.agent-teams/
 /dist/
 **/.runtime/
 **/src-tauri/resources/ofm/
+
+# 本机工具链、预览版与安装产物：只在这台机器上，绝不进库
+/.tools/
+/.agent-teams/
+/官方安装后产物/
+
+# 二进制与压缩包：本机产物不进库（测试用的两个 fixture 放行）
+*.exe
+*.dll
+*.cab
+*.msi
+*.7z
+*.zip
+!Wakuwaku/test/fixtures/**/*.zip
 
 # 用户数据、凭据与本地缓存
 **/.env

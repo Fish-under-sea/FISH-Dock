@@ -190,6 +190,9 @@ fn defaults() -> Map<String, Value> {
         // new from it (15, 30, 60, 120; 0 never: state.rs is_shown).
         "idleHideMin": crate::state::IDLE_HIDE_MIN,
         "notify": { "waiting": false, "done": false, "error": false },
+        // 飞书群机器人的单向通知（feishu.rs）：这里只有开关与推送哪几类；
+        // webhook 地址本身用当前用户 DPAPI 单独存（feishu.dpapi），不进这里。
+        "feishu": { "on": false, "waiting": true, "done": true, "error": true },
         "sound": false,
         "promptWaitSec": 290,
         "dnd": false,

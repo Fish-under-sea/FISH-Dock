@@ -46,11 +46,13 @@ mod audio;
 mod backplate;
 mod bars;
 mod clock;
+mod clash;
 mod connection;
 mod crash;
 mod data;
 mod desk;
 mod detach;
+mod zen;
 mod events;
 mod events_agy;
 mod events_codex;
@@ -61,6 +63,7 @@ mod events_reasonix;
 mod dsh_bridge;
 mod events_zcode;
 mod fetch;
+mod feishu;
 mod focus;
 mod fullscreen;
 mod model_focus;
@@ -497,13 +500,14 @@ impl Shared {
             // Antigravity's and Reasonix's approvals never come to her, nor
             // DeepSeek Harness's through its hook bridge (through her plugin
             // they may: those given on her are counted all the same).
+            let agent = msg["agent"].as_str().unwrap_or("");
             let is_agy = msg["agent"] == "agy" || msg["agent"] == "dsh" || msg["agent"] == "reasonix";
             self.count_today(|t| {
-                t.begun(out.turns, msg["agent"].as_str().unwrap_or(""));
+                t.begun(out.turns, agent);
+                t.worked(agent, out.worked_ms);
                 if is_agy {
                     t.agy_turns += out.turns;
                 }
-                t.worked_ms += out.worked_ms;
             });
         }
         if out.changed {
@@ -513,8 +517,8 @@ impl Shared {
             self.to_pages("pet:react", react);
         }
         if !self.flag("dnd") {
-            for (mood, project) in out.alerts {
-                self.alert(&mood, &project);
+            for alert in out.alerts {
+                self.alert(&alert);
             }
         }
         true
@@ -595,20 +599,25 @@ impl Shared {
         }
     }
 
-    // A chime from her home, and a system notification if asked for.
-    fn alert(&self, mood: &str, project: &str) {
+    // A chime from her home, a system notification and a Feishu message if
+    // asked for (each with its own switches).
+    fn alert(&self, alert: &state::Alert) {
+        let mood = alert.mood.as_str();
         let _ = self.app.emit_to("island", "pet:alert", json!({ "mood": mood }));
         let group = match mood {
             "waiting" => "waiting",
             "error" => "error",
             _ => "done",
         };
+        let lang = self.lang();
+        let whose = if alert.whose.is_empty() { String::new() } else { i18n::t(lang, "notify.project").replace("{project}", &alert.whose) };
+        let body = i18n::t(lang, &format!("notify.{mood}")).replace("{project}", &whose);
+        // The Feishu page's own switches decide (feishu.rs), and it sends on a
+        // thread of its own: a group's bot must not hold up her toast.
+        crate::feishu::alert(&self.app, alert);
         if self.setting("notify").get(group).and_then(Value::as_bool) != Some(true) {
             return;
         }
-        let lang = self.lang();
-        let whose = if project.is_empty() { String::new() } else { i18n::t(lang, "notify.project").replace("{project}", project) };
-        let body = i18n::t(lang, &format!("notify.{mood}")).replace("{project}", &whose);
         let sh = shared(&self.app);
         // Off this thread: a toast can take a moment.
         std::thread::spawn(move || {
@@ -968,13 +977,17 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
 async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
     let sh = shared(&app);
     let lang = sh.lang();
+    // Whose ask it was, taken before the answer takes it off the list: today's
+    // count keeps each agent's own approvals (widgets.rs approve).
+    let asks = sh.asks.lock().unwrap().views();
+    let agent = asks.as_array().map(|a| a.iter().find(|v| v["id"] == json!(id)).and_then(|v| v["agent"].as_str()).unwrap_or("").to_string()).unwrap_or_default();
     let ok = sh.asks.lock().unwrap().answer(id, &choice, lang);
     sh.log(&format!("answer {id}: {choice} -> {ok}"));
     if ok {
         sh.push_asks();
         // An approval given on her, for today's count.
         if matches!(choice["action"].as_str(), Some("allow" | "always")) {
-            sh.count_today(|t| t.approvals += 1);
+            sh.count_today(|t| t.approve(&agent));
         }
     }
     ok
@@ -1472,6 +1485,9 @@ fn main() {
     // end, and gives Windows' taskbar back if she could not; and sees
     // whether she crashed (crash.rs; her data folder is the file's).
     let args: Vec<String> = std::env::args().collect();
+    // The Clash page's system proxy (clash.rs): an orphan takeover left by a
+    // crash is restored before anything else runs off this start.
+    clash::startup_repair();
     // Uninstalling (scripts/installer.mjs): her own logon task taken away
     // before the uninstaller deletes her program, and gone. Early, before the
     // port is taken, the runtime prepared or anything shown: an uninstall must
@@ -1537,6 +1553,11 @@ fn main() {
     // One step for LibreHardwareMonitor run as administrator (lhm_setup.rs
     // admin: put in Program Files, its config, its task, removed), then
     // gone with its exit code; nothing of her started.
+    // One step for ZenDesktop's mod switches as administrator (zen.rs): write
+    // the diffs, leave the result file, gone. Nothing of her started.
+    if let Some(at) = args.iter().position(|a| a == "--wakuwaku-zen") {
+        std::process::exit(zen::admin(&args[at + 1..]));
+    }
     if let Some(at) = args.iter().position(|a| a == lhm_setup::ADMIN_FLAG) {
         std::process::exit(lhm_setup::admin(&args[at + 1..]));
     }
@@ -1688,6 +1709,9 @@ fn main() {
             settings::settings_get,
             settings::settings_focus,
             settings::settings_fullscreen_answer,
+            feishu::feishu_save,
+            feishu::feishu_clear,
+            feishu::feishu_test,
             identity_api::identity_view,
             identity_api::identity_export,
             identity_api::identity_preview,
@@ -1751,7 +1775,15 @@ fn main() {
             mail::mail_kick,
             mail::mail_draft,
             mail::mail_keep_draft,
+            zen::zen_state,
+            zen::zen_apply,
+            clash::clash_ensure,
+            clash::clash_state,
+            clash::clash_stop,
+            clash::clash_sysproxy,
             oflm::oflm_ensure,
+            oflm::oflm_open_url,
+            oflm::settings_step_aside,
             oflm::oflm_state,
             oflm::oflm_stop,
             taskbar::taskbar_tray,
@@ -1947,9 +1979,10 @@ fn main() {
                         tokens_at = Some(std::time::Instant::now());
                         let count = watcher.is_widget_wanted("tokens").then(|| {
                             tokens.update(&claude_dir, &codex_dir, &agy_dirs, widgets::local_midnight());
-                            // The local model service counts what it served itself: where it
-                            // has numbers for today, those are the ones to show; a day it
-                            // served nothing in leaves the transcripts to say it.
+                            // magpie counts what it served itself, in its own ledger
+                            // (~/.config/magpie/usage.jsonl): where it has numbers for
+                            // today, those are the ones to show; a day it served
+                            // nothing in leaves the transcripts to say it.
                             match oflm_stats::today(&widgets::local_date()) {
                                 Some(served) => tokens::words(served),
                                 None => tokens::words(tokens.count()),
@@ -2181,8 +2214,11 @@ fn main() {
                 sh.log("quitting: the bar given back, the mail stopped");
                 island::release_bar(&sh);
                 mail::stop_all(&sh);
-                // The local model service she runs (oflm.rs): no node.exe left.
+                // Her models page runs magpie (oflm.rs): no magpie left behind.
                 oflm::shutdown();
+                // The Clash page's kernel (clash.rs): no mihomo.exe left, and
+                // the system proxy restored from its snapshot (3.7.1).
+                clash::shutdown();
                 sh.log("quitting: done");
             }
         });

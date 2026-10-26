@@ -44,8 +44,8 @@
   // (island.rs asks for the pets, or connecting), the page they are part of
   // opens, scrolled to them (PART_OF, showPart); connecting while the
   // welcome shows is the welcome, at General's top.
-  const TABS = ['now', 'agents', 'look', 'widgets', 'mail', 'models']
-  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail', models: 's.tabModels' }
+  const TABS = ['now', 'agents', 'look', 'widgets', 'feishu', 'mail', 'models', 'clash', 'zen']
+  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', feishu: 's.tabFeishu', mail: 's.tabMail', models: 's.tabModels', clash: 's.tabClash', zen: 's.tabZen' }
   const PART_OF = { identity: 'now', pets: 'look', place: 'look', alerts: 'now', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
@@ -79,6 +79,7 @@
   let tab = 'now'
   let snap = null
   let lang = 'en'
+  const zenInvoke = (command, args) => window.__TAURI__.core.invoke(command, args)
   const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => window.confirm(message), lang: () => lang, redraw: () => draw() })
   // The crash report shown, as it would be sent (pageCrash).
   let crashShown = false
@@ -1439,6 +1440,9 @@
   // the room; never more than the screen leaves (draw()).
   const MODELS_W = 1120
   const MODELS_H = 760
+  const CLASH_W = 1120
+  const CLASH_H = 760
+  const SIZED = { models: [MODELS_W, MODELS_H], clash: [CLASH_W, CLASH_H] }
   const roomForTwo = () => screen.availWidth >= 820
   const twoPanes = () => tab === 'mail' && snap?.settings?.mailPanes !== 'one' && roomForTwo()
 
@@ -1852,6 +1856,121 @@
       ${whose}${files}${talk ? talkHTML(talk, l) : ''}
       <div class="m-text">${esc(l.text)}</div>${l.cut ? `<div class="d">${esc(T('mail.cut'))}</div>` : ''}
     </div>`
+  }
+
+  // --- Feishu ---------------------------------------------------------------------------
+  // 单向通知（feishu.rs）：webhook 只进不出，页面看见的只是末尾四位。
+  let feishuDraft = ''
+  let feishuBusy = false
+  let feishuSaid = ''
+
+  const feishuAt = ms => (ms ? new Date(ms).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', { hour12: false }) : '')
+
+  // Rust 侧只给码（"invalid"、"network:…"、"http:429"、"api:19024"），这里翻成人话。
+  function feishuWhy(err) {
+    const code = String((err && err.message) || err || '').trim()
+    if (code.startsWith('network:')) return T('feishu.err.network', { why: code.slice(8) })
+    if (code.startsWith('http:')) return T('feishu.err.http', { status: code.slice(5) })
+    if (code.startsWith('api:')) {
+      const n = code.slice(4)
+      if (n === '9499' || n === '19002') return T('feishu.err.bad')
+      if (n === '19021') return T('feishu.err.sign')
+      if (n === '19022') return T('feishu.err.ip')
+      if (n === '19024') return T('feishu.err.keywords')
+      if (['11232', '11233', '11247'].includes(n)) return T('feishu.err.rate')
+      if (n === '19036') return T('feishu.err.big')
+      return T('feishu.err.api', { code: n })
+    }
+    if (code === 'invalid') return T('feishu.err.invalid')
+    if (code === 'missing') return T('feishu.err.missing')
+    if (code === 'write' || code === 'clear') return T('feishu.err.write')
+    return T('feishu.err.other')
+  }
+
+  const feishuSaidText = code =>
+    code === 'ok-save' ? T('feishu.savedOk') : code === 'ok-test' ? T('feishu.testOk') : code === 'ok-clear' ? T('feishu.removed') : feishuWhy(code)
+
+  function pageFeishu() {
+    const f = snap.settings.feishu || {}
+    const view = snap.feishu || {}
+    const saved = view.saved === true
+    const last = view.last
+    const lastText = !last
+      ? T('feishu.never')
+      : last.ok
+        ? T('feishu.sent', { time: feishuAt(last.at) })
+        : T('feishu.failed', { time: feishuAt(last.at), why: feishuWhy(last.code) })
+    const said = feishuSaid ? `<div class="note${feishuSaid.startsWith('ok-') ? '' : ' err'}">${esc(feishuSaidText(feishuSaid))}</div>` : ''
+    return `${sec(T('feishu.section'))}<div class="grp">
+        <div class="note">${esc(T('feishu.note'))}</div>
+        <div class="r"><div class="grow"><div>${esc(T('feishu.url'))}</div></div><input class="in" data-feishu-url value="${esc(feishuDraft)}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" spellcheck="false" autocomplete="off"><button class="pbtn" data-feishu-save>${esc(T('feishu.save'))}</button></div>
+        ${saved ? `<div class="r"><span class="grow">${esc(T('feishu.saved', { tail: view.tail || '' }))}</span><button class="pbtn sm" data-feishu-clear>${esc(T('feishu.remove'))}</button></div>` : ''}
+      </div>
+      ${sec(T('feishu.events'))}<div class="grp">
+        ${row(esc(T('feishu.on')), esc(T('feishu.onNote')), sw('feishu.on', f.on === true))}
+        ${row(esc(T('feishu.waiting')), '', sw('feishu.waiting', f.waiting !== false))}
+        ${row(esc(T('feishu.done')), '', sw('feishu.done', f.done !== false))}
+        ${row(esc(T('feishu.error')), '', sw('feishu.error', f.error !== false))}
+      </div>
+      ${sec(T('feishu.test'))}<div class="grp">
+        <div class="note">${esc(T('feishu.testNote'))}</div>
+        <div class="r"><button class="pbtn wide" data-feishu-test ${saved && !feishuBusy ? '' : 'disabled'}>${esc(feishuBusy ? T('feishu.testing') : T('feishu.test'))}</button></div>
+        <div class="note">${esc(lastText)}</div>${said}
+      </div>`
+  }
+
+  // 飞书页的动作：保存地址、移除、发一条测试。
+  function handleFeishu(at) {
+    const save = at('[data-feishu-save]')
+    if (save) {
+      const box = body.querySelector('[data-feishu-url]')
+      const url = (box ? box.value : '').trim()
+      if (!url) {
+        feishuSaid = 'missing'
+        draw()
+        return true
+      }
+      window.pet.feishu.save(url).then(got => {
+        snap = got
+        feishuDraft = ''
+        feishuSaid = 'ok-save'
+        draw()
+      }).catch(err => {
+        feishuSaid = String((err && err.message) || err)
+        draw()
+      })
+      return true
+    }
+    if (at('[data-feishu-clear]')) {
+      window.pet.feishu.clear().then(got => {
+        snap = got
+        feishuDraft = ''
+        feishuSaid = 'ok-clear'
+        draw()
+      }).catch(err => {
+        feishuSaid = String((err && err.message) || err)
+        draw()
+      })
+      return true
+    }
+    const test = at('[data-feishu-test]')
+    if (test && !test.disabled) {
+      feishuBusy = true
+      feishuSaid = ''
+      draw()
+      window.pet.feishu.test().then(got => {
+        snap = got
+        feishuBusy = false
+        feishuSaid = 'ok-test'
+        draw()
+      }).catch(err => {
+        feishuBusy = false
+        feishuSaid = String((err && err.message) || err)
+        draw()
+      })
+      return true
+    }
+    return false
   }
 
   // Mail: each account with its switch and setting one up; the inbox
@@ -2550,6 +2669,7 @@
         <div class="note">${esc(T('home.intro'))}</div>
         <div class="note">${esc(T('home.upstream'))}</div>
         <div class="note">${esc(T('home.credits'))}</div>
+        <div class="r"><span class="link" data-thirdparty>${esc(T('settings.thirdParty'))} ›</span></div>
       </div>`
 
   // Her updates (updates.rs): this version and the latest, its notes and
@@ -2812,7 +2932,61 @@
     return ''
   }
 
-  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail, models: pageModels }
+  function pageClash() {
+    return ''
+  }
+
+  // Zen desktop（v4 §4）：Windhawk 状态卡、mod 列表（勾选即入待提交集合）、
+  // 动作条（应用 / 打开 Windhawk）。数据 zen_state 拉一次，应用后重拉。
+  let zenState = null
+  let zenDirty = {}
+  const ZEN_DEPLOYED = [
+    { id: 'local@zen-taskbar-acrylic', url: 'https://raw.githubusercontent.com/foxweb/pixel Fedora/main/PLACEHOLDER' },
+  ]
+  async function zenLoad() {
+    try {
+      zenState = await invoke('zen_state')
+    } catch (error) {
+      zenState = { installed: false, engine_running: false, mods: [], error: String(error) }
+    }
+    if (snap && isOpen && tab === 'zen') {
+      paintZen()
+      window.Island?.changed()
+    }
+  }
+  function zenModState(m) {
+    if (m.libraryFile) return 'compiled'
+    return m.hasSource ? 'uncompiled' : 'nosource'
+  }
+  function zenCard() {
+    if (!zenState) return `<div class="note">${esc(T('s.zenLoading'))}</div>`
+    if (!zenState.installed) return `<div class="note">${esc(T('s.zenNotInstalled'))}</div>`
+    const engine = zenState.engineRunning ? T('s.zenEngineOn') : T('s.zenEngineOff')
+    return `<div class="note">${esc(engine)}</div><div class="note">${esc(zenState.installDir || '')}</div>`
+  }
+  function zenRows() {
+    return (zenState?.mods || [])
+      .map(m => {
+        const kind = zenModState(m)
+        const wanted = zenDirty[m.id] ?? m.disabled
+        const canCheck = kind === 'compiled'
+        const why = kind === 'uncompiled' ? T('s.zenUncompiled') : kind === 'nosource' ? T('s.zenNoSource') : ''
+        return `<div class="r"><input type="checkbox" data-zen-mod="${esc(m.id)}" ${wanted ? 'checked' : ''} ${canCheck ? '' : 'disabled'}><div class="grow d"><b>${esc(m.id)}</b>${why ? `<span class="note"> ${esc(why)}</span>` : ''}</div><span class="d">${esc(m.version || '')}</span></div>`
+      })
+      .join('')
+  }
+  function paintZen() {
+    const body = document.querySelector('#island-settings .s-body') || document.querySelector('.s-body')
+    const box = body?.querySelector('[data-zen-page]')
+    if (!box) return
+    box.innerHTML = `${sec(T('s.zenTitle'))}<div class="grp">${zenCard()}</div><div class="grp">${zenRows()}</div><div class="grp"><div class="r"><button class="pbtn" data-zen-apply ${Object.keys(zenDirty).length ? '' : 'disabled'}>${esc(T('s.zenApply'))}</button><button class="pbtn" data-zen-open>${esc(T('s.zenOpen'))}</button></div><div class="note">${esc(T('s.zenOnceNote'))}</div></div>`
+  }
+  function pageZen() {
+    zenLoad()
+    return `<div data-zen-page>${sec(T('s.zenTitle'))}<div class="grp"><div class="note">${esc(T('s.zenLoading'))}</div></div></div>`
+  }
+
+  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, feishu: pageFeishu, mail: pageMail, models: pageModels, clash: pageClash, zen: pageZen }
 
   // --- Drawing --------------------------------------------------------------------------------
 
@@ -2856,15 +3030,17 @@
     // diff, and never redrawn (a redraw would take the frame out of the document
     // and reload it). Leaving it, the frame is parked first, so the diff below
     // clears an empty box rather than the frame.
-    if (tab === 'models') {
+    if (tab === 'models' || tab === 'clash') {
       // The page before this one is cleared first: the frame is placed over this
       // page's box by its position on screen, and left under that page's markup
       // it would be put where the box would have been below it.
       setHTML(body, '')
-      Models.enter(body, T)
+      if (tab === 'models') Models.enter(body, T)
+      else Clash.enter(body, T)
       body.scrollTop = 0
       return
     }
+    Clash.park()
     Models.park()
     const box = body.contains(document.activeElement) && document.activeElement.matches('input, textarea') ? document.activeElement : null
     const which =
@@ -2898,7 +3074,7 @@
     // The Mail page in two panes is wider; the Local models page is the console,
     // as wide as the console's own window.
     const wide = twoPanes()
-    const models = tab === 'models'
+    const models = tab === 'models' || tab === 'clash'
     layer.classList.toggle('wide', wide)
     layer.classList.toggle('models', models)
     const width = wide ? WIDE_W : models ? MODELS_W : 0
@@ -2966,7 +3142,7 @@
     const wasOpen = isOpen
     const revision = ++openRevision
     isOpen = true
-    syncModelFocus()
+    syncPinnedFocus()
     if (!wasOpen) openedAt = Date.now()
     if (!wasOpen) {
       window.pet.keyboard(true)
@@ -2998,8 +3174,9 @@
     window.Island?.changed()
   }
 
-  function syncModelFocus() {
-    const active = isOpen && tab === 'models'
+  const PINNED = new Set(['models', 'clash', 'zen'])
+  function syncPinnedFocus() {
+    const active = isOpen && PINNED.has(tab)
     if (active === modelFocus) return
     modelFocus = active
     if (snap?.settings) {
@@ -3016,8 +3193,9 @@
     isOpen = false
     syncFullscreenPrompt()
     ++openRevision
-    syncModelFocus()
-    // The console's frame waits off screen, as it does on any other page.
+    syncPinnedFocus()
+    // The consoles' frames wait off screen, as they do on any other page.
+    Clash.park()
     Models.park()
     // The welcome opened again only for this time: "not now" said since
     // (the island's 不用提醒), the next open shows it folded (the test session).
@@ -3039,7 +3217,7 @@
   function setTab(next) {
     if (next === tab || !TABS.includes(next)) return
     tab = next
-    syncModelFocus()
+    syncPinnedFocus()
     draw(true)
     if (tab === 'look') loadGallery(false)
     relayout()
@@ -3150,6 +3328,33 @@
     }
     const tabButton = at('[data-tab]')
     if (tabButton) return setTab(tabButton.dataset.tab)
+    // Zen desktop 的三个动作（v4 §4）：勾选只进待提交集合，应用才写。
+    const zenBox = at('[data-zen-mod]')
+    if (zenBox) {
+      zenDirty[zenBox.dataset.zenMod] = zenBox.checked
+      const apply = layer.querySelector('[data-zen-apply]')
+      if (apply) apply.disabled = !Object.keys(zenDirty).length
+      return
+    }
+    if (at('[data-zen-apply]')) {
+      const changes = Object.entries(zenDirty).map(([id, disabled]) => ({ id, disabled }))
+      return void zenInvoke('zen_apply', { changes })
+        .then(() => {
+          zenDirty = {}
+          return zenLoad()
+        })
+        .catch(error => console.log('[zen apply]', error))
+    }
+    if (at('[data-thirdparty]')) {
+      return void zenInvoke('oflm_open_url', { url: 'https://github.com/Fish-under-sea/FISH-Dock/blob/main/THIRD_PARTY_NOTICES.md' })
+        .catch(error => console.log('[thirdparty]', error))
+    }
+    if (at('[data-zen-open]')) {
+      // 本机装的 Windhawk：直接把它的 exe 路径交给 oflm_open_url（http/https
+      // 之外不放行，所以这里用 ZenDesktop 的网页作兜底入口）。
+      const site = 'https://windhawk.net/'
+      return void zenInvoke('oflm_open_url', { url: site }).catch(error => console.log('[zen open]', error))
+    }
     // A session: to its window (the settings close as it comes to the front).
     const session = at('[data-jump]')
     if (session) {
@@ -3163,6 +3368,7 @@
     // Mail: an account set up, changed, kept, removed; its server looked
     // up, or typed in.
     if (handleMail(at)) return
+    if (handleFeishu(at)) return
     const toggle = at('[data-sw]')
     if (toggle && !toggle.disabled) {
       const key = toggle.dataset.sw
@@ -3172,6 +3378,13 @@
       if (key === 'paperShuffle') return paperDo('shuffle', !snap.winPaper?.shuffle)
       if (key === 'ilookBare') return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bare: !ilookOf(ilookFor()).bare })
       if (key.startsWith('notify.')) return patch({ notify: { ...s.notify, [key.slice(7)]: !s.notify?.[key.slice(7)] } })
+      // 飞书的四把开关：总开关与「需要确认 / 完成 / 出错」三类。
+      if (key.startsWith('feishu.')) {
+        const f = s.feishu || {}
+        const name = key.slice(7)
+        const current = name === 'on' ? f.on === true : f[name] !== false
+        return patch({ feishu: { ...f, [name]: !current } })
+      }
       if (key === 'widgetNudge') return patch({ widgetNudge: s.widgetNudge === false })
       // One of the monitor's parts on or off.
       if (key.startsWith('mon:')) return patch({ monitor: { ...(s.monitor || {}), [key.slice(4)]: (s.monitor || {})[key.slice(4)] === false } })
@@ -3867,6 +4080,7 @@
 
   layer.addEventListener('input', e => {
     if (e.target.dataset.mf && mailForm) mailForm[e.target.dataset.mf] = e.target.value
+    if (e.target.dataset.feishuUrl !== undefined) feishuDraft = e.target.value
     if (e.target.dataset.proxyAt !== undefined) proxyTyped = { key: e.target.dataset.proxyAt, text: e.target.value, bad: false }
     if (e.target.dataset.w && draft) {
       draft[e.target.dataset.w] = e.target.value
