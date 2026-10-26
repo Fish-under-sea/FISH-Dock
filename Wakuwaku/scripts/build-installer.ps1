@@ -1,14 +1,14 @@
 <#
 一次构建 DSH-FISH 安装版：准备安装资源 → 编译主程序（feature installed）→ 生成安装包。
 
-安装包在安装时才把主程序、Node、固定版 WebView2 与本地模型服务展开到用户选的目录；
+安装包在安装时才把主程序、Node、固定版 WebView2 与 Windhawk 展开到用户选的目录；
 日常启动直接使用安装目录里的这些文件，不解压、不整树哈希、不递归授权。
 
 用法：
   & FISH本地模型工作台/Wakuwaku/scripts/build-installer.ps1
   & FISH本地模型工作台/Wakuwaku/scripts/build-installer.ps1 -Resources .tools/installer-resources
 
--Resources 指向已准备好的资源目录（含 manifest.json 与 node/webview2/ofm/licenses）；
+-Resources 指向已准备好的资源目录（含 manifest.json 与 node/webview2/windhawk/licenses）；
 不给时用 -Downloads 里的官方下载件现场准备（需要 node 可执行文件）。
 #>
 param(
@@ -54,7 +54,8 @@ if ($LASTEXITCODE -ne 0) { throw "主程序编译失败：$LASTEXITCODE" }
 
 $stage = Join-Path (Split-Path $Output -Parent) 'stage'
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-$binary = Join-Path $app 'src-tauri/target/release/wakuwaku.exe'
+$target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $app 'src-tauri/target' }
+$binary = Join-Path $target 'release/wakuwaku.exe'
 Copy-Item -LiteralPath $binary -Destination (Join-Path $stage 'DSH-FISH.exe') -Force
 
 # 3. 安装包：NSIS 3，装到用户选的目录，建快捷方式与卸载入口。

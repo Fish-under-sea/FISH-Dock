@@ -1107,7 +1107,7 @@ fn visible_owner(sh:&Shared)->Result<isize,String>{
 // `file` run as administrator (Windows asks the person), waited for up to
 // `wait_ms` if given; for a test, written down and its answer waited for
 // (WAKUWAKU_TEST_ELEVATE).
-fn elevate(sh: &Shared, file: &Path, params: &str, dir: &Path, wait_ms: Option<u32>) -> Asked {
+pub(crate) fn elevate(sh: &Shared, file: &Path, params: &str, dir: &Path, wait_ms: Option<u32>) -> Asked {
     sh.log(&format!("lhm: as administrator: {} {params}", file.display()));
     if let Some(test) = std::env::var_os(ELEVATE_TEST).filter(|v| !v.is_empty()) {
         // Hers alone and never used before (another run of hers left its own).

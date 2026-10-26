@@ -158,13 +158,42 @@ fn explorers_battery(id: u32, exe: &str) -> bool {
     id == EXPLORERS_BATTERY && exe.eq_ignore_ascii_case("explorer.exe")
 }
 
+// A message of Explorer's battery handed on to its tray, for the log
+// (zhoupengjie/Wakuwaku#85: on 22621 Explorer failed fast a moment after
+// one went by ours while it was starting, its icon handed on as #62 has it;
+// whether its tray took it then, and how fast, is what this says): which
+// message, the Explorer and how long it had run (s), what its tray answered
+// (None: not at all; error, GetLastError's then), and how long it took.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn battery_said(kind: &str, pid: u32, up: Option<f64>, tray: bool, answer: Option<usize>, error: u32, ms: u128) -> String {
+    let up = up.map_or_else(|| "gone".to_string(), |s| format!("up {s:.1} s"));
+    let how = match answer {
+        _ if !tray => "no tray of Explorer's to hand it to".to_string(),
+        Some(a) => format!("answered {a}"),
+        None => format!("not answered (error {error})"),
+    };
+    format!("tray: Explorer's battery {kind} (pid {pid}, {up}) handed on: {how} in {ms} ms")
+}
+
+// A tray message's name, as the log names it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn nim_name(message: u32) -> &'static str {
+    match message {
+        0 => "NIM_ADD",
+        1 => "NIM_MODIFY",
+        2 => "NIM_DELETE",
+        4 => "NIM_SETVERSION",
+        _ => "NIM_other",
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     use std::ffi::c_void;
-    use std::sync::atomic::{AtomicIsize, AtomicU32, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, Ordering};
     use std::sync::Mutex;
 
-    use super::{explorers_battery, file_name, guid_bytes, holds, icon_name, path_in, Holds, Press, Shown, EXPLORERS_BATTERY};
+    use super::{battery_said, explorers_battery, file_name, guid_bytes, holds, icon_name, nim_name, path_in, Holds, Press, Shown, EXPLORERS_BATTERY};
 
     type Hwnd = *mut c_void;
     type Handle = isize;
@@ -272,6 +301,7 @@ mod imp {
         fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> Handle;
         fn Process32FirstW(snapshot: Handle, entry: *mut ProcessEntry) -> i32;
         fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry) -> i32;
+        fn GetLastError() -> u32;
     }
 
     // PROCESSENTRY32W: every process's file name, SYSTEM's too, which
@@ -330,6 +360,9 @@ mod imp {
     const WS_EX_TOPMOST: u32 = 0x8;
     const WS_EX_TOOLWINDOW: u32 = 0x80;
     const HWND_TOPMOST: isize = -1;
+    const HWND_NOTOPMOST: isize = -2;
+    const HWND_BOTTOM: isize = 1;
+    const SWP_NOZORDER: u32 = 0x4;
     const SWP_NOSIZE: u32 = 0x1;
     const SWP_NOMOVE: u32 = 0x2;
     const SWP_NOACTIVATE: u32 = 0x10;
@@ -374,8 +407,16 @@ mod imp {
     // What came, for the log: (kind, count).
     static SEEN: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
     static NOTES: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    // The Explorer whose battery icon was last noted as left to it.
+    // The Explorer whose battery icon was last noted as left to it; how
+    // many of its battery's messages have been told the log (the first
+    // few of each Explorer's), and how many it refused in all (each told,
+    // up to a point).
     static BATTERY_NOTED: AtomicU32 = AtomicU32::new(0);
+    static BATTERY_SAID: AtomicU32 = AtomicU32::new(0);
+    static BATTERY_FAILED: AtomicU32 = AtomicU32::new(0);
+    // Ours behind Explorer's for now (set_aside): a new Explorer starting
+    // has programs, and its own battery, reach its tray (zhoupengjie/Wakuwaku#85).
+    static ASIDE: AtomicBool = AtomicBool::new(false);
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -466,9 +507,10 @@ mod imp {
     }
 
     // Ours put ahead of Explorer's again; true if it had fallen behind.
+    // Not while it is set aside.
     pub fn keep_first() -> bool {
         let ours = OURS.load(Ordering::SeqCst);
-        if ours == 0 || first() {
+        if ours == 0 || ASIDE.load(Ordering::SeqCst) || first() {
             return false;
         }
         // SAFETY: our own window.
@@ -700,12 +742,26 @@ mod imp {
             // Explorer's own battery icon: each message of it, an add in
             // answer to ask_again too, handed on to Explorer's tray alone and
             // its answer given back; ours never holds it (EXPLORERS_BATTERY).
-            if let Some(pid) = tray.and_then(|d| explorers_battery_of(&d.nid)) {
+            // The first few of each Explorer's, and each it refuses, told
+            // with its tray's answer (battery_said).
+            if let Some((pid, data)) = tray.and_then(|d| explorers_battery_of(&d.nid).map(|pid| (pid, d))) {
                 count("Explorer's battery, handed on");
                 if BATTERY_NOTED.swap(pid, Ordering::SeqCst) != pid {
                     note(format!("tray: Explorer's own battery icon (id {EXPLORERS_BATTERY}) left to Windows' taskbar, not taken (zhoupengjie/Wakuwaku#62)"));
+                    BATTERY_SAID.store(0, Ordering::SeqCst);
                 }
-                return hand_on(msg, wparam, lparam).unwrap_or(0) as isize;
+                let there = !explorers().is_null();
+                let began = std::time::Instant::now();
+                let answer = hand_on(msg, wparam, lparam);
+                // SAFETY: a plain query, of the send just made.
+                let error = if answer.is_none() { unsafe { GetLastError() } } else { 0 };
+                let ms = began.elapsed().as_millis();
+                let refused = !matches!(answer, Some(a) if a != 0);
+                if BATTERY_SAID.fetch_add(1, Ordering::SeqCst) < 4 || (refused && BATTERY_FAILED.fetch_add(1, Ordering::SeqCst) < 20) {
+                    let up = crate::shell::running_for(pid).map(|d| d.as_secs_f64());
+                    note(battery_said(nim_name(data.message), pid, up, there, answer, error, ms));
+                }
+                return answer.unwrap_or(0) as isize;
             }
             // An icon added again: Explorer has it already (an icon ours has,
             // or one coming in answer to ask_again), and an add it refuses can
@@ -836,9 +892,31 @@ mod imp {
     pub fn place(rect: (i32, i32, i32, i32)) {
         let ours = OURS.load(Ordering::SeqCst);
         if ours != 0 {
+            // Set aside, it stays where it is among the windows.
+            let aside = if ASIDE.load(Ordering::SeqCst) { SWP_NOZORDER } else { 0 };
             // SAFETY: our own window.
-            unsafe { SetWindowPos(ours as Hwnd, HWND_TOPMOST, rect.0, rect.1, rect.2, rect.3, SWP_NOACTIVATE) };
+            unsafe { SetWindowPos(ours as Hwnd, HWND_TOPMOST, rect.0, rect.1, rect.2, rect.3, SWP_NOACTIVATE | aside) };
         }
+    }
+
+    // Ours put behind Explorer's, and kept there, while a new Explorer
+    // starts (taskbar.rs): out of the topmost band and under every window,
+    // so FindWindow finds Explorer's (topmost) first. Let go, it is put
+    // first again by the next keep_first.
+    pub fn set_aside(aside: bool) {
+        ASIDE.store(aside, Ordering::SeqCst);
+        let ours = OURS.load(Ordering::SeqCst);
+        if aside && ours != 0 {
+            // SAFETY: our own window.
+            unsafe {
+                SetWindowPos(ours as Hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                SetWindowPos(ours as Hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+        }
+    }
+
+    pub fn aside() -> bool {
+        ASIDE.load(Ordering::SeqCst)
     }
 
     // Ours gone (on the thread that made it). Explorer's has had nearly
@@ -849,6 +927,7 @@ mod imp {
             // SAFETY: our own window.
             unsafe { DestroyWindow(ours as Hwnd) };
         }
+        ASIDE.store(false, Ordering::SeqCst);
         *ASKED.lock().unwrap() = None;
         for icon in ICONS.lock().unwrap().drain(..) {
             if icon.icon != 0 {
@@ -1353,6 +1432,10 @@ mod imp {
     pub fn keep_first() -> bool {
         false
     }
+    pub fn set_aside(_aside: bool) {}
+    pub fn aside() -> bool {
+        false
+    }
     pub fn ask_again() {}
     pub fn sweep() {}
     pub fn scan_held() {}
@@ -1375,7 +1458,7 @@ mod imp {
 }
 
 #[allow(unused_imports)]
-pub use imp::{ask_again, describe, first, handed_back, keep_first, notes, place, scan_held, seen, set_rects, shown, start, stop, sweep, tell};
+pub use imp::{aside, ask_again, describe, first, handed_back, keep_first, notes, place, scan_held, seen, set_aside, set_rects, shown, start, stop, sweep, tell};
 
 #[cfg(test)]
 mod tests {
@@ -1433,5 +1516,20 @@ mod tests {
         // Another program's icon of that uID, or one whose process is gone.
         assert!(!explorers_battery(1225, "QQ.exe"));
         assert!(!explorers_battery(1225, "pid 0"));
+    }
+
+    #[test]
+    fn the_batterys_hand_on_says_what_explorers_tray_answered() {
+        assert_eq!(nim_name(0), "NIM_ADD");
+        assert_eq!(nim_name(4), "NIM_SETVERSION");
+        assert_eq!(nim_name(9), "NIM_other");
+        assert_eq!(
+            battery_said("NIM_ADD", 4242, Some(6.27), true, Some(1), 0, 3),
+            "tray: Explorer's battery NIM_ADD (pid 4242, up 6.3 s) handed on: answered 1 in 3 ms"
+        );
+        // Refused; timed out (1460, ERROR_TIMEOUT); no tray of Explorer's.
+        assert!(battery_said("NIM_MODIFY", 1, None, true, Some(0), 0, 2).ends_with("(pid 1, gone) handed on: answered 0 in 2 ms"));
+        assert!(battery_said("NIM_ADD", 1, Some(1.0), true, None, 1460, 3000).ends_with("not answered (error 1460) in 3000 ms"));
+        assert!(battery_said("NIM_ADD", 1, Some(1.0), false, None, 0, 0).ends_with("no tray of Explorer's to hand it to in 0 ms"));
     }
 }

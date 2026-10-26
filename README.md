@@ -41,7 +41,7 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 | --- | --- |
 | 桌面岛 | 展示会话状态、任务进度、通知和资源信息。 |
 | 模型工作台 | 管理模型渠道、账号、模型目录和 API 配置。 |
-| 插件中心 | 校验来源、平台、清单和逐文件 SHA-256，支持安装、停用、更新、回滚。 |
+| 插件中心 | 校验来源、平台和逐文件 SHA-256；支持检查更新、默认启用、停用、卸载与失败恢复。 |
 | 外观工具链 | 随安装包提供 Windhawk 与编译器资源，由外观插件按需调用。 |
 | 工作区 | 通过插件接入飞书通知、Clash 代理、Magpie 网关和 OFM 本地模型。 |
 
@@ -56,11 +56,15 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器、插件管理与 Windhawk。
 
+`1.1.0` 是插件化大更新：应用内确认框统一内化，登录期间的临时锁定与置顶在关闭、取消或到期后释放；全屏结束恢复桌面岛，主动唤醒和待处理审批也可在全屏期间显示。「关于」和插件卡片提供独立更新检查，包体积自动换算为 KB／MB／GB。
+
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark.png"><img src="assets/readme/section-install-light.png" alt="INSTALL · 安装使用" width="100%"></picture></h2>
 
 1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0) 下载 `FISH-Dock-Setup-1.1.0.exe`，用同页 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源并展示运行时条款。
-3. 打开「插件」页，刷新官方目录，按需安装 [FISH Dock Official Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。
+3. 打开「插件」页，点击「GitHub 登录」。验证码会自动复制，在系统浏览器中粘贴并确认；Dock 自动检查授权结果。
+4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
+5. 点击「检查更新」读取官方目录，按需安装 [FISH Dock Official Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。新插件安装成功即启用；凭据和服务参数仍需各自配置。
 
 安装包包含 Node.js 24.14.0、固定版 WebView2 155.0.4283.62、Windhawk 1.7.3 及 LLVM-MinGW 编译器，供对应插件按需调用；无需另外安装 Windhawk。安装包当前未做 Authenticode 签名。
 
@@ -90,6 +94,6 @@ cargo test --locked --no-default-features --manifest-path Wakuwaku/src-tauri/Car
 
 <h2 id="source"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-intro-dark.png"><img src="assets/readme/section-intro-light.png" alt="SOURCE · 来源许可" width="100%"></picture></h2>
 
-FISH Dock 基于 [Wakuwaku](https://github.com/KiruyaMomochi/Wakuwaku) 演进，保留原作者版权与 MIT 许可；历史模型能力源自 [Our Free Model](https://github.com/Ebony-Vinyl/dsh-our-free-model)。原始品牌素材见 [素材记录](assets/readme/SOURCES.md)。Windhawk、Node.js、WebView2 和编译器的原文许可随运行资源交付。
+FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 演进，保留原作者版权与 MIT 许可；历史模型能力源自 [Our Free Model](https://github.com/Ebony-Vinyl/dsh-our-free-model)。原始品牌素材见 [素材记录](assets/readme/SOURCES.md)。Windhawk、Node.js、WebView2 和编译器的原文许可随运行资源交付。
 
 <p align="center"><sub>FISH Dock · Desktop + Model Workspace · Windows x64</sub></p>

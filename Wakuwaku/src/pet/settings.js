@@ -31,7 +31,6 @@
   const { CLIPS } = window.Sprite
   const Status = window.Status
   const Widgets = window.Widgets
-  const Models = window.Models
   const Agents = window.Agents
 
   // The island's colours (on black), the same as island.js.
@@ -44,8 +43,9 @@
   // (island.rs asks for the pets, or connecting), the page they are part of
   // opens, scrolled to them (PART_OF, showPart); connecting while the
   // welcome shows is the welcome, at General's top.
-  const TABS = ['now', 'agents', 'look', 'widgets', 'mail', 'models']
-  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail', models: 's.tabModels' }
+  let TABS = [...window.ExtensionTabs.CORE]
+  const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail' }
+  const tabTitle = key => TAB_KEY[key] ? T(TAB_KEY[key]) : extensionPanel.pages().find(page => page.key === key)?.title || key
   const PART_OF = { identity: 'now', pets: 'look', place: 'look', alerts: 'now', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
@@ -68,7 +68,6 @@
 
   const layer = document.getElementById('island-settings')
   let isOpen = false
-  let modelFocus = false
   let openRevision = 0
   // When they last opened: on a Mac the loss of focus that comes with taking
   // the keyboard is not a click outside (opened from her menu, the menu going
@@ -79,7 +78,19 @@
   let tab = 'now'
   let snap = null
   let lang = 'en'
-  const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => window.confirm(message), lang: () => lang, redraw: () => draw() })
+  const windhawkPanel = window.WindhawkPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, redraw: () => draw() })
+  const extensionLayouts = new Map()
+  let extensionLayoutFrame = 0
+  const extensionPage = window.ExtensionPage.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, onLayout: (key, value) => {
+    if (JSON.stringify(extensionLayouts.get(key)) === JSON.stringify(value)) return
+    extensionLayouts.set(key, value)
+    cancelAnimationFrame(extensionLayoutFrame)
+    extensionLayoutFrame = requestAnimationFrame(() => { if (isOpen && tab === key) draw() })
+  } })
+  let confirmActive = null
+  const confirmQueue = []
+  const extensionPanel = window.ExtensionPanel.create({ syncAuthFocus: async () => { const revision = openRevision; const got = await window.pet.settings.get(); if (isOpen && revision === openRevision) { snap = got; draw() } }, invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw(), openPage: key => open(key) })
+  const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw() })
   // The crash report shown, as it would be sent (pageCrash).
   let crashShown = false
   // The download box: what is typed, and how the last download went.
@@ -179,51 +190,55 @@
       <p>是否取消本地模型面板的置顶和锁定，让全屏应用完整显示？</p>
       <div class="s-fullscreen-actions"><button type="button" data-fullscreen-keep autofocus>保持</button><button type="button" data-fullscreen-cancel>取消置顶和锁定</button></div>
       <p class="s-fullscreen-error" role="alert" hidden></p>
+    </dialog>
+    <dialog class="s-confirm-dialog" aria-labelledby="s-confirm-title" aria-describedby="s-confirm-message">
+      <h2 id="s-confirm-title">确认操作</h2>
+      <p id="s-confirm-message"></p>
+      <div class="s-confirm-actions"><button type="button" class="pbtn" data-confirm-cancel>取消</button><button type="button" class="pbtn al" data-confirm-ok autofocus>确认</button></div>
     </dialog>`
   const head = layer.querySelector('.s-head')
   const tabs = layer.querySelector('.s-tabs')
+  window.ExtensionTabs.bindScroll(tabs)
   tabs.style.setProperty('--tabs', TABS.length)
   const askSlot = layer.querySelector('.s-ask')
+  const confirmDialog = layer.querySelector('.s-confirm-dialog')
+  const confirmTitle = confirmDialog.querySelector('#s-confirm-title')
+  const confirmMessage = confirmDialog.querySelector('#s-confirm-message')
+  const confirmOk = confirmDialog.querySelector('[data-confirm-ok]')
+  const confirmCancel = confirmDialog.querySelector('[data-confirm-cancel]')
+  function pumpConfirm() {
+    if (confirmActive || !confirmQueue.length || !isOpen) return
+    confirmActive = confirmQueue.shift()
+    confirmTitle.textContent = lang === 'en' ? 'Confirm action' : '确认操作'
+    confirmOk.textContent = lang === 'en' ? 'Confirm' : '确认'
+    confirmCancel.textContent = lang === 'en' ? 'Cancel' : '取消'
+    confirmMessage.textContent = confirmActive.message
+    confirmDialog.showModal()
+    confirmOk.focus()
+  }
+  function finishConfirm(result) {
+    if (!confirmActive) return
+    const current = confirmActive
+    confirmActive = null
+    if (confirmDialog.open) confirmDialog.close()
+    current.resolve(result)
+    requestAnimationFrame(() => {
+      if (isOpen && current.focus && current.focus.isConnected) current.focus.focus()
+      pumpConfirm()
+    })
+  }
+  function confirmInDock(message) {
+    return new Promise(resolve => {
+      confirmQueue.push({ message: String(message ?? ''), resolve, focus: document.activeElement })
+      pumpConfirm()
+    })
+  }
+  confirmOk.onclick = () => finishConfirm(true)
+  confirmCancel.onclick = () => finishConfirm(false)
+  confirmDialog.addEventListener('cancel', event => { event.preventDefault(); finishConfirm(false) })
+  confirmDialog.addEventListener('click', event => { if (event.target === confirmDialog) finishConfirm(false) })
   const body = layer.querySelector('.s-body')
   const foot = layer.querySelector('.s-foot')
-  const fullscreenDialog = layer.querySelector('.s-fullscreen-dialog')
-  let fullscreenPrompt = null
-  let fullscreenAnswering = false
-  const fullscreenError = fullscreenDialog.querySelector('.s-fullscreen-error')
-  function syncFullscreenPrompt() {
-    const id = isOpen && tab === 'models' ? snap?.modelFullscreenPrompt ?? null : null
-    fullscreenPrompt = id
-    if (id === null) {
-      if (fullscreenDialog.open) fullscreenDialog.close()
-      fullscreenError.hidden = true
-    } else if (!fullscreenDialog.open) {
-      fullscreenError.hidden = true
-      fullscreenDialog.showModal()
-    }
-  }
-  async function answerFullscreen(cancel) {
-    if (fullscreenPrompt === null || fullscreenAnswering) return
-    const id = fullscreenPrompt
-    const revision = openRevision
-    fullscreenAnswering = true
-    fullscreenDialog.querySelectorAll('button').forEach(button => { button.disabled = true })
-    try {
-      const got = await window.pet.settings.fullscreenAnswer(id, cancel)
-      if (isOpen && revision === openRevision && id === fullscreenPrompt) { snap = got; draw() }
-    } catch (error) {
-      if (isOpen && revision === openRevision && id === fullscreenPrompt) {
-        fullscreenError.textContent = `操作失败，请重试：${error.message || error}`
-        fullscreenError.hidden = false
-      }
-    } finally {
-      fullscreenAnswering = false
-      fullscreenDialog.querySelectorAll('button').forEach(button => { button.disabled = false })
-    }
-  }
-  fullscreenDialog.addEventListener('cancel', event => { event.preventDefault(); void answerFullscreen(false) })
-  fullscreenDialog.querySelector('[data-fullscreen-keep]').addEventListener('click', () => { void answerFullscreen(false) })
-  fullscreenDialog.querySelector('[data-fullscreen-cancel]').addEventListener('click', () => { void answerFullscreen(true) })
-
   // The new markup, changed in place: only what differs is touched, so a
   // number that changed (a plugin's reading) does not redraw the page around
   // it, and a box being typed in keeps its focus and caret.
@@ -640,6 +655,53 @@
     return `${row(esc(T('s.ilook')), esc(now), `<button class="pbtn sm" data-ilook-fold>${esc(T(ilookOpen ? 's.ilookFold' : 's.ilookAdjust'))}</button>`)}${ilookOpen ? ilookPanel() : ''}`
   }
 
+  let orderBusy = false, orderNote = '', orderError = '', draggingTab = ''
+  function pageTabOrder() {
+    const rows = TABS.map((key, index) => `<li draggable="${!orderBusy}" data-order-key="${esc(key)}"><span class="grow">${esc(tabTitle(key))}</span><button type="button" class="pbtn sm" data-order-move="-1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '前移 ' : 'Move earlier: ') + tabTitle(key))}"${index === 0 || orderBusy ? ' disabled' : ''}>↑</button><button type="button" class="pbtn sm" data-order-move="1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '后移 ' : 'Move later: ') + tabTitle(key))}"${index === TABS.length - 1 || orderBusy ? ' disabled' : ''}>↓</button></li>`).join('')
+    return `<section class="tab-order"><h3>${lang === 'zh' ? '标签页排序' : 'Tab order'}</h3><p class="note">${lang === 'zh' ? '拖动或使用前后移动按钮调整；停用的插件保留原位置。' : 'Drag or use the arrow buttons. Disabled extensions keep their positions.'}</p><ol>${rows}</ol><button type="button" class="pbtn" data-order-reset${orderBusy ? ' disabled' : ''}>${lang === 'zh' ? '恢复默认顺序' : 'Restore default order'}</button><p role="status" aria-live="polite">${esc(orderNote)}</p>${orderError ? `<p class="bad" role="alert">${esc(orderError)}</p>` : ''}</section>`
+  }
+  async function saveTabOrder(order, key, direction) {
+    if (orderBusy) return
+    orderBusy = true; orderError = ''; draw()
+    try {
+      const got = await window.pet.settings.set({ appearance: { tabOrder: order } })
+      if (JSON.stringify(got.settings.appearance?.tabOrder) !== JSON.stringify(order)) throw new Error(lang === 'zh' ? '标签顺序未保存，请重试。' : 'Tab order was not saved. Please retry.')
+      snap = got
+      const visible = window.ExtensionTabs.order(order, extensionPanel.pages().map(page => page.key))
+      orderNote = key ? `${tabTitle(key)} · ${visible.indexOf(key) + 1}/${visible.length}` : lang === 'zh' ? '已恢复默认顺序' : 'Default order restored'
+    } catch (error) { orderError = error.message || String(error) }
+    finally {
+      orderBusy = false; draw()
+      if (key) {
+        const buttons = [...body.querySelectorAll('[data-order-id]')].filter(button => button.dataset.orderId === key)
+        const focus = buttons.find(button => !button.disabled && button.dataset.orderMove === String(direction)) || buttons.find(button => !button.disabled)
+        focus?.focus()
+      }
+    }
+  }
+  function mountTabOrder() {
+    const panel = body.querySelector('.tab-order'); if (!panel) return
+    panel.querySelectorAll('[data-order-move]').forEach(button => { button.onclick = () => {
+      const direction = Number(button.dataset.orderMove), key = button.dataset.orderId
+      void saveTabOrder(window.ExtensionTabs.move(snap.settings.appearance?.tabOrder, extensionPanel.pages().map(page => page.key), key, direction), key, direction)
+    } })
+    panel.querySelector('[data-order-reset]').onclick = () => saveTabOrder([], '', 0)
+    panel.querySelectorAll('[data-order-key]').forEach(row => {
+      row.ondragstart = event => { if (orderBusy) { event.preventDefault(); return }; draggingTab = row.dataset.orderKey; event.dataTransfer.setData('text/plain', draggingTab); event.dataTransfer.effectAllowed = 'move' }
+      row.ondragend = () => { draggingTab = '' }
+      row.ondragover = event => { if (draggingTab) event.preventDefault() }
+      row.ondrop = event => {
+        event.preventDefault(); const key = draggingTab; draggingTab = ''
+        const to = TABS.indexOf(row.dataset.orderKey), from = TABS.indexOf(key)
+        if (from < 0 || to < 0 || from === to) return
+        const direction = to > from ? 1 : -1
+        let order = snap.settings.appearance?.tabOrder || []
+        for (let step = 0; step < Math.abs(to - from); step++) order = window.ExtensionTabs.move(order, extensionPanel.pages().map(page => page.key), key, direction)
+        void saveTabOrder(order, key, direction)
+      }
+    })
+  }
+
   function pageLook() {
     const s = snap.settings
     return `${sec(T('home.display'))}<div class="modes">
@@ -649,12 +711,14 @@
       ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div></div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
       ${part('place', '')}<div class="grp">${islandPosRow()}${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
       ${pageWindows()}
+      ${window.pet.mac ? '' : windhawkPanel.render()}
       ${sec(T('s.her'))}<div class="grp">
         ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
         ${row(esc(T('s.details')), esc(T('s.detailsNote')), sw('details', s.details !== false))}
         ${row(esc(T('s.walk')), esc(T('s.walkNote')), sw('walk', s.walk))}
         ${row(esc(T('s.look')), '', sw('look', s.look))}
       </div>
+      ${pageTabOrder()}
       ${part('pets', pagePets())}`
   }
 
@@ -1086,7 +1150,7 @@
     const spins = SPINS.map(n => [n, n ? T('settings.seconds', { n }) : T('w.spinOff')])
     const waku = `powershell -ExecutionPolicy Bypass -File "${snap.waku}" npm run build`
     const example = `Invoke-RestMethod -Method Post http://127.0.0.1:${snap.port}/widget -ContentType application/json -Body '{"id":"hello","label":"Hello","value":"42","icon":"star"}'`
-    return `${sec(T('w.section'))}<div class="grp"><div class="note">${esc(T('w.note'))}</div>${rows}</div>
+    return `${extensionPanel.render()}${sec(T('w.section'))}<div class="grp"><div class="note">${esc(T('w.note'))}</div>${rows}</div>
       ${sec(T('w.show'))}<div class="grp">
         ${row(esc(T('w.spin')), '', seg('widgetSpin', spins, s.widgetSpin ?? 8))}
         ${row(esc(T('w.nudge')), esc(T('w.nudgeNote')), sw('widgetNudge', s.widgetNudge !== false))}
@@ -1435,10 +1499,9 @@
   // has it (the setting mailPanes, two unless one), where the screen has the
   // room; the settings as wide as that then (island.js measures them).
   const WIDE_W = 960
-  // The Local models page: the console's own window is 1280×800, its panel needs
-  // the room; never more than the screen leaves (draw()).
-  const MODELS_W = 1120
-  const MODELS_H = 760
+  // 原生管理界面保留足够空间；实际尺寸仍按当前屏幕可用区域收缩。
+  const SERVICE_W = 1280
+  const SERVICE_BODY_H = 900
   const roomForTwo = () => screen.availWidth >= 820
   const twoPanes = () => tab === 'mail' && snap?.settings?.mailPanes !== 'one' && roomForTwo()
 
@@ -2546,7 +2609,9 @@
 
   // About: this version, the project's page, the credits (General's foot).
   const aboutHTML = () => `${sec(T('settings.about'))}<div class="grp">
-        <div class="r"><div class="grow">${esc(T('s.version', { version: snap.version }))}</div><span class="link" data-site="repo">${esc(T('home.repo'))} ›</span></div>
+        <div class="r"><div class="grow">${esc(T('s.version', { version: snap.version }))}${snap.update?.latest?.newer ? ` <span class="chip">${esc(lang === 'zh' ? '发现新版本' : 'New version')} ${esc(snap.update.latest.version)}</span>` : ''}</div><button type="button" class="pbtn sm" data-update="check" ${snap.update?.checking || snap.update?.stage ? 'disabled' : ''}>${esc(snap.update?.checking ? T('s.updateChecking') : T('s.updateCheck'))}</button><span class="link" data-site="repo">${esc(T('home.repo'))} ›</span></div>
+        ${snap.update?.error ? `<div class="note" role="status">${esc(T(`s.updateError.${snap.update.error.code}`, { detail: snap.update.error.detail || '' }))}</div>` : ''}
+        ${snap.update?.latest?.newer ? `<div class="r"><div class="grow d">${esc(lang === 'zh' ? '请前往发行页查看整包更新。' : 'View the full package on the release page.')}</div><button type="button" class="pbtn sm" data-update="page">${esc(T('s.updateNotes'))}</button></div>` : ''}
         <div class="note">${esc(T('home.intro'))}</div>
         <div class="note">${esc(T('home.upstream'))}</div>
         <div class="note">${esc(T('home.credits'))}</div>
@@ -2806,13 +2871,7 @@
       ${aboutHTML()}`
   }
 
-  // The Local models page is not markup: models.js puts the console's frame
-  // straight into .s-body and keeps it alive across pages (drawBody).
-  function pageModels() {
-    return ''
-  }
-
-  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail, models: pageModels }
+  const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail }
 
   // --- Drawing --------------------------------------------------------------------------------
 
@@ -2837,11 +2896,17 @@
   }
 
   function drawTabs() {
+    const previous = TABS
+    TABS = window.ExtensionTabs.order(snap.settings.appearance?.tabOrder, extensionPanel.pages().map(page => page.key))
+    tab = window.ExtensionTabs.nearest(tab, previous, TABS)
+    extensionPage.sync(extensionPanel.pages())
+    setHTML(tabs, `<span class="ind"></span>${TABS.map(k => `<button type="button" data-tab="${esc(k)}" title="${esc(tabTitle(k))}"><span></span><i class="n" hidden></i></button>`).join('')}`)
+    tabs.style.setProperty('--tabs', TABS.length)
     const i = TABS.indexOf(tab)
     tabs.querySelector('.ind').style.transform = `translateX(${i * 100}%)`
     for (const b of tabs.querySelectorAll('button')) {
       b.classList.toggle('on', b.dataset.tab === tab)
-      b.querySelector('span').textContent = T(TAB_KEY[b.dataset.tab])
+      b.querySelector('span').textContent = tabTitle(b.dataset.tab)
     }
     tabs.querySelector('[data-tab="now"] .n').hidden = !(snap.asks || []).length
     // An agent that wants the person (amber): the same dot on the Agent page's.
@@ -2852,20 +2917,9 @@
   // typed in (the download box, a plugin's setting, the mail proxy's
   // address) gets the focus and the caret back.
   function drawBody(reset) {
-    // The Local models page is the console's frame, kept as it is: not markup to
-    // diff, and never redrawn (a redraw would take the frame out of the document
-    // and reload it). Leaving it, the frame is parked first, so the diff below
-    // clears an empty box rather than the frame.
-    if (tab === 'models') {
-      // The page before this one is cleared first: the frame is placed over this
-      // page's box by its position on screen, and left under that page's markup
-      // it would be put where the box would have been below it.
-      setHTML(body, '')
-      Models.enter(body, T)
-      body.scrollTop = 0
-      return
-    }
-    Models.park()
+    const extension = extensionPanel.pages().find(page => page.key === tab)
+    if (extension) { void extensionPage.enter(body, extension); return }
+    extensionPage.park()
     const box = body.contains(document.activeElement) && document.activeElement.matches('input, textarea') ? document.activeElement : null
     const which =
       box &&
@@ -2873,6 +2927,8 @@
     const caret = which ? box.selectionStart : null
     const changed = setHTML(body, PAGES[tab]())
     if (tab === 'now') identityPanel.mount(body)
+    if (tab === 'widgets') extensionPanel.mount(body)
+    if (tab === 'look') { mountTabOrder(); windhawkPanel.mount(body) }
     if (reset) {
       body.scrollTop = 0
       // Two panes: what is on the right from its top; the list stays where it was.
@@ -2897,16 +2953,18 @@
     lang = snap.lang || lang
     // The Mail page in two panes is wider; the Local models page is the console,
     // as wide as the console's own window.
-    const wide = twoPanes()
-    const models = tab === 'models'
+    const extension = extensionPanel.pages().some(page => page.key === tab)
+    const sizing = extensionLayouts.get(tab)
+    const servicePage = !!sizing?.service
+    const wide = twoPanes() || (extension && !servicePage && sizing?.layout === 'double' && roomForTwo())
     layer.classList.toggle('wide', wide)
-    layer.classList.toggle('models', models)
-    const width = wide ? WIDE_W : models ? MODELS_W : 0
+    layer.classList.toggle('models', extension)
+    layer.classList.toggle('extension-compact', extension && !servicePage && !wide)
+    const width = servicePage ? SERVICE_W : wide ? WIDE_W : extension ? 620 : 0
     layer.style.width = width ? `${Math.min(width, screen.availWidth - 40)}px` : ''
     drawHead()
     drawTabs()
     drawBody(reset)
-    syncFullscreenPrompt()
     // Locked (the button by ✕), a click outside closes them no more.
     foot.querySelector('.foot-text').textContent = T(snap.settings.settingsPin ? 's.footLocked' : 's.foot')
     foot.querySelector('.ver').textContent = `v${snap.version}`
@@ -2918,7 +2976,9 @@
     // than the home keeps room for (the taskbar's): a page scrolls inside.
     const rest = layer.offsetHeight - body.offsetHeight
     const most = window.Island?.settingsMax?.() ?? screen.availHeight - 56
-    body.style.height = `${Math.max(160, Math.min(models ? MODELS_H : 460, most - rest))}px`
+    const desired = extension ? servicePage ? SERVICE_BODY_H : sizing?.height || 320 : 460
+    body.style.height = `${Math.max(160, Math.min(desired, most - rest))}px`
+    requestAnimationFrame(() => tabs.querySelector('button.on')?.scrollIntoView({block:'nearest',inline:'nearest'}))
     window.Island?.changed()
   }
 
@@ -2966,7 +3026,6 @@
     const wasOpen = isOpen
     const revision = ++openRevision
     isOpen = true
-    syncModelFocus()
     if (!wasOpen) openedAt = Date.now()
     if (!wasOpen) {
       window.pet.keyboard(true)
@@ -2976,9 +3035,14 @@
       // Locked and gone under another window: asked for again, to the front.
       window.pet.keyboard(true)
     }
-    window.pet.settings.get().then(got => {
+    const initialTab = tab
+    window.pet.settings.get().then(async got => {
       if (!isOpen || revision !== openRevision) return
       snap = got
+      await extensionPanel.load(true)
+      if (!isOpen || revision !== openRevision) return
+      const remembered = next || (!wasOpen && got.settings.settingsLastTab)
+      if (tab === initialTab && (TABS.includes(remembered) || extensionPanel.pages().some(page => page.key === remembered))) tab = remembered
       // Connecting while the welcome card shows (nothing connected yet):
       // the card, at General's top; else the Agent page.
       if (partToShow === 'connect' && cardShows()) {
@@ -2987,7 +3051,7 @@
       }
       draw(true)
       showPart()
-      if (tab === 'look') loadGallery(false)
+      if (tab === 'look') { loadGallery(false); if (!window.pet.mac) void windhawkPanel.load() }
       if (tab === 'mail' && letterToOpen) {
         const { account, uid, folder } = letterToOpen
         letterToOpen = null
@@ -2998,27 +3062,16 @@
     window.Island?.changed()
   }
 
-  function syncModelFocus() {
-    const active = isOpen && tab === 'models'
-    if (active === modelFocus) return
-    modelFocus = active
-    if (snap?.settings) {
-      snap.modelFullscreenPrompt = null
-      snap.settings.settingsPin = active
-      snap.settings.settingsTop = active
-    }
-    window.pet.settings.focus(active).catch(e => console.log('[settings focus]', e))
-  }
-
   function close(why = 'asked') {
     if (!isOpen) return
     console.log('settings close:', why)
+    if (confirmActive) finishConfirm(false)
+    while (confirmQueue.length) confirmQueue.shift().resolve(false)
+    void window.pet.settings.set({ settingsLastTab: tab }).catch(error => console.log('[settings memory]', error))
     isOpen = false
-    syncFullscreenPrompt()
     ++openRevision
-    syncModelFocus()
     // The console's frame waits off screen, as it does on any other page.
-    Models.park()
+    extensionPage.park()
     // The welcome opened again only for this time: "not now" said since
     // (the island's 不用提醒), the next open shows it folded (the test session).
     welcomeOpen = false
@@ -3039,9 +3092,8 @@
   function setTab(next) {
     if (next === tab || !TABS.includes(next)) return
     tab = next
-    syncModelFocus()
     draw(true)
-    if (tab === 'look') loadGallery(false)
+    if (tab === 'look') { loadGallery(false); if (!window.pet.mac) void windhawkPanel.load() }
     relayout()
   }
 
@@ -3957,7 +4009,7 @@
 
   document.addEventListener('keydown', e => {
     if (!isOpen) return
-    if (fullscreenDialog.open) return
+    if (confirmDialog.open) return
     if (e.key === 'Escape') {
       e.preventDefault()
       if (!menuEl.hidden) return closeMenu()
@@ -3992,8 +4044,8 @@
   })
 
   window.pet.onIdentityChanged(() => {
-    Models.invalidate()
-    if (isOpen && tab === 'models') draw()
+    extensionPage.sync([])
+    void extensionPanel.load().then(() => { if (isOpen) draw() })
   })
   window.pet.onSettings(({ tab: next } = {}) => open(next))
   window.pet.onSettingsChanged(got => {

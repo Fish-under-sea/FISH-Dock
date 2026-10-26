@@ -165,7 +165,7 @@
   // The settings above the taskbar: clear of it, and room for their shadow.
   const TASKBAR_GAP = 8
   const TASKBAR_SHADE = 12
-  const SETTINGS_ROOM = 900
+  const SETTINGS_ROOM = 1100
   const TASK_HEAD = 30
   // On the taskbar's Mica her end is an island of its own in the strip: a
   // black capsule this far in from the strip's left end and its foot.
@@ -3760,10 +3760,12 @@
   // inner edge is the work area's, where maximized windows stop (a hairline
   // gap at 175%: zhoupengjie/Wakuwaku#2). 48 until told.
   let stripThick = 0
+  let stripScale = 0
   function setStrip() {
     if (!stripThick) return
     document.documentElement.style.setProperty('--strip-h', `${stripThick / (devicePixelRatio || 1)}px`)
     fitPage()
+    if (window.Settings?.isOpen?.()) window.Settings.redraw()
     // Once laid out for it (its edge may have just changed too).
     setTimeout(() => {
       const r = island.parentElement.getBoundingClientRect()
@@ -3810,9 +3812,10 @@
     root.style.setProperty('--page-cut-x', `${winPx ? over(r.width, winPx[0]) : 0}px`)
     root.style.setProperty('--page-cut-y', `${winPx ? over(r.height, winPx[1]) : 0}px`)
   }
-  window.pet.onStrip(({ thick, win } = {}) => {
+  window.pet.onStrip(({ thick, win, sf } = {}) => {
     if (!(thick > 0)) return
     stripThick = thick
+    if (Number.isFinite(sf) && sf > 0) stripScale = sf
     if (Array.isArray(win) && win[0] > 0 && win[1] > 0) winPx = win
     setStrip()
   })
@@ -3820,6 +3823,8 @@
     if (!stripThick) return
     document.documentElement.style.setProperty('--strip-h', `${stripThick / (devicePixelRatio || 1)}px`)
     fitPage()
+    if (window.Settings?.isOpen?.()) window.Settings.redraw()
+    sendSolid()
   })
 
   const micaBox = el('div')
@@ -4594,9 +4599,10 @@
   function sendSolid() {
     if (!isOn()) return
     const on = !!editLayout
-    const parts = [...(editLayout ? [editBar] : []), ...(window.Picker?.solids() || []), ...(window.Models?.solids?.() || [])]
+    const settings = window.Settings?.isOpen?.() ? window.Settings.layer : null
+    const parts = [...(settings ? [settings] : []), ...(editLayout ? [editBar] : []), ...(window.Picker?.solids() || []), ...(window.Models?.solids?.() || [])]
     const rects = Surfaces.solid(parts)
-    const sent = JSON.stringify([on, rects])
+    const sent = JSON.stringify([on, rects, devicePixelRatio || 1])
     if (sent === solidSent) return
     solidSent = sent
     window.pet.editing(on, rects)
@@ -5908,7 +5914,7 @@
   // panel.js tells the island when its prompt changes.
   // The most the settings may be high: above the taskbar, its room (the
   // window never moves for them); elsewhere, none said (the screen's).
-  const settingsMax = () => (home() === 'taskbar' ? (isSide() ? innerHeight - 2 * TASKBAR_GAP - TASKBAR_SHADE : Math.min(SETTINGS_ROOM, (screen.height || Infinity) - TASKBAR_GAP) - TASKBAR_GAP - TASKBAR_SHADE) : null)
+  const settingsMax = () => (home() === 'taskbar' ? (isSide() ? innerHeight - 2 * TASKBAR_GAP - TASKBAR_SHADE : Math.min((SETTINGS_ROOM - TASKBAR_GAP - TASKBAR_SHADE) * (stripScale ? stripScale / (devicePixelRatio || 1) : 1), innerHeight - TASKBAR_H - TASKBAR_GAP - TASKBAR_SHADE)) : null)
 
   // The taskbar's layout, for the settings: its presets, which one it is, editing it on the strip.
   // From her menu: editing it (添加小工具…: with the picker open, { picker }),

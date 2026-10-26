@@ -47,10 +47,28 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(240);
 // What is kept of what pnpm printed.
 const OUTPUT_MAX: usize = 16 * 1024;
 
-// DSH's desktop app, where its installer puts it.
+// 仅接受含完整运行工具链的绝对目录，不依赖开发机器的盘符。
+fn discover_app(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|p| p.is_absolute() && runtime_in(p).is_some()).cloned()
+}
 pub fn app_dir() -> Option<PathBuf> {
-    let dir = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("Programs").join("DeepSeek Harness");
-    dir.join("resources").is_dir().then_some(dir)
+    let mut candidates = Vec::new();
+    if let Some(context) = crate::storage_context::current() {
+        if let Ok(Some(bytes)) = context.host.read("config", "dsh-runtime.json") {
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+                if let Some(path) = value.get("appDir").and_then(Value::as_str) {
+                    candidates.push(PathBuf::from(path));
+                }
+            }
+        }
+    }
+    for key in ["FISH_DOCK_DSH_APP", "DSH_APP_DIR"] {
+        if let Some(path) = std::env::var_os(key) { candidates.push(PathBuf::from(path)); }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local).join("Programs").join("DeepSeek Harness"));
+    }
+    discover_app(&candidates)
 }
 
 // DSH's own Node and pnpm.
@@ -526,6 +544,22 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn portable_runtime_candidates_are_validated_in_priority_order() {
+        let root=std::env::temp_dir().join(format!("fish-dsh-discovery-{}-{}",std::process::id(),crate::now_ms()));
+        let folders=["portable 中文", "configured", "environment", "fallback"].map(|name|root.join(name));
+        for folder in &folders {
+            let runtime=folder.join("resources/runtime");
+            fs::create_dir_all(runtime.join("primary-runtime/dependencies/node")).unwrap();
+            fs::create_dir_all(runtime.join("pnpm/bin")).unwrap();
+            fs::write(runtime.join("primary-runtime/dependencies/node/node.exe"),b"fixture").unwrap();
+            fs::write(runtime.join("pnpm/bin/pnpm.mjs"),b"fixture").unwrap();
+        }
+        assert_eq!(discover_app(&folders),Some(folders[0].clone()));
+        assert_eq!(discover_app(&[root.join("absent"),folders[1].clone(),folders[2].clone()]),Some(folders[1].clone()));
+        assert_eq!(discover_app(&[std::path::PathBuf::from("relative")]),None);
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn minimum_release_age_lets_these_releases_through() {
         let specs = vec!["@deepseek-ai/dsh-hooks-claude-code@0.2.1-rc.2".to_string(), "@deepseek-ai/dsh-hook-protocol@0.2.1-rc.2".to_string()];

@@ -1,5 +1,12 @@
 {
   "schema": 1,
+  "windhawk": {
+    "version": "1.7.3",
+    "filename": "windhawk-1.7.3-offline.exe",
+    "url": "https://github.com/ramensoftware/windhawk/releases/download/v1.7.3/windhawk_setup_offline.exe",
+    "sha256": "4d93016570f982326eebdfc9068e924ff21f6448534ea32672bb4c1d52a8193b",
+    "source": "https://github.com/ramensoftware/windhawk/tree/v1.7.3"
+  },
   "node": {
     "version": "24.14.0",
     "filename": "node-v24.14.0-win-x64.zip",

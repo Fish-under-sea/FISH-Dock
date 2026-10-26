@@ -1,14 +1,14 @@
 <p align="center"><img src="src-tauri/icons/dsh-fish.png" width="112" alt="FISH Dock 图标"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">AI 会话有处停靠，模型连接集中管理。</p>
-<p align="center"><strong>1.0.2</strong> · Windows x64 · MIT 代码许可</p>
-<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-1.0.2.md">更新记录</a></p>
+<p align="center"><strong>1.1.0</strong> · Windows x64 · MIT 代码许可</p>
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-1.1.0.md">更新记录</a></p>
 
 > **这是二次开发集成，不是上游官方发行版。** FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 的桌面与 AI 会话体验，集成 [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的模型渠道与 API 工作台。桌面核心与模型服务核心来自上游，原作者、版权和许可证见「来源与致谢」。
 
-> **Meoo 目前仅属于灰度测试，暂时不可使用。** 本版保留实验界面和源码，暂未开放可用的登录、项目绑定及模型调用。
+> **业务插件独立分发。** OFM 等插件的可用渠道和灰度状态见 [官方插件仓](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)，本安装包不预装业务服务。
 
-本仓库包含完整 Dock 与 OFM 源码：Rust / Tauri 桌面、Node.js 服务、React 前端、渠道适配、测试及构建脚本。
+本仓库包含完整桌面宿主、插件 SDK、统一存储、运行时管理、安装器与测试。旧 OFM 服务副本已移出主仓，业务实现和发行包在官方插件仓维护。
 
 ## 一个工作台，两组能力
 
@@ -20,24 +20,24 @@
 
 **「本地」不等于本机离线推理。** 工作台、代理和数据在本机运行；模型请求仍发送到所选渠道的服务商。资格、额度、计费和可用性由服务商决定。本项目不承诺永久免费、无限额度或绕过服务限制。
 
-## 1.0.2 更新
+## 1.1.0 更新
 
-- **WorkBuddy 恢复**：限流、超时等暂时故障不再持久锁停透明验证，保留诊断和手动恢复入口。
-- **邮件全部已读**：支持当前与聚合邮箱，保留其他标志并报告已确认进度；窄窗口下筛选保持可见。
-- **窗口行为**：进入 OFM 默认锁定并置顶，离开或关闭时解除；其他应用全屏时询问保持或取消两者。已关置顶但仍锁定时，连续全屏 2 秒后解除锁定。
-- **账号与积分**：按账号续期、恢复余额查询；商汤一键领取和按厂商折叠的今日核验均以实际到账证据为准，不写死金额。
-- **厂商界面统一**：14 个渠道入口采用统一卡片、图标及账号／模型折叠区，保留各渠道已有功能；Qoder 区分国际版与国内版。
-- **兼容与完整源码**：保留 1.0.1 身份迁移、完整身份 ZIP、CodeArts 专用传输和严格模型测试结果；公开完整 Dock 与 OFM 源码，沿用指定原始图标。
+- 独立插件平台：飞书、Clash、Magpie、OFM 按需安装，安装完成默认启用。
+- GitHub 设备登录与主仓 Star 验证；自动复制设备码、轮询授权结果，按实际验证结果显示官方入口。
+- 内化应用确认弹窗；移除旧自动锁定逻辑，验证期间只保留临时焦点状态。
+- 修复全屏退出恢复、主动唤醒及审批显示；保存手动置顶与锁定偏好。
+- 插件中心和「关于」支持检查更新，目录含 GitHub API 回退，包大小自动换算单位。
+- 内置 Windhawk 与编译器；保留原生插件管理页、标签拖动及单双栏布局。
 
-**Meoo 仍处于灰度测试，暂不可使用。** 完整变化、验证证据和实机边界见 [1.0.2 更新记录](docs/release-1.0.2.md)。
+完整变化和验证边界见 [1.1.0 更新记录](docs/release-1.1.0.md)。
 
 ## 安装与更新
 
 适用平台：**Windows 10/11 x64**。系统任务栏集成主要面向 Windows 11；其他系统版本与第三方任务栏软件组合需要单独验证。
 
-1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2) 下载 `FISH-Dock-Setup-1.0.2.exe`，核对随包提供的 `SHA256SUMS.txt`。
+1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0) 下载 `FISH-Dock-Setup-1.1.0.exe`，核对随包提供的 `SHA256SUMS.txt`。
 2. 从托盘完全退出旧版及单独运行的 OFM，再运行安装器并选择目录。新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock`；已有安装沿用登记目录覆盖升级，不自动搬迁。
-3. 通过桌面或开始菜单启动 **FISH Dock**。完整 Node.js、固定版 WebView2、模型服务和许可随包安装，无需另装运行时。
+3. 通过桌面或开始菜单启动 **FISH Dock**。Node.js、固定版 WebView2、Windhawk 与编译器随包安装；业务插件另行下载。
 4. 首次启动需要确认运行时许可并校验资源；后续使用安装目录中的文件，不重复解压整套依赖。
 
 **安装器尚未进行 Authenticode 代码签名。** Windows 可能提示未知发布者或 SmartScreen。改名、换图标、自签名都不能可靠消除信誉提示。仅使用可信来源，核对摘要，不要关闭系统防护、导入不明根证书或绕过组织策略。通常不要求以管理员身份运行。
@@ -48,7 +48,7 @@
 
 **桌面**：首次默认任务栏；通过设置或托盘切换任务栏／灵动岛、边缘和左中右位置。退出重启保留选择，保存的显示器不可用时回退主屏。减少动态效果时使用短淡入。
 
-**模型**：打开设置中的「本地模型」，添加有权使用的渠道，然后从「API 接入」复制本机地址与密钥。常见地址如下，实际端口以页面为准：
+**插件与模型**：在「插件」页完成 GitHub 登录与主仓 Star 验证后安装插件。设备码自动复制，网页确认后自动检查结果。新插件默认启用，模型服务仍需按页面配置并启动。API 地址和端口以插件页面为准，例如：
 
 ```text
 http://127.0.0.1:18901/v1
@@ -78,31 +78,32 @@ OFM「服务设置 → OFM 迁移备份」生成的 **OFM 专项 ZIP** 不含邮
 | 内容 | 位置 |
 | --- | --- |
 | 主程序和内置依赖 | 用户选择的安装目录，新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock` |
-| 设置、宠物、布局与日志 | `%LOCALAPPDATA%\DSH-FISH\data` |
-| WebView2 用户数据 | `%LOCALAPPDATA%\DSH-FISH\webview` |
-| 许可确认及资源校验状态 | `%LOCALAPPDATA%\DSH-FISH\state` |
-| OFM 账号、密钥、用量与邮件身份 | `%USERPROFILE%\.fish-dock` |
+| 设置、宠物、布局与日志 | 数据根下 `host` 命名空间 |
+| WebView2 用户数据 | 数据根下 `host/webview` |
+| 许可确认及资源校验状态 | 系统用户运行时状态目录 |
+| 插件配置、凭据与身份 | 数据根下 `.fishplugin-*` 或 `.plugin.<publisher>.<name>`，按分类隔离 |
 
 内部程序名 `DSH-FISH.exe`、应用标识、卸载登记和旧数据路径保留兼容，不代表显示名称未更新。卸载只移除自身安装文件与登记，保留用户数据；只清理确认属于本安装的自启动任务。手动删除数据前应先备份。
 
 ## 从源码构建
 
-### Gemini OAuth 客户端配置
+### GitHub 与插件配置
 
-公开源码已移除上游内嵌的 Google OAuth 客户端 ID 和 Secret。使用 Gemini OAuth 前，请自行注册并配置 `CMDC_PAK_GOOGLE_CLIENT_ID` 与 `CMDC_PAK_GOOGLE_CLIENT_SECRET`，然后在相同环境中启动程序；不配置时无法完成该渠道的 OAuth 授权。不要把真实值写入源码、提交记录或工单。1.0.2 源码和本次重建的安装包均沿用这项约束；不包含真实 OAuth 客户端秘密。
+GitHub 登录使用公开 OAuth Client ID 与设备授权流程，令牌由宿主 DPAPI 加密保存，不交给插件。可通过 `FISH_DOCK_GITHUB_CLIENT_ID` 指定自有应用。模型渠道的 OAuth 配置在对应插件仓维护。
 
 桌面使用 **Rust + Tauri 2 + HTML/CSS/JavaScript**，模型管理使用 **Node.js + React**，安装器使用 **NSIS 3**。需要 Windows x64、MSVC/Rust、Node.js、NSIS，以及锁定的官方运行时下载件。离线构建要求依赖已缓存，不能忽略锁文件。
 
 ```text
 FISH-Dock/
   Wakuwaku/              # 桌面源码与此 README
-  dsh-our-free-model/     # 集成的服务源码与上游许可
+  sdk/                   # Node 后台和浏览器插件桥接 SDK
+  licenses/              # 保留的历史组件许可证
 ```
 
-先在 `dsh-our-free-model/packages/standalone` 执行 `npm ci`，再在模型服务根目录执行 `node scripts/build-standalone-ui.mjs`。然后在桌面源码目录执行：
+在桌面源码目录执行；构建宿主不再需要旧 OFM 源码树：
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <运行时缓存> --source ../dsh-our-free-model --out <新的资源目录> --version 1.0.2
+node scripts/prepare-installer.mjs --downloads <运行时缓存> --out <新的资源目录> --version 1.1.0
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <资源目录> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
@@ -115,7 +116,7 @@ node --test "test/*.test.js" "scripts/*.test.mjs"
 | 项目 | 原作者／维护者 | 保留的核心能力 | 许可 |
 | --- | --- | --- | --- |
 | [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) | Pengjie Zhou / zhoupengjie | 任务栏、灵动岛、宠物、会话与桌面功能 | [MIT](LICENSE)，Copyright 2026 Pengjie Zhou |
-| [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) | Ebony-Vinyl 及贡献者 | 模型渠道、账号、用量与兼容 API | MIT，Copyright 2026 Ebony-Vinyl；发行包保留其 LICENSE 和第三方声明 |
+| [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) | Ebony-Vinyl 及贡献者 | 模型渠道、账号、用量与兼容 API | 历史模型集成；MIT，Copyright 2026 Ebony-Vinyl；[许可原文](../licenses/Our-Free-Model.txt)，业务代码见插件仓 |
 
 **Fish-under-sea** 负责 FISH Dock 集成与维护。新增集成代码使用 MIT，上游版权声明原样保留。不能将全部功能描述为 FISH Dock 原创，也不应让上游维护者承担本发行版的支持责任。
 
@@ -123,4 +124,4 @@ node --test "test/*.test.js" "scripts/*.test.mjs"
 
 ## 反馈与安全
 
-在 [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues) 提供系统与应用版本、停靠模式、复现步骤和脱敏日志。不要上传真实密钥、完整 Cookies、私人邮件或备份 ZIP。漏洞报告也不要公开附上可用凭据。安装包与校验文件已在上方 v1.0.2 Release 提供。
+在 [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues) 提供系统与应用版本、停靠模式、复现步骤和脱敏日志。不要上传真实密钥、完整 Cookies、私人邮件或备份 ZIP。漏洞报告也不要公开附上可用凭据。安装包与校验文件已在上方 v1.1.0 Release 提供。

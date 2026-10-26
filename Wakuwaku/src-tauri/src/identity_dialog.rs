@@ -2,7 +2,9 @@
 use std::path::{Path, PathBuf};
 
 pub fn export_directory(configured: Option<&str>) -> Result<PathBuf, String> {
-    let directory = configured.filter(|s| !s.trim().is_empty()).map(PathBuf::from).map(Ok).unwrap_or_else(downloads)?;
+    let directory = configured.filter(|s| !s.trim().is_empty()).map(PathBuf::from).map(Ok).unwrap_or_else(|| {
+        crate::storage_context::current().map(|context| Ok(context.host.path().join("exports"))).unwrap_or_else(downloads)
+    })?;
     if !directory.is_absolute() { return Err("导出目录必须是绝对路径".into()); }
     crate::identity_store::safe(&directory)?;
     if !directory.is_dir() { return Err("导出目录不存在，请选择已有目录".into()); }

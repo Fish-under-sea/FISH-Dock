@@ -240,4 +240,15 @@ mod imp {
     pub const AVAILABLE: bool = false;
 }
 
+pub fn resolved(previous: bool, cover: Option<bool>, own_interactive: bool) -> bool {
+    cover.unwrap_or(previous && !own_interactive)
+}
+#[cfg(test)] mod recovery_tests {
+    #[test] fn returning_to_interactive_dock_clears_stale_fullscreen() {
+        assert!(!super::resolved(true, None, true));
+        assert!(super::resolved(true, None, false));
+        assert!(super::resolved(false, Some(true), false));
+        assert!(!super::resolved(true, Some(false), false));
+    }
+}
 pub use imp::{check, covering, front, AVAILABLE};

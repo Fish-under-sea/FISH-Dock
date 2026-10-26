@@ -21,6 +21,38 @@ struct Row { path: String, after: Option<String>, before: Option<String> }
 #[serde(deny_unknown_fields)]
 struct Journal { version: u32, id: String, rows: Vec<Row> }
 fn allowed(name: &str) -> bool { OFM_FILES.contains(&name) || MAIL_FILES.contains(&name) }
+pub fn classified_name(name: &str) -> Result<String, String> {
+    if !allowed(name) { return Err("身份文件名不在兼容清单中".into()); }
+    let category = match name {
+        "mail-accounts.json" | "channel-pack/state.json" => "roster",
+        "mail-secrets.dpapi" | "channel-credentials.json" | "eac-user.json" => "credentials",
+        _ => "config",
+    };
+    Ok(format!("{category}/{name}"))
+}
+pub fn path(root: &Path, name: &str) -> Result<PathBuf, String> {
+    if let Some(namespace) = crate::storage_context::Namespace::claimed(root)? {
+        if namespace.identity().plugin_id == "host" && !MAIL_FILES.contains(&name) { return Err("OFM 资料只属于 OFM 插件".into()); }
+        let name = classified_name(name)?;
+        let (category, name) = name.split_once('/').ok_or("身份文件分类无效")?;
+        namespace.file(category, name)
+    } else { Ok(root.join(name)) }
+}
+fn classified_changes(root: &Path, changes: Changes) -> Result<Changes, String> {
+    changes.into_iter().map(|(name, bytes)| {
+        let classified = if allowed(&name) {
+            path(root, &name)?;
+            classified_name(&name)?
+        } else {
+            let namespace = crate::storage_context::Namespace::existing(root)?.ok_or("分类变更缺少命名空间归属")?;
+            let (category, relative) = name.split_once('/').ok_or("分类变更路径无效")?;
+            if !["credentials", "roster", "keys", "config"].contains(&category) { return Err("身份变更类别无效".into()); }
+            namespace.file(category, relative)?;
+            name
+        };
+        Ok((classified, bytes))
+    }).collect()
+}
 fn digest(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
 fn id() -> String {
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -115,6 +147,7 @@ fn apply_rows(root: &Path, journal: &Journal, mut after: impl FnMut(usize) -> Re
     fs::remove_file(root.join(JOURNAL)).map_err(|_| "身份已写入，但无法完成事务标记；请重试恢复".into())
 }
 pub fn recover_unlocked(root: &Path) -> Result<(), String> {
+    if let Some(namespace) = crate::storage_context::Namespace::existing(root)? { return crate::storage_transaction::recover_unlocked(&namespace); }
     let Some(bytes) = read_optional(&root.join(JOURNAL))? else { return Ok(()) };
     if bytes.len() > 64 * 1024 { return Err("身份事务记录大小无效".into()); }
     let journal: Journal = serde_json::from_slice(&bytes).map_err(|_| "身份事务记录损坏，未启动身份功能")?;
@@ -148,6 +181,9 @@ fn prepare(root: &Path, changes: Changes) -> Result<Journal, String> {
     Ok(journal)
 }
 pub fn apply_unlocked(root: &Path, changes: Changes) -> Result<PathBuf, String> {
+    if let Some(namespace) = crate::storage_context::Namespace::existing(root)? {
+        return crate::storage_transaction::apply(&namespace, classified_changes(root, changes)?);
+    }
     let journal = prepare(root, changes)?;
     apply_rows(root, &journal, |_| Ok(()))?;
     Ok(root.join(".backups").join(journal.id))
@@ -157,6 +193,7 @@ pub fn apply(root: &Path, changes: Changes) -> Result<PathBuf, String> {
     apply_unlocked(root, changes)
 }
 pub fn restore(root: &Path, backup: &Path) -> Result<(), String> {
+    if let Some(namespace) = crate::storage_context::Namespace::existing(root)? { return crate::storage_transaction::restore(&namespace, backup).map(|_| ()); }
     safe(backup)?;
     if backup.parent() != Some(root.join(".backups").as_path()) { return Err("身份恢复副本不属于当前目录".into()); }
     let bytes = read_optional(&backup.join("transaction.json"))?.ok_or("缺少身份恢复记录")?;
@@ -179,6 +216,20 @@ mod tests {
     fn root() -> PathBuf {
         let root = std::env::temp_dir().join(id());
         fs::create_dir_all(&root).unwrap(); root
+    }
+    #[test]
+    fn classified_host_keeps_roster_and_secrets_separate() {
+        let base = root(); let root = base.join("host");
+        crate::storage::initialize(&root, "host", "1.0.2", 1).unwrap();
+        let owner = crate::storage_context::Identity { plugin_id: "host".into(), directory: "host".into(), plugin_version: "1.0.2".into(), data_schema: 1 };
+        fs::write(root.join("storage.json"), serde_json::to_vec(&owner).unwrap()).unwrap();
+        let backup = apply(&root, BTreeMap::from([("mail-accounts.json".into(), Some(b"synthetic-roster".to_vec())), ("mail-secrets.dpapi".into(), Some(b"synthetic-encrypted".to_vec()))])).unwrap();
+        assert_eq!(fs::read(root.join("roster/mail-accounts.json")).unwrap(), b"synthetic-roster");
+        assert_eq!(fs::read(root.join("credentials/mail-secrets.dpapi")).unwrap(), b"synthetic-encrypted");
+        assert!(backup.starts_with(root.join("backups")));
+        assert!(!root.join("mail-accounts.json").exists());
+        assert!(!root.join(".backups").exists());
+        fs::remove_dir_all(base).unwrap();
     }
     #[test]
     fn replaces_accounts_and_secrets_together_and_keeps_before_copy() {

@@ -10,8 +10,15 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { installerScript, resourceDirectories, resourceFiles, scriptSource, REQUIRED } from './installer.mjs'
 
+import { REQUIRED as RUNTIME_REQUIRED } from './prepare-installer.mjs'
+
+test('安装器与运行资源必需清单一致且不预装业务插件', () => {
+  assert.deepEqual(REQUIRED, RUNTIME_REQUIRED)
+  assert.equal(REQUIRED.some(name => name.startsWith('ofm/')), false)
+  assert.ok(REQUIRED.includes('windhawk/Compiler/bin/clang++.exe'))
+})
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const makensis = path.resolve(root, '../../.tools/nsis-3.13/makensis.exe')
+const makensis = process.env.FISH_MAKENSIS || path.resolve(root, '../../.tools/nsis-3.13/makensis.exe')
 
 const LISTED = [...REQUIRED, 'licenses/WebView2-Fixed-Version.html', 'licenses/NOTICE.txt', 'webview2/locales/zh-CN.pak', 'webview2/EBWebView/x.txt']
 

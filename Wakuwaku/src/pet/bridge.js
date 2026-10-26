@@ -80,7 +80,7 @@
     // panel, the toasts; [[x, y, w, h]], page px, editing or not): the
     // window keeps the mouse there whatever enter and leave say (island.rs
     // set_editing, #53).
-    editing: (on, rects) => send('island_editing', { on: on === true, rects: Array.isArray(rects) ? rects : [] }),
+    editing: (on, rects) => send('island_editing', { on: on === true, rects: Array.isArray(rects) ? rects : [], dpr: window.devicePixelRatio || 1 }),
     // Her seat on the taskbar, where the page has laid her island out (logical px from its left).
     seat: x => send('island_seat', { x: Number(x) || 0 }),
     // A blur of what is behind her island, under it (backplate.rs): where
@@ -235,8 +235,6 @@
     onStart: on('taskbar:start'),
     settings: {
       get: () => invoke('settings_get'),
-      focus: active => invoke('settings_focus', { active: active === true }),
-      fullscreenAnswer: (id, cancel) => invoke('settings_fullscreen_answer', { id, cancel: cancel === true }),
       set: patch => invoke('settings_set', { patch }),
       showPet: on => invoke('settings_show_pet', { on: on === true }),
       login: on => invoke('settings_login', { on: on === true }),

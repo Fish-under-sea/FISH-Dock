@@ -329,7 +329,8 @@ test('the page loads surfaces.js before the scripts that use it', () => {
   const at = html.indexOf('src="surfaces.js"')
   assert.ok(at > 0, 'surfaces.js loaded')
   assert.ok(at < html.indexOf('src="island.js"'), 'before island.js')
-  assert.ok(at < html.indexOf('src="models.js"'), 'and before models.js')
+  assert.ok(at < html.indexOf('src="settings.js"'), 'and before settings.js')
+  assert.equal(html.includes('src="models.js"'), false, 'legacy OFM page is not bundled into settings')
 })
 
 test('a part grown by Surfaces covers its own pixels, and a part not on screen is none', () => {

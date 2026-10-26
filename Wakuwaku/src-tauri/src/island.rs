@@ -39,11 +39,11 @@ pub const TASKBAR_H: f64 = 48.0;
 // Free Model's console (1280×800 of its own) and its page wants the height of
 // it, which the window therefore keeps from the start. It is the taskbar
 // window's room (size_for), so the room above her strip is exactly this.
-const SETTINGS_ROOM: f64 = 900.0;
+const SETTINGS_ROOM: f64 = 1100.0;
 // Beside a side bar (taskbarEdge left or right): as wide as the settings
 // ever are (the Mail page in two panes, settings.js WIDE_W), their gap off
 // the strip and their shadow, for the same reason.
-const SIDE_ROOM: f64 = 960.0 + 8.0 + 12.0;
+const SIDE_ROOM: f64 = 1280.0 + 8.0 + 12.0;
 // The middle of her portrait at the taskbar's start (its left end, or a
 // side bar's top), along the strip.
 const TASKBAR_SEAT: f64 = 24.0;
@@ -71,6 +71,8 @@ pub struct Island {
     pos: (i32, i32),
     size: (i32, i32),
     sf: f64,
+    // 页面缩放独立于显示器 DPI。
+    page_sf: f64,
     // Extra room the page asked for.
     room: Option<(f64, f64)>,
     created: bool,
@@ -110,7 +112,7 @@ pub struct Island {
     seat_at: Option<f64>,
     // The strip, its edge and the window as the page was last told of them
     // (tell_strip).
-    strip_told: Option<((i32, i32, i32, i32), Edge, (i32, i32), (i32, i32))>,
+    strip_told: Option<((i32, i32, i32, i32), Edge, (i32, i32), (i32, i32), f64)>,
     // At the top of the screen, up out of the way of a window under it.
     stow: Stow,
     // The taskbar's layout being edited (island.js editTaskbar): her menu
@@ -191,6 +193,10 @@ struct Stow {
 impl Island {
     fn sf(&self) -> f64 {
         if self.sf > 0.0 { self.sf } else { 1.0 }
+    }
+
+    fn page_sf(&self) -> f64 {
+        valid_scale(Some(self.page_sf)).unwrap_or_else(|| self.sf())
     }
 
     // Physical. The taskbar is as long as its strip (its display, or what
@@ -377,7 +383,7 @@ pub fn tell_strip(sh: &Shared, again: bool) {
     };
     let Some(b) = bar else { return };
     let thick = thickness(edge, b);
-    let now = Some((b, edge, pos, size));
+    let now = Some((b, edge, pos, size, sf));
     if now == told && !again {
         return;
     }
@@ -390,7 +396,7 @@ pub fn tell_strip(sh: &Shared, again: bool) {
     ));
     // With the window's size: the page may be a little bigger (island.js
     // fitPage, zhoupengjie/Wakuwaku#19).
-    let _ = sh.app.emit_to("island", "taskbar:strip", json!({ "thick": thick, "win": [size.0, size.1] }));
+    let _ = sh.app.emit_to("island", "taskbar:strip", json!({ "thick": thick, "win": [size.0, size.1], "sf": sf }));
 }
 
 // One at a time: two at once took the taskbar twice (two tray threads, one
@@ -1135,9 +1141,9 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
         if !isl.shown {
             (isl.ct.force(Mode::Pass), None, 500, None, false)
         } else {
-            let (pos, size, sf, held) = (isl.pos, isl.size, isl.sf(), isl.holding);
+            let (pos, size, sf, page_sf, held) = (isl.pos, isl.size, isl.sf(), isl.page_sf(), isl.holding);
             let solid = std::mem::take(&mut isl.solid);
-            let seen = isl.ct.look(cursor, pos, size, sf, held, passive && !held, &solid);
+            let seen = isl.ct.look(cursor, pos, size, sf, page_sf, held, passive && !held, &solid);
             isl.solid = solid;
             if isl.ct.calmed() {
                 sh.log(&format!("island: mouse mode bouncing, calmed: cursor {cursor:?}, window {pos:?} {size:?}, scale {sf}"));
@@ -1206,11 +1212,19 @@ pub fn set_seat(sh: &Shared, at: f64) {
 // The room a shape needs, as the page measured it.
 pub fn set_room(sh: &Shared, measured: &Value) {
     let room = match (measured["width"].as_f64(), measured["height"].as_f64()) {
-        (Some(w), Some(h)) if w > 0.0 && h > 0.0 => Some((w.ceil(), h.ceil())),
+        (Some(w), Some(h)) if w > 0.0 && h > 0.0 => {
+            let isl = sh.island.lock().unwrap();
+            let ratio = valid_scale(measured["dpr"].as_f64()).unwrap_or_else(|| isl.page_sf()) / isl.sf();
+            Some(((w * ratio).ceil(), (h * ratio).ceil()))
+        },
         _ => None,
     };
     sh.island.lock().unwrap().room = room;
     place(sh);
+}
+
+fn valid_scale(scale: Option<f64>) -> Option<f64> {
+    scale.filter(|v| v.is_finite() && *v >= 0.5 && *v <= 8.0)
 }
 
 // The button is held on her in her home (a pull, or carrying her out).
@@ -1221,11 +1235,12 @@ pub fn set_room(sh: &Shared, measured: &Value) {
 // are open, editing or not, on the taskbar and at the top of the screen
 // alike; none, the mouse as ever. Logged as each starts and ends only: the
 // rects come again as they change (the picker opened, a toast gone).
-pub fn set_editing(sh: &Shared, on: bool, rects: Vec<[f64; 4]>) {
+pub fn set_editing(sh: &Shared, on: bool, rects: Vec<[f64; 4]>, page_sf: Option<f64>) {
     let rects: Vec<[f64; 4]> = rects.into_iter().filter(|r| r.iter().all(|v| v.is_finite()) && r[2] > 0.0 && r[3] > 0.0).take(8).collect();
     let solid = !rects.is_empty();
     let (was, had) = {
         let mut isl = sh.island.lock().unwrap();
+        if let Some(scale) = valid_scale(page_sf) { isl.page_sf = scale; }
         let had = !std::mem::replace(&mut isl.solid, rects).is_empty();
         (std::mem::replace(&mut isl.editing, on), had)
     };
@@ -1392,10 +1407,7 @@ pub fn open_settings(sh: &Arc<Shared>, tab: Option<&str>) {
 // (she was hidden, or do not disturb turned on, while they were open).
 pub fn settings_closed(sh: &Arc<Shared>) {
     sh.island.lock().unwrap().settings_open = false;
-    {
-        let mut focus = sh.settings_focus.lock().unwrap();
-        if focus.flags.is_some() { focus.enter(false, std::time::Instant::now()); }
-    }
+    sh.auth_focus(0);
     sh.log("island: settings closed");
     keep_on_top(sh);
     // Set up once Claude Code or Codex is connected, not as the settings
@@ -1495,8 +1507,7 @@ static WATCHING_TOP: AtomicBool = AtomicBool::new(false);
 pub fn keep_on_top(sh: &Arc<Shared>) {
     let open = sh.island.lock().unwrap().settings_open;
     let (locked, top) = (sh.flag("settingsPin"), sh.flag("settingsTop"));
-    let model_focus = sh.settings_focus.lock().unwrap().active();
-    let topmost = if open && model_focus { locked && top } else { !(open && locked && !top) };
+    let topmost = crate::model_focus::topmost(open, top);
     if TOPMOST.swap(topmost, Ordering::SeqCst) != topmost {
         if let Some(win) = window(sh) {
             let _ = win.set_always_on_top(topmost);
@@ -1727,8 +1738,8 @@ mod strip_tests {
                 }
             }
         }
-        // At 100%: 48 of strip and 900 of room, the size the console page asks for.
-        assert_eq!(taskbar_size(1.0, Edge::Bottom), (3840, 948));
+        // At 100%: 48 of strip and 1100 of room, the size the console page asks for.
+        assert_eq!(taskbar_size(1.0, Edge::Bottom), (3840, 1148));
     }
 
     // At every scale, a strip as Windows grants it (its room, a pixel more

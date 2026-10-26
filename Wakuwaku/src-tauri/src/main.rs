@@ -74,9 +74,33 @@ mod identity_archive;
 mod identity_dialog;
 mod identity_transfer;
 mod identity_api;
+mod storage;
+mod storage_context;
+mod storage_transaction;
+mod storage_archive;
+mod storage_bootstrap;
+mod storage_version;
+mod plugin_manifest;
+mod plugin_package;
+mod plugin_install;
+mod plugin_protocol;
+mod plugin_job;
+mod plugin_process;
+mod plugin_events;
+mod plugin_runtime;
+mod plugin_development;
+mod plugin_store;
+mod plugin_api;
+mod github_access;
+mod tab_order;
+mod plugin_page;
+mod windhawk_source;
+mod windhawk_collection;
+mod windhawk;
 mod inputs;
 mod island;
 mod jump;
+mod browser;
 mod lhm;
 mod lhm_setup;
 mod logon;
@@ -85,8 +109,6 @@ mod mail_identity;
 mod mail_secrets;
 mod notch;
 mod notify;
-mod oflm;
-mod oflm_stats;
 mod runtime;
 mod paper;
 mod pet;
@@ -148,7 +170,6 @@ pub struct Shared {
     pub identity_generation: std::sync::atomic::AtomicU64,
     pub port: u16,
     pub settings: Mutex<Map<String, Value>>,
-    pub settings_focus: Mutex<model_focus::ModelFocus>,
     pub pet: Mutex<state::Pet>,
     pub win: Mutex<pet::Win>,
     pub island: Mutex<island::Island>,
@@ -164,6 +185,7 @@ pub struct Shared {
     // Out of sight: hidden from the tray, or another app is full screen.
     pub hidden: AtomicBool,
     by_fullscreen: AtomicBool,
+    auth_focus_until: std::sync::atomic::AtomicU64,
     // Nobody at the keyboard or mouse for a while (check_quiet).
     quiet: AtomicBool,
     greeted: AtomicBool,
@@ -200,16 +222,30 @@ pub struct Shared {
 
 impl Shared {
     pub fn setting(&self, key: &str) -> Value {
-        if matches!(key, "settingsPin" | "settingsTop") {
-            if let Some((pin, top)) = self.settings_focus.lock().unwrap().flags {
-                return json!(if key == "settingsPin" { pin } else { top });
-            }
-        }
         self.settings.lock().unwrap().get(key).cloned().unwrap_or(Value::Null)
     }
 
     pub fn flag(&self, key: &str) -> bool {
+        if matches!(key, "settingsPin" | "settingsTop") && self.auth_focus_active() { return true; }
         self.setting(key).as_bool().unwrap_or(false)
+    }
+
+    pub fn auth_focus_active(&self) -> bool {
+        model_focus::AuthFocus { until: self.auth_focus_until.load(Ordering::SeqCst) }.active(now_ms())
+    }
+
+    pub fn auth_focus(self: &Arc<Self>, until: u64) {
+        self.auth_focus_until.store(until, Ordering::SeqCst);
+        island::keep_on_top(self);
+        self.push_settings();
+    }
+
+    fn expire_auth_focus(self: &Arc<Self>, now: u64) {
+        let until = self.auth_focus_until.load(Ordering::SeqCst);
+        if until > 0 && now >= until && self.auth_focus_until.compare_exchange(until, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            island::keep_on_top(self);
+            self.push_settings();
+        }
     }
 
     pub fn lang(&self) -> &'static str {
@@ -243,7 +279,7 @@ impl Shared {
     // apply_visibility); it had them even while her capsule on another
     // display showed (the test session, 2026-10-13).
     pub fn asks_seen(&self) -> bool {
-        self.is_visible() || (!self.hidden.load(Ordering::SeqCst) && !self.flag("dnd") && self.is_fullscreen() && bars::any_shown())
+        self.is_visible() || (!self.hidden.load(Ordering::SeqCst) && !self.flag("dnd") && self.is_fullscreen())
     }
 
     pub fn is_visible(&self) -> bool {
@@ -473,6 +509,8 @@ impl Shared {
         bars::refresh(self);
         if none {
             island::asks_answered(&shared(&self.app));
+        } else if self.asks_seen() {
+            island::show_asks(&shared(&self.app));
         }
     }
 
@@ -514,6 +552,7 @@ impl Shared {
         }
         if !self.flag("dnd") {
             for (mood, project) in out.alerts {
+                if let Some(event)=plugin_events::alert(&mood,&project,msg){plugin_events::publish(event);}
                 self.alert(&mood, &project);
             }
         }
@@ -632,14 +671,6 @@ impl Shared {
         patch.remove("mail");
         let touches_visibility = ["dnd", "display", "out", "hideInFullscreen", "taskbarEdge", "taskbarDisplays"].iter().any(|k| patch.contains_key(*k));
         let touches_top = ["settingsPin", "settingsTop"].iter().any(|k| patch.contains_key(*k));
-        {
-            let mut focus = self.settings_focus.lock().unwrap();
-            if focus.flags.is_some() {
-                let pin = patch.remove("settingsPin").and_then(|v| v.as_bool());
-                let top = patch.remove("settingsTop").and_then(|v| v.as_bool());
-                focus.set(pin, top, Instant::now());
-            }
-        }
         let touches_monitor = ["monitor", "monitorSource", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
         let touches_stow = patch.contains_key("islandHideUnder");
         {
@@ -690,16 +721,14 @@ impl Shared {
             bars::full_screen(self, cover);
         }
         let on = self.displays();
-        let is_full = cover.map(|c| c.is_some_and(|mon| on.is_empty() || on.contains(&mon)));
+        let measured = cover.map(|c| c.is_some_and(|mon| on.is_empty() || on.contains(&mon)));
+        let interactive = { let isl = self.island.lock().unwrap(); isl.settings_open || isl.for_asks || isl.temp };
+        let is_full = Some(fullscreen::resolved(self.is_fullscreen(), measured, interactive));
         let how = match asked {
             Some(at) => format!("event, {} ms after", at.elapsed().as_millis()),
             None => "timer".to_string(),
         };
         let changed = is_full.is_some_and(|f| self.by_fullscreen.swap(f, Ordering::SeqCst) != f);
-        if self.settings_focus.lock().unwrap().observe(cover.map(|c| c.is_some()), Instant::now()) {
-            island::keep_on_top(self);
-            self.push_settings();
-        }
         if !changed {
             if CHANGED.lock().unwrap().is_some_and(|at| at.elapsed() < Duration::from_secs(10)) {
                 let saw = is_full.map_or("one of hers in front".to_string(), |f| f.to_string());
@@ -875,7 +904,11 @@ pub fn come_home(sh: &Arc<Shared>) {
     if sh.flag("out") {
         pet::come_home(sh);
     }
+    let was_fullscreen = sh.is_fullscreen();
+    sh.by_fullscreen.store(false, Ordering::SeqCst);
     sh.apply_visibility();
+    if was_fullscreen { island::open_settings(sh, None); }
+    fullscreen::ask();
     tray::refresh_menu(sh);
 }
 
@@ -1022,8 +1055,8 @@ async fn island_holding(app: AppHandle, is_holding: bool) {
 // The taskbar's layout being edited (island.js editTaskbar), and where its
 // bar, library and tools are in the page: the window keeps the mouse there.
 #[tauri::command]
-async fn island_editing(app: AppHandle, on: bool, rects: Vec<[f64; 4]>) {
-    island::set_editing(&shared(&app), on, rects);
+async fn island_editing(app: AppHandle, on: bool, rects: Vec<[f64; 4]>, dpr: Option<f64>) {
+    island::set_editing(&shared(&app), on, rects, dpr);
 }
 
 // The handover with Windows' taskbar: the page's answers (covered, bare, done).
@@ -1472,6 +1505,9 @@ fn main() {
     // end, and gives Windows' taskbar back if she could not; and sees
     // whether she crashed (crash.rs; her data folder is the file's).
     let args: Vec<String> = std::env::args().collect();
+    if let Some(at) = args.iter().position(|arg| arg == windhawk::ADMIN_FLAG) {
+        std::process::exit(windhawk::admin(args.get(at + 1).map(String::as_str).unwrap_or(""), &args));
+    }
     // Uninstalling (scripts/installer.mjs): her own logon task taken away
     // before the uninstaller deletes her program, and gone. Early, before the
     // port is taken, the runtime prepared or anything shown: an uninstall must
@@ -1615,8 +1651,9 @@ fn main() {
         return;
     }
 
-    let identity_location = match identity::from_environment() {
-        Ok(location) => location,
+    let legacy_data = data::folder();
+    let context = match storage_context::start(&args) {
+        Ok(context) => context,
         Err(error) => {
             #[cfg(feature = "installed")]
             runtime::show_failure(&error);
@@ -1625,14 +1662,16 @@ fn main() {
             return;
         }
     };
-    if let Some(warning) = identity_location.warning { eprintln!("FISH Dock: {warning}"); }
-    let mut identity_error = None;
-    match identity::prepare(&identity_location) {
-        Ok(identity::Prepared::Migrated { files, bytes }) => eprintln!("FISH Dock: 已复制并校验 {files} 个 OFM 身份文件（{bytes} 字节）；旧目录保留"),
-        Ok(_) => {}
-        Err(error) => { identity_error = Some(error); }
-    }
-
+    std::thread::spawn(|| { if let Err(error)=windhawk::resume_bundled(){ eprintln!("Windhawk: {error}"); } });
+    let legacy_identity = identity::from_environment().map(|location| {
+        if location.root.join("mail-accounts.json").is_file() { location.root }
+        else { location.legacy.unwrap_or(location.root) }
+    });
+    let mut identity_error = match legacy_identity {
+        Ok(source) => storage_bootstrap::prepare(&context.host, &legacy_data, &source, mail::secret::read_legacy).err(),
+        Err(error) => Some(error),
+    };
+    let identity_directory = context.host.path().to_path_buf();
     let dir = data::folder();
     let _ = std::fs::create_dir_all(&dir);
 
@@ -1661,6 +1700,10 @@ fn main() {
     tauri::async_runtime::set(runtime.handle().clone());
 
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("fish-plugin", |context, request, responder| {
+            let label = context.webview_label().to_owned();
+            tauri::async_runtime::spawn_blocking(move || responder.respond(crate::plugin_page::serve(&label, request)));
+        })
         .invoke_handler(tauri::generate_handler![
             pet_ready,
             pet_hover,
@@ -1686,12 +1729,28 @@ fn main() {
             pet_log,
             session_jump,
             settings::settings_get,
-            settings::settings_focus,
-            settings::settings_fullscreen_answer,
             identity_api::identity_view,
             identity_api::identity_export,
             identity_api::identity_preview,
             identity_api::identity_import,
+            windhawk::windhawk_state,
+            windhawk::windhawk_select,
+            windhawk::windhawk_apply,
+            windhawk::windhawk_open,
+            windhawk::windhawk_preview,
+            windhawk::windhawk_import,
+            windhawk::windhawk_rollback,
+            windhawk::windhawk_fetch_source,
+            windhawk::windhawk_collection_preview,
+            windhawk::windhawk_collection_import,
+            plugin_api::extension_view,
+            plugin_api::extension_catalog,
+            plugin_api::extension_manage,
+            plugin_api::extension_auth,
+            plugin_api::extension_call,
+            plugin_api::extension_page,
+            plugin_api::extension_page_close,
+            plugin_api::extension_page_call,
             settings::settings_set,
             settings::settings_open,
             settings::settings_closed,
@@ -1751,9 +1810,6 @@ fn main() {
             mail::mail_kick,
             mail::mail_draft,
             mail::mail_keep_draft,
-            oflm::oflm_ensure,
-            oflm::oflm_state,
-            oflm::oflm_stop,
             taskbar::taskbar_tray,
             taskbar::taskbar_open,
             taskbar::taskbar_volume,
@@ -1785,7 +1841,7 @@ fn main() {
             let mut mail_accounts = Vec::new();
             if identity_error.is_none() {
                 let legacy = settings.get("mail").cloned().unwrap_or_else(|| json!([]));
-                match mail_identity::initialize(&identity_location.root, &legacy, mail::secret::read_legacy) {
+                match mail_identity::initialize(&identity_directory, &legacy, mail::secret::read_legacy) {
                     Ok(snapshot) => {
                         mail_missing = snapshot.missing;
                         mail_accounts = snapshot.accounts;
@@ -1817,14 +1873,13 @@ fn main() {
                 app: app.handle().clone(),
                 is_logging: dir.join("debug.on").exists(),
                 dir,
-                identity_dir: identity_location.root,
+                identity_dir: identity_directory,
                 identity_error: Mutex::new(identity_error),
                 mail_missing: Mutex::new(mail_missing),
                 identity_busy: AtomicBool::new(false),
                 identity_generation: std::sync::atomic::AtomicU64::new(0),
                 port,
                 settings: Mutex::new(settings),
-                settings_focus: Mutex::new(model_focus::ModelFocus::default()),
                 pet: Mutex::new(state::Pet::default()),
                 win: Mutex::new(pet::Win::default()),
                 island: Mutex::new(island::Island::default()),
@@ -1836,6 +1891,7 @@ fn main() {
                 screens: Mutex::new(screen::read(app.handle())),
                 hidden: AtomicBool::new(false),
                 by_fullscreen: AtomicBool::new(false),
+                auth_focus_until: std::sync::atomic::AtomicU64::new(0),
                 quiet: AtomicBool::new(false),
                 greeted: AtomicBool::new(false),
                 codex_seen: std::sync::atomic::AtomicU64::new(0),
@@ -1853,6 +1909,7 @@ fn main() {
                 evals: Mutex::new((0, std::collections::HashMap::new())),
             });
             app.manage(sh.clone());
+            plugin_api::resume();
             // Her requests to the web the way the General page says (proxy.rs).
             proxy::set_web(&sh.setting("netProxy"));
             sh.log(&format!("up on port {}, data in {}", sh.port, sh.dir.display()));
@@ -1947,13 +2004,7 @@ fn main() {
                         tokens_at = Some(std::time::Instant::now());
                         let count = watcher.is_widget_wanted("tokens").then(|| {
                             tokens.update(&claude_dir, &codex_dir, &agy_dirs, widgets::local_midnight());
-                            // The local model service counts what it served itself: where it
-                            // has numbers for today, those are the ones to show; a day it
-                            // served nothing in leaves the transcripts to say it.
-                            match oflm_stats::today(&widgets::local_date()) {
-                                Some(served) => tokens::words(served),
-                                None => tokens::words(tokens.count()),
-                            }
+                            tokens::words(tokens.count())
                         });
                         built_in("tokens", count);
                     }
@@ -2051,7 +2102,7 @@ fn main() {
             // island's display, and one under it.
             let watcher = sh.clone();
             spawn_named("fullscreen", move || loop {
-                let wait = watcher.settings_focus.lock().unwrap().wait(Instant::now());
+                let wait = Duration::from_millis(1500);
                 let asked = fullscreen::wait(wait);
                 watcher.look_fullscreen(asked);
                 island::look_over_max(&watcher);
@@ -2068,6 +2119,7 @@ fn main() {
                     let hold = ticker.hold();
                     if n % 2 == 0 {
                         ticker.check_quiet();
+                        ticker.expire_auth_focus(now);
                         let hide = ticker.idle_hide_ms();
                         let mut changed = ticker.pet.lock().unwrap().tick(now, hold);
                         if n % 120 == 0 {
@@ -2182,7 +2234,7 @@ fn main() {
                 island::release_bar(&sh);
                 mail::stop_all(&sh);
                 // The local model service she runs (oflm.rs): no node.exe left.
-                oflm::shutdown();
+                plugin_api::shutdown();
                 sh.log("quitting: done");
             }
         });

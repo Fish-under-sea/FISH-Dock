@@ -1,4 +1,4 @@
-// 构建期准备安装资源：从已锁定的官方下载件解出 Node、固定版 WebView2 与本地模型服务，
+// 构建期准备安装资源：从已锁定的官方下载件解出 Node、固定版 WebView2 与 Windhawk，
 // 目录结构与安装后一致，并写一份清单（schema 2）供程序首次启动全量校验、日常启动只查必需文件。
 // 安装包里只装这些文件；安装器不做压缩解包的二次搬运。
 import fs from 'node:fs/promises'
@@ -16,8 +16,17 @@ export const REQUIRED = [
   'node/node.exe',
   'node/LICENSE',
   'webview2/msedgewebview2.exe',
-  'ofm/packages/desktop/service-host.mjs',
   'licenses/Wakuwaku.txt',
+  'windhawk/windhawk.exe',
+  'windhawk/windhawk-x64-helper.exe',
+  'windhawk/Engine/32/windhawk.dll',
+  'windhawk/Engine/32/windhawk.lib',
+  'windhawk/Engine/64/windhawk.dll',
+  'windhawk/Engine/64/windhawk.lib',
+  'windhawk/Compiler/bin/clang++.exe',
+  'windhawk/Compiler/include/windhawk_api.h',
+  'windhawk/LICENSE-Windhawk.txt',
+  'windhawk/Compiler/LICENSE.TXT',
 ]
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -68,7 +77,7 @@ function run(command, args, quiet = false) {
   if (result.status !== 0) throw new Error(`${command} failed with ${result.status}`)
 }
 
-/// 从官方下载件准备 `output/resources`：解包 Node 与固定版 WebView2，整理本地模型服务，
+/// 从官方下载件准备 `output/resources`：解包 Node 与固定版 WebView2，整理 Windhawk 工具链，
 /// 放许可原文，最后写清单。每一步都先核对摘要，不信任之前的解压工作目录。
 export async function prepareResources(downloads, output, options = {}) {
   if (process.platform !== 'win32') throw new Error('This resource builder requires Windows x64 tools')
@@ -89,17 +98,16 @@ export async function prepareResources(downloads, output, options = {}) {
   run('expand.exe', ['-F:*', path.join(downloads, lock.webview2.filename), unpackWebview], true)
   await fs.rename(path.join(unpackNode, lock.node.directory), path.join(resources, 'node'))
   await fs.rename(path.join(unpackWebview, lock.webview2.directory), path.join(resources, 'webview2'))
-  const ofm = [path.join(root, 'scripts/stage-ofm.mjs'), '--out', path.join(resources, 'ofm')]
-  if (options.ofmSource) ofm.push('--source', options.ofmSource)
-  run(process.execPath, ofm)
   await fs.mkdir(path.join(resources, 'licenses'))
   await fs.copyFile(path.join(root, 'LICENSE'), path.join(resources, 'licenses/Wakuwaku.txt'))
   await fs.copyFile(path.join(downloads, lock.webview2_license.filename), path.join(resources, 'licenses/WebView2-Fixed-Version.html'))
   await fs.writeFile(path.join(resources, 'licenses/runtime-sources.json'), `${JSON.stringify(lock, null, 2)}\n`)
-  await fs.writeFile(path.join(resources, 'licenses/NOTICE.txt'), 'FISH Dock includes Microsoft Edge WebView2 Runtime (Fixed Version).\nMicrosoft Defender SmartScreen is enabled by default and may collect and send information to Microsoft.\nPrivacy: https://aka.ms/privacy\nSmartScreen: https://learn.microsoft.com/en-us/microsoft-edge/privacy-whitepaper#smartscreen\nTerms: WebView2-Fixed-Version.html\nNode.js and its third-party terms: ../node/LICENSE\nOFM terms and notices: ../ofm/LICENSE and ../ofm/THIRD_PARTY_NOTICES.txt\nWakuwaku terms: Wakuwaku.txt\n')
+  await fs.writeFile(path.join(resources, 'licenses/NOTICE.txt'), 'FISH Dock includes Microsoft Edge WebView2 Runtime (Fixed Version).\nMicrosoft Defender SmartScreen is enabled by default and may collect and send information to Microsoft.\nPrivacy: https://aka.ms/privacy\nSmartScreen: https://learn.microsoft.com/en-us/microsoft-edge/privacy-whitepaper#smartscreen\nTerms: WebView2-Fixed-Version.html\nNode.js and its third-party terms: ../node/LICENSE\nWakuwaku terms: Wakuwaku.txt\n')
   // 解包目录已用完：安装资源就是 resources/，安装器不再压缩打包。
   await fs.rm(unpackNode, { recursive: true, force: true })
   await fs.rm(unpackWebview, { recursive: true, force: true })
+  const {stageWindhawk}=await import('./stage-windhawk.mjs')
+  await stageWindhawk(path.join(downloads,lock.windhawk.filename),path.join(resources,'windhawk'),{source:lock.windhawk,sevenZip:options.sevenZip??'C:/Program Files/7-Zip/7z.exe'})
   console.log('Hashing the install resources...')
   const manifest = await writeManifest(resources, { version, nodeVersion: lock.node.version, webview2Version: lock.webview2.version })
   console.log(JSON.stringify({ output, resources, version, files: manifest.files.length, expanded_bytes: manifest.files.reduce((n, f) => n + f.bytes, 0) }, null, 2))
@@ -109,9 +117,8 @@ export async function prepareResources(downloads, output, options = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
   const option = name => args[args.indexOf(`--${name}`) + 1]
-  if (!args.includes('--downloads') || !args.includes('--out')) throw new Error('Usage: node scripts/prepare-installer.mjs --downloads <official-downloads> --out <new-output-directory> [--source <ofm-repository>] [--version <version>]')
+  if (!args.includes('--downloads') || !args.includes('--out')) throw new Error('Usage: node scripts/prepare-installer.mjs --downloads <official-downloads> --out <new-output-directory> [--version <version>]')
   await prepareResources(path.resolve(option('downloads')), path.resolve(option('out')), {
-    ofmSource: args.includes('--source') ? path.resolve(option('source')) : undefined,
     version: args.includes('--version') ? option('version') : undefined,
   })
 }

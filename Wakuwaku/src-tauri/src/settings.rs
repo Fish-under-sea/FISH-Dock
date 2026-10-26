@@ -64,8 +64,8 @@ pub fn snapshot(sh: &Shared) -> Value {
     let monitor_source = crate::hw::Source::of(&sh.setting("monitor"), &sh.setting("monitorSource"), lhm_status == "found");
     let lhm_shown = monitor_source == crate::hw::Source::Lhm && sh.island.lock().unwrap().settings_open;
     let mut settings = sh.settings.lock().unwrap().clone();
-    settings.insert("settingsPin".into(), sh.setting("settingsPin"));
-    settings.insert("settingsTop".into(), sh.setting("settingsTop"));
+    settings.insert("settingsPin".into(), json!(sh.flag("settingsPin")));
+    settings.insert("settingsTop".into(), json!(sh.flag("settingsTop")));
     json!({
         "settings": Value::Object(settings),
         "lang": sh.lang(),
@@ -171,7 +171,6 @@ pub fn snapshot(sh: &Shared) -> Value {
         // Her crash reports: as set, those waiting, the last sent (crash.rs).
         "crash": crate::crash::view(sh),
         "fullscreenAvailable": fullscreen::AVAILABLE,
-        "modelFullscreenPrompt": sh.settings_focus.lock().unwrap().prompt(),
         // Whether Windows' acrylic can go under the open island (backplate.rs).
         "plate": crate::backplate::available(),
         "widgets": sh.widgets_view(),
@@ -533,6 +532,7 @@ fn is_island_pos(v: &Value) -> bool {
 fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
     let is_bool = v.is_boolean();
     match key {
+        "settingsLastTab" => v.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"._/-".contains(&b))),
         "lang" => matches!(v.as_str(), Some("auto" | "zh" | "en")),
         "pet" => v.as_str().is_some_and(|id| data::pets(&sh.dir).iter().any(|p| p.id == id)),
         "scale" => v.as_f64().is_some_and(|s| data::SCALES.iter().any(|(_, x)| (x - s).abs() < 1e-9)),
@@ -578,6 +578,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // Each widget's row in the open island, small or medium, by its id
         // (island.js rowSize).
         "widgetSize" => v.as_object().is_some_and(|m| m.len() <= 64 && m.iter().all(|(id, s)| crate::widgets::is_id(id) && matches!(s.as_str(), Some("S" | "M")))),
+        "appearance" => crate::tab_order::valid(v),
         "plugins" => plugins::is_ok(v),
         "monitor" => v.as_object().is_some_and(|m| {
             m.iter().all(|(k, v)| match k.as_str() {
@@ -688,36 +689,6 @@ pub fn apply_patch(sh: &Arc<Shared>, patch: &Value) -> Value {
 #[tauri::command]
 pub async fn settings_get(app: AppHandle) -> Value {
     snapshot(&shared(&app))
-}
-
-#[tauri::command]
-pub fn settings_focus(app: AppHandle, active: bool) -> Value {
-    let sh = shared(&app);
-    if active && !sh.island.lock().unwrap().settings_open {
-        return snapshot(&sh);
-    }
-    let own = sh.own.lock().unwrap().clone();
-    let full = fullscreen::covering(&own).map(|cover| cover.is_some());
-    {
-        let mut focus = sh.settings_focus.lock().unwrap();
-        let now = std::time::Instant::now();
-        focus.observe(full, now);
-        focus.enter(active, now);
-    }
-    fullscreen::ask();
-    island::keep_on_top(&sh);
-    sh.redraw();
-    snapshot(&sh)
-}
-
-#[tauri::command]
-pub fn settings_fullscreen_answer(app: AppHandle, id: u64, cancel: bool) -> Value {
-    let sh = shared(&app);
-    if sh.settings_focus.lock().unwrap().answer(id, cancel, std::time::Instant::now()) {
-        island::keep_on_top(&sh);
-        sh.redraw();
-    }
-    snapshot(&sh)
 }
 
 #[tauri::command]
@@ -1104,19 +1075,27 @@ pub async fn settings_crash(app: AppHandle, what: String) -> Value {
 // added (`account`), so a browser signed in to several Google accounts
 // opens that one's.
 #[tauri::command]
-pub async fn settings_open_site(app: AppHandle, place: String, account: Option<String>) {
+pub async fn settings_open_site(app: AppHandle, place: String, account: Option<String>) -> Result<Value, String> {
+    let device_code = if place == "githubDevice" { crate::storage_context::current().and_then(|context| crate::github_access::view(context).ok()).and_then(|v| v["pending"]["userCode"].as_str().map(str::to_owned)) } else { None };
+    let code_copied = device_code.as_deref().is_some_and(|code| {
+        #[cfg(windows)] {
+            use tauri::Manager;
+            app.get_webview_window("island").and_then(|w| w.hwnd().ok()).is_some_and(|h| crate::browser::copy_device_code(h.0 as isize, code))
+        }
+        #[cfg(not(windows))] { crate::browser::copy_device_code(0, code) }
+    });
     let url = site_url(&place, account.as_deref());
-    // By ShellExecute, not `cmd /c start`: run from the installed pet (no
-    // console), cmd got handles that were none and never started ("the
-    // handle is invalid").
-    if !crate::jump::open_url(&url) {
-        shared(&app).log(&format!("open {url}: ShellExecute failed"));
-    }
+    let result = tauri::async_runtime::spawn_blocking(move || crate::browser::open(&url)).await
+        .map_err(|_| "浏览器启动任务意外结束".to_string()).and_then(|value| value);
+    if result.is_err() && place == "githubDevice" { crate::shared(&app).auth_focus(0); }
+    result?;
+    Ok(json!({"codeCopied":code_copied}))
 }
 
 fn site_url(place: &str, account: Option<&str>) -> String {
     let url = match place {
         "repo" => REPO,
+        "githubDevice" => "https://github.com/login/device",
         "agyCli" => "https://antigravity.google/docs/cli/install",
         "googleAppPasswords" => "https://myaccount.google.com/apppasswords",
         "google2sv" => "https://myaccount.google.com/signinoptions/two-step-verification",
@@ -1132,6 +1111,7 @@ fn site_url(place: &str, account: Option<&str>) -> String {
     };
     // Google's account pages take whose they are as authuser: only an
     // address as one is written goes in, its @ and + escaped.
+    if place == "githubDevice" { return url.to_string(); }
     let google = url.starts_with("https://myaccount.google.com/") || url.starts_with("https://mail.google.com/");
     match account.map(str::trim) {
         Some(a) if google && is_address(a) => format!("{url}?authuser={}", a.replace('%', "%25").replace('+', "%2B").replace('@', "%40")),
@@ -1149,6 +1129,12 @@ fn is_address(a: &str) -> bool {
 mod tests {
     use serde_json::json;
 
+    #[test]
+    fn github_device_signin_opens_fixed_official_page() {
+        assert_eq!(super::site_url("githubDevice", None), "https://github.com/login/device");
+        assert_eq!(super::site_url("githubDevice", Some("ABCD-EFGH")), "https://github.com/login/device");
+        assert_eq!(super::site_url("githubDevice", Some("ABCD&redirect=bad")), "https://github.com/login/device");
+    }
     #[test]
     fn google_pages_open_for_the_address() {
         use super::site_url;

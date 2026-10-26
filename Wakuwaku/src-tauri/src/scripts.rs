@@ -78,6 +78,7 @@ pub(crate) mod job {
         fn CreateJobObjectW(attributes: *const u8, name: *const u16) -> isize;
         fn SetInformationJobObject(job: isize, class: i32, info: *const Extended, len: u32) -> i32;
         fn AssignProcessToJobObject(job: isize, process: isize) -> i32;
+        fn CloseHandle(object: isize) -> i32;
     }
 
     const EXTENDED_LIMIT_INFORMATION: i32 = 9;
@@ -97,6 +98,11 @@ pub(crate) mod job {
                 let limits = Extended { basic: Basic { flags: KILL_ON_JOB_CLOSE, ..Basic::default() }, ..Extended::default() };
                 (SetInformationJobObject(job, EXTENDED_LIMIT_INFORMATION, &limits, std::mem::size_of::<Extended>() as u32) != 0).then_some(Job(job))
             }
+        }
+
+        pub fn close(self) {
+            // 仅供持有该实例句柄的插件所有者调用。
+            unsafe { CloseHandle(self.0); }
         }
 
         pub fn assign(&self, child: &std::process::Child) -> bool {

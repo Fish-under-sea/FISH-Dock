@@ -7,7 +7,7 @@ const LIMIT: usize = 32 * 1024 * 1024;
 const FILE_LIMIT: usize = 16 * 1024 * 1024;
 const README: &[u8] = include_bytes!("identity-backup-readme.md");
 pub struct Archive { pub bytes: Vec<u8>, pub missing: usize }
-pub struct Preview { pub format: String, pub ofm_accounts: usize, pub mail_accounts: Option<usize>, pub missing: usize, pub files: BTreeMap<String, Vec<u8>> }
+pub struct Preview { pub format: String, pub ofm_accounts: usize, pub mail_accounts: Option<usize>, pub missing: usize, pub files: BTreeMap<String, Vec<u8>>, classified_changes: Option<crate::identity_store::Changes> }
 fn sha(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
 fn allowed(name: &str) -> bool {
     crate::identity_store::OFM_FILES.contains(&name) || ["README.md", "README.txt", "manifest.json", "mail-accounts.json", "mail-secrets.json", "channel-pack/accounts-backup.json"].contains(&name)
@@ -50,6 +50,11 @@ fn manifest(files: &BTreeMap<String, Vec<u8>>, format: &str, missing: usize) -> 
     json!({"format":format,"version":1,"product":"FISH Dock","exportedAtUnixMs":crate::now_ms(),"encrypted":false,"missingCredentialCount":missing,"files":files.iter().map(|(name,bytes)|json!({"path":name,"bytes":bytes.len(),"sha256":sha(bytes)})).collect::<Vec<_>>()})
 }
 pub fn export(root: &Path) -> Result<Archive, String> {
+    if let Some(namespace) = crate::storage_context::Namespace::existing(root)? {
+        let snapshot = crate::mail_identity::load(root)?;
+        let bytes = crate::storage_archive::export(&namespace, &["credentials".into(), "roster".into(), "keys".into(), "config".into()])?;
+        return Ok(Archive { bytes, missing: snapshot.missing.len() });
+    }
     let _lock = crate::identity_store::EDIT.lock().map_err(|_| "身份操作锁不可用")?;
     crate::identity_store::recover_unlocked(root)?;
     let mut files = BTreeMap::from([("README.md".into(), README.to_vec())]);
@@ -80,10 +85,36 @@ pub fn inspect(bytes: &[u8]) -> Result<Preview, String> {
         if row["bytes"].as_u64() != Some(file.len() as u64) || row["sha256"].as_str() != Some(sha(file).as_str()) { return Err("备份文件大小或 SHA-256 校验失败".into()); }
     }
     let (ofm_accounts, mail_accounts, missing) = counts(&files, full)?;
-    Ok(Preview { format: format.into(), ofm_accounts, mail_accounts, missing, files })
+    Ok(Preview { format: format.into(), ofm_accounts, mail_accounts, missing, files, classified_changes: None })
+}
+pub fn inspect_for(root: &Path, bytes: &[u8]) -> Result<Preview, String> {
+    let Some(namespace) = crate::storage_context::Namespace::existing(root)? else { return inspect(bytes); };
+    let files = unzip_with(bytes, |name| {
+        if name == "manifest.json" || name == "README.md" || allowed(name) { return true; }
+        let Some((category, relative)) = name.split_once('/') else { return false; };
+        ["credentials", "roster", "keys", "config"].contains(&category) && (relative == "README.md" || namespace.file(category, relative).is_ok())
+    })?;
+    let meta = document(&files, "manifest.json")?.ok_or("备份缺少清单")?;
+    if meta["format"] == "fish-dock/plugin-backup" {
+        let changes = crate::storage_archive::inspect(&namespace, bytes)?;
+        let roster = document(&files, "roster/mail-accounts.json")?;
+        let mail = roster.as_ref().map(|v| crate::mail_identity::validate(&v["accounts"])).transpose()?;
+        let secrets = document(&files, "credentials/mail-secrets.json")?;
+        let missing = mail.as_ref().map(|accounts| accounts.iter().filter(|a| a["id"].as_str().is_some_and(|id| secrets.as_ref().and_then(|s| s["entries"].get(id)).is_none())).count()).unwrap_or(0);
+        return Ok(Preview { format: "fish-dock/plugin-backup".into(), ofm_accounts: 0, mail_accounts: mail.map(|a| a.len()), missing, files, classified_changes: Some(changes) });
+    }
+    let mut preview = inspect(bytes)?;
+    if namespace.identity().plugin_id == "host" {
+        if crate::identity_store::OFM_FILES.iter().any(|name| preview.files.contains_key(*name)) {
+            return Err("此旧备份含 OFM 资料，请通过 OFM 插件的旧备份迁移入口导入；宿主目录只接收宿主资料".into());
+        }
+        preview.classified_changes = Some(preview.changes()?.into_iter().filter(|(name, _)| !crate::identity_store::OFM_FILES.contains(&name.as_str())).collect());
+    }
+    Ok(preview)
 }
 impl Preview {
     pub fn changes(&self) -> Result<crate::identity_store::Changes, String> {
+        if let Some(changes) = &self.classified_changes { return Ok(changes.clone()); }
         // 完整包替换白名单范围；旧 OFM 包不触碰邮件。不存在的可选项只在本范围内删除。
         let mut changes = crate::identity_store::OFM_FILES.iter().map(|name| ((*name).into(), self.files.get(*name).cloned())).collect::<crate::identity_store::Changes>();
         if self.mail_accounts.is_some() {
@@ -98,12 +129,16 @@ impl Preview {
 }
 fn short(bytes: &[u8], at: usize) -> Result<u16, String> { bytes.get(at..at+2).and_then(|b| b.try_into().ok()).map(u16::from_le_bytes).ok_or_else(|| "ZIP 数据被截断".into()) }
 fn long(bytes: &[u8], at: usize) -> Result<u32, String> { bytes.get(at..at+4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes).ok_or_else(|| "ZIP 数据被截断".into()) }
-fn unzip(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
-    if bytes.len() > LIMIT || bytes.len() < 22 { return Err("ZIP 文件大小无效或超过 32 MiB".into()); }
+fn unzip(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> { unzip_with(bytes, allowed) }
+pub(crate) fn unzip_with(bytes: &[u8], allowed: impl Fn(&str) -> bool) -> Result<BTreeMap<String, Vec<u8>>, String> {
+    unzip_limits(bytes,allowed,LIMIT,FILE_LIMIT,128)
+}
+pub(crate) fn unzip_limits(bytes:&[u8],allowed:impl Fn(&str)->bool,limit:usize,file_limit:usize,entries:usize)->Result<BTreeMap<String,Vec<u8>>,String>{
+    if bytes.len() > limit || bytes.len() < 22 { return Err("ZIP 文件大小无效或超过当前类型限制".into()); }
     let end = (bytes.len().saturating_sub(65557)..=bytes.len()-22).rev().find(|&p| long(bytes,p).ok() == Some(0x06054b50) && short(bytes,p+20).is_ok_and(|n| p+22+n as usize == bytes.len())).ok_or("ZIP 缺少有效目录")?;
     let n = short(bytes,end+10)? as usize;
     let start = long(bytes,end+16)? as usize;
-    if short(bytes,end+4)? != 0 || short(bytes,end+6)? != 0 || short(bytes,end+8)? as usize != n || n == 0 || n > 128 || start.checked_add(long(bytes,end+12)? as usize) != Some(end) { return Err("ZIP 分卷、目录或条目数量无效".into()); }
+    if short(bytes,end+4)? != 0 || short(bytes,end+6)? != 0 || short(bytes,end+8)? as usize != n || n == 0 || n > entries || start.checked_add(long(bytes,end+12)? as usize) != Some(end) { return Err("ZIP 分卷、目录或条目数量无效".into()); }
     let mut p = start;
     let mut seen = HashSet::new();
     let mut files = BTreeMap::new();
@@ -124,7 +159,7 @@ fn unzip(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
         let name = std::str::from_utf8(raw).map_err(|_| "ZIP 文件名不是 UTF-8")?;
         if !allowed(name) || !seen.insert(name.to_ascii_lowercase()) || flags & !0x808 != 0 || ![0,8].contains(&method) || short(bytes,p+34)? != 0 || ![0,0o100000].contains(&kind) || attr & 0x10 != 0 { return Err("ZIP 包含加密、链接、重复、越界或未允许的条目".into()); }
         total = total.checked_add(size).ok_or("ZIP 展开大小溢出")?;
-        if size > FILE_LIMIT || total > LIMIT || size > packed.saturating_mul(1000).saturating_add(1024) { return Err("ZIP 展开大小或压缩比超过限制".into()); }
+        if size > file_limit || total > limit || size > packed.saturating_mul(1000).saturating_add(1024) { return Err("ZIP 展开大小或压缩比超过限制".into()); }
         if long(bytes,local)? != 0x04034b50 || short(bytes,local+6)? != flags || short(bytes,local+8)? != method { return Err("ZIP 本地头与目录不一致".into()); }
         let ln = short(bytes,local+26)? as usize;
         let lx = short(bytes,local+28)? as usize;
@@ -143,7 +178,7 @@ fn unzip(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
     if p != end { return Err("ZIP 目录存在未声明条目".into()); }
     Ok(files)
 }
-fn zip(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>, String> {
+pub(crate) fn zip(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>, String> {
     if files.len() > 128 || files.values().any(|b| b.len() > FILE_LIMIT) || files.values().map(Vec::len).sum::<usize>() > LIMIT - 65536 { return Err("完整身份备份超过大小限制".into()); }
     let mut out = Vec::new();
     let mut directory = Vec::new();

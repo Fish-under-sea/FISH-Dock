@@ -1,14 +1,14 @@
 <p align="center"><img src="src-tauri/icons/dsh-fish.png" width="112" alt="FISH Dock icon"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">A place for AI sessions to dock, and model connections to come together.</p>
-<p align="center"><strong>1.0.2</strong> · Windows x64 · MIT-licensed code</p>
-<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-1.0.2.md">Release notes</a></p>
+<p align="center"><strong>1.1.0</strong> · Windows x64 · MIT-licensed code</p>
+<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-1.1.0.md">Release notes</a></p>
 
 > **A derivative integration, not an official upstream release.** FISH Dock builds on the desktop and AI-session experience of [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) and integrates the model channels and API workspace of [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model). Both core systems remain upstream work. Original authors, copyrights, and licenses are credited below.
 
-> **Meoo is currently in a limited rollout and is unavailable for use.** Its experimental UI and source remain included; this release does not offer usable login, project binding or inference.
+> **Business plugins are distributed separately.** See the [official plugin repository](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) for supported channels and rollout status. The desktop installer does not preinstall business services.
 
-This repository contains the complete Dock and OFM source: the Rust / Tauri desktop, Node.js service, React frontend, channel adapters, tests and build scripts.
+This repository contains the desktop host, plugin SDK, storage and runtime management, tests and installer. The old OFM service snapshot has been removed; business implementations and packages live in the official plugin repository.
 
 ## One Workspace, Two Capabilities
 
@@ -20,24 +20,24 @@ This repository contains the complete Dock and OFM source: the Rust / Tauri desk
 
 **Local does not mean offline model inference.** The workspace, proxy, and stored data run on your computer. Model requests still go to the selected provider. Eligibility, quotas, pricing, and availability are controlled by those providers. This project does not promise unlimited usage, permanently free access, or bypasses for provider restrictions.
 
-## New in 1.0.2
+## New in 1.1.0
 
-- **WorkBuddy:** temporary failures such as rate limits and timeouts no longer permanently lock validation; diagnostics and manual recovery remain available.
-- **Mail:** mark all as read in individual or combined inboxes, preserving other flags and reporting confirmed progress; filters stay visible in narrow windows.
-- **Window behavior:** entering OFM enables pinning and always-on-top; leaving or closing disables both. Other apps entering fullscreen trigger a choice; with topmost off, two continuous fullscreen seconds clear the remaining lock.
-- **Accounts and credits:** account-scoped renewal and balance recovery; Raccoon daily claims and grouped vendor audits use actual grant evidence instead of a fixed amount.
-- **Consistent channel UI:** 14 vendor entries share cards, logos and account/model sections while retaining their existing capabilities. Qoder labels distinguish international and China editions.
-- **Compatibility and source:** retain 1.0.1 identity migration, full identity ZIPs, dedicated CodeArts transport and persistent strict model tests; publish complete Dock and OFM source with the supplied original icon.
+- Independent Feishu, Clash, Magpie and OFM plugins; newly installed plugins are enabled automatically.
+- GitHub device sign-in and main-repository star verification, with device-code copying and automatic status polling.
+- In-window confirmations and temporary authentication focus, preserving manual pin/top preferences.
+- Fullscreen recovery, explicit wake-up and approval visibility while fullscreen.
+- About/plugin update checks, catalog API fallback and readable KB/MB/GB package sizes.
+- Bundled Windhawk/compiler, native management pages, draggable tabs and configurable columns.
 
-**Meoo remains in a limited rollout and unavailable for use.** See the [1.0.2 notes](docs/release-1.0.2.md) for source scope, test evidence and real-device verification limits.
+See the [1.1.0 release notes](docs/release-1.1.0.md) for verification scope.
 
 ## Installation and Updates
 
 Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows 11; other Windows releases and third-party taskbar software require separate verification.
 
-1. Download `FISH-Dock-Setup-1.0.2.exe` from [this project's Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2), and compare its SHA-256 with the attached `SHA256SUMS.txt`.
+1. Download `FISH-Dock-Setup-1.1.0.exe` from [this project's Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0), and compare its SHA-256 with the attached `SHA256SUMS.txt`.
 2. Fully exit the previous version from the tray and any standalone OFM service. Run the installer and choose a destination. Fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock`; upgrades reuse the registered directory instead of moving it.
-3. Start **FISH Dock** from the desktop or Start menu. Full Node.js, Fixed Version WebView2, the service, and license notices are bundled.
+3. Start **FISH Dock** from the desktop or Start menu. Node.js, Fixed Version WebView2, Windhawk, its compiler, and license notices are bundled. Business plugins are downloaded separately.
 4. The first launch confirms runtime terms and verifies resources. Later launches use installed files without repeatedly extracting the entire runtime.
 
 **The installer has no Authenticode signature.** Windows may display unknown-publisher or SmartScreen warnings. Renaming, new artwork, and self-signing cannot reliably remove reputation warnings. Use a trusted source, compare the digest, and do not disable protection, install unknown roots, or bypass organizational policy. Normal use does not generally require administrator rights.
@@ -48,7 +48,7 @@ Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows
 
 **Desktop:** the first launch defaults to taskbar mode. Settings and the tray switch between taskbar and island, choose the edge, and select left, center, or right island positioning. Choices survive restarts; an unavailable saved display falls back to the primary. Reduced motion uses a short fade.
 
-**Models:** open **Local Models**, add a channel you are authorized to use, and copy the local endpoint and key from **API Access**. A typical endpoint is shown below; use the actual port displayed in the page:
+**Plugins and models:** sign in to GitHub and verify your star on the main repository under **Plugins**. Paste the automatically copied device code in the browser and confirm; Dock polls for completion. New plugins are enabled after installation. Configure credentials and start services as needed. Use the endpoint actually shown by each plugin, for example:
 
 ```text
 http://127.0.0.1:18901/v1
@@ -78,31 +78,32 @@ Exit standalone OFM but keep FISH Dock open for import. The app pauses its own m
 | Content | Location |
 | --- | --- |
 | Application and bundled dependencies | Chosen directory; fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock` |
-| Settings, pets, layouts, and logs | `%LOCALAPPDATA%\DSH-FISH\data` |
-| WebView2 profile | `%LOCALAPPDATA%\DSH-FISH\webview` |
-| Runtime terms and verification state | `%LOCALAPPDATA%\DSH-FISH\state` |
-| OFM accounts, keys, usage, and mail identities | `%USERPROFILE%\.fish-dock` |
+| Settings, pets, layouts, and logs | `host` under the data root |
+| WebView2 profile | `host/webview` under the data root |
+| Runtime terms and verification state | System per-user runtime state |
+| Plugin configuration and secrets | Isolated `.fishplugin-*` / `.plugin.<publisher>.<name>` namespaces |
 
 `DSH-FISH.exe`, the application identifier, uninstall registration, and data directories remain for compatibility. Uninstall removes owned installation files and registration while preserving user data. Startup tasks are deleted only when verified to belong to this installation. Back up data before deleting it manually.
 
 ## Building From Source
 
-### Gemini OAuth Client Configuration
+### GitHub and Plugin Configuration
 
-The public source omits the upstream embedded Google OAuth client ID and secret. To use Gemini OAuth, register your own client, configure `CMDC_PAK_GOOGLE_CLIENT_ID` and `CMDC_PAK_GOOGLE_CLIENT_SECRET`, and launch the application in that environment. Without them, this channel cannot complete OAuth authorization. Never put real values in source files, commits, or issues. This requirement also applies to the rebuilt 1.0.2 package; no real OAuth client secrets are embedded.
+GitHub authentication uses a public OAuth Client ID and device flow. Tokens are encrypted by the host using DPAPI and are not exposed to plugins. `FISH_DOCK_GITHUB_CLIENT_ID` can select your own application. Provider-specific OAuth setup belongs to each plugin.
 
 The desktop uses **Rust + Tauri 2 + HTML/CSS/JavaScript**. The model UI uses **Node.js + React**. Installers use **NSIS 3**. Building requires Windows x64, MSVC/Rust, Node.js, NSIS, and pinned official runtime downloads. Offline builds require cached dependencies; retain lock files.
 
 ```text
 FISH-Dock/
   Wakuwaku/              # Desktop source and this README
-  dsh-our-free-model/     # Integrated service source and its licenses
+  sdk/                   # Plugin SDK
+  licenses/              # Historical component notices
 ```
 
-Run `npm ci` in `dsh-our-free-model/packages/standalone`, then `node scripts/build-standalone-ui.mjs` in the service root. From the desktop directory:
+From the desktop directory; the host build no longer needs the old OFM snapshot:
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <runtime-cache> --source ../dsh-our-free-model --out <new-resource-directory> --version 1.0.2
+node scripts/prepare-installer.mjs --downloads <runtime-cache> --out <new-resource-directory> --version 1.1.0
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <prepared-directory> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
@@ -115,7 +116,7 @@ Pinned versions and digests are in [runtime-sources.json](scripts/runtime-source
 | Project | Original author / maintainers | Retained contribution | License |
 | --- | --- | --- | --- |
 | [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) | Pengjie Zhou / zhoupengjie | Taskbar, island, pets, sessions, and desktop functions | [MIT](LICENSE), Copyright 2026 Pengjie Zhou |
-| [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) | Ebony-Vinyl and contributors | Model channels, accounts, usage, and compatible APIs | MIT, Copyright 2026 Ebony-Vinyl; its LICENSE and third-party notices remain bundled |
+| [dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) | Ebony-Vinyl and contributors | Model channels, accounts, usage, and compatible APIs | Historical model integration; MIT, Copyright 2026 Ebony-Vinyl; [retained license](../licenses/Our-Free-Model.txt), business code in the plugin repository |
 
 **Fish-under-sea** maintains the FISH Dock integration. New integration code uses MIT, and upstream copyright notices remain intact. Do not describe the whole feature set as original FISH Dock work or make upstream maintainers responsible for this distribution.
 
@@ -123,4 +124,4 @@ The application uses the user's original blue-haired character icon, not redrawn
 
 ## Feedback and Security
 
-Report Windows and application versions, docking mode, reproduction steps, and redacted logs through [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues). Never upload usable keys, full Cookies, private mail, or backup ZIPs, including in vulnerability reports. The installer and checksum file are available in the linked v1.0.2 Release.
+Report Windows and application versions, docking mode, reproduction steps, and redacted logs through [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues). Never upload usable keys, full Cookies, private mail, or backup ZIPs, including in vulnerability reports. The installer and checksum file are available in the linked v1.1.0 Release.

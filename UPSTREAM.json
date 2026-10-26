@@ -1,33 +1,44 @@
 {
   "format": "fish-dock/source-snapshot",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "projects": [
     {
       "path": "Wakuwaku",
       "repository": "https://github.com/zhoupengjie/Wakuwaku",
       "baseCommit": "f1441cbbcf6801d18c27a1d241fd4e5475086e3b",
-      "selectedUpstreamThrough": "896f6ba29f98c1c310a5a7c137c3881af5078d66",
-      "license": "Wakuwaku/LICENSE"
+      "selectedUpstreamThrough": "79c95cb3c02b74511cf88bd180fa789665a1c046",
+      "license": "Wakuwaku/LICENSE",
+      "selectedChanges": [
+        "Settings WebView DPI/hit testing and clipping",
+        "Explorer startup/restart taskbar handoff"
+      ],
+      "excludedChanges": [
+        "Upstream web-file plugin store and auto-update protocol",
+        "Wi-Fi/tray-clock appearance changes and Codex wrapper discovery",
+        "DeepSeek Harness token accounting"
+      ]
     },
     {
-      "path": "dsh-our-free-model",
       "repository": "https://github.com/Ebony-Vinyl/dsh-our-free-model",
       "baseCommit": "e465d73733ae7000b21d86ccb2bdfb8c0616c2b9",
       "selectedUsageFix": "f7a02f15bb3375b605f6c13bcf05a2de3d589afd",
-      "license": "dsh-our-free-model/LICENSE",
+      "license": "licenses/Our-Free-Model.txt",
       "selectedCompatibilityTag": "v2.5.7",
       "selectedCompatibilityCommit": "d857f8ecb6236608dd97f8f2aa81beacc4994a8d",
       "selectedFunctionalMerge": "761babf6508e2c87ce6a4c86e9a5f98708d785c2",
       "selectedFunctionalChanges": [
         "Isolated signed CodeArts transport and scoped cancellation",
         "Strict model tests with durable manual results and probe race ordering"
-      ]
+      ],
+      "historicalPath": "dsh-our-free-model",
+      "status": "Historical attribution only; source snapshot removed from the host repository in 1.1.0",
+      "pluginRepository": "https://github.com/Fish-under-sea/FISH-DOCK-Plugins"
     }
   ],
   "notes": [
-    "Snapshot includes FISH Dock integration modifications, not an unmodified upstream mirror.",
-    "Upstream deployment workflows and local state are excluded. Original licenses remain in each subtree.",
-    "OFM remains a selective integration on the recorded base, not a wholesale v2.5.7 merge; ads and upstream updater/crash endpoints are excluded.",
-    "Includes current Dock and OFM service/frontend/channel source. Meoo integration is experimental, limited rollout and unavailable for general use. Public OAuth client defaults are empty."
+    "Host SDK, runtime, storage, installer and independent-plugin management are published here.",
+    "OFM business source and distribution are maintained separately; the old snapshot and staging scripts are removed.",
+    "Selected Wakuwaku v0.3.6 fixes preserve FISH Dock plugin protocols and storage isolation.",
+    "Original author copyright notices are retained. No user credentials or runtime state are published."
   ]
 }

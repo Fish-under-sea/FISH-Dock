@@ -5,6 +5,7 @@
 /.tools/
 /.agent-teams/
 /dist/
+/.test-results/
 **/.runtime/
 **/src-tauri/resources/ofm/
 

@@ -4,11 +4,12 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data: http://asset.localhost asset: https://codex-pets.net; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src http://127.0.0.1:*"
+      content="default-src 'self'; img-src 'self' data: http://asset.localhost asset: https://codex-pets.net; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src http://127.0.0.1:* http://fish-plugin.localhost fish-plugin:"
     />
     <title>DSH-FISH</title>
     <link rel="stylesheet" href="style.css" />
     <link rel="stylesheet" href="settings.css" />
+    <link rel="stylesheet" href="extensions.css" />
     <link rel="stylesheet" href="picker.css" />
   </head>
   <body>
@@ -57,8 +58,11 @@
     <script src="picker.js"></script>
     <script src="capsule-panel.js"></script>
     <script src="handoff.js"></script>
-    <script src="models.js"></script>
     <script src="identity-panel.js"></script>
+    <script src="extension-panel.js"></script>
+    <script src="extension-tabs.js"></script>
+    <script src="extension-page.js"></script>
+    <script src="windhawk-panel.js"></script>
     <script src="settings.js"></script>
     <script src="panel.js"></script>
   </body>

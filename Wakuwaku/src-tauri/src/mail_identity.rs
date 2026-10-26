@@ -24,7 +24,7 @@ pub fn validate(accounts: &Value) -> Result<Vec<Value>, String> {
 
 fn load_unlocked(root: &Path) -> Result<Snapshot, String> {
     crate::identity_store::recover_unlocked(root)?;
-    let bytes = crate::identity_store::read_optional(&root.join("mail-accounts.json"))?.ok_or("邮件身份尚未初始化")?;
+    let bytes = crate::identity_store::read_optional(&crate::identity_store::path(root, "mail-accounts.json")?)?.ok_or("邮件身份尚未初始化")?;
     let saved: Value = serde_json::from_slice(&bytes).map_err(|_| "邮件账号文件格式无效")?;
     if saved["format"] != "fish-dock/mail-accounts" || saved["version"] != 1 { return Err("邮件账号文件版本无效".into()); }
     let accounts = validate(&saved["accounts"])?;
@@ -55,8 +55,8 @@ pub fn changes(accounts: &[Value], secrets: &BTreeMap<String, String>) -> Result
 pub fn initialize(root: &Path, legacy: &Value, mut read_legacy: impl FnMut(&str) -> Result<Option<String>, String>) -> Result<Snapshot, String> {
     let _lock = crate::identity_store::EDIT.lock().map_err(|_| "身份操作锁不可用")?;
     crate::identity_store::recover_unlocked(root)?;
-    if crate::identity_store::read_optional(&root.join("mail-accounts.json"))?.is_some() { return load_unlocked(root); }
-    if crate::identity_store::read_optional(&root.join("mail-secrets.dpapi"))?.is_some() { return Err("邮件凭据存在但账号文件缺失，请先恢复身份副本".into()); }
+    if crate::identity_store::read_optional(&crate::identity_store::path(root, "mail-accounts.json")?)?.is_some() { return load_unlocked(root); }
+    if crate::identity_store::read_optional(&crate::identity_store::path(root, "mail-secrets.dpapi")?)?.is_some() { return Err("邮件凭据存在但账号文件缺失，请先恢复身份副本".into()); }
     let empty = json!([]);
     let accounts = validate(if legacy.is_null() { &empty } else { legacy })?;
     let mut secrets = BTreeMap::new();

@@ -22,24 +22,19 @@ fn owner(window:&WebviewWindow)->isize{
     #[cfg(windows)]{window.hwnd().map(|h|h.0 as isize).unwrap_or(0)}
     #[cfg(not(windows))]{let _=window;0}
 }
-struct Paused{sh:Arc<crate::Shared>,running:bool,origin:String}
+struct Paused{sh:Arc<crate::Shared>}
 impl Paused{
-    fn new(sh:Arc<crate::Shared>,origin:String)->Result<Self,String>{
+    fn new(sh:Arc<crate::Shared>,_origin:String)->Result<Self,String>{
         if sh.identity_busy.swap(true,Ordering::SeqCst){return Err("另一个身份操作尚未完成".into())}
         sh.identity_generation.fetch_add(1,Ordering::SeqCst);
-        let running=crate::oflm::oflm_state().running;
         crate::mail::stop_all(&sh);
-        crate::oflm::shutdown();
-        Ok(Self{sh,running,origin})
+        crate::plugin_api::shutdown();
+        Ok(Self{sh})
     }
     fn activate(&self)->Result<(),String>{
-        crate::oflm::shutdown();
         let snapshot=crate::mail_identity::load(&self.sh.identity_dir)?;
         crate::mail::accept_snapshot(&self.sh,snapshot);
         *self.sh.identity_error.lock().unwrap()=None;
-        if self.running{
-            crate::oflm::resume_identity(self.sh.app.clone(),self.origin.clone()).map_err(|_|"本地模型服务未能启动")?;
-        }
         Ok(())
     }
 }
@@ -47,7 +42,7 @@ impl Drop for Paused{
     fn drop(&mut self){
         self.sh.identity_busy.store(false,Ordering::SeqCst);
         if self.sh.identity_error.lock().unwrap().is_none(){
-            if self.running && !crate::oflm::oflm_state().running{let _=crate::oflm::resume_identity(self.sh.app.clone(),self.origin.clone());}
+            crate::plugin_api::resume();
             crate::mail::sync(&self.sh);
         }
         self.sh.redraw();
@@ -82,14 +77,14 @@ pub async fn identity_export(app:AppHandle,window:WebviewWindow,directory:String
     }).await.map_err(|_|"身份导出任务意外结束")?
 }
 #[tauri::command]
-pub async fn identity_preview(window:WebviewWindow)->Result<Value,String>{
-    trusted(&window)?;let owner=owner(&window);
+pub async fn identity_preview(app:AppHandle,window:WebviewWindow)->Result<Value,String>{
+    trusted(&window)?;let owner=owner(&window);let sh=crate::shared(&app);
     tauri::async_runtime::spawn_blocking(move||{
         let _operation=OPERATION.try_lock().map_err(|_|"另一个身份操作尚未完成")?;
         *PENDING.lock().unwrap()=None;
         let Some(path)=crate::identity_dialog::open(owner)? else{return Ok(json!({"cancelled":true}))};
         let bytes=crate::identity_store::read_optional(&path)?.ok_or("所选 ZIP 已不存在")?;
-        let preview=crate::identity_archive::inspect(&bytes)?;
+        let preview=crate::identity_archive::inspect_for(&sh.identity_dir,&bytes)?;
         let digest=hash(&bytes);let at=crate::now_ms();
         let ticket=hash(format!("{digest}-{at}-{}",std::process::id()).as_bytes());
         let view=json!({"ticket":ticket,"format":preview.format,"ofmAccounts":preview.ofm_accounts,"mailAccounts":preview.mail_accounts,"missingCredentials":preview.missing,"files":preview.files.len(),"name":path.file_name().unwrap_or_default().to_string_lossy()});
@@ -108,7 +103,7 @@ pub async fn identity_import(app:AppHandle,window:WebviewWindow,ticket:String,co
         if pending.ticket!=ticket || crate::now_ms().saturating_sub(pending.at)>5*60*1000{return Err("预览已过期，请重新选择 ZIP".into())}
         let bytes=crate::identity_store::read_optional(&pending.path)?.ok_or("所选 ZIP 已不存在")?;
         if hash(&bytes)!=pending.hash{return Err("预览后 ZIP 发生变化，请重新选择".into())}
-        let preview=crate::identity_archive::inspect(&bytes)?;
+        let preview=crate::identity_archive::inspect_for(&sh.identity_dir,&bytes)?;
         let changes=preview.changes()?;
         let _editing=crate::mail::EDITING.lock().map_err(|_|"邮件身份操作不可用")?;
         let paused=Paused::new(sh.clone(),origin)?;

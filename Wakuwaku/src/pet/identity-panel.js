@@ -26,7 +26,7 @@
       if (!got.cancelled) preview = got
     })
     const save = async () => {
-      if (working || !confirm(text('导出的普通 ZIP 包含明文 API Key、渠道凭据和邮件授权码。请只保存在自己的可信位置。继续选择保存位置？', 'This ordinary ZIP includes plaintext API keys, provider credentials and mail passwords. Keep it in a trusted location. Continue to choose where to save it?'))) return
+      if (working || !await confirm(text('导出的普通 ZIP 包含明文 API Key、渠道凭据和邮件授权码。请只保存在自己的可信位置。继续选择保存位置？', 'This ordinary ZIP includes plaintext API keys, provider credentials and mail passwords. Keep it in a trusted location. Continue to choose where to save it?'))) return
       return run(async () => {
         const got = await invoke('identity_export', { directory, confirm: true })
         if (got.saved) result = text('已保存：', 'Saved: ') + got.path + (got.missingCredentials ? text('；缺失凭据：', '; missing credentials: ') + got.missingCredentials : '')
@@ -34,7 +34,7 @@
     }
     const commit = async () => {
       if (working || !preview) return
-      if (!confirm(text('将替换预览所示身份资料，并保留替换前备份。旧 OFM 包不替换邮件。确认导入？', 'Replace the identities shown in the preview and keep a backup of the current files? Older OFM backups leave mail unchanged.'))) return
+      if (!await confirm(text('将替换预览所示身份资料，并保留替换前备份。旧 OFM 包不替换邮件。确认导入？', 'Replace the identities shown in the preview and keep a backup of the current files? Older OFM backups leave mail unchanged.'))) return
       return run(async () => {
         const got = await invoke('identity_import', { ticket: preview.ticket, confirm: true })
         if (got.imported) {

@@ -1,6 +1,6 @@
 [package]
 name = "wakuwaku"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Pengjie Zhou"]
@@ -14,6 +14,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset", "macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "=0.9.34"
+shlex = "=2.0.1"
 # Her local HTTP port (server.rs): tiny_http 0.12.0 as patched in
 # vendor/tiny_http (below), which drops a connection it cannot take where
 # 0.12.0 panicked and so ended her.
@@ -82,6 +84,7 @@ winreg = "0.56.0"
 # already in the tree, under Tauri.
 webview2-com = "0.39"
 windows-core = "0.62"
+windows = { version = "0.62.2", features = ["Foundation", "System", "Win32_System_WinRT"] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
 # The island over the menu bar, round the notch (notch.rs): the window's level

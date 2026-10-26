@@ -39,6 +39,17 @@ test('拒绝明文确认不会调用原生导出或导入', async () => {
   assert.deepEqual(calls.map(c => c.command), ['identity_view', 'identity_preview'])
   assert.equal(panel.busy(), false)
 })
+test('异步取消确认不会调用导入导出，确认等待期间没有业务请求', async () => {
+  let answer
+  const { panel, calls } = make(() => new Promise(resolve => { answer = resolve }))
+  await panel.load(); await panel.preview()
+  const exporting = panel.export()
+  assert.equal(calls.filter(c => c.command === 'identity_export').length, 0)
+  answer(false); await exporting
+  const importing = panel.import()
+  assert.equal(calls.filter(c => c.command === 'identity_import').length, 0)
+  answer(false); await importing
+})
 test('保存使用编辑后的目录，提交只使用预览票据不接受任意文件路径', async () => {
   const { panel, calls } = make()
   await panel.load()

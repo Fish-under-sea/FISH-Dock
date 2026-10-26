@@ -522,7 +522,7 @@ pub fn poll(sh: &Arc<Shared>, cursor: (i32, i32)) -> u64 {
             16
         } else {
             let (pos, size) = (w.pos, w.size);
-            let seen = w.ct.look(cursor, pos, size, sf, false, false, &[]);
+            let seen = w.ct.look(cursor, pos, size, sf, sf, false, false, &[]);
             if w.ct.calmed() {
                 sh.log(&format!("pet: mouse mode bouncing, calmed: cursor {cursor:?}, window {pos:?} {size:?}, scale {sf}"));
             }

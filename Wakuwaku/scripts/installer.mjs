@@ -12,13 +12,8 @@ export const INSTALL_ID = 'DSH-FISH'
 export const EXE_NAME = 'DSH-FISH.exe'
 export const PUBLISHER = 'Fish-under-sea'
 /// 程序启动必需的文件；与 src-tauri/src/runtime.rs 的 REQUIRED 保持一致。
-export const REQUIRED = [
-  'node/node.exe',
-  'node/LICENSE',
-  'webview2/msedgewebview2.exe',
-  'ofm/packages/desktop/service-host.mjs',
-  'licenses/Wakuwaku.txt',
-]
+export { REQUIRED } from './prepare-installer.mjs'
+import { REQUIRED } from './prepare-installer.mjs'
 
 /// 卸载时让程序自己收掉「开机自动启动」的计划任务。
 /// 任务名带用户 SID，卸载器拼不出来；程序侧才知道名字，也能先确认任务指向的

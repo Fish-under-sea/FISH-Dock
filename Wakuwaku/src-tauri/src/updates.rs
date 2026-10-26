@@ -453,7 +453,7 @@ fn places(r: &Release) -> String {
 
 // Looked at now (one look at a time); told on the island if newer.
 pub fn check_now(sh: &Arc<Shared>) {
-    if cfg!(feature = "installed") { return; }
+    // 安装版可检查官方发行，但仍禁止独立替换宿主 EXE（may_update）。
     {
         let mut s = STATE.lock().unwrap();
         if s.checking {

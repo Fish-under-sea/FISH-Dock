@@ -1,0 +1,49 @@
+/* 插件中心使用独立信息布局，避免通用 .r / .note 给每行叠加大内边距。 */
+#island-settings .extension-panel { margin-block: 12px 20px; overflow-wrap: anywhere; }
+#island-settings .extension-panel h3 { margin-block: 0 10px; font-size: 14px; }
+#island-settings .extension-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-block-end: 10px; }
+#island-settings .extension-actions [aria-pressed='true'] { background: var(--g3); color: var(--fg); box-shadow: inset 0 0 0 1px currentColor; }
+#island-settings .extension-list { display: grid; align-content: start; gap: 8px; }
+#island-settings .extension-card { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; border-radius: 12px; background: var(--g1); padding: 10px 12px; }
+#island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+#island-settings .extension-card-title { display: flex; flex: 1 1 160px; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; min-width: 0; line-height: 1.4; }
+#island-settings .extension-card-title strong { font-size: 13px; }
+#island-settings .extension-version, #island-settings .extension-state { color: var(--g4); font-size: 12px; }
+#island-settings .extension-card-actions, #island-settings .extension-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#island-settings .extension-update { color: var(--ok, #34b97c); font-size: 12px; font-weight: 600; }
+#island-settings .extension-card p { margin: 0; padding: 0; line-height: 1.45; }
+#island-settings .extension-card .extension-description { font-size: 12px; }
+#island-settings .extension-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 12px; margin: 0; padding: 0; font-size: 12px; line-height: 1.45; color: var(--g4); }
+#island-settings .extension-meta > div { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
+#island-settings .extension-meta :is(dt,dd) { margin: 0; padding: 0; }
+#island-settings .extension-meta dd { color: var(--fg); }
+#island-settings .extension-card :is(.extension-dependencies,.extension-location) { color: var(--g4); font-size: 12px; }
+#island-settings .extension-dependencies > span { margin-inline-end: 6px; }
+#island-settings .extension-auth { display: grid; gap: 8px; margin-block-end: 10px; }
+#island-settings .extension-auth .extension-actions { margin: 0; }
+#island-settings .extension-auth :is(.extension-auth-status,.extension-auth-code) { margin: 0; padding: 0; font-size: 12px; line-height: 1.5; color: var(--g4); }
+#island-settings .extension-auth .mono { user-select: text; }
+#island-settings .extension-panel .extension-star { background: #277c56; color: #fff; }
+#island-settings .extension-actions [data-extension-refresh] { background: #fff; color: #202124; border: 1px solid #c7cbd1; }
+#island-settings .extension-actions [data-extension-refresh]:not(:disabled):hover { background: #edf0f4; }
+#island-settings .extension-panel .pbtn { min-height: 28px; min-width: 28px; }
+.extension-panel :is(button,input,summary):focus-visible { outline: 2px solid #80b6ff; outline-offset: 3px; }
+.extension-panel button:disabled { opacity: .5; cursor: default; }
+.extension-panel button:not(:disabled):active { transform: translateY(1px); }
+.extension-panel details { padding: 10px 0; }
+.extension-panel summary { cursor: pointer; min-height: 28px; }
+.extension-panel label { display: block; margin-block: 8px; }
+.extension-node { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--g3); background: var(--g1); color: var(--fg); border-radius: 6px; margin-block-end: 8px; }
+/* 外观标签顺序支持鼠标拖动与键盘按钮。 */
+.tab-order { padding-block: 12px; }
+.tab-order ol { list-style: none; padding: 0; }
+.tab-order li { display: flex; align-items: center; gap: 8px; padding: 8px; margin-block: 4px; background: var(--g1); border-radius: 8px; }
+.tab-order :is(button,li):focus-visible { outline: 2px solid #80b6ff; outline-offset: 3px; }
+.s-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.models .s-body { overflow: hidden; margin-right: 0; padding-right: 0; }
+.extension-frame { display: block; width: 100%; height: 100%; min-height: 0; border: 0; border-radius: 0; background: transparent; }
+.extension-service-shell { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; gap: 10px; }
+.extension-service-toolbar { flex: none; }
+.extension-service-content { display: block; flex: 1; width: 100%; min-height: 0; border: 0; border-radius: 18px; background: var(--g1); }
+.extension-frame:focus-visible { outline: 2px solid #80b6ff; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .extension-panel *, .extension-frame { animation: none; transition: none; transform: none; } }

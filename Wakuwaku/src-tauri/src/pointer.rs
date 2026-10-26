@@ -111,7 +111,7 @@ impl ClickThrough {
     // mouse mode flip back and forth while the pointer is on them
     // (zhoupengjie/Wakuwaku#53: 完成 and 取消 did nothing, the presses going
     // under it and only their release reaching the page).
-    pub fn look(&mut self, cursor: (i32, i32), pos: (i32, i32), size: (i32, i32), sf: f64, held: bool, passive: bool, solid: &[[f64; 4]]) -> Look {
+    pub fn look(&mut self, cursor: (i32, i32), pos: (i32, i32), size: (i32, i32), sf: f64, page_sf: f64, held: bool, passive: bool, solid: &[[f64; 4]]) -> Look {
         let moved = cursor != self.last;
         self.last = cursor;
         if passive {
@@ -119,7 +119,7 @@ impl ClickThrough {
             let ignore = self.force(Mode::Pass);
             return Look { ignore, pointer: self.gone(), near: false, moved, forward: false };
         }
-        let (px, py) = ((cursor.0 - pos.0) as f64 / sf, (cursor.1 - pos.1) as f64 / sf);
+        let (px, py) = ((cursor.0 - pos.0) as f64 / page_sf, (cursor.1 - pos.1) as f64 / page_sf);
         self.on_solid = solid.iter().any(|r| px >= r[0] && px <= r[0] + r[2] && py >= r[1] && py <= r[1] + r[3]);
         let near = within(cursor, pos, size, (NEAR_PX * sf) as i32);
         // Over something of ours, yet outside the window: the page missed the
@@ -135,7 +135,7 @@ impl ClickThrough {
         // the page said meanwhile.
         let mode = if held || self.over || self.on_solid || self.calm() { Mode::Catch } else if near { Mode::Forward } else { Mode::Pass };
         let ignore = self.force(mode);
-        let at = || json!({ "x": (cursor.0 - pos.0) as f64 / sf, "y": (cursor.1 - pos.1) as f64 / sf });
+        let at = || json!({ "x": (cursor.0 - pos.0) as f64 / page_sf, "y": (cursor.1 - pos.1) as f64 / page_sf });
         let pointer = if mode == Mode::Forward && moved {
             self.pointing = true;
             Some(at())
@@ -209,14 +209,14 @@ mod tests {
         // caught, inside it or out.
         assert_eq!(ct.set_over(false, false, false), None);
         assert!(!ct.over);
-        let seen = ct.look((500, 500), pos, size, 1.0, false, false, &[]);
+        let seen = ct.look((500, 500), pos, size, 1.0, 1.0, false, false, &[]);
         assert_eq!(seen.ignore, None);
-        let seen = ct.look(inside, pos, size, 1.0, false, false, &[]);
+        let seen = ct.look(inside, pos, size, 1.0, 1.0, false, false, &[]);
         assert_eq!(seen.ignore, None);
         // The calm over: the next look lets clicks through again (the
         // pointer still in the window, as over the lower half of the screen).
         ct.calm_until = Some(Instant::now() - Duration::from_millis(1));
-        let seen = ct.look(inside, pos, size, 1.0, false, false, &[]);
+        let seen = ct.look(inside, pos, size, 1.0, 1.0, false, false, &[]);
         assert_eq!(seen.ignore, Some(true));
         assert!(seen.forward);
     }
@@ -234,7 +234,7 @@ mod tests {
         ct.set_over(true, false, false);
         assert!(ct.calmed());
         ct.calm_until = Some(Instant::now() - Duration::from_millis(1));
-        let seen = ct.look((50, 50), pos, size, 1.0, false, false, &[]);
+        let seen = ct.look((50, 50), pos, size, 1.0, 1.0, false, false, &[]);
         assert_eq!(seen.ignore, None);
         assert!(ct.over);
     }
@@ -247,17 +247,17 @@ mod tests {
         let mut ct = ClickThrough::default();
         let (pos, size) = ((100, 200), (400, 300));
         assert_eq!(ct.set_over(true, false, false), Some(false));
-        let seen = ct.look((300, 250), pos, size, 1.25, false, false, &[]);
+        let seen = ct.look((300, 250), pos, size, 1.25, 1.25, false, false, &[]);
         assert_eq!(seen.ignore, None);
         assert_eq!(seen.pointer, Some(json!({ "x": 160.0, "y": 40.0, "caught": true })));
         assert!(!seen.forward);
         // At rest: nothing.
-        assert_eq!(ct.look((300, 250), pos, size, 1.25, false, false, &[]).pointer, None);
+        assert_eq!(ct.look((300, 250), pos, size, 1.25, 1.25, false, false, &[]).pointer, None);
         // Held (a drag): nothing.
-        assert_eq!(ct.look((310, 250), pos, size, 1.25, true, false, &[]).pointer, None);
+        assert_eq!(ct.look((310, 250), pos, size, 1.25, 1.25, true, false, &[]).pointer, None);
         // Off her (the page said so): forwarded as before, not caught.
         assert_eq!(ct.set_over(false, false, false), Some(true));
-        let seen = ct.look((320, 250), pos, size, 1.25, false, false, &[]);
+        let seen = ct.look((320, 250), pos, size, 1.25, 1.25, false, false, &[]);
         assert_eq!(seen.pointer, Some(json!({ "x": 176.0, "y": 40.0 })));
     }
 
@@ -269,13 +269,13 @@ mod tests {
         let mut ct = ClickThrough::default();
         let (pos, size) = ((0, 0), (100, 100));
         ct.set_over(true, false, false);
-        let _ = ct.look((50, 50), pos, size, 1.0, false, false, &[]);
-        let seen = ct.look((500, 500), pos, size, 1.0, false, false, &[]);
+        let _ = ct.look((50, 50), pos, size, 1.0, 1.0, false, false, &[]);
+        let seen = ct.look((500, 500), pos, size, 1.0, 1.0, false, false, &[]);
         assert!(!ct.over);
         assert_eq!(seen.ignore, Some(true));
         assert_eq!(seen.pointer, Some(Value::Null));
         // Once.
-        assert_eq!(ct.look((510, 500), pos, size, 1.0, false, false, &[]).pointer, None);
+        assert_eq!(ct.look((510, 500), pos, size, 1.0, 1.0, false, false, &[]).pointer, None);
     }
 
     // A solid rect (the taskbar's layout being edited, #53): caught while
@@ -286,20 +286,29 @@ mod tests {
         let (pos, size) = ((0, 500), (1000, 400));
         let bar = [[100.0, 100.0, 300.0, 40.0]];
         // On it (page 200, 120 at 125 %): caught, the page having said nothing.
-        let seen = ct.look((250, 650), pos, size, 1.25, false, false, &bar);
+        let seen = ct.look((250, 650), pos, size, 1.25, 1.25, false, false, &bar);
         assert_eq!(seen.ignore, Some(false));
         assert!(ct.caught());
         // The page says off (a leave of WebView2's own, the pointer on it): kept.
         assert_eq!(ct.set_over(false, false, false), None);
         assert!(ct.caught());
-        assert_eq!(ct.look((260, 650), pos, size, 1.25, false, false, &bar).ignore, None);
+        assert_eq!(ct.look((260, 650), pos, size, 1.25, 1.25, false, false, &bar).ignore, None);
         // Off it, still in the window: clicks through again, forwarded.
-        let seen = ct.look((600, 650), pos, size, 1.25, false, false, &bar);
+        let seen = ct.look((600, 650), pos, size, 1.25, 1.25, false, false, &bar);
         assert_eq!(seen.ignore, Some(true));
         assert!(seen.forward);
         // Editing over (no rects): as before.
-        assert_eq!(ct.look((250, 650), pos, size, 1.25, false, false, &[]).ignore, None);
+        assert_eq!(ct.look((250, 650), pos, size, 1.25, 1.25, false, false, &[]).ignore, None);
         assert!(!ct.caught());
+    }
+
+    #[test]
+    fn settings_hit_test_uses_webview_scale() {
+        let mut ct = ClickThrough::default();
+        let settings = [[40.0, 500.0, 520.0, 100.0]];
+        let seen = ct.look((100, 650), (0, 0), (1000, 800), 1.0, 1.25, false, false, &settings);
+        assert_eq!(seen.ignore, Some(false));
+        assert!(ct.caught());
     }
 
     #[test]

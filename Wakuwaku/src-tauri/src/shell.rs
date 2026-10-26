@@ -237,6 +237,35 @@ mod imp {
         }
     }
 
+    // How long a process has run, or None when it is gone.
+    pub fn running_for(pid: u32) -> Option<std::time::Duration> {
+        let at = started(pid)?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?;
+        // As started() has it: 100 ns since 1601.
+        let now = (now.as_nanos() / 100) as u64 + 116_444_736_000_000_000;
+        Some(std::time::Duration::from_nanos(now.saturating_sub(at) * 100))
+    }
+
+    // The process of Explorer's taskbar, or 0 while Explorer has none.
+    pub fn explorer_pid() -> u32 {
+        let tray = explorer_tray();
+        let mut pid = 0;
+        if tray != 0 {
+            // SAFETY: our own out-parameter; a gone window leaves it 0.
+            unsafe { GetWindowThreadProcessId(tray as Hwnd, &mut pid) };
+        }
+        pid
+    }
+
+    // Whether the desktop's shell window (Progman) is Explorer's yet.
+    pub fn desktop_up() -> bool {
+        // SAFETY: a plain lookup.
+        let shell = unsafe { GetShellWindow() };
+        let mut pid = 0;
+        // SAFETY: our own out-parameter.
+        !shell.is_null() && unsafe { GetWindowThreadProcessId(shell, &mut pid) } != 0 && is_explorer(pid)
+    }
+
     fn read(file: &Path) -> Option<Value> {
         serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()
     }
@@ -473,9 +502,18 @@ mod imp {
     pub fn lone_win() -> super::LoneWin {
         super::LoneWin { taskman: None, shell: None, tray: None }
     }
+    pub fn running_for(_pid: u32) -> Option<std::time::Duration> {
+        None
+    }
+    pub fn explorer_pid() -> u32 {
+        0
+    }
+    pub fn desktop_up() -> bool {
+        false
+    }
 }
 
-pub use imp::{explorer_tray, guard, hide, keep_room, lone_win, recover, rehide, restore, room, show_bars, shown_room, spawn_guard, started, taskbar_created, taskbars, visible};
+pub use imp::{desktop_up, explorer_pid, explorer_tray, guard, hide, keep_room, lone_win, recover, rehide, restore, room, running_for, show_bars, shown_room, spawn_guard, started, taskbar_created, taskbars, visible};
 
 // The shell's windows Win pressed alone may go by, none of them hers
 // (zhoupengjie/Wakuwaku#54, where it opened no Start after she was quit,
@@ -567,6 +605,19 @@ mod tests {
         println!("{}", now.said());
         if cfg!(windows) && now.shell.is_some() {
             assert!(now.shell.as_ref().is_some_and(|s| !s.class.is_empty()));
+        }
+    }
+
+    // On a desktop with Explorer: its taskbar's process found, and how long
+    // it has run, as taskbar.rs waits on it (zhoupengjie/Wakuwaku#85).
+    // Seen with --nocapture.
+    #[test]
+    fn this_desktops_explorer_has_run_so_long() {
+        let pid = explorer_pid();
+        println!("Explorer pid {pid}, up {:?}, desktop its: {}", running_for(pid), desktop_up());
+        if cfg!(windows) && pid != 0 {
+            assert!(running_for(pid).is_some_and(|d| d.as_secs() < 400 * 24 * 3600));
+            assert!(running_for(std::process::id()).is_some_and(|d| d.as_secs() < 3600));
         }
     }
 }

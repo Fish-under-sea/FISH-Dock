@@ -130,7 +130,9 @@ test("Claude today: its turns small; the three numbers and the hours medium; tok
   assert.match(m, /<svg class="wbars" width="292" height="30"/)
   assert.match(text(m), /1.7B token/)
   const l = text(WDesk.faceHTML(today, 'l', ctx(dark)))
-  assert.match(l, /每小时的 token 暂无数据/)
+  assert.match(l, /今天的 token 1.7B token · 输出 3.4M/)
+  const withoutTokens=text(WDesk.faceHTML(today,'l',{...dark,all:all.filter(w=>w.id!=='tokens')}))
+  assert.match(withoutTokens, /每小时的 token 暂无数据/)
   assert.match(l, /最忙的会话 暂无数据/)
 })
 

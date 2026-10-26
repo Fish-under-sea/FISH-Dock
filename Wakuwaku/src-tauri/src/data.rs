@@ -23,6 +23,7 @@ fn in_tree(up: usize, rest: &str) -> PathBuf {
 }
 
 pub fn folder() -> PathBuf {
+    if let Some(context) = crate::storage_context::current() { return context.host.path().to_path_buf(); }
     if let Ok(dir) = std::env::var("WAKUWAKU_USER_DATA") {
         return dir.into();
     }
@@ -204,9 +205,12 @@ fn defaults() -> Map<String, Value> {
     map
 }
 
+fn configuration_file(dir: &Path) -> PathBuf {
+    if crate::storage_context::current().is_some_and(|context| context.host.path() == dir) { dir.join("config/config.json") } else { dir.join("config.json") }
+}
 pub fn load(dir: &Path) -> Map<String, Value> {
     let mut settings = defaults();
-    if let Ok(Value::Object(mut saved)) = fs::read_to_string(dir.join("config.json")).map_err(|_| ()).and_then(|t| serde_json::from_str(&t).map_err(|_| ())) {
+    if let Ok(Value::Object(mut saved)) = fs::read_to_string(configuration_file(dir)).map_err(|_| ()).and_then(|t| serde_json::from_str(&t).map_err(|_| ())) {
         keep_old_look(&mut saved);
         adopt_end_cue(&mut saved);
         settings.extend(saved);
@@ -317,7 +321,10 @@ pub fn save(dir: &Path, settings: &Map<String, Value>) {
     // A settings file we cannot write only costs the remembered settings.
     let mut desktop = settings.clone();
     desktop.remove("mail");
-    let _ = fs::write(dir.join("config.json"), serde_json::to_string_pretty(&desktop).unwrap_or_default());
+    let bytes = serde_json::to_vec_pretty(&desktop).unwrap_or_default();
+    if let Some(context) = crate::storage_context::current().filter(|context| context.host.path() == dir) {
+        if let Err(error) = context.host.write("config", "config.json", &bytes) { eprintln!("FISH Dock: {error}"); }
+    } else { let _ = fs::write(configuration_file(dir), bytes); }
 }
 
 // --- Pets ----------------------------------------------------------------------------

@@ -11,12 +11,21 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// Files the program cannot start without; checked on every start.
-pub const REQUIRED: [&str; 5] = [
+pub const REQUIRED: [&str; 14] = [
     "node/node.exe",
     "node/LICENSE",
     "webview2/msedgewebview2.exe",
-    "ofm/packages/desktop/service-host.mjs",
     "licenses/Wakuwaku.txt",
+    "windhawk/windhawk.exe",
+    "windhawk/windhawk-x64-helper.exe",
+    "windhawk/Engine/32/windhawk.dll",
+    "windhawk/Engine/32/windhawk.lib",
+    "windhawk/Engine/64/windhawk.dll",
+    "windhawk/Engine/64/windhawk.lib",
+    "windhawk/Compiler/bin/clang++.exe",
+    "windhawk/Compiler/include/windhawk_api.h",
+    "windhawk/LICENSE-Windhawk.txt",
+    "windhawk/Compiler/LICENSE.TXT",
 ];
 const SCHEMA: u32 = 2;
 const PRODUCT: &str = "DSH-FISH";

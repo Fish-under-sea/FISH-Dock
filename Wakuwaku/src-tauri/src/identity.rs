@@ -178,7 +178,7 @@ fn private_directory(path: &Path) -> Result<(), String> {
             match create_private_directory(path, &sddl) {
                 Ok(()) => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(_) => return Err("无法创建当前用户专属身份目录".into()),
+                Err(error) => return Err(format!("无法创建当前用户专属身份目录（Windows 错误码 {:?}）", error.raw_os_error())),
             }
         }
         set_private_dacl(path, &sddl)?;

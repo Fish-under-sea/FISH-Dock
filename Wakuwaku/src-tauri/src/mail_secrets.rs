@@ -20,10 +20,10 @@ pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 200 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
-fn path(root: &Path) -> PathBuf { root.join(FILE) }
+fn path(root: &Path) -> Result<PathBuf, String> { crate::identity_store::path(root, FILE) }
 
 fn load(root: &Path) -> Result<Vault, String> {
-    let path = path(root);
+    let path = path(root)?;
     crate::identity_store::safe(&path)?;
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
@@ -123,8 +123,9 @@ pub fn delete(root: &Path, id: &str) -> Result<(), String> {
 fn write_vault(root: &Path, vault: &Vault) -> Result<(), String> {
     let bytes = serde_json::to_vec(vault).map_err(|_| "无法序列化邮件凭据")?;
     if bytes.len() as u64 > MAX_FILE { return Err("邮件凭据文件超出大小限制".into()); }
-    let path = path(root);
-    let tmp = root.join(format!(".mail-secrets-{}-{}.tmp", std::process::id(), crate::now_ms()));
+    let path = path(root)?;
+    let temporary_root = if crate::storage_context::Namespace::claimed(root)?.is_some() { root.join("tmp") } else { root.to_path_buf() };
+    let tmp = temporary_root.join(format!(".mail-secrets-{}-{}.tmp", std::process::id(), crate::now_ms()));
     let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(|_| "无法创建邮件凭据暂存文件")?;
     if file.write_all(&bytes).and_then(|_| file.sync_all()).is_err() { return Err("无法写入邮件凭据暂存文件".into()); }
     drop(file);
@@ -153,7 +154,7 @@ fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
 struct DataBlob { size: u32, data: *mut u8 }
 
 #[cfg(windows)]
-fn protect(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn protect(bytes: &[u8]) -> Result<Vec<u8>, String> {
     use std::ffi::c_void;
     #[link(name = "crypt32")]
     unsafe extern "system" { fn CryptProtectData(input: *const DataBlob, description: *const u16, entropy: *const DataBlob, reserved: *mut c_void, prompt: *mut c_void, flags: u32, output: *mut DataBlob) -> i32; }
@@ -170,7 +171,7 @@ fn protect(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(windows)]
-fn unprotect(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn unprotect(bytes: &[u8]) -> Result<Vec<u8>, String> {
     use std::ffi::c_void;
     #[link(name = "crypt32")]
     unsafe extern "system" { fn CryptUnprotectData(input: *const DataBlob, description: *mut *mut u16, entropy: *const DataBlob, reserved: *mut c_void, prompt: *mut c_void, flags: u32, output: *mut DataBlob) -> i32; }
@@ -187,9 +188,9 @@ fn unprotect(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(not(windows))]
-fn protect(_bytes: &[u8]) -> Result<Vec<u8>, String> { Err("邮件凭据的 DPAPI 迁移仅支持 Windows".into()) }
+pub(crate) fn protect(_bytes: &[u8]) -> Result<Vec<u8>, String> { Err("邮件凭据的 DPAPI 迁移仅支持 Windows".into()) }
 #[cfg(not(windows))]
-fn unprotect(_bytes: &[u8]) -> Result<Vec<u8>, String> { Err("邮件凭据的 DPAPI 解密仅支持 Windows".into()) }
+pub(crate) fn unprotect(_bytes: &[u8]) -> Result<Vec<u8>, String> { Err("邮件凭据的 DPAPI 解密仅支持 Windows".into()) }
 
 #[cfg(test)]
 mod tests {
@@ -201,7 +202,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let synthetic = "synthetic-only-test-secret";
         write(&root, "test-account", synthetic).unwrap();
-        let stored = fs::read(path(&root)).unwrap();
+        let stored = fs::read(path(&root).unwrap()).unwrap();
         assert!(!String::from_utf8_lossy(&stored).contains(synthetic));
         assert_eq!(read(&root, "test-account").unwrap().as_deref(), Some(synthetic));
         delete(&root, "test-account").unwrap();
