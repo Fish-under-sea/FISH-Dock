@@ -1,7 +1,7 @@
-// The Local models page: Our Free Model's own management console, unchanged, in a frame.
+// The Local models page: magpie's own web console, unchanged, in a frame.
 //
-// The console is a page of its own, served by a Node service on loopback (the
-// service is Rust's business: oflm.rs, oflm_ensure). This file is only the glass
+// The console is a page of its own, served by magpie on loopback (the service is
+// Rust's business: oflm.rs, oflm_ensure). This file is only the glass
 // it is seen through, and it keeps that glass: the frame lives in a layer of its
 // own (#models-host, fixed, its own place on screen), and the page moves that
 // layer over the page's slot instead of moving the frame into the page. Moving a
@@ -222,7 +222,7 @@
     if (frame && frame.dataset.url === url) return frame
     const next = document.createElement('iframe')
     next.className = 's-models-frame'
-    next.title = 'Our Free Model'
+    next.title = 'Magpie'
     // The bootstrap token rides in the fragment; no-referrer keeps the console's
     // own requests from carrying Wakuwaku's URL anywhere.
     next.setAttribute('referrerpolicy', 'no-referrer')
