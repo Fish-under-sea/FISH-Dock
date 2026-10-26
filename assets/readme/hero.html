@@ -66,16 +66,16 @@ h1{margin:0;font-size:140px;line-height:1;height:140px;white-space:nowrap}
 <p id="translation" class="translation pixel">Your sessions. Your models. Your dock.</p>
 <div class="chips pixel"><span>WINDOWS X64</span><span>1.1.0</span><span>MIT CODE</span></div>
 </div>
-<div class="pane portrait"><img src="../../Wakuwaku/src-tauri/icons/dsh-fish.png" width="360" height="360" alt="用户提供的 FISH Dock 原图标"></div>
+<div class="pane portrait"><img id="portrait" src="DSH-FISH.png" width="360" height="360" alt="DSH-FISH 吉祥物"></div>
 </div>
 </div>
 <img class="mascot" src="mascot.png" width="188" height="239" alt="用户指定的求佛透明挂件">
 </section>
 <section class="metrics">
-<div id="stat-version" class="metric frame"><div class="metric-head pixel">VERSION<i class="lamp"></i></div><div class="metric-value"><span class="number pixel">1.0.2</span><span class="metric-label" data-zh="当前版本" data-en="CURRENT RELEASE"></span></div></div>
+<div id="stat-version" class="metric frame"><div class="metric-head pixel">VERSION<i class="lamp"></i></div><div class="metric-value"><span class="number pixel">1.1.0</span><span class="metric-label" data-zh="当前版本" data-en="CURRENT RELEASE"></span></div></div>
 <div id="stat-desktop" class="metric frame"><div class="metric-head pixel">DESKTOP<i class="lamp"></i></div><div class="metric-value"><span class="number pixel">2 MODES</span><span class="metric-label" data-zh="任务栏 / 岛" data-en="BAR / ISLAND"></span></div></div>
 <div id="stat-mail" class="metric frame"><div class="metric-head pixel">MAIL<i class="lamp"></i></div><div class="metric-value"><span class="number pixel" data-zh="邮件管理" data-en="INBOX"></span><span class="metric-label" data-zh="聚合收件 / 一键已读" data-en="COMBINED / MARK READ"></span></div></div>
-<div id="stat-channels" class="metric frame"><div class="metric-head pixel">CHANNELS<i class="lamp"></i></div><div class="metric-value"><span class="number pixel">14</span><span class="metric-label" data-zh="已接入渠道 · 含 Meoo 灰度" data-en="ENTRIES / MEOO IN TEST"></span></div></div>
+<div id="stat-channels" class="metric frame"><div class="metric-head pixel">PLUGINS<i class="lamp"></i></div><div class="metric-value"><span class="number pixel">4</span><span class="metric-label" data-zh="官方插件" data-en="OFFICIAL PLUGINS"></span></div></div>
 </section>
 <div class="keys">
 <span id="key-zh" class="key frame green">中文</span><span id="key-en" class="key frame">English</span><span id="key-start" class="key frame" data-zh="入门指南" data-en="Get started"></span>
@@ -84,9 +84,12 @@ h1{margin:0;font-size:140px;line-height:1;height:140px;white-space:nowrap}
 <script>
 const params=new URLSearchParams(location.search);
 document.documentElement.dataset.theme=params.get('theme')==='dark'?'dark':'light';
-const en=params.get('lang')==='en';document.documentElement.lang=en?'en':'zh-CN';
+const en=params.get('lang')==='en';const plugin=params.get('variant')==='plugin';document.documentElement.lang=en?'en':'zh-CN';
+if(plugin){document.querySelector('.system-name').textContent='FISH // OFFICIAL PLUGIN WORKSPACE';document.querySelector('#portrait').src='DSH-model-broker.png';document.querySelector('#portrait').alt='DSH-model-broker 吉祥物';document.querySelector('#kicker').textContent=en?'OFFICIAL PLUGINS':'官方插件仓';document.querySelector('#tagline').textContent=en?'Four plugins. One dock.':'四个插件，一个 Dock 工作台';document.querySelector('#translation').textContent=en?'Install what you need. Run what you use.':'按需安装，按需运行。';document.querySelector('#stat-version .number').textContent='1.0.0';document.querySelector('#stat-desktop .number').textContent='4 PLUGINS';document.querySelector('#stat-channels .number').textContent='API 1'}
 for(const el of document.querySelectorAll('[data-zh]'))el.textContent=en?el.dataset.en:el.dataset.zh;
-if(en){document.querySelector('#kicker').textContent='DESKTOP DOCK + MODEL GATEWAY';document.querySelector('#tagline').textContent='A dock for AI sessions. A home for model APIs.';document.querySelector('#tagline').style.fontSize='27px';}
+if(plugin){document.querySelector('#stat-mail .number').textContent='4 PACKS';document.querySelector('#stat-mail .metric-label').textContent=en?'SINGLE PACKAGES':'独立单包';}
+if(en&&!plugin){document.querySelector('#kicker').textContent='DESKTOP DOCK + MODEL GATEWAY';document.querySelector('#tagline').textContent='A dock for AI sessions. A home for model APIs.';document.querySelector('#tagline').style.fontSize='27px';}
+if(en&&plugin){document.querySelector('#kicker').textContent='OFFICIAL PLUGINS';document.querySelector('#tagline').textContent='Four plugins. One dock.';document.querySelector('#tagline').style.fontSize='27px';}
 </script>
 </body>
 </html>

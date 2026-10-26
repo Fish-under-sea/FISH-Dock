@@ -7,9 +7,11 @@ import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const assets = path.join(root, 'assets/readme')
+const heroVariant = process.env.README_VARIANT || ''
+const outputPrefix = process.env.README_OUTPUT_PREFIX || ''
 const edge = process.env.EDGE_BINARY || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fish-readme-'))
-const browser = spawn(edge, ['--headless=new','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'], { stdio:'ignore' })
+const browser = spawn(edge, ['--headless=new','--disable-gpu','--disable-gpu-sandbox','--disable-features=CalculateNativeWinOcclusion','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'], { stdio:'ignore' })
 const pause = () => new Promise(resolve => setTimeout(resolve, 80))
 async function until(check) { const end=Date.now()+25000; while(Date.now()<end) { const value=await check(); if(value)return value; if(browser.exitCode!==null)throw Error(`Edge exited ${browser.exitCode}`); await pause() } throw Error('浏览器就绪超时') }
 let ws, serial=0
@@ -26,7 +28,7 @@ try {
   await call('Emulation.setDeviceMetricsOverride',{width:2200,height:1300,deviceScaleFactor:1,mobile:false})
   await call('Emulation.setDefaultBackgroundColorOverride',{color:{r:0,g:0,b:0,a:0}})
   for(const lang of ['zh','en'])for(const theme of ['light','dark']){
-    await call('Page.navigate',{url:pathToFileURL(path.join(assets,'hero.html')).href+`?lang=${lang}&theme=${theme}`})
+    await call('Page.navigate',{url:pathToFileURL(path.join(assets,'hero.html')).href+`?lang=${lang}&theme=${theme}&variant=${encodeURIComponent(heroVariant)}`})
     await until(()=>evaluate(`document.readyState==='complete' && document.documentElement.lang==='${lang==='en'?'en':'zh-CN'}' && document.documentElement.dataset.theme==='${theme}'`))
     await evaluate('document.fonts.ready.then(()=>true)')
     assert.ok(await evaluate("[...document.images].every(i=>i.complete&&i.naturalWidth>0)"),'图片缺失')
@@ -38,7 +40,7 @@ try {
       if(lang==='en'&&['key-zh','key-en'].includes(id))continue
       const clip=await evaluate(`(()=>{const r=document.getElementById('${id}').getBoundingClientRect();return {x:Math.max(0,r.x-4),y:Math.max(0,r.y-4),width:r.width+8,height:r.height+15,scale:1}})()`)
       const image=await call('Page.captureScreenshot',{format:'png',clip,captureBeyondViewport:true})
-      const file=`${id}-${lang}-${theme}.png`,bytes=Buffer.from(image.data,'base64')
+      const file=`${outputPrefix}${id}-${lang}-${theme}.png`,bytes=Buffer.from(image.data,'base64')
       fs.writeFileSync(path.join(assets,file),bytes)
       results.push({path:`assets/readme/${file}`,kind:'image',channel:'browser-layout-screenshot',size:bytes.length,license:'排版 MIT；用户图片许可单独保留',createdAt:new Date().toISOString(),contentHash:crypto.createHash('sha256').update(bytes).digest('hex')})
     }
