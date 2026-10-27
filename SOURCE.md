@@ -1,4 +1,4 @@
-# FISH Dock 1.1.0 源码与发行范围
+# FISH Dock 1.2.0 源码与发行范围
 
 本仓库维护桌面宿主与独立插件平台，不使用子模块或本机目录链接：
 
@@ -13,4 +13,4 @@
 
 GitHub 登录使用公开 OAuth Client ID 和设备授权流程；宿主加密保存令牌，不向插件传递。公开 Client ID 属于应用标识，不是客户端密钥。自建应用可通过 `FISH_DOCK_GITHUB_CLIENT_ID` 配置。模型渠道的授权配置在对应业务插件仓维护。
 
-[构建方法](README.md#development) · [1.1.0 更新记录](Wakuwaku/docs/release-1.1.0.md)。
+[构建方法](README.md#development) · [1.2.0 更新记录](Wakuwaku/docs/release-1.2.0.md)。

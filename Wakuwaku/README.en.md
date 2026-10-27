@@ -1,8 +1,8 @@
 <p align="center"><img src="src-tauri/icons/dsh-fish.png" width="112" alt="FISH Dock icon"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">A place for AI sessions to dock, and model connections to come together.</p>
-<p align="center"><strong>1.1.0</strong> · Windows x64 · MIT-licensed code</p>
-<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-1.1.0.md">Release notes</a></p>
+<p align="center"><strong>1.2.0</strong> · Windows x64 · MIT-licensed code</p>
+<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-1.2.0.md">Release notes</a></p>
 
 > **A derivative integration, not an official upstream release.** FISH Dock builds on the desktop and AI-session experience of [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) and integrates the model channels and API workspace of [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model). Both core systems remain upstream work. Original authors, copyrights, and licenses are credited below.
 
@@ -20,7 +20,16 @@ This repository contains the desktop host, plugin SDK, storage and runtime manag
 
 **Local does not mean offline model inference.** The workspace, proxy, and stored data run on your computer. Model requests still go to the selected provider. Eligibility, quotas, pricing, and availability are controlled by those providers. This project does not promise unlimited usage, permanently free access, or bypasses for provider restrictions.
 
-## New in 1.1.0
+## New in 1.2.0
+
+Both **1.2.0** installers include renewable GitHub sign-in. Download the full and compact packages from [v1.2.0](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0). Legacy sessions without saved refresh tokens need one new sign-in.
+
+- Installation: same-volume staging, removal of verified obsolete owned files, verification reuse, visible progress and rollback; full and compact update packages.
+- Configuration: whole-configuration backups with preview, before-copies and transactional restore.
+- Sign-in: smaller device-code dialogs, accurate copy feedback, manual release of temporary pinning and island-position recovery.
+- Runtime discovery: actual Node source, path and version, with recovery from stale overrides.
+
+These existing capabilities are retained:
 
 - Independent Feishu, Clash, Magpie and OFM plugins; newly installed plugins are enabled automatically.
 - GitHub device sign-in and main-repository star verification, with device-code copying and automatic status polling.
@@ -29,13 +38,13 @@ This repository contains the desktop host, plugin SDK, storage and runtime manag
 - About/plugin update checks, catalog API fallback and readable KB/MB/GB package sizes.
 - Bundled Windhawk/compiler, native management pages, draggable tabs and configurable columns.
 
-See the [1.1.0 release notes](docs/release-1.1.0.md) for verification scope.
+See the [1.2.0 release notes](docs/release-1.2.0.md) for verification scope.
 
 ## Installation and Updates
 
 Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows 11; other Windows releases and third-party taskbar software require separate verification.
 
-1. Download `FISH-Dock-Setup-1.1.0.exe` from [this project's Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0), and compare its SHA-256 with the attached `SHA256SUMS.txt`.
+1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-1.2.0.exe` is for first installation or repair; `FISH-Dock-Update-1.2.0.exe` is for an existing 1.1.0 installation with intact base resources.
 2. Fully exit the previous version from the tray and any standalone OFM service. Run the installer and choose a destination. Fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock`; upgrades reuse the registered directory instead of moving it.
 3. Start **FISH Dock** from the desktop or Start menu. Node.js, Fixed Version WebView2, Windhawk, its compiler, and license notices are bundled. Business plugins are downloaded separately.
 4. The first launch confirms runtime terms and verifies resources. Later launches use installed files without repeatedly extracting the entire runtime.
@@ -48,7 +57,7 @@ Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows
 
 **Desktop:** the first launch defaults to taskbar mode. Settings and the tray switch between taskbar and island, choose the edge, and select left, center, or right island positioning. Choices survive restarts; an unavailable saved display falls back to the primary. Reduced motion uses a short fade.
 
-**Plugins and models:** sign in to GitHub and verify your star on the main repository under **Plugins**. Paste the automatically copied device code in the browser and confirm; Dock polls for completion. New plugins are enabled after installation. Configure credentials and start services as needed. Use the endpoint actually shown by each plugin, for example:
+**Plugins and models:** sign in to GitHub and verify your star on the main repository under **Plugins**. The in-window prompt shows the code and actual copy result. Paste it in the browser and confirm; Dock polls for completion. Temporary pinning can be released without cancelling sign-in. New plugins are enabled after installation. Configure credentials and start services as needed. Use the endpoint actually shown by each plugin, for example:
 
 ```text
 http://127.0.0.1:18901/v1
@@ -69,9 +78,9 @@ Management stays local. Transport uses HTTP and is intended only for trusted net
 
 The OFM **Service Settings → OFM Migration Backup** creates an OFM-only ZIP, excluding mail and usage statistics. It is unencrypted and may contain the local API Key, LAN Key, provider credentials, and EAC authorization.
 
-For a full move, use **General → Identity and backups**. The full ZIP includes OFM accounts, settings, usage and token ledger, plus mail accounts and passwords. Mail passwords are encrypted at rest with the current Windows user's DPAPI; the exported ZIP is plaintext. Its default folder comes from the system Downloads location, can be edited, and can be changed again in the save dialog. Handle it like a password file; do not upload or share it.
+For a complete move, use **General → FISH Dock configuration and backups**. The ZIP includes host settings, layouts, extension registration and persistent namespace configuration, credentials, rosters and keys. It excludes caches, temporary files, program packages and old backups. The default export folder is `host/exports` in the configuration repository. Exported secrets are plaintext and are re-encrypted locally on restore; handle the archive like a password file.
 
-Exit standalone OFM but keep FISH Dock open for import. The app pauses its own model service and mail sync. Review the preview and confirm again. A full archive replaces allowlisted OFM and mail files and keeps a pre-import copy; an older OFM-only archive changes OFM only and leaves mail untouched. The app attempts rollback after activation failure. Existing `%USERPROFILE%\.dsh-fish` data is copied to `%USERPROFILE%\.fish-dock` and the old folder remains; an existing new folder is authoritative and is not merged. The archive supplies a fixed `README.md`.
+Exit standalone OFM but keep FISH Dock open for import. The app pauses its own model service and mail sync. Review the preview and confirm again. A whole-configuration archive restores the previewed scope and keeps a pre-import copy. Legacy backups keep their original scope; import old OFM material through the corresponding plugin migration entry. The app attempts rollback after activation failure. Existing `%USERPROFILE%\.dsh-fish` data is copied to `%USERPROFILE%\.fish-dock` and the old folder remains; an existing new folder is authoritative and is not merged. The archive supplies a fixed `README.md`.
 
 ## Data and Uninstallation
 
@@ -103,13 +112,13 @@ FISH-Dock/
 From the desktop directory; the host build no longer needs the old OFM snapshot:
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <runtime-cache> --out <new-resource-directory> --version 1.1.0
+node scripts/prepare-installer.mjs --downloads <runtime-cache> --out <new-resource-directory> --version 1.2.0
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <prepared-directory> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
 ```
 
-Pinned versions and digests are in [runtime-sources.json](scripts/runtime-sources.json). Actual tests, environment limits, and historical artifacts are in the [build record](docs/installer-build.md). The installer includes neither model weights nor the development toolchain.
+Pinned versions and digests are in [runtime-sources.json](scripts/runtime-sources.json). Actual tests, environment limits, and historical artifacts are in the [build record](docs/installer-build.md). The installer includes no model weights or Rust/MSVC environment for building Dock. It does include the LLVM-MinGW compiler used by Windhawk mods.
 
 ## Sources and Credits
 
@@ -124,4 +133,4 @@ The application uses the user's original blue-haired character icon, not redrawn
 
 ## Feedback and Security
 
-Report Windows and application versions, docking mode, reproduction steps, and redacted logs through [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues). Never upload usable keys, full Cookies, private mail, or backup ZIPs, including in vulnerability reports. The installer and checksum file are available in the linked v1.1.0 Release.
+Report Windows and application versions, docking mode, reproduction steps, and redacted logs through [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues). Never upload usable keys, full Cookies, private mail, or backup ZIPs, including in vulnerability reports. The 1.2.0 full installer, compact update package and checksums are available in the linked release.

@@ -6,27 +6,42 @@
 </p>
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark.png"><img src="assets/readme/hero-en-light.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="Wakuwaku/docs/release-1.1.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" width="23%" alt="Current version v1.1.0"></picture></a>
+<a href="Wakuwaku/docs/release-1.2.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" width="23%" alt="Current version v1.2.0"></picture></a>
 <a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
 <a href="#data-and-development"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark.png"><img src="assets/readme/stat-channels-zh-light.png" width="23%" alt="Four independent official plugins"></picture></a>
 </p>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="Wakuwaku/docs/release-1.1.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
+<a href="Wakuwaku/docs/release-1.2.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark.png"><img src="assets/readme/key-issues-en-light.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
 
-**1.1.0 · Windows 10/11 x64** — a desktop workspace for Agent sessions, notifications, mail and independent plugins.
+**1.2.0 · Windows 10/11 x64** — a desktop workspace for Agent sessions, notifications, mail and independent plugins.
 
-[Download](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.1.0) · [中文](README.md) · [Official plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) · [Release notes](Wakuwaku/docs/release-1.1.0.md)
+[Download](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0) · [中文](README.md) · [Official plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) · [Release notes](Wakuwaku/docs/release-1.2.0.md)
+
+**FISH Dock 1.2.0** ships as a full installer and a compact update package. Both include the GitHub sign-in persistence fix. Download them and the checksums from [v1.2.0](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0). This version adds transactional installation, verification reuse, whole-configuration backups and compact, dismissible sign-in dialogs.
 
 ## Install
 
-Download `FISH-Dock-Setup-1.1.0.exe` and verify it with `SHA256SUMS.txt` from the same release. Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0, Fixed Version WebView2 155.0.4283.62, and Windhawk 1.7.3 with its LLVM-MinGW compiler. A separate Windhawk installation is unnecessary. The installer is currently unsigned.
+Choose the package for the published version and verify it with `SHA256SUMS.txt` from that same release.
+
+| Package | When to use it |
+| --- | --- |
+| `FISH-Dock-Setup-1.2.0.exe` | First installation, missing runtimes or repair; includes the complete offline runtime. |
+| `FISH-Dock-Update-1.2.0.exe` | An existing 1.1.0 installation with intact base resources; contains changed files and prompts for the full installer if required resources are missing or damaged. |
+
+ Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0, Fixed Version WebView2 155.0.4283.62, and Windhawk 1.7.3 with its LLVM-MinGW compiler. A separate Windhawk installation is unnecessary. The installer is currently unsigned.
 
 ## Changes
+
+- GitHub device-flow refresh credentials are encrypted and renewed automatically. Temporary network errors keep the saved session; Star revalidation is distinct from signing out. Legacy sessions without saved refresh credentials require one new sign-in.
+
+- Installer transactions remove only verified obsolete owned files. Unchanged installed resources reuse verification records; changed files and cross-volume copies are checked.
+- Whole-configuration backup includes host settings, layouts, extension registration and persistent namespace configuration and secrets. Preview, before-copies and rollback protect restores.
+- Device-code prompts are smaller, scroll internally and no longer use heavy shadows or a full-window dim backdrop. Temporary sign-in pinning can be released manually; the island position is restored.
 
 - OFM, Feishu, Clash and Magpie are independent plugins. Use Settings → Plugins to sign in to GitHub and verify your star on the main FISH Dock repository. Official installation actions and feature pages become available after both checks. Installed plugins are enabled automatically; service credentials still require configuration. The desktop installer does not preinstall business plugins.
 - Plugin manifests, resources, platform and storage identity are validated. Failed updates restore the previous version and data.
@@ -40,7 +55,7 @@ Download `FISH-Dock-Setup-1.1.0.exe` and verify it with `SHA256SUMS.txt` from th
 
 ## Data and development
 
-The complete data root is resolved from `--data-root`, then `FISH_DOCK_HOME`, then `.fish-dock` under the current user profile. The host uses `host`; official plugins use separate `.fishplugin-*` namespaces. Disabling or uninstalling a plugin preserves its data. Backups can contain account secrets.
+The complete data root is resolved from `--data-root`, then `FISH_DOCK_HOME`, then `.fish-dock` under the current user profile. The host uses `host`; official plugins use separate `.fishplugin-*` namespaces. Disabling or uninstalling a plugin preserves its data. Use **General → FISH Dock configuration and backups** for a whole-configuration archive; the default export folder is `host/exports`. Caches, temporary files, downloadable program packages and old backups are excluded. Exported ZIPs contain plaintext secrets.
 
 The desktop host, SDK, installer and Windhawk integration belong in this repository. Plugin business code and distribution belong in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Service startup is on demand. Model requests still use the selected upstream provider and its own accounts and quotas.
 
