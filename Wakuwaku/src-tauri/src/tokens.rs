@@ -49,6 +49,13 @@ pub struct Tokens {
     // Antigravity's steps counted, per transcript.
     agy_steps: HashMap<PathBuf, HashSet<u64>>,
     agy: Count,
+    // ZCode's and OpenCode's own bills (their SQLite records, read whole on
+    // each look: no offset to keep).
+    zcode: Count,
+    opencode: Count,
+    // DeepSeek Harness's: the usage each answer of the model's carries in its
+    // session log (a compressed stream: read whole, as the two above).
+    dsh: Count,
 }
 
 // "2026-10-09T07:25:43.995Z" in ms since 1970.
@@ -147,6 +154,18 @@ impl Tokens {
                 }
             }
         }
+        // Their own bills, read whole each time: their records are not written
+        // in a shape that can be followed from where the last look stopped.
+        // (The tests' own: no bill of this computer's is read under them.)
+        if !cfg!(test) {
+            if let Some(db) = zcode_db() {
+                self.zcode = zcode_bill(&db, day_start).unwrap_or_default();
+            }
+            if let Some(db) = opencode_db() {
+                self.opencode = opencode_bill(&db, day_start).unwrap_or_default();
+            }
+            self.dsh = dsh_bill(day_start);
+        }
     }
 
     fn claude_line(&mut self, line: &str) {
@@ -214,7 +233,26 @@ impl Tokens {
                 sum.output += today.output.saturating_sub(s.before.output);
             }
         }
+        sum.total += self.zcode.total + self.opencode.total + self.dsh.total;
+        sum.output += self.zcode.output + self.opencode.output + self.dsh.output;
         sum
+    }
+
+    // Each agent's own bill today, by its id (widgets.rs brand names it): the
+    // three read from their session records, and the two that keep their own
+    // (ZCode, OpenCode). Only those with anything spent, the most first.
+    pub fn by_agent(&self) -> Vec<(&'static str, Count)> {
+        let mut codex = Count::default();
+        for s in self.codex.values() {
+            if let Some(today) = s.today {
+                codex.total += today.total.saturating_sub(s.before.total);
+                codex.output += today.output.saturating_sub(s.before.output);
+            }
+        }
+        let mut all = vec![("claude", self.claude), ("codex", codex), ("agy", self.agy), ("zcode", self.zcode), ("opencode", self.opencode), ("dsh", self.dsh)];
+        all.retain(|(_, c)| c.total > 0 || c.output > 0);
+        all.sort_by(|a, b| b.1.total.cmp(&a.1.total).then(a.0.cmp(b.0)));
+        all
     }
 }
 
@@ -232,8 +270,145 @@ fn trim(x: f64) -> String {
     if x >= 100.0 { format!("{x:.0}") } else { format!("{x:.1}").trim_end_matches(".0").to_string() }
 }
 
-pub fn words(c: Count) -> Value {
-    json!({ "key": "widget.tokensValue", "vars": { "total": short(c.total), "output": short(c.output) } })
+pub fn words(t: &Tokens) -> Value {
+    let c = t.count();
+    // Beside the sum, each agent's own: the island's token widget swipes
+    // between them (wcards.js). Beside vars, not in them: a var the pages
+    // render in her words, and an agent is no words.
+    let agents: Vec<Value> = t.by_agent().into_iter().map(|(id, c)| json!({ "id": id, "who": crate::widgets::brand(id).unwrap_or(id), "total": short(c.total), "output": short(c.output) })).collect();
+    json!({ "key": "widget.tokensValue", "vars": { "total": short(c.total), "output": short(c.output) }, "agents": agents })
+}
+
+// ZCode's own record of what it spent: one row per model request, in its
+// SQLite database (~/.zcode/cli/db/db.sqlite, table model_usage). Its agent
+// column names the one that asked (zcode-agent, zcode-Explore, ...): all of
+// them are ZCode's. status says whether the request ended ('completed'); the
+// ones still running, cancelled or failed spent nothing that counts. Its
+// input_tokens already take in what was read from the cache (unlike Claude
+// Code's own count, nothing is added here for it).
+// Its schema carries no version of its own: a field it renames ends the
+// reading (no bill at all) rather than a wrong one.
+fn zcode_bill(db: &Path, day_start: u64) -> Option<Count> {
+    let db = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let mut stmt = db.prepare("SELECT SUM(input_tokens), SUM(output_tokens) FROM model_usage WHERE started_at >= ?1 AND status = 'completed'").ok()?;
+    let (input, output): (i64, i64) = stmt.query_row([day_start as i64], |r| Ok((r.get(0)?, r.get(1)?))).ok()?;
+    Some(Count { total: (input.max(0) + output.max(0)) as u64, output: output.max(0) as u64 })
+}
+
+// OpenCode's own record: each message's data carries its tokens (input,
+// output, reasoning, the cache's) as the step's own use, in its SQLite
+// database (~/.local/share/opencode/opencode.db, table message). Its input
+// already takes in what was read from the cache.
+fn opencode_bill(db: &Path, day_start: u64) -> Option<Count> {
+    let db = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let mut stmt = db
+        .prepare("SELECT SUM(COALESCE(json_extract(data, '$.tokens.input'), 0)), SUM(COALESCE(json_extract(data, '$.tokens.output'), 0)) FROM message WHERE time_created >= ?1")
+        .ok()?;
+    let (input, output): (i64, i64) = stmt.query_row([day_start as i64], |r| Ok((r.get(0)?, r.get(1)?))).ok()?;
+    Some(Count { total: (input.max(0) + output.max(0)) as u64, output: output.max(0) as u64 })
+}
+
+// DeepSeek Harness's own record: each answer of its model's carries a usage
+// (inputTokens, outputTokens, cacheReadTokens) in its session log, one line
+// an event of its own (~/.dsh/sessions, or DSH_HOME; events_dsh.rs's own
+// reading of the log). The log is a Zstandard stream (session.v4.jsonl.zstd),
+// so it is read whole rather than followed from an offset, and only the logs
+// written since midnight are opened at all.
+// Its inputTokens already takes in what was read from the cache (unlike
+// Claude Code's count, nothing is added for it here).
+fn dsh_bill(day_start: u64) -> Count {
+    let home = crate::connection::dsh_home();
+    let mut files = Vec::new();
+    // Its logs are two folders deep (sessions/<project>/<session>/), and one
+    // more for a subagent's own folder.
+    dsh_written_since(&home.join("sessions"), day_start, 3, &mut files);
+    let mut sum = Count::default();
+    for path in files {
+        let Some(text) = dsh_text(&path) else { continue };
+        for line in text.lines() {
+            if !line.contains("\"usage\"") || !line.contains("\"assistant/message\"") {
+                continue;
+            }
+            let Ok(e) = serde_json::from_str::<Value>(line) else { continue };
+            if at_of(&e) < Some(day_start) {
+                continue;
+            }
+            let usage = &e["data"]["usage"];
+            let n = |k: &str| usage[k].as_u64().unwrap_or(0);
+            let output = n("outputTokens");
+            sum.total += n("inputTokens") + n("cacheReadTokens") + output;
+            sum.output += output;
+        }
+    }
+    sum
+}
+
+// When one of its events was written, in ms since 1970 (its `time` is that
+// already).
+fn at_of(e: &Value) -> Option<u64> {
+    e["time"].as_u64()
+}
+
+// Its logs written to since a moment, in any depth of its sessions folders.
+fn dsh_written_since(dir: &Path, since: u64, depth: u32, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else { continue };
+        let path = entry.path();
+        if kind.is_dir() {
+            if depth > 0 {
+                dsh_written_since(&path, since, depth - 1, out);
+            }
+        } else if path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("session.v")) {
+            let modified = entry.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
+            if modified >= since {
+                out.push(path);
+            }
+        }
+    }
+}
+
+// A whole session log as text, compressed or not. Its log is not one stream
+// but frames appended one after another (events_dsh.rs's own reading),
+// so each is decoded in turn, back to back.
+fn dsh_text(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    if !path.extension().is_some_and(|e| e == "zstd") {
+        return Some(String::from_utf8_lossy(&bytes).into_owned());
+    }
+    let mut out = Vec::new();
+    let mut source = &bytes[..];
+    while !source.is_empty() {
+        let before = source.len();
+        {
+            let mut decoder = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(&mut source, 64 * 1024 * 1024).ok()?;
+            if std::io::Read::read_to_end(&mut decoder, &mut out).is_err() {
+                break;
+            }
+        }
+        // A frame that took nothing (padding, or an unreadable tail) ends it.
+        if source.len() == before || out.len() > MAX_READ as usize {
+            break;
+        }
+    }
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+pub fn zcode_db() -> Option<PathBuf> {
+    let path = crate::connection::zcode_dir().join("cli").join("db").join("db.sqlite");
+    path.is_file().then_some(path)
+}
+
+pub fn opencode_db() -> Option<PathBuf> {
+    let path = std::env::var_os("XDG_DATA_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default().join(".local").join("share")
+        })
+        .join("opencode")
+        .join("opencode.db");
+    path.is_file().then_some(path)
 }
 
 // Where Claude Code and Codex keep their records.
@@ -320,7 +495,110 @@ mod tests {
         // A new day: nothing yet.
         t.update(&dir.join("claude"), &dir.join("codex"), &brains, day + 86_400_000);
         assert_eq!(t.count(), Count::default());
-        assert_eq!(words(Count { total: 1_234_567, output: 85_000 })["vars"], json!({ "total": "1.2M", "output": "85K" }));
+        assert_eq!(words(&Tokens { claude: Count { total: 1_234_567, output: 85_000 }, ..Tokens::default() })["vars"], json!({ "total": "1.2M", "output": "85K" }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ZCode's and OpenCode's bills: their own databases, read whole; the day
+    // is a range of their times, and ZCode's unfinished requests spend nothing.
+    #[test]
+    fn their_own_bills_are_read_per_day_and_per_agent() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-bills-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let day = parse_time("2026-10-09T00:00:00.000Z").unwrap();
+
+        let zcode = dir.join("zcode.sqlite");
+        let db = rusqlite::Connection::open(&zcode).unwrap();
+        db.execute_batch("CREATE TABLE model_usage (agent TEXT, started_at INTEGER, status TEXT, input_tokens INTEGER, output_tokens INTEGER)").unwrap();
+        let row = |agent: &str, at: u64, status: &str, input: u64, output: u64| {
+            db.execute("INSERT INTO model_usage VALUES (?1, ?2, ?3, ?4, ?5)", rusqlite::params![agent, at as i64, status, input as i64, output as i64]).unwrap();
+        };
+        row("zcode-agent", day - 1, "completed", 9_000, 900); // yesterday
+        row("zcode-agent", day, "completed", 1_000, 100);
+        row("zcode-Explore", day, "completed", 2_000, 200);
+        row("zcode-agent", day, "running", 5_000, 500); // not ended: nothing spent
+        row("zcode-agent", day, "error", 4_000, 400);
+        drop(db);
+        assert_eq!(zcode_bill(&zcode, day), Some(Count { total: 3_300, output: 300 }));
+
+        let opencode = dir.join("opencode.sqlite");        let db = rusqlite::Connection::open(&opencode).unwrap();
+        db.execute_batch("CREATE TABLE message (time_created INTEGER, data TEXT)").unwrap();
+        let msg = |at: u64, input: u64, output: u64| {
+            db.execute("INSERT INTO message VALUES (?1, ?2)", rusqlite::params![at as i64, format!(r#"{{"tokens":{{"input":{input},"output":{output}}}}}"#)]).unwrap();
+        };
+        msg(day - 1, 700, 70); // yesterday
+        msg(day, 30, 3);
+        msg(day, 40, 4);
+        drop(db);
+        assert_eq!(opencode_bill(&opencode, day), Some(Count { total: 77, output: 7 }));
+        // Nothing there: no bill, not an error.
+        assert_eq!(zcode_bill(&dir.join("none.sqlite"), day), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // DeepSeek Harness's log: each answer of its model's carries its usage
+    // (inputTokens taking in what was read from the cache), and the day is a
+    // range of its own `time`. Its logs are compressed, so the reading is
+    // whole; written or not, an empty folder is no bill rather than an error.
+    #[test]
+    fn dsh_bills_each_answers_usage() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-dsh-bills-{}", std::process::id()));
+        let log = dir.join("sessions").join("--p--").join("session-1");
+        std::fs::create_dir_all(&log).unwrap();
+        let day = parse_time("2026-10-09T00:00:00.000Z").unwrap();
+        let answer = |at: u64, input: u64, cache: u64, out: u64| format!(r#"{{"type":"assistant/message","time":{at},"data":{{"turn":1,"step":1,"usage":{{"inputTokens":{input},"outputTokens":{out},"cacheReadTokens":{cache}}}}}}}"#);
+        let lines = [
+            answer(day - 1, 9_000, 900, 900),  // yesterday
+            answer(day, 1_000, 100, 50),
+            answer(day + 1, 2_000, 200, 60),
+            // Anything else in the log is no usage of the model's.
+            r#"{"type":"user/message","time":1000,"data":{"text":"hi"}}"#.to_string(),
+        ];
+        std::fs::write(log.join("session.v4.jsonl"), lines.join("\n") + "\n").unwrap();
+        // Every log written since the day, read whole, its own lines counted.
+        let mut files = Vec::new();
+        dsh_written_since(&dir.join("sessions"), day, 3, &mut files);
+        assert_eq!(files.len(), 1, "the session log is found under its project");
+        let text = dsh_text(&files[0]).unwrap();
+        let sum = {
+            let mut sum = Count::default();
+            for line in text.lines() {
+                if !line.contains("\"usage\"") || !line.contains("\"assistant/message\"") {
+                    continue;
+                }
+                let e: Value = serde_json::from_str(line).unwrap();
+                if at_of(&e).is_none_or(|t| t < day) {
+                    continue;
+                }
+                let usage = &e["data"]["usage"];
+                let n = |k: &str| usage[k].as_u64().unwrap_or(0);
+                let output = n("outputTokens");
+                sum.total += n("inputTokens") + n("cacheReadTokens") + output;
+                sum.output += output;
+            }
+            sum
+        };
+        assert_eq!(sum, Count { total: (1_000 + 100 + 50) + (2_000 + 200 + 60), output: 110 });
+        // No such folder at all: nothing found, no panic.
+        let mut none = Vec::new();
+        dsh_written_since(&dir.join("gone"), day, 3, &mut none);
+        assert!(none.is_empty());
+
+        // Its compressed logs are not one stream but frames appended one
+        // after another: every one of them is read, not just the first (the
+        // bug this pins: the first frame alone was all that came back).
+        let frames: Vec<Vec<u8>> = lines
+            .chunks(2)
+            .map(|part| ruzstd::encoding::compress_to_vec((part.join("\n") + "\n").as_bytes(), ruzstd::encoding::CompressionLevel::Fastest))
+            .collect();
+        assert_eq!(frames.len(), 2, "two frames, the one after the other");
+        let appended: Vec<u8> = frames.concat();
+        std::fs::write(log.join("session.v4.jsonl.zstd"), &appended).unwrap();
+        let text = dsh_text(&log.join("session.v4.jsonl.zstd")).unwrap();
+        assert_eq!(text.lines().filter(|l| l.contains("assistant/message")).count(), 3, "every frame is read");
+        assert_eq!(text.lines().filter(|l| l.contains("\"usage\"")).count(), 3);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+

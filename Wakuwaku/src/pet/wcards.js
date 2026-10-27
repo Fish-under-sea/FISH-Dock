@@ -101,27 +101,50 @@
   const TITLES = { weather: 'card.weather', monitor: 'card.monitor', today: 'card.today', mail: 'card.mail', pomodoro: 'card.pomodoro', countdown: 'card.countdown' }
   function titleOf(w, ctx) {
     const kind = kindOf(w)
-    // Whose day it is: the agent the card shows (swiped to), else the one
-    // that last worked (widgets.rs: brand of the agent that last worked),
-    // by its brand.
+    // Whose day (or bill) it is: the agent the card shows (swiped to), else
+    // the one that last worked (widgets.rs: brand of the agent that last
+    // worked), by its brand.
     const v = varsOf(w)
-    const who = (kind === 'today' && todayOf(w)?.who) || v.who
+    const who = (kind === 'today' || kind === 'tokens') && shownAgent(w, kind)?.who
     if (kind === 'today' && who) return t(ctx, 'card.todayWho', { who })
+    if (kind === 'tokens' && who) return t(ctx, 'card.tokensWho', { who })
+    if (kind === 'today' && v.who) return t(ctx, 'card.todayWho', { who: v.who })
     if (TITLES[kind]) return t(ctx, TITLES[kind])
     return Widgets.words(ctx.lang, w, ctx.detailed).label || Widgets.words(ctx.lang, w, true).value
   }
 
-  // The today card swipes between the agents that worked today (widgets.rs
-  // words: agents beside its vars, busiest first): the one swiped to, else
-  // the busiest.
-  let todaySel = ''
+  // The today card and the token widget swipe together between the agents
+  // they have something of: one agent shown by both, so a swipe on either
+  // turns both to it (widgets.rs words: agents beside vars, busiest first).
+  // The one swiped to, else the first (the busiest).
+  let selAgent = ''
   let todayAgents = []
-  function todayOf(w) {
+  let tokenAgents = []
+  function agentsOf(w, which) {
     const list = Array.isArray(w?.value?.agents) ? w.value.agents : []
-    if (list.length) todayAgents = list
     if (!list.length) return null
-    if (!list.some(a => a.id === todaySel)) todaySel = list[0].id
-    return list.find(a => a.id === todaySel)
+    if (which === 'tokens') tokenAgents = list
+    else todayAgents = list
+    if (!list.some(a => a.id === selAgent)) selAgent = list[0].id
+    return list.find(a => a.id === selAgent) || null
+  }
+  const todayOf = w => agentsOf(w, 'today')
+  const tokensOf = w => agentsOf(w, 'tokens')
+  // Whose turn it is: the agent the list of that kind shows.
+  const shownAgent = (w, kind) => (kind === 'tokens' ? tokensOf(w) : kind === 'today' ? todayOf(w) : null)
+  // What the tokens widget says of one agent (its agents list), or nothing.
+  function tokenOfAgent(all, id) {
+    const w = (all || []).find(x => x.id === 'tokens')
+    const list = Array.isArray(w?.value?.agents) ? w.value.agents : []
+    return list.find(a => a.id === id) || null
+  }
+  // The tokens widget's sum: only for a widget that lists no agents at all
+  // (an old payload, a script's). An agent missing from a list that has one
+  // spent nothing, and the sum is other agents' money, not its own.
+  function tokenSum(all) {
+    const w = (all || []).find(x => x.id === 'tokens')
+    const list = Array.isArray(w?.value?.agents) ? w.value.agents : []
+    return list.length ? '' : varsOf(w).total
   }
 
   // The turn under way adds to the day's time while it runs (the clock by
@@ -141,24 +164,25 @@
     return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`
   }
 
-  // One agent over, wrapping (a swipe). The id it now shows, or none to
-  // swipe between (one agent, or none).
-  function todayCycle(by) {
-    if (todayAgents.length < 2) return null
-    const at = Math.max(0, todayAgents.findIndex(a => a.id === todaySel))
-    todaySel = todayAgents[(at + by + todayAgents.length) % todayAgents.length].id
-    todayAnim = { from: by > 0 ? 'r' : 'l', at: Date.now() }
-    return todaySel
+  // One agent over, wrapping (a swipe on either widget: both turn to it).
+  // The id it now shows, or none to swipe between (one agent, or none).
+  function cycleAgents(kind, by) {
+    const list = kind === 'tokens' ? tokenAgents : todayAgents
+    if (list.length < 2) return null
+    const at = Math.max(0, list.findIndex(a => a.id === selAgent))
+    selAgent = list[(at + by + list.length) % list.length].id
+    swipeAnim = { from: by > 0 ? 'r' : 'l', at: Date.now() }
+    return selAgent
   }
 
-  // The swipe's trail: for this long after it, the row and its card draw
+  // The swipe's trail: for this long after it, the rows and their cards draw
   // with the class that plays it (the island redraws each second, so the
   // class goes away with the window, the animation played out).
   const SWIPE_MS = 350
-  let todayAnim = null
-  function todayAnimClass() {
-    if (!todayAnim || Date.now() - todayAnim.at > SWIPE_MS) return ''
-    return 'wswipe from-' + todayAnim.from
+  let swipeAnim = null
+  function swipeAnimClass() {
+    if (!swipeAnim || Date.now() - swipeAnim.at > SWIPE_MS) return ''
+    return 'wswipe from-' + swipeAnim.from
   }
   // The monitor's readings by their glyph (widgets.rs: cpu, memory, down, up).
   const partText = (w, icon) => (Widgets.partsOf(w) || []).find(p => p.icon === icon)?.text || ''
@@ -209,8 +233,13 @@
         second: [time, t(ctx, 'card.approved', { n: approved })].filter(Boolean).join(' · '),
       })
     } else if (kind === 'tokens') {
+      // The agent it shows (swiped to): its own bill; the sum while there are
+      // no agents to show (a script's words, or no bill at all yet).
       const v = varsOf(w)
-      Object.assign(out, { value: v.total || said.value, top: `${v.total || said.value} token`, line: v.output ? t(ctx, 'card.output', { n: v.output }) : '', big: v.total || said.value, unit: 'token', say: v.output ? t(ctx, 'card.output', { n: v.output }) : '', second: v.output ? t(ctx, 'card.output', { n: v.output }) : '' })
+      const a = tokensOf(w)
+      const total = a ? a.total : v.total || said.value
+      const output = a ? a.output : v.output
+      Object.assign(out, { value: total, top: `${total} token`, line: output ? t(ctx, 'card.output', { n: output }) : '', big: total, unit: 'token', say: output ? t(ctx, 'card.output', { n: output }) : '', second: output ? t(ctx, 'card.output', { n: output }) : '' })
     } else if (kind === 'stock') {
       const row = rowsOf(w)[0] || {}
       const name = said.label || row.code || ''
@@ -344,7 +373,7 @@
     const b = briefOf(w, ctx)
     const said = Widgets.words(ctx.lang, w, true)
     const kind = kindOf(w)
-    const out = { name: ['weather', 'monitor', 'today', 'pomodoro'].includes(kind) ? titleOf(w, ctx) : render(ctx.lang, w.label), value: said.value, second: b.second }
+    const out = { name: ['weather', 'monitor', 'today', 'tokens', 'pomodoro'].includes(kind) ? titleOf(w, ctx) : render(ctx.lang, w.label), value: said.value, second: b.second }
     if (kind === 'weather') {
       const [city, sky] = String(said.label).split(' · ')
       out.second = [sky, Widgets.detailOf(w).extra, city].filter(Boolean).join(' · ')
@@ -355,7 +384,11 @@
     } else if (kind === 'today') {
       const v = varsOf(w)
       const a = todayOf(w)
-      const tokens = varsOf((ctx.all || []).find(x => x.id === 'tokens')).total
+      // The agent's own bill (the tokens widget's agents), not the day's sum:
+      // both widgets swipe to the same one. No bill of its own: nothing said,
+      // never another agent's sum.
+      const own = a && tokenOfAgent(ctx.all, a.id)
+      const tokens = own ? own.total : tokenSum(ctx.all)
       const time = a ? liveTime(ctx, a.workedMs, a.id) : render(ctx.lang, v.time)
       out.value = [t(ctx, 'card.turns', { n: a ? a.turns : (v.turns ?? '') }), time].filter(Boolean).join(' · ')
       out.second = [t(ctx, 'card.approved', { n: a ? a.approvals : (v.approvals ?? '') }), tokens ? `${tokens} token` : ''].filter(Boolean).join(' · ')
@@ -481,14 +514,16 @@
     const a = todayOf(w)
     const d = Widgets.detailOf(w)
     const color = colorOf(w, ctx)
-    const tokens = all.find(x => x.id === 'tokens')
-    const tv = varsOf(tokens)
+    // The agent shown: its own bill, exactly as its row has it; nothing when
+    // it has none (another agent's sum is not its own).
+    const own = a && tokenOfAgent(all, a.id)
+    const tokenTotal = own ? own.total : tokenSum(all)
     const cell = (n, label) => `<span class="cnum"><b>${esc(n)}</b><span>${esc(label)}</span></span>`
-    const anim = todayAnimClass()
+    const anim = swipeAnimClass()
     const time = a ? liveTime(ctx, a.workedMs, a.id) : render(ctx.lang, v.time)
     const turns = (a ? a.turns : v.turns) ?? '—'
     const approved = (a ? a.approvals : v.approvals) ?? '—'
-    const top = `<div class="crow nums${anim ? ` ${anim}` : ''}">${cell(turns, t(ctx, 'card.turnsUnit'))}${cell(time || '—', t(ctx, 'card.worked'))}${cell(approved, t(ctx, 'card.approvals'))}${cell(tv.total || '—', 'token')}</div>`
+    const top = `<div class="crow nums${anim ? ` ${anim}` : ''}">${cell(turns, t(ctx, 'card.turnsUnit'))}${cell(time || '—', t(ctx, 'card.worked'))}${cell(approved, t(ctx, 'card.approvals'))}${cell(tokenTotal || '—', 'token')}</div>`
     const lit = Number.isFinite(ctx.hour) ? ctx.hour : new Date().getHours()
     // The turns by the hour of the agent shown (its own, widgets.rs words),
     // the day's when no agent is to show.
@@ -507,6 +542,29 @@
     return `<div class="cmails">${rows
       .map(r => `<div class="cmail"><b>${priv(w, r.from || '', ctx)}</b><em>${esc(whenOf(r.at, ctx))}</em><span>${priv(w, r.subject || '', ctx)}</span></div>`)
       .join('')}</div>`
+  }
+
+  // The bills of the day, one line each (the agent, what it spent in all, its
+  // answers' part): the one it swipes to is lit. No bill at all: what is not
+  // read greys with "no data", as the today card's unread rows do.
+  function tokensCard(w, ctx, all = []) {
+    const v = varsOf(w)
+    const list = Array.isArray(w?.value?.agents) ? w.value.agents : []
+    if (!list.length) {
+      const said = Widgets.words(ctx.lang, w, true)
+      return `<div class="crow"><span class="cbig sm">${esc(v.total || said.value)}</span><span class="cwords"><b>token</b><span>${esc(v.output ? t(ctx, 'card.output', { n: v.output }) : '')}</span></span></div><div class="clines"><div class="cline off"><span class="cn">${esc(t(ctx, 'card.tokensBy'))}</span>${nodata(ctx)}</div></div>`
+    }
+    const a = tokensOf(w)
+    const color = colorOf(w, ctx)
+    const anim = swipeAnimClass()
+    const rows = list
+      .map(x => {
+        const on = a && x.id === a.id
+        return `<div class="cline${on ? ' on' : ''}"${on ? ` style="--c:${color}"` : ''}><span class="cn">${esc(x.who || x.id)}</span><span class="cv">${esc(x.total)}<span class="cu"> token</span></span><span class="cd">${esc(t(ctx, 'card.output', { n: x.output }))}</span></div>`
+      })
+      .join('')
+    const top = `<div class="crow${anim ? ` ${anim}` : ''}"><span class="cbig sm">${esc((a && a.total) || v.total || '—')}</span><span class="cwords"><b>${esc(t(ctx, 'card.tokensBy'))}</b><span>${esc(a && a.output ? t(ctx, 'card.output', { n: a.output }) : '')}</span></span></div>`
+    return `${top}<div class="clines">${rows}</div>`
   }
 
   // Anyone else's with a large size: its words, its curve, its list.
@@ -536,6 +594,8 @@
         return stockCard(w, ctx, all)
       case 'today':
         return todayCard(w, ctx, all)
+      case 'tokens':
+        return tokensCard(w, ctx, all)
       case 'mail':
         return mailCard(w, ctx)
       default:
@@ -567,7 +627,7 @@
     return `${d.getMonth() + 1}/${d.getDate()}`
   }
 
-  const api = { KINDS, kindOf, colorOf, trendOf, glyphOf, glyphHTML, memberGlyph, titleOf, briefOf, spark, ring, bars, hourSlots, hourBars, faceHTML, emptyFaceHTML, rowHTML, stackRowHTML, hasCard, cardHTML, todayCycle, todayAnimClass, upFor, whenOf, esc }
+  const api = { KINDS, kindOf, colorOf, trendOf, glyphOf, glyphHTML, memberGlyph, titleOf, briefOf, spark, ring, bars, hourSlots, hourBars, faceHTML, emptyFaceHTML, rowHTML, stackRowHTML, hasCard, cardHTML, cycleAgents, swipeAnimClass, upFor, whenOf, esc }
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api

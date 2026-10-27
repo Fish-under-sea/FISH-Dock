@@ -541,7 +541,7 @@ fn today_time(worked_ms: u64) -> Value {
 
 // What each agent is called in her words: its brand, where it has one she
 // knows (DeepSeek Harness is DeepSeek, Codex is GPT), else its own name.
-fn brand(agent: &str) -> Option<&'static str> {
+pub(crate) fn brand(agent: &str) -> Option<&'static str> {
     Some(match agent {
         "dsh" => "DeepSeek",
         "codex" => "GPT",
