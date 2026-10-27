@@ -50,6 +50,11 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 # off). New to the tree: 78,848 bytes of the release exe with the reading
 # of the log (11,452,416 before; 2026-10-16).
 ruzstd = { version = "=0.9.1", default-features = false, features = ["std"] }
+# ZCode's and OpenCode's own records of what they spent (tokens.rs): both keep
+# them in SQLite, which nothing else in the tree reads. Bundled SQLite (its C
+# source built in, no system library). New to the tree: about 1.5 MB of the
+# release exe with the reading of their bills.
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
 
 [dev-dependencies]
 # Her tests make a connection's split fail (server.rs); her builds never have it.
@@ -84,6 +89,9 @@ winreg = "0.56.0"
 # already in the tree, under Tauri.
 webview2-com = "0.39"
 windows-core = "0.62"
+# Her island's window placed and sized in one call (island.rs atomic_lay):
+# its handle, off the window Tauri made; already in the tree, under Tauri.
+raw-window-handle = "0.6"
 windows = { version = "0.62.2", features = ["Foundation", "System", "Win32_System_WinRT"] }
 
 [target."cfg(target_os = \"macos\")".dependencies]

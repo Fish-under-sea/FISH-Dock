@@ -569,10 +569,40 @@ pub fn take_strip_again(sh: &Shared) {
 // made the main one while it sat on the laptop's at 175%, her taskbar came
 // out 1830 x 615 for 2560 x 860, the strip floating up the screen and short
 // of its end, until she was restarted (zhoupengjie/Wakuwaku#37).
+// Its place and its size in one call where that is possible: three calls
+// show the window at its old place with its new size for a frame, and at a
+// top corner (islandPos: the centre or the right) that frame is the island
+// drawn out of its anchor and snapping back — the twitch seen when the
+// settings widen a page, the window's place and its width both changing.
 fn lay(win: &WebviewWindow, (x, y): (i32, i32), (w, h): (i32, i32)) {
+    if atomic_lay(win, x, y, w.max(1), h.max(1)) {
+        return;
+    }
     let _ = win.set_position(PhysicalPosition::new(x, y));
     let _ = win.set_size(PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
     let _ = win.set_position(PhysicalPosition::new(x, y));
+}
+
+// The window's place and size in one call (SetWindowPos), and no frame drawn
+// at the old picture in the new place: false when it cannot be done here.
+#[cfg(windows)]
+fn atomic_lay(win: &WebviewWindow, x: i32, y: i32, w: i32, h: i32) -> bool {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, w: i32, h: i32, flags: u32) -> i32;
+    }
+    const SWP_NOZORDER: u32 = 0x4;
+    const SWP_NOACTIVATE: u32 = 0x10;
+    const SWP_NOOWNERZORDER: u32 = 0x200;
+    const SWP_NOREDRAW: u32 = 0x8;
+    let Ok(handle) = win.window_handle() else { return false };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else { return false };
+    let hwnd = win32.hwnd.get() as isize;
+    // SAFETY: plain Win32 call on a handle the window owns; nothing kept.
+    // Its new place and size in this one call, so no frame is drawn with the
+    // old picture in the new place (the twitch at a corner).
+    unsafe { SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOREDRAW) != 0 }
 }
 
 // Laid again where it is meant to be (a change of scale under it).
