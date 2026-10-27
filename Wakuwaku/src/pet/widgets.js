@@ -100,7 +100,7 @@
   // script's that says none, small and medium (its value over its label:
   // nothing more to show large). One that says it is small alone (a
   // countdown) is small alone, on the taskbar too.
-  const BUILT_SIZES = { monitor: ['s', 'm', 'l'], today: ['s', 'm', 'l'], tokens: ['s', 'm'] }
+  const BUILT_SIZES = { monitor: ['s', 'm', 'l'], today: ['s', 'm', 'l'], tokens: ['s', 'm', 'l'] }
   function sizesOf(w) {
     const said = detailOf(w).sizes
     if (Array.isArray(said) && said.length) return ['s', 'm', 'l'].filter(z => said.includes(z))

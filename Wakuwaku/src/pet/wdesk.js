@@ -201,6 +201,16 @@
     const v = varsOf(w)
     const said = Widgets.words(ctx.lang, w, true)
     const name = render(ctx.lang, w.label) || t(ctx, 'widget.tokens')
+    // The large one: the day's bills, one line each (the same as its card in
+    // the island); the sum while there is none to list.
+    const list = Array.isArray(w?.value?.agents) ? w.value.agents : []
+    if (size === 'l') {
+      const rows = list
+        .slice(0, 8)
+        .map(x => `<div class="row ter" style="justify-content:space-between;margin-top:6px"><span class="n">${esc(x.who || x.id)}</span><span>${esc([`${x.total} token`, x.output ? t(ctx, 'card.output', { n: x.output }) : ''].filter(Boolean).join(' · '))}</span></div>`)
+        .join('')
+      return `${head(w, name, ctx, esc(t(ctx, 'desk.today')))}<div class="grow"></div>${rows || `<div class="ter">${esc(t(ctx, 'taskbar.w.none'))}</div>`}`
+    }
     if (size === 's') return `${head(w, name, ctx)}<div class="grow"></div>${big(v.total || said.value)}<div class="sub" style="margin-top:4px">token</div><div class="ter">${esc(v.output ? t(ctx, 'card.output', { n: v.output }) : '')}</div>`
     const series = detailOf(w).series
     const nums = `<div class="row nums tokens"><div>${big(v.total || said.value, '', series ? 'md' : '')}<div class="ter" style="margin-top:4px">token</div></div><div>${big(v.output || '—', '', series ? 'sm' : 'md')}<div class="ter" style="margin-top:4px">${esc(t(ctx, 'desk.output'))}</div></div></div>`

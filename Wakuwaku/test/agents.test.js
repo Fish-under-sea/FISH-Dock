@@ -94,14 +94,15 @@ test('what she can do is what the code does', () => {
   // Mail: those mail/agent.rs runs.
   const mail = /const NAMES: \[&str; \d\] = \[([^\]]*)\]/.exec(read('src-tauri/src/mail/agent.rs'))[1]
   assert.deepEqual(lit('mail'), [...mail.matchAll(/"(\w+)"/g)].map(m => m[1]).sort())
-  // Today counts every agent; tokens only those tokens.rs reads.
+  // Today counts every agent; tokens those tokens.rs reads.
   assert.deepEqual(lit('stats'), Agents.TABLE.map(a => a.id).sort())
-  // (tokens.rs keeps a count for each agent it reads, by its id.)
+  // (tokens.rs keeps a count for each agent it reads, by its id: the three
+  // from their session records, and ZCode's and OpenCode's own bills.)
   const fields = /pub struct Tokens \{([\s\S]*?)\n\}/.exec(read('src-tauri/src/tokens.rs'))[1]
   const counted = new Set([...fields.matchAll(/\n\s+(\w+): /g)].map(m => m[1]))
-  const withTokens = Agents.TABLE.filter(a => ['ag.cap.stats.tokens', 'ag.cap.stats.agy'].includes(a.caps.stats[1])).map(a => a.id)
+  const withTokens = Agents.TABLE.filter(a => ['ag.cap.stats.tokens', 'ag.cap.stats.agy', 'ag.cap.stats.dsh'].includes(a.caps.stats[1])).map(a => a.id)
   assert.deepEqual(withTokens, Agents.TABLE.filter(a => counted.has(a.id)).map(a => a.id))
-  assert.deepEqual(withTokens, ['claude', 'codex', 'agy'])
+  assert.deepEqual(withTokens, ['claude', 'codex', 'agy', 'opencode', 'zcode', 'dsh'])
 })
 
 test('found here or not', () => {

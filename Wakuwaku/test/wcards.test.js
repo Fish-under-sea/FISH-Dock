@@ -172,8 +172,60 @@ test("today's card: its numbers, the turns by the hour up to now lit, the tokens
   assert.match(card, /每小时的 token<\/span><span class="wnone">暂无数据/)
 })
 
-test('a curve, a ring, bars: each to its own scale', () => {
-  assert.equal(WCards.spark([5], 56, 16, '#fff'), '')
+// The bills by agent: the widget shows the one it swipes to, its card lists
+// them all (the one shown lit), and the today card's token cell is that same
+// agent's bill, not the day's sum.
+test("today's card and the token widget turn to the same agent (its own bill)", () => {
+  const byAgent = [
+    { id: 'claude', who: 'Claude', total: '850K', output: '40K' },
+    { id: 'zcode', who: 'ZCode', total: '60K', output: '12K' },
+    { id: 'codex', who: 'GPT', total: '300K', output: '30K' },
+  ]
+  const tokens = { id: 'tokens', builtIn: true, value: { key: 'widget.tokensValue', vars: { total: '1.2M', output: '85K' }, agents: byAgent }, detail: { sizes: ['s', 'm', 'l'] } }
+  const today = { id: 'today', builtIn: true, value: { key: 'widget.todayValue', vars: { turns: '9', time: '0:40', approvals: '1' }, agents: [{ id: 'claude', who: 'Claude', turns: '5', time: '0:30', workedMs: 1800000, approvals: '1', hours: [] }, { id: 'zcode', who: 'ZCode', turns: '4', time: '0:10', workedMs: 600000, approvals: '0', hours: [] }] }, detail: { sizes: ['s', 'm', 'l'], series: { points: new Array(24).fill(0) } } }
+  const all = [today, tokens]
+  // The busiest first: both widgets start on Claude.
+  assert.equal(WCards.titleOf(tokens, dark), 'Claude 的 token')
+  assert.equal(WCards.titleOf(today, dark), 'Claude 今天')
+  // Its row: the agent's own bill, not the sum over all of them.
+  const row = WCards.rowHTML(tokens, 'M', { ...dark, all })
+  assert.match(row, /850K/)
+  assert.ok(!/1\.2M/.test(row), 'the sum is not the agent it shows')
+  // Its card lists every bill, the one shown lit.
+  const card = WCards.cardHTML(tokens, dark, all)
+  assert.match(card, /Claude.*850K/)
+  assert.match(card, /GPT.*300K/)
+  assert.match(card, /ZCode.*60K/)
+  assert.match(card, /class="cline on"/)
+  // The today card's token cell: Claude's 850K, not the 1.2M sum.
+  const dayCard = WCards.cardHTML(today, dark, all)
+  assert.match(dayCard, /<b>850K<\/b><span>token<\/span>/)
+  assert.ok(!/1\.2M/.test(dayCard))
+  // A swipe on either goes to the same agent (and both follow).
+  assert.equal(WCards.cycleAgents('tokens', 1), 'zcode')
+  assert.equal(WCards.titleOf(tokens, dark), 'ZCode 的 token')
+  assert.equal(WCards.titleOf(today, dark), 'ZCode 今天')
+  assert.match(WCards.cardHTML(today, dark, all), /<b>60K<\/b><span>token<\/span>/)
+  assert.match(WCards.cardHTML(tokens, dark, all), /class="cline on"[\s\S]*?ZCode/)
+  // Back the other way wraps: zcode is second of three, one back is Claude.
+  assert.equal(WCards.cycleAgents('today', -1), 'claude')
+  // No bills for an agent: the sum, as it was (a script's words, old data).
+  const plain = { id: 'tokens', builtIn: true, value: { key: 'widget.tokensValue', vars: { total: '1.7B', output: '3.4M' } } }
+  assert.match(WCards.rowHTML(plain, 'M', { ...dark, all: [plain] }), /1\.7B/)
+  assert.match(WCards.cardHTML(plain, dark, [plain]), /1\.7B/)
+  // An agent that spent nothing (dsh, omp, reasonix: no bill at all) is never
+  // shown another agent's sum as its own: no token figure, the gap left empty.
+  const dshToday = { id: 'today', builtIn: true, value: { key: 'widget.todayValue', vars: { turns: '1', time: '0:06', approvals: '0' }, agents: [{ id: 'dsh', who: 'DeepSeek', turns: '1', time: '0:06', workedMs: 755474, approvals: '0', hours: [] }] }, detail: { sizes: ['s', 'm', 'l'], series: { points: new Array(24).fill(0) } } }
+  const dshRow = WCards.rowHTML(dshToday, 'M', { ...dark, all: [dshToday, tokens] })
+  assert.match(dshRow, /DeepSeek 今天/)
+  assert.ok(!/1\.2M/.test(dshRow), 'never another agent\'s sum')
+  assert.ok(!/850K/.test(dshRow), 'and not the busiest agent\'s bill either')
+  const dshCard = WCards.cardHTML(dshToday, dark, [dshToday, tokens])
+  assert.ok(!/1\.2M/.test(dshCard), 'the today card leaves the token cell empty too')
+  assert.match(dshCard, /<b>—<\/b><span>token<\/span>/)
+})
+
+test('a curve, a ring, bars: each to its own scale', () => {  assert.equal(WCards.spark([5], 56, 16, '#fff'), '')
   const svg = WCards.spark([0, 10], 100, 20, '#fff', { pad: 0, fill: false, dot: false })
   assert.match(svg, /points="0,20 100,0"/)
   // A scale wider than the points (0 to 100 for a share).
