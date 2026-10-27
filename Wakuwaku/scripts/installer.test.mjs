@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { installerScript, resourceDirectories, resourceFiles, scriptSource, REQUIRED } from './installer.mjs'
+import { installerScript, resourceDirectories, resourceFiles, scriptSource, writeOwnershipManifest, REQUIRED, findTool } from './installer.mjs'
 
 import { REQUIRED as RUNTIME_REQUIRED } from './prepare-installer.mjs'
 
@@ -18,7 +18,7 @@ test('安装器与运行资源必需清单一致且不预装业务插件', () =>
   assert.ok(REQUIRED.includes('windhawk/Compiler/bin/clang++.exe'))
 })
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const makensis = process.env.FISH_MAKENSIS || path.resolve(root, '../../.tools/nsis-3.13/makensis.exe')
+const makensis = process.env.FISH_MAKENSIS || findTool('nsis-3.13/makensis.exe')
 
 const LISTED = [...REQUIRED, 'licenses/WebView2-Fixed-Version.html', 'licenses/NOTICE.txt', 'webview2/locales/zh-CN.pak', 'webview2/EBWebView/x.txt']
 
@@ -56,6 +56,7 @@ async function fakeResources() {
 async function script(env, extra = {}) {
   const files = await resourceFiles(env.resources)
   const directories = await resourceDirectories(env.resources)
+  await writeOwnershipManifest(env.app, env.resources, files, path.join(env.dir, 'install-manifest.json'), '0.3.3')
   return { files, directories, text: installerScript({ version: '0.3.3', app: env.app, resources: env.resources, outFile: path.join(env.dir, 'Setup.exe'), files, directories, ...extra }) }
 }
 
@@ -64,7 +65,8 @@ test('资源清单里的每个文件都进安装包，安装到 $INSTDIR\\resour
   try {
     const { files, text } = await script(env)
     assert.match(text, /^Unicode true$/m)
-    assert.match(text, /SetOutPath "\$INSTDIR\\resources"/)
+    assert.match(text, /SetOutPath "\$StageDir\\resources"/)
+    assert.match(text, /install-update\.cjs/)
     assert.match(text, /File \/r "\$\{RESOURCES\}\\\*\.\*"/)
     assert.equal(files.length, env.listed.length)
     for (const name of env.listed) assert.ok(files.includes(name), name)
@@ -97,11 +99,11 @@ test('卸载只删安装器放下的文件，绝不递归删除目录、绝不�
   const env = await fakeResources()
   try {
     const { files, text } = await script(env)
-    assert.doesNotMatch(text, /RMDir \/r/i, '卸载不得递归删目录：用户可能把程序装进别的目录')
-    assert.doesNotMatch(text, /DSH-FISH\\data|DSH-FISH\\webview|\.dsh-fish|\.fish-dock|mail-secrets|channel-credentials|channel-pack/, '账号、密钥、用量、设置与 WebView 数据不在安装目录里，卸载不得提到删除它们')
+    assert.doesNotMatch(text.slice(text.indexOf('Section "Uninstall"')), /RMDir \/r/i, '卸载不得递归删目录：用户可能把程序装进别的目录')
+    assert.doesNotMatch(text.slice(text.indexOf('Section "Uninstall"')), /DSH-FISH\\data|DSH-FISH\\webview|\.dsh-fish|\.fish-dock|mail-secrets|channel-credentials|channel-pack/, '账号、密钥、用量、设置与 WebView 数据不在安装目录里，卸载不得提到删除它们')
     const uninstall = text.slice(text.indexOf('Section "Uninstall"'))
     const inner = [...uninstall.matchAll(/^\s*Delete "(\$INSTDIR\\[^"]+)"/gm)].map(m => m[1].replace(/^\$INSTDIR\\/, '').replace(/\\/g, '/'))
-    const owned = new Set(['DSH-FISH.exe', 'uninstall.exe', ...files.map(name => `resources/${name}`)])
+    const owned = new Set(['DSH-FISH.exe', 'uninstall.exe', 'install-manifest.json', 'install-state.json', 'install-update.cjs', 'install-stop.ps1', ...files.map(name => `resources/${name}`)])
     for (const name of inner) assert.ok(owned.has(name), `卸载删除了安装器没放下的文件：${name}`)
     for (const name of files) assert.ok(inner.includes(`resources/${name}`), `卸载漏掉了：${name}`)
     // 安装目录之外只允许删自己建的两个快捷方式和开始菜单文件夹。

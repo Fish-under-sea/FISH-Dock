@@ -3,8 +3,10 @@
 // 卸载只删除安装器自己放下的文件与快捷方式，绝不递归删目录、绝不碰用户数据
 // （%LOCALAPPDATA%\DSH-FISH 里的账号、设置、用量与 WebView 配置）。
 import fs from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 export const PRODUCT = 'FISH Dock'
@@ -110,7 +112,7 @@ export function scriptSource(text) {
 }
 
 /// 生成 NSIS 脚本。`outFile` 是安装包，`app` 是编译好的主程序，`resources` 是解好的资源目录。
-export function installerScript({ version, app, resources, outFile, files, directories, product = PRODUCT, publisher = PUBLISHER, icon = path.join(root, 'src-tauri/icons/DSH-FISH-Windows.ico'), estimatedBytes = 0 }) {
+export function installerScript({ version, app, resources, outFile, files, directories, product = PRODUCT, publisher = PUBLISHER, icon = path.join(root, 'src-tauri/icons/DSH-FISH-Windows.ico'), estimatedBytes = 0, payloadFiles = null, installManifest = path.join(path.dirname(resources), 'install-manifest.json') }) {
   if (!version) throw new Error('安装包需要产品版本')
   if (!files?.length) throw new Error('安装包需要资源文件清单（resourceFiles）')
   const fileName = path.basename(app)
@@ -119,17 +121,26 @@ export function installerScript({ version, app, resources, outFile, files, direc
   const directoryLines = unmountDirectories(files, directories)
     .map(name => `  RMDir "$INSTDIR\\resources\\${name.replace(/\//g, '\\')}"`)
     .join('\n')
+  const payloadLines = payloadFiles === null ? '  File /r "\${RESOURCES}\\*.*"' : payloadFiles.map(name => {
+    if (!SAFE.test(name) || name.split('/').includes('..')) throw Error('精简载荷路径无效')
+    const folder = path.posix.dirname(name)
+    return '  SetOutPath "$StageDir\\resources' + (folder === '.' ? '' : '\\' + folder.replaceAll('/', '\\')) + '"\n  File "\${RESOURCES}\\' + name.replaceAll('/', '\\') + '"'
+  }).join('\n')
   const kilobytes = Math.max(1, Math.round(estimatedBytes / 1024))
   return `; 由 scripts/installer.mjs 生成，请勿手改。
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
 
 !define PRODUCT ${quote(product)}
 !define VERSION ${quote(version)}
 !define PUBLISHER ${quote(publisher)}
 !define APPFILE ${quote(windowsPath(app))}
 !define RESOURCES ${quote(windowsPath(resources))}
+!define OWNERSHIP ${quote(windowsPath(installManifest))}
+!define UPDATER ${quote(windowsPath(path.join(root, 'scripts/install-update.cjs')))}
+!define STOPPER ${quote(windowsPath(path.join(root, 'scripts/install-stop.ps1')))}
 !define UNINSTALL_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${INSTALL_ID}"
 !define RUN_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 
@@ -138,6 +149,10 @@ OutFile ${quote(windowsPath(outFile))}
 InstallDir "$LOCALAPPDATA\\Programs\\\${PRODUCT}"
 InstallDirRegKey HKCU "\${UNINSTALL_KEY}" "InstallLocation"
 RequestExecutionLevel user
+Var StageSeed
+Var StageName
+Var StageDir
+Var NeedsWebviewAcl
 SetCompressor /SOLID lzma
 SetCompressorDictSize 32
 ShowInstDetails show
@@ -170,22 +185,47 @@ VIAddVersionKey "LegalCopyright" "\${PUBLISHER}"
 
 Section "\${PRODUCT}" SecInstall
   SectionIn RO
-  SetOutPath "$INSTDIR"
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR\\bootstrap"
+  File /oname=node.exe "\${RESOURCES}\\node\\node.exe"
+  CreateDirectory "$INSTDIR"
+  GetTempFileName $StageSeed "$INSTDIR"
+  Delete "$StageSeed"
+  \${GetFileName} "$StageSeed" $StageName
+  StrCpy $StageDir "$INSTDIR\\.fish-dock-stage-$StageName"
+  CreateDirectory "$StageDir"
+  SetOutPath "$StageDir"
   File "\${APPFILE}"
-
-  ; 一次展开：Node、固定版 WebView2、本地模型服务与许可原文都放进安装目录，
-  ; 之后每次启动直接使用这些文件，不再解压。
-  SetOutPath "$INSTDIR\\resources"
-  File /r "\${RESOURCES}\\*.*"
+  File /oname=install-manifest.json "\${OWNERSHIP}"
+  File /oname=install-update.cjs "\${UPDATER}"
+  File /oname=install-stop.ps1 "\${STOPPER}"
+  SetOutPath "$StageDir\\resources"
+${payloadLines}
+  DetailPrint "校验发行文件并事务更新本安装..."
+  nsExec::ExecToLog '"$PLUGINSDIR\\bootstrap\\node.exe" "$StageDir\\install-update.cjs" "$StageDir" "$INSTDIR"'
+  Pop $0
+  \${If} $0 != 0
+    RMDir /r "$StageDir"
+    MessageBox MB_OK|MB_ICONSTOP "更新未完成，旧版本已保留或恢复。请查看安装详情后重试。" /SD IDOK
+    SetErrorLevel 1
+    Abort
+  \${EndIf}
+  StrCpy $NeedsWebviewAcl 0
+  IfFileExists "$StageDir\\webview-acl-needed" 0 +2
+    StrCpy $NeedsWebviewAcl 1
+  SetOutPath "$INSTDIR"
+  RMDir /r "$StageDir"
 
   ; 固定版 WebView2 的沙箱主体只需读取运行时：安装时授权一次（仅这两个 SID、只读、仅本目录），
   ; 日常启动不再递归设置权限。这里失败不阻止安装，但首次启动会再试一次并把失败说清楚：
   ; 没有这份授权，WebView2 建不出界面。
+  \${If} $NeedsWebviewAcl == 1
   DetailPrint "设置内置浏览器运行时权限..."
   nsExec::ExecToLog 'icacls "$INSTDIR\\resources\\webview2" /grant *S-1-15-2-1:(OI)(CI)(RX) *S-1-15-2-2:(OI)(CI)(RX) /T'
   Pop $0
   \${If} $0 != 0
     DetailPrint "内置浏览器运行时授权未成功（$0）：首次启动会再试一次并提示修复方式"
+  \${EndIf}
   \${EndIf}
 
   CreateDirectory "$SMPROGRAMS\\\${PRODUCT}"
@@ -237,6 +277,10 @@ ${directoryLines}
   RMDir "$INSTDIR\\resources"
   Delete "$INSTDIR\\${fileName}"
   Delete "$INSTDIR\\uninstall.exe"
+  Delete "$INSTDIR\\install-manifest.json"
+  Delete "$INSTDIR\\install-state.json"
+  Delete "$INSTDIR\\install-update.cjs"
+  Delete "$INSTDIR\\install-stop.ps1"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "\${UNINSTALL_KEY}"
 
@@ -247,17 +291,39 @@ SectionEnd
 `
 }
 
+export async function writeOwnershipManifest(app, resources, files, output, version) {
+  const inputs = [[path.basename(app), app], ...files.map(name => ['resources/' + name, path.join(resources, name)]),
+    ['install-update.cjs', path.join(root, 'scripts/install-update.cjs')], ['install-stop.ps1', path.join(root, 'scripts/install-stop.ps1')]]
+  const records = []
+  for (const [name, source] of inputs) { const bytes = await fs.readFile(source); records.push({path:name, bytes:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex')}) }
+  const manifest = {schema:1, product:'FISH Dock', version, files:records}
+  await fs.writeFile(output, JSON.stringify(manifest, null, 2))
+  return manifest
+}
+
 /// 一次构建：读资源清单、生成 .nsi、调用 makensis。
-export async function buildInstaller({ version, app, resources, outFile, makensis, product, publisher }) {
+export async function buildInstaller({ version, app, resources, outFile, makensis, product, publisher, baselineManifest }) {
   if (!makensis) throw new Error('需要 makensis（NSIS 3）的路径')
   const files = await resourceFiles(resources)
   const directories = await resourceDirectories(resources)
   const total = (await Promise.all(files.map(name => fs.stat(path.join(resources, name))))).reduce((n, s) => n + s.size, 0)
   const appStat = await fs.stat(app)
   const target = path.resolve(outFile)
+  await fs.mkdir(path.dirname(target), { recursive: true })
+  const installManifest = path.join(path.dirname(target), `install-manifest-${version}.json`)
+  const ownership = await writeOwnershipManifest(app, resources, files, installManifest, version)
+  let payloadFiles = null
+  if (baselineManifest) {
+    const baseline = JSON.parse(await fs.readFile(baselineManifest, 'utf8'))
+    if (baseline.schema !== 1 || baseline.product !== 'FISH Dock' || !Array.isArray(baseline.files)) throw Error('精简更新的基础清单无效')
+    const previous = new Map(baseline.files.map(f => [f.path, f]))
+    ownership.payload = ownership.files.filter(f => { const old = previous.get(f.path); return !old || old.bytes !== f.bytes || old.sha256 !== f.sha256 }).map(f => f.path)
+    payloadFiles = ownership.payload.filter(p => p.startsWith('resources/')).map(p => p.slice(10))
+    await fs.writeFile(installManifest, JSON.stringify(ownership, null, 2))
+  }
   const script = installerScript({
     version, app: path.resolve(app), resources: path.resolve(resources), outFile: target,
-    files, directories, product, publisher, estimatedBytes: total + appStat.size,
+    files, directories, product, publisher, payloadFiles, estimatedBytes: total + appStat.size, installManifest,
   })
   await fs.mkdir(path.dirname(target), { recursive: true })
   const scriptPath = path.join(path.dirname(target), `${path.basename(target, '.exe')}.nsi`)
@@ -269,18 +335,31 @@ export async function buildInstaller({ version, app, resources, outFile, makensi
   return { outFile: target, scriptPath, bytes: built.size, files: files.length }
 }
 
+/// 离线工具（如 NSIS）放在仓库上层的 .tools：逐级向上找，兼容多一层产品目录的检出。
+export function findTool(relative) {
+  let directory = root
+  for (;;) {
+    const candidate = path.join(directory, '.tools', relative)
+    if (existsSync(candidate)) return candidate
+    const parent = path.dirname(directory)
+    if (parent === directory) return path.join(root, '.tools', relative)
+    directory = parent
+  }
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
   const option = name => args[args.indexOf(`--${name}`) + 1]
   const needed = ['app', 'resources', 'version', 'out'].filter(name => !args.includes(`--${name}`))
   if (needed.length) throw new Error(`缺少参数：${needed.map(n => `--${n}`).join(', ')}；用法：node scripts/installer.mjs --app <DSH-FISH.exe> --resources <resources> --version <version> --out <setup.exe> [--makensis <makensis.exe>]`)
-  const makensis = option('makensis') ?? path.resolve(root, '../../.tools/nsis-3.13/makensis.exe')
+  const makensis = option('makensis') ?? process.env.FISH_MAKENSIS ?? findTool('nsis-3.13/makensis.exe')
   const result = await buildInstaller({
     version: option('version'),
     app: path.resolve(option('app')),
     resources: path.resolve(option('resources')),
     outFile: path.resolve(option('out')),
     makensis,
+    baselineManifest: args.includes('--baseline') ? path.resolve(option('baseline')) : undefined,
   })
   console.log(JSON.stringify(result, null, 2))
 }

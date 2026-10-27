@@ -21,7 +21,15 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $app = Split-Path $PSScriptRoot -Parent
+# 工具目录 .tools 与仓库之间可能隔有产品目录：向上找到真正含 .tools 的祖先。
 $workspace = Split-Path (Split-Path $app -Parent) -Parent
+$probe = Split-Path $app -Parent
+while ($probe) {
+    if (Test-Path -LiteralPath (Join-Path $probe '.tools') -PathType Container) { $workspace = $probe; break }
+    $next = Split-Path $probe -Parent
+    if (!$next -or $next -eq $probe) { break }
+    $probe = $next
+}
 if (!$Node) { $Node = Join-Path $workspace '.tools/offline-downloads/node/node-v24.14.0-win-x64/node.exe' }
 if (!(Test-Path -LiteralPath $Node -PathType Leaf)) { $Node = (Get-Command node -ErrorAction Stop).Source }
 if (!$Cargo) { $Cargo = Join-Path $workspace '.tools/cargo/bin/cargo.exe' }
