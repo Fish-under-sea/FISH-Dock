@@ -68,6 +68,7 @@ pub fn snapshot(sh: &Shared) -> Value {
     settings.insert("settingsTop".into(), json!(sh.flag("settingsTop")));
     json!({
         "settings": Value::Object(settings),
+        "authFocusActive": sh.auth_focus_active(),
         "lang": sh.lang(),
         "pets": pets,
         "now": now,
@@ -1076,7 +1077,7 @@ pub async fn settings_crash(app: AppHandle, what: String) -> Value {
 // opens that one's.
 #[tauri::command]
 pub async fn settings_open_site(app: AppHandle, place: String, account: Option<String>) -> Result<Value, String> {
-    let device_code = if place == "githubDevice" { crate::storage_context::current().and_then(|context| crate::github_access::view(context).ok()).and_then(|v| v["pending"]["userCode"].as_str().map(str::to_owned)) } else { None };
+    let device_code = if matches!(place.as_str(), "githubDevice" | "githubCopy") { crate::storage_context::current().and_then(|context| crate::github_access::view(context).ok()).and_then(|v| v["pending"]["userCode"].as_str().map(str::to_owned)) } else { None };
     let code_copied = device_code.as_deref().is_some_and(|code| {
         #[cfg(windows)] {
             use tauri::Manager;
@@ -1084,6 +1085,7 @@ pub async fn settings_open_site(app: AppHandle, place: String, account: Option<S
         }
         #[cfg(not(windows))] { crate::browser::copy_device_code(0, code) }
     });
+    if place == "githubCopy" { return Ok(json!({"codeCopied":code_copied})); }
     let url = site_url(&place, account.as_deref());
     let result = tauri::async_runtime::spawn_blocking(move || crate::browser::open(&url)).await
         .map_err(|_| "浏览器启动任务意外结束".to_string()).and_then(|value| value);

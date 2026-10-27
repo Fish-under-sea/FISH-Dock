@@ -44,7 +44,7 @@ fn choose(owner:isize, directory:Option<&Path>, suggested:Option<&str>) -> Resul
     if let Some(name) = suggested { for (to,c) in file.iter_mut().zip(name.encode_utf16()) { *to=c; } }
     let filter:Vec<u16> = "ZIP 备份 (*.zip)\0*.zip\0\0".encode_utf16().collect();
     let initial:Vec<u16> = directory.map(|p|p.as_os_str().encode_wide().chain(Some(0)).collect()).unwrap_or_default();
-    let title:Vec<u16> = if suggested.is_some() { "保存 FISH Dock 身份 ZIP\0" } else { "选择 FISH Dock / OFM 身份 ZIP\0" }.encode_utf16().collect();
+    let title:Vec<u16> = if suggested.is_some() { "保存 FISH Dock 配置备份 ZIP\0" } else { "选择 FISH Dock 配置备份 / 旧身份 ZIP\0" }.encode_utf16().collect();
     let extension:Vec<u16> = "zip\0".encode_utf16().collect();
     let mut form:OpenFileName = unsafe { std::mem::zeroed() };
     form.size=std::mem::size_of::<OpenFileName>() as u32; form.owner=owner; form.filter=filter.as_ptr(); form.filter_index=1;

@@ -20,23 +20,18 @@ struct Dependencies {node:Option<PathBuf>}
 fn dependencies(context:&Context)->Result<Dependencies,String>{
     context.host.read("config","plugin-dependencies.json")?.map(|bytes|serde_json::from_slice(&bytes).map_err(|_|"插件依赖设置损坏".into())).unwrap_or_else(||Ok(Dependencies::default()))
 }
-pub fn node(context:&Context)->Result<Option<PathBuf>,String>{
-    let config=dependencies(context)?;
-    if config.node.is_some(){return Ok(config.node);}
-    #[cfg(debug_assertions)]
-    if let Some(path)=std::env::var_os("FISH_DOCK_DEV_NODE").map(PathBuf::from){crate::storage::safe(&path)?;if !path.is_absolute()||!path.is_file(){return Err("开发 Node 路径无效".into());}return Ok(Some(path));}
-    #[cfg(feature="installed")]{if let Ok(directory)=crate::runtime::component("node"){let path=directory.join(if cfg!(windows){"node.exe"}else{"node"});if path.is_file(){return Ok(Some(path));}}}
-    Ok(None)
-}
+fn discovery(context:&Context)->Result<crate::plugin_dependencies::Discovery,String>{Ok(crate::plugin_dependencies::discover(dependencies(context)?.node))}
+pub fn node(context:&Context)->Result<Option<PathBuf>,String>{Ok(discovery(context)?.path)}
 fn runtime_config(context:&Context,path:Option<PathBuf>)->Result<(),String>{
-    if let Some(path)=&path {crate::storage::safe(path)?;if !path.is_absolute()||!path.is_file(){return Err("请选择已有的 Node 可执行文件绝对路径".into());}}
+    if let Some(path)=&path {let version=crate::plugin_dependencies::probe(path)?;let selected=crate::plugin_dependencies::select(false,vec![("saved",path.clone())], |_|Ok(version.clone()));if selected.path.is_none(){return Err(selected.candidates.first().and_then(|c|c.error.clone()).unwrap_or_else(||"Node 版本不兼容".into()));}}
     context.host.write("config","plugin-dependencies.json",&serde_json::to_vec(&Dependencies{node:path}).map_err(|_|"插件依赖编码失败")?)
 }
 fn view(context:&Context)->Result<Value,String>{
     let star=crate::github_access::view(context)?;
     let manager=Manager{context};
+    let runtime=discovery(context)?;
     let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
-    Ok(json!({"installed":runner.view(&manager)?,"node":node(context)?,"root":context.root,"star":star}))
+    Ok(json!({"installed":runner.view(&manager)?,"node":runtime.path,"runtime":runtime,"root":context.root,"star":star}))
 }
 #[tauri::command]
 pub async fn extension_view(window:WebviewWindow)->Result<Value,String>{
@@ -67,23 +62,25 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
             "uninstall"=>runner.uninstall(&manager,&id)?,
             _=>return Err("插件管理操作无效".into()),
         }
-        let installed=runner.view(&manager)?;drop(runner);
-        Ok(json!({"installed":installed,"node":node,"root":context.root,"star":crate::github_access::view(context)?}))
+        let _=runner.view(&manager)?;drop(runner);
+        view(context)
     }).await.map_err(|_|"插件管理任务意外结束")?
 }
 #[tauri::command]
 pub async fn extension_auth(window:WebviewWindow,action:String)->Result<Value,String>{
     trusted(&window)?;
     let sh = crate::shared(window.app_handle());
+    if action=="release" { sh.auth_focus(0); return Ok(json!({"released":true})); }
+    if matches!(action.as_str(), "cancel" | "logout") { sh.auth_focus(0); }
     tauri::async_runtime::spawn_blocking(move||{
         let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
-        let result = match action.as_str(){"login"=>crate::github_access::begin(context),"check"=>crate::github_access::check(context),"logout"=>crate::github_access::logout(context),_=>Err("GitHub 登录操作无效".into())};
+        let result = match action.as_str(){"login"=>crate::github_access::begin(context),"check"=>crate::github_access::check(context),"logout"=>crate::github_access::logout(context),"cancel"=>crate::github_access::cancel(context),_=>Err("GitHub 登录操作无效".into())};
         if action == "login" && result.is_ok() {
             let until = result.as_ref().ok().and_then(|v| v["pending"]["expiresAt"].as_u64()).unwrap_or(0);
             sh.auth_focus(until);
-        } else if action == "logout" || action == "check" {
+        } else if action == "logout" || action == "cancel" || action == "check" {
             // Star 尚未点亮也可能已经完成设备登录，此时同样释放临时状态。
-            if action == "logout" || crate::github_access::view(context).is_ok_and(|v| v["pending"].is_null()) { sh.auth_focus(0); }
+            if action == "logout" || action == "cancel" || crate::github_access::view(context).is_ok_and(|v| v["pending"].is_null()) { sh.auth_focus(0); }
         }
         result
     }).await.map_err(|_|"GitHub 登录任务意外结束")?

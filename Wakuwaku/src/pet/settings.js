@@ -89,7 +89,7 @@
   } })
   let confirmActive = null
   const confirmQueue = []
-  const extensionPanel = window.ExtensionPanel.create({ syncAuthFocus: async () => { const revision = openRevision; const got = await window.pet.settings.get(); if (isOpen && revision === openRevision) { snap = got; draw() } }, invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw(), openPage: key => open(key) })
+  const extensionPanel = window.ExtensionPanel.create({ deviceDialog: showDeviceDialog, syncAuthFocus: async () => { const revision = openRevision; const got = await window.pet.settings.get(); if (isOpen && revision === openRevision) { snap = got; draw() } }, invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw(), openPage: key => open(key) })
   const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw() })
   // The crash report shown, as it would be sent (pageCrash).
   let crashShown = false
@@ -194,6 +194,9 @@
     <dialog class="s-confirm-dialog" aria-labelledby="s-confirm-title" aria-describedby="s-confirm-message">
       <h2 id="s-confirm-title">确认操作</h2>
       <p id="s-confirm-message"></p>
+      <strong class="s-device-code mono" data-device-code hidden></strong>
+      <div class="s-confirm-actions s-device-actions" data-device-actions hidden><button type="button" class="pbtn" data-device-copy>再次复制</button><button type="button" class="pbtn" data-device-open>打开 GitHub 验证页</button><button type="button" class="pbtn" data-device-release>解除临时锁定与置顶</button><button type="button" class="pbtn" data-device-cancel>取消验证</button></div>
+      <p class="bad" role="alert" data-device-error hidden></p>
       <div class="s-confirm-actions"><button type="button" class="pbtn" data-confirm-cancel>取消</button><button type="button" class="pbtn al" data-confirm-ok autofocus>确认</button></div>
     </dialog>`
   const head = layer.querySelector('.s-head')
@@ -209,10 +212,16 @@
   function pumpConfirm() {
     if (confirmActive || !confirmQueue.length || !isOpen) return
     confirmActive = confirmQueue.shift()
-    confirmTitle.textContent = lang === 'en' ? 'Confirm action' : '确认操作'
-    confirmOk.textContent = lang === 'en' ? 'Confirm' : '确认'
+    const device = confirmActive.device
+    confirmTitle.textContent = device ? (lang === 'en' ? 'GitHub device verification' : 'GitHub 设备验证') : (lang === 'en' ? 'Confirm action' : '确认操作')
+    confirmOk.textContent = device ? (lang === 'en' ? 'Got it' : '我知道了') : (lang === 'en' ? 'Confirm' : '确认')
+    confirmCancel.hidden = !!device
     confirmCancel.textContent = lang === 'en' ? 'Cancel' : '取消'
     confirmMessage.textContent = confirmActive.message
+    confirmDialog.querySelector('[data-device-code]').textContent = device?.userCode || ''
+    confirmDialog.querySelector('[data-device-code]').hidden = !device
+    confirmDialog.querySelector('[data-device-actions]').hidden = !device
+    confirmDialog.querySelector('[data-device-error]').hidden = true
     confirmDialog.showModal()
     confirmOk.focus()
   }
@@ -233,6 +242,42 @@
       pumpConfirm()
     })
   }
+  function showDeviceDialog(device) {
+    for (let i = confirmQueue.length - 1; i >= 0; i--) {
+      if (confirmQueue[i].device) confirmQueue.splice(i, 1)[0].resolve(false)
+    }
+    if (confirmActive?.device) finishConfirm(false)
+    if (!device || !isOpen) return
+    const copied = device.copied
+    const message = lang === 'en'
+      ? (copied ? 'Verification code copied. Paste it on GitHub and confirm. ' : 'Copy or enter the code below on GitHub. ') + 'You can release the temporary window lock without cancelling sign-in.'
+      : (copied ? '验证码已复制。请在 GitHub 网页粘贴并确认授权。' : '请复制或输入下方验证码，在 GitHub 网页完成授权。') + '可手动解除临时锁定与置顶，登录验证会继续。'
+    confirmQueue.push({ device, message, resolve() {}, focus: document.activeElement })
+    pumpConfirm()
+  }
+  async function deviceAction(action) {
+    const error = confirmDialog.querySelector('[data-device-error]')
+    const buttons = [...confirmDialog.querySelectorAll('[data-device-actions] button')]
+    buttons.forEach(button => { button.disabled = true })
+    try {
+      if (action === 'copy' || action === 'open') {
+        const result = await window.__TAURI__.core.invoke('settings_open_site', { place: action === 'copy' ? 'githubCopy' : 'githubDevice', account: null })
+        if (confirmActive?.device) showDeviceDialog({ ...confirmActive.device, copied: result?.codeCopied === true })
+        return
+      }
+      await extensionPanel.auth(action)
+      const revision = openRevision, got = await window.pet.settings.get()
+      if (isOpen && revision === openRevision) { snap = got; draw() }
+      await extensionPanel.load(true)
+      if (action === 'cancel') showDeviceDialog(null)
+      else finishConfirm(true)
+    } catch (e) { error.textContent = typeof e === 'string' ? e : e?.message || '操作失败，请重试'; error.hidden = false }
+    finally { buttons.forEach(button => { button.disabled = false }) }
+  }
+  confirmDialog.querySelector('[data-device-copy]').onclick = () => deviceAction('copy')
+  confirmDialog.querySelector('[data-device-open]').onclick = () => deviceAction('open')
+  confirmDialog.querySelector('[data-device-release]').onclick = () => deviceAction('release')
+  confirmDialog.querySelector('[data-device-cancel]').onclick = () => deviceAction('cancel')
   confirmOk.onclick = () => finishConfirm(true)
   confirmCancel.onclick = () => finishConfirm(false)
   confirmDialog.addEventListener('cancel', event => { event.preventDefault(); finishConfirm(false) })
@@ -3065,6 +3110,7 @@
   function close(why = 'asked') {
     if (!isOpen) return
     console.log('settings close:', why)
+    void extensionPanel.closeAuth?.()
     if (confirmActive) finishConfirm(false)
     while (confirmQueue.length) confirmQueue.shift().resolve(false)
     void window.pet.settings.set({ settingsLastTab: tab }).catch(error => console.log('[settings memory]', error))
@@ -3193,6 +3239,7 @@
     const at = selector => e.target.closest(selector)
     // A click anywhere but on it closes the letter menu.
     if (!menuEl.hidden && !at('.mmenu')) closeMenu()
+    if (snap?.authFocusActive && (at('[data-lock]') || at('[data-top]'))) return deviceAction('release')
     if (at('[data-lock]')) return patch(snap.settings.settingsPin ? { settingsPin: false, settingsTop: false } : { settingsPin: true })
     if (at('[data-top]')) return patch(snap.settings.settingsPin && snap.settings.settingsTop ? { settingsTop: false } : { settingsPin: true, settingsTop: true })
     if (at('[data-close]')) {

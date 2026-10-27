@@ -3,12 +3,12 @@ const fs = require('node:fs')
 const vm = require('node:vm')
 const path = require('node:path')
 const { test } = require('node:test')
-function make({ agree = true, offline = false, installed = [], manage, verified = true, authenticated = true, configured = true, bytes = 4096, auth, open, syncAuthFocus = async () => {} } = {}) {
-  const calls = [], window = {}, timers = new Map(); let star = { verified, authenticated, configured }, sequence = 0
+function make({ agree = true, offline = false, installed = [], manage, verified = true, authenticated = true, configured = true, bytes = 4096, auth, open, deviceDialog = () => {}, runtimeInfo = null, syncAuthFocus = async () => {}, initialStar = {} } = {}) {
+  const calls = [], window = {}, timers = new Map(); let star = { verified, authenticated, configured, ...initialStar }, sequence = 0
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/pet/extension-panel.js'), 'utf8'), { window, Date, setTimeout: (fn, ms) => { const id = ++sequence; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id) })
-  const panel = window.ExtensionPanel.create({ syncAuthFocus, lang: () => 'zh', redraw() {}, confirm: () => agree, invoke: async (command, args) => {
+  const panel = window.ExtensionPanel.create({ deviceDialog, syncAuthFocus, lang: () => 'zh', redraw() {}, confirm: () => agree, invoke: async (command, args) => {
     calls.push({ command, args })
-    if (command === 'extension_view') return { installed, star, node: null, root: 'X:/合成/.fish-dock' }
+    if (command === 'extension_view') return { installed, star, runtime: runtimeInfo, node: null, root: 'X:/合成/.fish-dock' }
     if (command === 'extension_auth') { star = auth ? await auth(args) : { verified, authenticated, configured, pending: { userCode: 'TEST-CODE' } }; return star }
     if (command === 'settings_open_site') return open ? open(args) : undefined
     if (command === 'extension_catalog') {
@@ -19,6 +19,41 @@ function make({ agree = true, offline = false, installed = [], manage, verified 
   } })
   return { panel, calls, timers }
 }
+test('已登录但 Star 待复核时保留账号身份并自动检查', async () => {
+  const { panel, calls, timers } = make({ authenticated: true, verified: false, initialStar: { login: 'fixture-user', needsStarCheck: true }, auth: async () => ({ authenticated: true, verified: true, login: 'fixture-user', pending: null }) })
+  await panel.load(); assert.match(panel.render(), /GitHub：fixture-user/); assert.match(panel.render(), /复核/)
+  assert.equal(timers.size, 1); const [id, timer] = [...timers][0]; timers.delete(id); await timer.fn()
+  assert.ok(calls.some(c => c.command === 'extension_auth' && c.args.action === 'check'))
+  assert.match(panel.render(), /主仓 Star 已验证/)
+})
+test('已登录的访问令牌到期时自动续期，不重新打开设备登录', async () => {
+  const { panel, calls, timers } = make({ initialStar: { login: 'fixture-user', needsRefresh: true }, auth: async () => ({ authenticated: true, verified: true, login: 'fixture-user', pending: null }) })
+  await panel.load(); assert.equal(timers.size, 1); const [id, timer] = [...timers][0]; timers.delete(id); await timer.fn()
+  assert.ok(calls.some(c => c.command === 'extension_auth' && c.args.action === 'check'))
+  assert.equal(calls.some(c => c.command === 'settings_open_site'), false)
+})
+test('临时网络失败保留已登录界面，自动复核按退避间隔重试', async () => {
+  const { panel, timers } = make({ initialStar: { login: 'fixture-user', needsRefresh: true }, auth: async () => { throw Error('合成网络超时') } })
+  await panel.load(); assert.equal(timers.size, 1); const [id, timer] = [...timers][0]; timers.delete(id); await timer.fn()
+  assert.match(panel.render(), /GitHub：fixture-user/); assert.match(panel.render(), /登录资料已保留/)
+  assert.ok([...timers.values()].every(t => t.ms >= 59000))
+})
+test('旧版没有续期凭据时准确提示重新登录，关闭面板不退出已保存账号', async () => {
+  const { panel, calls, timers } = make({ authenticated: false, verified: false, initialStar: { login: 'fixture-user', requiresLogin: true } })
+  await panel.load(); assert.match(panel.render(), /需要重新登录/)
+  await panel.closeAuth(); assert.equal(timers.size, 0); assert.equal(calls.some(c => c.command === 'extension_auth' && c.args.action === 'logout'), false)
+})
+test('旧账号无刷新凭据时不在到期前循环复核，关闭后停止计时但不退出', async () => {
+  const { panel, calls, timers } = make({ initialStar: { login: 'fixture-user', expiresAt: Date.now() + 120000, refreshable: false, lastCheckedAt: Date.now() } })
+  await panel.load(); assert.equal(timers.size, 1); assert.ok([...timers.values()][0].ms >= 119000)
+  await panel.closeAuth(); assert.equal(timers.size, 0); assert.equal(calls.some(c => c.command === 'extension_auth'), false)
+  await panel.load(true); assert.equal(timers.size, 1); assert.match(panel.render(), /GitHub：fixture-user/)
+})
+test('明确未 Star 的自动检查显示已登录，不显示断网或退出提示', async () => {
+  const { panel, timers } = make({ verified: false, initialStar: { login: 'fixture-user', needsStarCheck: true }, auth: async () => ({ authenticated: true, verified: false, login: 'fixture-user', needsStarCheck: false, lastCheckedAt: Date.now() }) })
+  await panel.load(); const [id, timer] = [...timers][0]; timers.delete(id); await timer.fn()
+  assert.match(panel.render(), /GitHub：fixture-user/); assert.match(panel.render(), /已登录，请点亮/); assert.doesNotMatch(panel.render(), /暂时连接失败|需要重新登录/)
+})
 test('设备码复制提示以宿主的实际结果为准', async () => {
   for (const copied of [true, false]) {
     const { panel } = make({ authenticated: false, verified: false, open: async () => ({ codeCopied: copied }) })
@@ -96,6 +131,11 @@ test('检查更新入口可见且商店不重复展示已安装卡片', async ()
   assert.equal((html.match(/class="extension-card"/g) || []).length, 1)
   assert.doesNotMatch(html, /<h4>已安装扩展/)
 })
+test('配置恢复后程序包缺失时，同版本也提供重新安装入口', async () => {
+  const { panel } = make({ installed: [{ ...row, packageMissing: true }] }); await panel.load(); await panel.store()
+  assert.match(panel.render(), /重新安装/)
+  assert.match(panel.render(), /data-extension-action="install"/)
+})
 test('本地版本高于目录时保持已安装而不展示降级更新', async () => {
   const newer = { ...row, plugin: { ...row.plugin, manifest: { ...row.plugin.manifest, version: '2.10.0' } } }
   const { panel } = make({ installed: [newer] }); await panel.load(); await panel.store()
@@ -163,7 +203,7 @@ test('官方功能和安装入口同时要求登录和 Star，缺一即隐藏', 
   }
 })
 async function mountAuth(panel) {
-  const buttons = Object.fromEntries(['login','check','logout'].map(action=>[action,{dataset:{extensionAuth:action}}]))
+  const buttons = Object.fromEntries(['login','check','logout','release','cancel'].map(action=>[action,{dataset:{extensionAuth:action}}]))
   panel.mount({ querySelector:()=>({querySelector:()=>({}),querySelectorAll:selector=>selector==='[data-extension-auth]'?Object.values(buttons):[]}) })
   return buttons
 }
@@ -177,6 +217,36 @@ test('浏览器打开失败保留设备码并在 Dock 内报告，允许重试',
   const { panel } = make({ authenticated:false, verified:false, open:()=>{throw Error('默认浏览器打开失败')} });await panel.load()
   const buttons=await mountAuth(panel);await buttons.login.onclick()
   assert.match(panel.render(),/默认浏览器打开失败/)
+})
+test('登录仅发起一次内部验证码弹窗并传递真实复制状态', async () => {
+  for (const copied of [true, false]) {
+    const requests = []
+    const { panel } = make({ authenticated: false, verified: false, open: async () => ({ codeCopied: copied }), deviceDialog: request => requests.push(request) })
+    await panel.load(); const buttons = await mountAuth(panel); await buttons.login.onclick()
+    assert.equal(requests.length, 1); assert.equal(requests[0].userCode, 'TEST-CODE'); assert.equal(requests[0].copied, copied)
+    assert.match(panel.render(), /data-extension-auth="release"/)
+    await panel.load(true); assert.equal(requests.length, 1)
+  }
+})
+test('手动解除临时状态保留验证，取消验证清理提示且停止轮询', async () => {
+  const dialogs = [], pending = { userCode: 'ABCD-EFGH', interval: 5, expiresAt: Date.now() + 900000 }
+  const { panel, calls, timers } = make({ authenticated: false, verified: false, deviceDialog: value => dialogs.push(value), auth: async ({ action }) => ({ authenticated: false, verified: false, pending: action === 'cancel' ? null : pending }) })
+  await panel.load(); const buttons = await mountAuth(panel); await buttons.login.onclick()
+  await buttons.release.onclick(); assert.equal(timers.size, 1); assert.match(panel.render(), /ABCD-EFGH/)
+  await buttons.cancel.onclick(); assert.equal(timers.size, 0); assert.equal(dialogs.at(-1), null)
+  assert.ok(calls.some(c => c.command === 'extension_auth' && c.args.action === 'release'))
+  assert.doesNotMatch(panel.render(), /ABCD-EFGH/)
+})
+test('重新打开设备页面使用实际复制状态并再次展示内部提示', async () => {
+  const dialogs = [], { panel } = make({ authenticated: false, verified: false, open: async () => ({ codeCopied: true }), deviceDialog: value => dialogs.push(value) })
+  await panel.load(); const buttons = await mountAuth(panel); await buttons.login.onclick()
+  const site = { dataset: { extensionSite: 'githubDevice' } }
+  panel.mount({ querySelector: () => ({ querySelector: () => ({}), querySelectorAll: selector => selector === '[data-extension-site]' ? [site] : [] }) })
+  await site.onclick(); assert.equal(dialogs.length, 2); assert.equal(dialogs[1].copied, true)
+})
+test('依赖来源和版本可见且开发版不声称宿主已提供', async () => {
+  const { panel } = make({ runtimeInfo: { installed: false, source: 'path', path: 'D:/中文 Node/node.exe', version: 'v24.13.0', candidates: [], warning: null } })
+  await panel.load(); const html = panel.render(); assert.match(html, /系统 PATH/); assert.match(html, /v24\.13\.0/); assert.match(html, /开发构建/)
 })
 test('缓存说明与作者维护者可见，商店名称不会变成标记', async () => {
   const { panel } = make(); await panel.load(); await panel.store()

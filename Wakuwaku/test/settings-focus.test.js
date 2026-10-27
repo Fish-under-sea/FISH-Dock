@@ -4,6 +4,16 @@ const path = require('node:path')
 const vm = require('node:vm')
 const { test } = require('node:test')
 
+const styles = fs.readFileSync(path.join(__dirname, '../src/pet/settings.css'), 'utf8')
+test('确认弹窗尺寸紧凑，遮罩不把整个 Dock 背景压暗', () => {
+  for (const selector of ['s-confirm-dialog', 's-fullscreen-dialog']) {
+    const rule = styles.match(new RegExp(`#island-settings \\.${selector} \\{([^}]+)\\}`))?.[1] || ''
+    assert.match(rule, /width:\s*min\(360px, calc\(100vw - 40px\)\)/)
+    assert.match(rule, /max-height:\s*min\(70vh, calc\(100vh - 32px\)\)/)
+    assert.match(rule, /box-shadow:\s*none/)
+    assert.match(styles, new RegExp(`#island-settings \\.${selector}::backdrop \\{ background: transparent; \\}`))
+  }
+})
 test('设置键盘处理不依赖已移除的全屏弹窗变量', () => {
   const handler = source.slice(source.indexOf("  document.addEventListener('keydown'"), source.indexOf('  window.pet.onIdentityChanged'))
   const listeners = []

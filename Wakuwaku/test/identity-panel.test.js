@@ -19,6 +19,14 @@ function make(confirm = () => true) {
   })
   return { panel, calls }
 }
+test('备份界面说明整个配置仓及实际默认导出位置', async () => {
+  const { panel } = make(); await panel.load(); const html = panel.render()
+  assert.match(html, /FISH Dock 配置与备份/)
+  assert.match(html, /宿主设置.*插件.*配置/)
+  assert.match(html, /导出配置备份 ZIP/)
+  assert.match(html, /exports/)
+  assert.doesNotMatch(html, /首次使用系统「下载」目录|统一保存 OFM/)
+})
 test('预览不会提交，并清楚说明旧 OFM 包保留邮件身份', async () => {
   const { panel, calls } = make()
   await panel.load()

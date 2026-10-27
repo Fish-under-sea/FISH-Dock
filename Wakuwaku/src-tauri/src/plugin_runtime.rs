@@ -13,7 +13,8 @@ impl Runner {
             let id=&installed.manifest.id;
             let running=self.processes.get_mut(id).is_some_and(Process::running);
             if !running && self.processes.remove(id).is_some(){self.failures.insert(id.clone(),"插件进程已退出，请检查配置后重新启用".into());}
-            rows.push(json!({"plugin":installed,"running":running,"error":self.failures.get(id)}));
+            let package_missing=!manager.directory(&installed)?.join("plugin.json").is_file();
+            rows.push(json!({"plugin":installed,"running":running,"packageMissing":package_missing,"error":if package_missing {Some("插件程序包缺失，请在官方商店重新安装；原配置已保留")}else{self.failures.get(id).map(String::as_str)}}));
         }
         Ok(json!(rows))
     }
@@ -55,7 +56,6 @@ impl Runner {
         let id=package.manifest.id.clone();
         let old=manager.list()?.into_iter().find(|row|row.manifest.id==id);
         let backup=if let Some(row)=&old {
-            manager.verify(row)?;
             let ns=manager.namespace(row)?;
             let categories=["credentials","roster","keys","config"].map(String::from);
             let bytes=crate::storage_archive::export(&ns,&categories)?;
@@ -83,15 +83,10 @@ impl Runner {
         }
     }
     fn restore_previous(&mut self,manager:&Manager<'_>,row:&Installed,backup:Option<&[u8]>,node:Option<&Path>)->Result<(),String>{
-        manager.verify(row)?;let directory=manager.directory(row)?;
-        let mut files=BTreeMap::new();
-        for name in row.manifest.files.keys().map(String::as_str).chain(std::iter::once("plugin.json")) {
-            let path=crate::plugin_manifest::package_path(&directory,name)?;
-            files.insert(name.into(),crate::plugin_package::read(&path)?.ok_or("旧版资源缺失")?);
-        }
-        manager.install(Package{manifest:row.manifest.clone(),files},&row.digest,row.official)?;
+        let available=manager.verify(row).is_ok();
+        manager.restore_registration(row)?;
         if let Some(bytes)=backup {let ns=manager.namespace(row)?;let changes=crate::storage_archive::inspect(&ns,bytes)?;if !changes.is_empty(){crate::storage_transaction::apply(&ns,changes)?;}}
-        if row.enabled {let process=Process::start(manager,row,node)?;self.processes.insert(row.manifest.id.clone(),process);}
+        if row.enabled && available {let process=Process::start(manager,row,node)?;self.processes.insert(row.manifest.id.clone(),process);}
         Ok(())
     }
     pub fn event(&mut self,params:Value){

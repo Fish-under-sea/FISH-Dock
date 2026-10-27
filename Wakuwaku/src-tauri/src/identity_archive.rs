@@ -179,7 +179,10 @@ pub(crate) fn unzip_limits(bytes:&[u8],allowed:impl Fn(&str)->bool,limit:usize,f
     Ok(files)
 }
 pub(crate) fn zip(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>, String> {
-    if files.len() > 128 || files.values().any(|b| b.len() > FILE_LIMIT) || files.values().map(Vec::len).sum::<usize>() > LIMIT - 65536 { return Err("完整身份备份超过大小限制".into()); }
+    zip_limits(files, LIMIT, FILE_LIMIT, 128)
+}
+pub(crate) fn zip_limits(files: &BTreeMap<String, Vec<u8>>, limit: usize, file_limit: usize, entries: usize) -> Result<Vec<u8>, String> {
+    if files.len() > entries || files.len() > u16::MAX as usize || files.values().any(|b| b.len() > file_limit) || files.values().map(Vec::len).sum::<usize>() > limit.saturating_sub(65536) { return Err("配置备份超过大小限制".into()); }
     let mut out = Vec::new();
     let mut directory = Vec::new();
     for (name, bytes) in files {

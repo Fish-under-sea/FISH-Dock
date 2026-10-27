@@ -8,9 +8,21 @@ const VAULT:&str="github-access.dpapi";
 const API:&str="https://api.github.com";
 // 桌面 Device flow 使用公开 Client ID，不携带 Client Secret；显式配置仍可覆盖。
 const DEFAULT_CLIENT_ID:&str="Ov23lisbBQRqCOm57AC6";
-#[derive(Default,Serialize,Deserialize)]
+#[derive(Default,Clone,Serialize,Deserialize)]
 #[serde(default,deny_unknown_fields)]
-struct Account { token:String, login:String, user_id:u64, star_at:u64, expires_at:u64 }
+struct Account {
+ token:String, refresh_token:String, client_id:String,
+ login:String, user_id:u64, star_at:u64, star_checked_at:u64,
+ expires_at:u64, refresh_expires_at:u64,
+}
+const REFRESH_AHEAD:u64=300_000;
+impl Account {
+ fn access_live(&self,now:u64)->bool{!self.token.is_empty()&&(self.expires_at==0||self.expires_at>now)}
+ fn refresh_live(&self,now:u64)->bool{!self.refresh_token.is_empty()&&self.refresh_expires_at>now}
+ fn session_live(&self,now:u64)->bool{self.access_live(now)||self.refresh_live(now)}
+ fn needs_refresh(&self,now:u64)->bool{self.refresh_live(now)&&self.expires_at>0&&self.expires_at<=now.saturating_add(REFRESH_AHEAD)}
+ fn last_star_check(&self)->u64{self.star_checked_at.max(self.star_at)}
+}
 struct Pending { root:std::path::PathBuf, client:String, code:String, user_code:String, expires_at:u64, next_at:u64, interval:u64 }
 static DEVICE:Mutex<Option<Pending>>=Mutex::new(None);
 static EDIT:Mutex<()>=Mutex::new(());
@@ -37,10 +49,13 @@ fn save(context:&Context,account:&Account)->Result<(),String>{
 }
 fn public(context:&Context,account:&Account)->Result<Value,String>{
  let now=crate::now_ms();
- let live=!account.token.is_empty()&&(account.expires_at==0||account.expires_at>now);
+ let live=account.session_live(now);
+ let last_star_check=account.last_star_check();
+ let needs_star_check=live&&(last_star_check==0||!receipt_valid(last_star_check,now));
+ let requires_login=!live&&(!account.token.is_empty()||!account.login.is_empty());
  let device=DEVICE.lock().map_err(|_|"GitHub 设备登录锁不可用")?;
  let pending=device.as_ref().filter(|p|p.root==context.root&&p.expires_at>now).map(|p|json!({"userCode":p.user_code,"verificationUri":"https://github.com/login/device","expiresAt":p.expires_at,"interval":p.interval/1000}));
- Ok(json!({"configured":client(context)?.is_some(),"authenticated":live,"login":account.login,"verified":live&&account.user_id>0&&receipt_valid(account.star_at,now),"checkedAt":account.star_at,"expiresAt":account.expires_at,"pending":pending}))
+ Ok(json!({"configured":client(context)?.is_some(),"authenticated":live,"login":account.login,"verified":live&&account.user_id>0&&receipt_valid(account.star_at,now),"checkedAt":account.star_at,"lastCheckedAt":last_star_check,"expiresAt":account.expires_at,"needsRefresh":account.needs_refresh(now),"refreshable":account.refresh_live(now),"needsStarCheck":needs_star_check,"requiresLogin":requires_login,"pending":pending}))
 }
 pub fn view(context:&Context)->Result<Value,String>{let _guard=EDIT.lock().map_err(|_|"GitHub 登录锁不可用")?;public(context,&load(context)?)}
 // 固定域名、禁止重定向且限制响应大小，避免认证头随跳转外送。
@@ -93,46 +108,120 @@ fn poll(context:&Context)->Result<Option<Account>,String>{
   Some("slow_down")=>{p.interval=(p.interval+5000).min(120_000);p.next_at=now+p.interval;return Err("GitHub 要求降低检查频率，请稍后重试".into());},
   Some(_)=>{*pending=None;return Err("GitHub 设备授权已结束，请重新登录".into());},None=>{},
  }
- let token=data["access_token"].as_str().filter(|s|!s.is_empty()&&s.len()<=4096&&!s.chars().any(char::is_control)).ok_or("GitHub 未返回有效登录令牌")?.to_owned();
- let expires_at=data["expires_in"].as_u64().map(|seconds|now.saturating_add(seconds.saturating_mul(1000))).unwrap_or(0);
+ let account=token_response(&data,now,&p.client)?;
  *pending=None;
- Ok(Some(Account{token,expires_at,..Account::default()}))
+ Ok(Some(account))
 }
-fn verify(context:&Context,account:&mut Account)->Result<(),String>{
- if account.token.is_empty(){return Err("请先登录 GitHub".into());}
- let(status,bytes)=request(&format!("{API}/user"),Some(&account.token),None)?;
- if status==401{*account=Account::default();save(context,account)?;return Err("GitHub 登录已失效，请重新登录".into());}
+fn token_response(data:&Value,now:u64,client:&str)->Result<Account,String>{
+ fn credential(data:&Value,key:&str)->Result<String,String>{data[key].as_str().filter(|s|!s.is_empty()&&s.len()<=4096&&s.bytes().all(|b|b.is_ascii_graphic())).map(str::to_owned).ok_or_else(||format!("GitHub {key} 字段无效"))}
+ let token=credential(data,"access_token")?;
+ let expires_at=match data.get("expires_in"){Some(v)=>{let seconds=v.as_u64().filter(|s|*s>0).ok_or("GitHub 令牌有效期无效")?;now.saturating_add(seconds.saturating_mul(1000))},None=>0};
+ let (refresh_token,refresh_expires_at)=if data.get("refresh_token").is_some(){let value=credential(data,"refresh_token")?;let seconds=data["refresh_token_expires_in"].as_u64().filter(|s|*s>0).ok_or("GitHub 刷新令牌有效期缺失")?;(value,now.saturating_add(seconds.saturating_mul(1000)))}else{(String::new(),0)};
+ Ok(Account{token,expires_at,refresh_token,refresh_expires_at,client_id:client.into(),..Account::default()})
+}
+type Transport<'a> = dyn FnMut(&str,Option<&str>,Option<&[(&str,&str)]>)->Result<(u16,Vec<u8>),String> + 'a;
+fn invalidate(context:&Context,account:&mut Account)->Result<(),String>{
+ // 只在服务端明确确认凭据无效后清理令牌，保留账号名以提示重新登录。
+ account.token.clear();account.refresh_token.clear();account.expires_at=0;account.refresh_expires_at=0;account.star_at=0;account.star_checked_at=0;
+ save(context,account)
+}
+fn refresh_with(context:&Context,account:&mut Account,now:u64,http:&mut Transport<'_>)->Result<(),String>{
+ if !account.refresh_live(now){return Err("GitHub 登录需要重新授权；此账号没有可用的续期凭据".into());}
+ let configured=client(context)?.ok_or("GitHub 登录应用未配置")?;
+ let owner=if account.client_id.is_empty(){configured.as_str()}else{account.client_id.as_str()};
+ if owner!=configured{return Err("GitHub 登录应用已变更，请重新登录".into());}
+ let(status,bytes)=http("https://github.com/login/oauth/access_token",None,Some(&[("client_id",owner),("grant_type","refresh_token"),("refresh_token",&account.refresh_token)]))?;
+ let value:Value=serde_json::from_slice(&bytes).map_err(|_|"GitHub 续期响应格式无效，原登录资料已保留")?;
+ if status<500 && matches!(value["error"].as_str(),Some("bad_refresh_token"|"expired_token"|"invalid_grant"|"invalid_refresh_token")){
+  invalidate(context,account)?;return Err("GitHub 续期凭据已失效，请重新登录".into());
+ }
+ if status!=200 || value.get("error").is_some(){return Err(format!("GitHub 暂未完成登录续期（HTTP {status}），原登录资料已保留"));}
+ let rotated=token_response(&value,now,&configured)?;
+ if rotated.refresh_token.is_empty(){return Err("GitHub 续期响应缺少新刷新令牌，原登录资料已保留".into());}
+ account.token=rotated.token;account.expires_at=rotated.expires_at;
+ account.refresh_token=rotated.refresh_token;account.refresh_expires_at=rotated.refresh_expires_at;account.client_id=rotated.client_id;
+ // GitHub 会同时轮换并作废旧令牌。新令牌必须先持久化，再请求个人身份和 Star。
+ save(context,account)
+}
+fn ensure_access(context:&Context,account:&mut Account,now:u64,http:&mut Transport<'_>)->Result<bool,String>{
+ if account.needs_refresh(now) || !account.access_live(now){
+  if account.refresh_live(now){refresh_with(context,account,now,http)?;return Ok(true);}
+  if account.token.is_empty(){return Err("请先登录 GitHub".into());}
+  return Err("GitHub 登录已到期，需重新登录一次以保存续期凭据".into());
+ }
+ Ok(false)
+}
+fn authorized_get(context:&Context,account:&mut Account,now:u64,url:&str,refreshed:&mut bool,http:&mut Transport<'_>)->Result<(u16,Vec<u8>),String>{
+ let mut answer=http(url,Some(&account.token),None)?;
+ if answer.0!=401{return Ok(answer);}
+ if !*refreshed && account.refresh_live(now){
+  refresh_with(context,account,now,http)?;*refreshed=true;
+  answer=http(url,Some(&account.token),None)?;
+  if answer.0!=401{return Ok(answer);}
+ }
+ invalidate(context,account)?;
+ Err("GitHub 登录已失效，请重新登录".into())
+}
+fn verify_with(context:&Context,account:&mut Account,now:u64,http:&mut Transport<'_>)->Result<(),String>{
+ let mut refreshed=ensure_access(context,account,now,http)?;
+ let(status,bytes)=authorized_get(context,account,now,&format!("{API}/user"),&mut refreshed,http)?;
  let identity=object(status,&bytes)?;
  let login=identity["login"].as_str().filter(|s|!s.is_empty()&&s.len()<=100&&s.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'-')).ok_or("GitHub 用户身份无效")?;
  let id=identity["id"].as_u64().filter(|id|*id>0).ok_or("GitHub 用户 ID 无效")?;
- if account.user_id!=id{account.star_at=0;}
+ if account.user_id!=id{account.star_at=0;account.star_checked_at=0;}
  account.login=login.into();account.user_id=id;
- let(status,_)=request(&format!("{API}/user/starred/Fish-under-sea/FISH-Dock"),Some(&account.token),None)?;
- if status==401{*account=Account::default();save(context,account)?;return Err("GitHub 登录已失效，请重新登录".into());}
- let starred=star_status(status)?;account.star_at=if starred{crate::now_ms()}else{0};save(context,account)?;
- if !starred{return Err("尚未检测到主仓 Star，请在 GitHub 点亮后重新验证".into());}Ok(())
+ // Star 接口断连时仍保留已确认的个人身份，不把它误报为未登录。
+ save(context,account)?;
+ let(status,_)=authorized_get(context,account,now,&format!("{API}/user/starred/Fish-under-sea/FISH-Dock"),&mut refreshed,http)?;
+ let starred=star_status(status)?;account.star_at=if starred{now}else{0};account.star_checked_at=now;save(context,account)?;
+ if !starred{return Err("已登录 GitHub，但尚未检测到主仓 Star，请点亮后重新验证".into());}Ok(())
 }
+fn verify(context:&Context,account:&mut Account)->Result<(),String>{verify_with(context,account,crate::now_ms(),&mut request)}
 pub fn check(context:&Context)->Result<Value,String>{
  let _guard=EDIT.lock().map_err(|_|"GitHub 登录锁不可用")?;
- let mut account=poll(context)?.unwrap_or(load(context)?);
- // 新令牌先加密落盘，后续网络失败仍可复核，不丢失已完成的设备授权。
- save(context,&account)?;verify(context,&mut account)?;public(context,&account)
+ let mut account=match poll(context)?{Some(account)=>{save(context,&account)?;account},None=>load(context)?};
+ verify(context,&mut account)?;public(context,&account)
 }
 pub fn require(context:&Context)->Result<(),String>{
  let _guard=EDIT.lock().map_err(|_|"GitHub 登录锁不可用")?;
  let mut account=load(context)?;let now=crate::now_ms();
- if !account.token.is_empty()&&account.user_id>0&&receipt_valid(account.star_at,now)&&(account.expires_at==0||account.expires_at>now){return Ok(());}
+ if account.user_id>0&&receipt_valid(account.star_at,now){ensure_access(context,&mut account,now,&mut request)?;return Ok(());}
  verify(context,&mut account)
 }
 pub fn require_plugin(context:&Context,id:&str)->Result<(),String>{
  if matches!(id,"fish.feishu"|"fish.clash"|"fish.magpie"|"fish.ofm"){require(context)}else{Ok(())}
 }
+pub fn cancel(context:&Context)->Result<Value,String>{
+ let _guard=EDIT.lock().map_err(|_|"GitHub 登录锁不可用")?;
+ let mut device=DEVICE.lock().map_err(|_|"GitHub 设备登录锁不可用")?;
+ if device.as_ref().is_some_and(|p|p.root==context.root){*device=None;}drop(device);public(context,&load(context)?)
+}
 pub fn logout(context:&Context)->Result<Value,String>{
  let _guard=EDIT.lock().map_err(|_|"GitHub 登录锁不可用")?;
  *DEVICE.lock().map_err(|_|"GitHub 设备登录锁不可用")?=None;let account=Account::default();save(context,&account)?;public(context,&account)
 }
+#[cfg(test)]
+#[path="github_session_tests.rs"]
+mod session_tests;
 #[cfg(test)]mod tests{
  use super::*;
+ #[test]fn device_token_response_keeps_rotating_credentials_across_restart(){
+  let now=crate::now_ms();let token=token_response(&json!({"access_token":"synthetic-access","expires_in":28800,"refresh_token":"synthetic-refresh","refresh_token_expires_in":15897600}),now,DEFAULT_CLIENT_ID).unwrap();
+  let encoded=serde_json::to_value(&token).unwrap();
+  assert_eq!(encoded["refresh_token"],"synthetic-refresh","设备登录响应中的刷新令牌必须保存");
+  assert_eq!(encoded["refresh_expires_at"],now+15897600000u64);
+  let root=std::env::temp_dir().join(format!("fish-session-restart-{}-{}",std::process::id(),crate::now_ms()));
+  let context=Context::open(root,env!("CARGO_PKG_VERSION")).unwrap();save(&context,&token).unwrap();
+  assert_eq!(serde_json::to_value(load(&context).unwrap()).unwrap()["refresh_token"],"synthetic-refresh");
+  assert!(!String::from_utf8_lossy(&context.host.read("keys",VAULT).unwrap().unwrap()).contains("synthetic-refresh"));
+ }
+ #[test]fn expired_access_with_refresh_is_a_recoverable_session_not_a_logout(){
+  let now=crate::now_ms();let mut account=token_response(&json!({"access_token":"synthetic-access","expires_in":28800,"refresh_token":"synthetic-refresh","refresh_token_expires_in":15897600}),now,DEFAULT_CLIENT_ID).unwrap();
+  account.expires_at=now-1;account.login="fixture-user".into();account.user_id=42;account.star_at=now;
+  let root=std::env::temp_dir().join(format!("fish-session-expired-{}-{}",std::process::id(),crate::now_ms()));let context=Context::open(root,env!("CARGO_PKG_VERSION")).unwrap();
+  let state=public(&context,&account).unwrap();assert_eq!(state["authenticated"],true);assert_eq!(state["needsRefresh"],true);
+  for key in ["token","refresh_token","refreshToken","clientSecret"]{assert!(state.get(key).is_none());}
+ }
  #[test]fn official_build_has_a_public_client_without_personal_setup(){
   let root=std::env::temp_dir().join(format!("fish-github-client-{}-{}",std::process::id(),crate::now_ms()));
   let context=Context::open(root,"1.1.0").unwrap();

@@ -3,13 +3,13 @@ use std::{path::{Path,PathBuf},fs,io::Write};
 
 pub fn save(path:Option<&Path>, bytes:&[u8])->Result<Option<PathBuf>,String> {
     let Some(path)=path else{return Ok(None)};
-    if !path.is_absolute() || bytes.len()>32*1024*1024{return Err("导出路径或文件大小无效".into())}
+    if !path.is_absolute() || bytes.len()>crate::config_backup::LIMIT{return Err("导出路径或文件大小无效".into())}
     crate::identity_store::safe(path)?;
     let mut file=fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|_|"无法创建 ZIP；已有文件不会被覆盖，请选择新文件名")?;
     // 先限制空文件权限，再写入敏感内容；权限失败时文件仍为空。
     crate::identity::protect_file(path)?;
     file.write_all(bytes).and_then(|_|file.sync_all()).map_err(|_|"ZIP 保存未完成；请勿使用不完整的文件")?;
-    let saved=crate::identity_store::read_optional(path)?.ok_or("ZIP 保存后无法回读")?;
+    let saved=crate::config_backup::read_zip(path)?;
     if saved!=bytes{return Err("ZIP 保存后校验失败".into())}
     Ok(Some(path.into()))
 }

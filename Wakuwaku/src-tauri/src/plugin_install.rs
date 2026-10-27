@@ -100,6 +100,13 @@ impl Manager<'_> {
         }
         Ok(())
     }
+    pub(super) fn restore_registration(&self, row:&Installed) -> Result<(),String> {
+        let _lock=EDIT_REGISTRY.lock().map_err(|_|"插件安装锁不可用")?;
+        row.manifest.validate(&self.context.root,source(row),&platform())?;
+        let mut registry=self.registry()?;
+        self.namespace(row)?;
+        registry.entries.insert(row.manifest.id.clone(),row.clone());self.save(&registry)
+    }
     pub fn set_enabled(&self,id:&str,enabled:bool) -> Result<Installed,String> {
         let _lock=EDIT_REGISTRY.lock().map_err(|_|"插件安装锁不可用")?;
         self.recover_unlocked()?;

@@ -2824,17 +2824,20 @@
 }
 
 /* 全屏确认留在 Dock 内；原生 dialog 限定键盘焦点并覆盖模型 iframe。 */
-#island-settings .s-fullscreen-dialog { box-sizing: border-box; width: min(420px, calc(100vw - 48px)); max-height: calc(100vh - 48px); padding: 22px; border: 1px solid var(--g3); border-radius: 16px; background: var(--g1); color: var(--fg); box-shadow: 0 20px 60px #0008; overflow: auto; }
+#island-settings .s-fullscreen-dialog { box-sizing: border-box; width: min(360px, calc(100vw - 40px)); max-height: min(70vh, calc(100vh - 32px)); max-height: min(70dvh, calc(100dvh - 32px)); padding: 16px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); color: var(--fg); box-shadow: none; overflow: auto; }
 #island-settings .s-fullscreen-dialog:not([open]) { display: none; }
-#island-settings .s-fullscreen-dialog::backdrop { background: #0007; }
-#island-settings .s-fullscreen-dialog h2 { margin: 0 0 12px; font-size: 17px; }
-#island-settings .s-fullscreen-dialog p { margin: 0 0 18px; line-height: 1.6; }
-#island-settings .s-confirm-dialog { box-sizing: border-box; width: min(420px, calc(100vw - 48px)); max-height: calc(100vh - 48px); padding: 22px; border: 1px solid var(--g3); border-radius: 16px; background: var(--g1); color: var(--fg); box-shadow: 0 20px 60px #0008; overflow: auto; }
+#island-settings .s-fullscreen-dialog::backdrop { background: transparent; }
+#island-settings .s-fullscreen-dialog h2 { margin: 0 0 8px; font-size: 16px; }
+#island-settings .s-fullscreen-dialog p { margin: 0 0 12px; line-height: 1.5; }
+#island-settings .s-confirm-dialog { box-sizing: border-box; width: min(360px, calc(100vw - 40px)); max-height: min(70vh, calc(100vh - 32px)); max-height: min(70dvh, calc(100dvh - 32px)); padding: 16px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); color: var(--fg); box-shadow: none; overflow: auto; }
 #island-settings .s-confirm-dialog:not([open]) { display: none; }
-#island-settings .s-confirm-dialog::backdrop { background: #0007; }
-#island-settings .s-confirm-dialog h2 { margin: 0 0 12px; font-size: 17px; }
-#island-settings .s-confirm-dialog p { margin: 0 0 18px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-#island-settings .s-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#island-settings .s-confirm-dialog::backdrop { background: transparent; }
+#island-settings .s-confirm-dialog h2 { margin: 0 0 8px; font-size: 16px; }
+#island-settings .s-confirm-dialog p { margin: 0 0 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+#island-settings .s-confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+#island-settings .s-device-code { display: block; margin: 12px 0 20px; padding: 12px; font-size: 28px; letter-spacing: .12em; text-align: center; user-select: text; background: var(--g2); border: 1px solid var(--g3); border-radius: 8px; overflow-wrap: anywhere; }
+#island-settings .s-device-code[hidden], #island-settings .s-device-actions[hidden] { display: none; }
+#island-settings .s-device-actions { margin-bottom: 12px; }
 #island-settings .s-fullscreen-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 #island-settings .s-fullscreen-actions button { min-height: 36px; padding: 8px 12px; border: 1px solid var(--g3); border-radius: 9px; background: var(--g2); color: var(--fg); cursor: pointer; }
 #island-settings .s-fullscreen-actions button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }

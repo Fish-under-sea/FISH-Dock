@@ -292,7 +292,7 @@ fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
     let home = sh.home();
     let edge = edge(sh);
     let area = area(sh)?;
-    let wanted = Side::of(sh.setting("islandPos").as_str().unwrap_or("center"));
+    let wanted = Side::of(&sh.auth_island_side());
     let mut isl = sh.island.lock().unwrap();
     isl.sf = area.sf;
     let size = isl.size_for(home, &area, edge);

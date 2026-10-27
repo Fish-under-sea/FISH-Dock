@@ -30,6 +30,7 @@ impl Context {
         storage::resolve_root(&root, Some(&root), None)?;
         crate::identity::prepare(&crate::identity::Location { root: root.clone(), legacy: None, warning: None })?;
         storage::initialize_root(&root, host_version)?;
+        crate::config_backup::recover(&root)?;
         let host_path = root.join("host");
         let host = match Namespace::existing(&host_path)? {
             Some(previous) => crate::storage_version::change(&previous, host_version, 1)?,

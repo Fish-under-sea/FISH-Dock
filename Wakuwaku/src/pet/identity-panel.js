@@ -34,7 +34,7 @@
     }
     const commit = async () => {
       if (working || !preview) return
-      if (!await confirm(text('将替换预览所示身份资料，并保留替换前备份。旧 OFM 包不替换邮件。确认导入？', 'Replace the identities shown in the preview and keep a backup of the current files? Older OFM backups leave mail unchanged.'))) return
+      if (!await confirm(text('将按预览范围恢复配置仓并保留恢复前副本。缺少的插件包需重新安装；旧备份只恢复原有范围。确认恢复？', 'Restore the previewed configuration and keep a before-copy? Reinstall missing extension packages. Legacy backups only restore their original scope.'))) return
       return run(async () => {
         const got = await invoke('identity_import', { ticket: preview.ticket, confirm: true })
         if (got.imported) {
@@ -48,16 +48,17 @@
     function render() {
       const disabled = working ? ' disabled' : ''
       const missing = view?.missingMailCredentials || 0
-      const previewText = preview ? `<div class="identity-preview"><strong>${escape(preview.name)}</strong><p>${escape(text('OFM 账号：', 'OFM accounts: '))}${preview.ofmAccounts} · ${escape(preview.mailAccounts === null ? text('邮件保持不变', 'Mail stays unchanged') : text('邮件账号：', 'Mail accounts: ') + preview.mailAccounts)}</p><p>${escape(text('缺失凭据：', 'Missing credentials: '))}${preview.missingCredentials}</p><button type="button" class="pbtn al" data-identity="import"${disabled}>${escape(text('确认替换身份', 'Confirm replacement'))}</button></div>` : ''
+      const configSummary = preview?.configuration ? `<p>${escape(text('将恢复宿主与插件：', 'Host and extensions to restore: '))}${preview.configuration.owners.map(owner => escape(owner.plugin_id + ' ' + owner.plugin_version + ' · schema ' + owner.data_schema)).join('、')}</p><p>${escape(text('持久文件：', 'Persistent files: '))}${preview.configuration.files}${escape(text('；程序包不包含在备份中，配置将保留供重新安装后使用。', '; packages are excluded. Configuration is kept for reinstall.'))}</p>` : ''
+      const previewText = preview ? `<div class="identity-preview"><strong>${escape(preview.name)}</strong>${configSummary}<p>${escape(text('OFM 账号：', 'OFM accounts: '))}${preview.ofmAccounts} · ${escape(preview.mailAccounts === null ? text('邮件保持不变', 'Mail stays unchanged') : text('邮件账号：', 'Mail accounts: ') + preview.mailAccounts)}</p><p>${escape(text('缺失凭据：', 'Missing credentials: '))}${preview.missingCredentials}</p><button type="button" class="pbtn al" data-identity="import"${disabled}>${escape(text('确认恢复备份', 'Confirm restore'))}</button></div>` : ''
       return `<section class="identity-panel" aria-labelledby="identity-heading" aria-busy="${working}">
-        <h3 id="identity-heading">${escape(text('身份与备份', 'Identity and backups'))}</h3>
-        <p class="note">${escape(text('统一保存 OFM 账号、密钥和邮件身份。导出的普通 ZIP 含明文凭据；邮件在本机由 Windows 加密保存。', 'OFM accounts, keys and mail identities are stored together. Exported ZIPs contain plaintext credentials; local mail passwords use Windows encryption.'))}</p>
-        ${view?.root ? `<p class="note identity-path">${escape(text('身份目录：', 'Identity folder: '))}${escape(view.root)}</p>` : ''}
+        <h3 id="identity-heading">${escape(text('FISH Dock 配置与备份', 'FISH Dock configuration and backups'))}</h3>
+        <p class="note">${escape(text('备份整个配置仓：宿主设置、布局、插件注册与配置，以及插件凭据、名册和密钥。普通 ZIP 含明文凭据，导入后在本机重新加密。', 'Back up host settings, layout, extension registration, configuration, credentials and rosters. ZIPs contain plaintext secrets, re-encrypted locally on restore.'))}</p>
+        ${view?.root ? `<p class="note identity-path">${escape(text('配置仓目录：', 'Configuration repository: '))}${escape(view.root)}</p>` : ''}
         ${missing ? `<p class="identity-warning">${escape(text('缺失邮件凭据：', 'Missing mail credentials: '))}${missing}${escape(text('；请在邮件设置重新填写。', '. Re-enter them in Mail settings.'))}</p>` : ''}
         <label class="identity-label" for="identity-directory">${escape(text('导出默认目录', 'Default export folder'))}</label>
         <input class="identity-directory" id="identity-directory" type="text" value="${escape(directory)}" autocomplete="off" spellcheck="false"${disabled}>
-        <p class="note">${escape(text('首次使用系统「下载」目录；可在此编辑，保存时仍可选择文件位置。', 'Starts with your system Downloads folder. Edit it here or choose another location in the save dialog.'))}</p>
-        <div class="identity-actions"><button type="button" class="pbtn" data-identity="export"${disabled}>${escape(text('导出身份 ZIP', 'Export identity ZIP'))}</button><button type="button" class="pbtn" data-identity="preview"${disabled}>${escape(text('选择 ZIP 并预览', 'Choose ZIP and preview'))}</button></div>
+        <p class="note">${escape(text('默认保存在配置仓的 host/exports，可在此修改。备份排除临时文件、缓存、程序资源、可重新下载的插件包和历史备份；缺少插件包时需从商店重新安装。', 'Defaults to host/exports in the configuration repository. Edit it here. Temporary files, caches, program resources, downloadable extension packages and old backups are excluded; reinstall missing packages from the store.'))}</p>
+        <div class="identity-actions"><button type="button" class="pbtn" data-identity="export"${disabled}>${escape(text('导出配置备份 ZIP', 'Export configuration ZIP'))}</button><button type="button" class="pbtn" data-identity="preview"${disabled}>${escape(text('选择备份 ZIP 并预览', 'Choose backup ZIP and preview'))}</button></div>
         ${previewText}
         ${working ? `<p role="status">${escape(text('正在处理，请完成文件窗口中的选择…', 'Working. Complete your selection in the file dialog…'))}</p>` : ''}
         ${error ? `<p class="identity-error" role="alert">${escape(error)}</p>` : ''}

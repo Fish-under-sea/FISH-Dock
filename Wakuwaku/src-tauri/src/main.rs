@@ -74,6 +74,7 @@ mod identity_archive;
 mod identity_dialog;
 mod identity_transfer;
 mod identity_api;
+mod config_backup;
 mod storage;
 mod storage_context;
 mod storage_transaction;
@@ -91,6 +92,7 @@ mod plugin_runtime;
 mod plugin_development;
 mod plugin_store;
 mod plugin_api;
+mod plugin_dependencies;
 mod github_access;
 mod tab_order;
 mod plugin_page;
@@ -185,7 +187,7 @@ pub struct Shared {
     // Out of sight: hidden from the tray, or another app is full screen.
     pub hidden: AtomicBool,
     by_fullscreen: AtomicBool,
-    auth_focus_until: std::sync::atomic::AtomicU64,
+    auth_focus_lease: Mutex<model_focus::AuthFocus>,
     // Nobody at the keyboard or mouse for a while (check_quiet).
     quiet: AtomicBool,
     greeted: AtomicBool,
@@ -230,22 +232,20 @@ impl Shared {
         self.setting(key).as_bool().unwrap_or(false)
     }
 
-    pub fn auth_focus_active(&self) -> bool {
-        model_focus::AuthFocus { until: self.auth_focus_until.load(Ordering::SeqCst) }.active(now_ms())
-    }
+    pub fn auth_focus_active(&self) -> bool { self.auth_focus_lease.lock().unwrap().active(now_ms()) }
 
-    pub fn auth_focus(self: &Arc<Self>, until: u64) {
-        self.auth_focus_until.store(until, Ordering::SeqCst);
-        island::keep_on_top(self);
-        self.push_settings();
+    pub fn auth_island_side(&self)->String {
+        let saved=self.setting("islandPos");
+        self.auth_focus_lease.lock().unwrap().side(now_ms(),self.home(),saved.as_str().unwrap_or("center")).to_owned()
     }
-
-    fn expire_auth_focus(self: &Arc<Self>, now: u64) {
-        let until = self.auth_focus_until.load(Ordering::SeqCst);
-        if until > 0 && now >= until && self.auth_focus_until.compare_exchange(until, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
-            island::keep_on_top(self);
-            self.push_settings();
-        }
+    pub fn auth_focus(self:&Arc<Self>,until:u64){
+        let side=self.setting("islandPos");
+        self.auth_focus_lease.lock().unwrap().begin(until,self.home(),side.as_str().unwrap_or("center"));
+        island::side_changed(self); island::keep_on_top(self); self.push_settings();
+    }
+    fn expire_auth_focus(self:&Arc<Self>,now:u64){
+        let expired=self.auth_focus_lease.lock().unwrap().expire(now);
+        if expired{island::side_changed(self);island::keep_on_top(self);self.push_settings();}
     }
 
     pub fn lang(&self) -> &'static str {
@@ -1896,7 +1896,7 @@ fn main() {
                 screens: Mutex::new(screen::read(app.handle())),
                 hidden: AtomicBool::new(false),
                 by_fullscreen: AtomicBool::new(false),
-                auth_focus_until: std::sync::atomic::AtomicU64::new(0),
+                auth_focus_lease: Mutex::new(model_focus::AuthFocus::default()),
                 quiet: AtomicBool::new(false),
                 greeted: AtomicBool::new(false),
                 codex_seen: std::sync::atomic::AtomicU64::new(0),

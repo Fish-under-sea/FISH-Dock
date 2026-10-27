@@ -148,6 +148,19 @@ mod tests {
         assert!(ns.read("keys","introduced.json").unwrap().is_none());
         assert!(std::fs::read_to_string(ns.path().join("README.md")).unwrap().contains("1.0.0"));
         assert_eq!(runner.call("acme.weather","save",json!({})).unwrap(),"synthetic");
+        runner.stop_all();
+        let config_bytes=crate::config_backup::export(&context.root).unwrap();
+        let restored_context=crate::storage_context::Context::open(root.parent().unwrap().join("restored-config"),env!("CARGO_PKG_VERSION")).unwrap();
+        crate::config_backup::restore(&restored_context.root,&config_bytes,||Ok(())).unwrap();
+        let restored_manager=Manager{context:&restored_context};let mut repaired=crate::plugin_runtime::Runner::default();
+        assert_eq!(repaired.view(&restored_manager).unwrap()[0]["packageMissing"],true);
+        let old=manager.list().unwrap().remove(0);let directory=manager.directory(&old).unwrap();
+        let mut package_files=BTreeMap::new();
+        for name in old.manifest.files.keys().map(String::as_str).chain(std::iter::once("plugin.json")){package_files.insert(name.into(),std::fs::read(directory.join(name)).unwrap());}
+        repaired.install(&restored_manager,crate::plugin_package::Package{manifest:old.manifest.clone(),files:package_files},&old.digest,false,Some(&node)).unwrap();
+        assert!(repaired.is_running("acme.weather"));
+        assert_eq!(restored_manager.namespace(&old).unwrap().read("config","prior.json").unwrap().unwrap(),b"synthetic-original");
+        repaired.stop_all();
         runner.uninstall(&manager,"acme.weather").unwrap();assert!(manager.list().unwrap().is_empty());
         assert_eq!(ns.read("keys","test.json").unwrap().unwrap(),b"synthetic");
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
