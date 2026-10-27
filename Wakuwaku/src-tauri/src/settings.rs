@@ -51,10 +51,11 @@ pub fn snapshot(sh: &Shared) -> Value {
         (pet.get(now_ms()), pet.list())
     };
     let (win_light, win_accent) = crate::wallpaper::look();
-    // Whether either is connected, as the island tells it (connection.rs).
+    // Whether any of them is connected, as the island tells it (connection.rs):
+    // the same full look the start takes, zcode and DSH and Reasonix included.
     let conn = connection::connection(sh.port);
     let omp = connection::omp_hooks_status(sh.port);
-    if connection::note_connected(conn != "none" || connection::is_codex_connected() || connection::is_agy_connected() || connection::is_opencode_connected(sh.port) || matches!(omp, "ok" | "stale" | "partial")) {
+    if connection::note_connected(connection::any_connected(sh.port)) {
         sh.redraw();
     }
     let omp_files = connection::omp_files();
