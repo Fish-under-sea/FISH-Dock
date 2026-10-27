@@ -158,7 +158,10 @@ impl Side {
     // The window's place (physical) at this side of a work area, at its top:
     // at a corner flush with it (the page lays the island TOP in from that
     // side, as from the top); grown wider, its side kept there (the centre
-    // keeps its middle).
+    // keeps its middle). Not what fit does at the top of the screen any
+    // more: there the window spans the whole area (fit, size_for), so its
+    // left edge never moves whatever the page's width — see fit.
+    #[allow(dead_code)]
     fn place(self, area: &Area, width: i32) -> (i32, i32) {
         match self {
             Side::Left => (area.x, area.y),
@@ -201,14 +204,18 @@ impl Island {
 
     // Physical. The taskbar is as long as its strip (its display, or what
     // Windows granted of it), with its room beside it: above a bottom bar,
-    // below a top one, inside a side one's.
+    // below a top one, inside a side one's. The island's own window is as
+    // wide as its whole work area, always (fit's note: its left edge and its
+    // width never change, so no page's width can move it — the left corner
+    // never twitched, and now none of them can); only its height grows, for
+    // a taller page.
     fn size_for(&self, home: &str, area: &Area, edge: Edge) -> (i32, i32) {
         let sf = self.sf();
         let side = home == "taskbar" && edge.is_side();
         let base = match home {
             "taskbar" if side => (TASKBAR_H + SIDE_ROOM, self.bar.map_or(area.mon.3, |b| b.3) as f64 / sf),
             "taskbar" => (area.mon.2 as f64 / sf, TASKBAR_H + SETTINGS_ROOM),
-            _ => ISLAND,
+            _ => (area.w as f64 / sf, ISLAND.1),
         };
         let (w, h) = match self.room {
             Some((w, h)) => (w.max(base.0), h.max(base.1)),
@@ -306,6 +313,15 @@ fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
         // is told the side (pet:update islandAt) and lays the island out at
         // that side of its window by it, never by the setting itself; the
         // closed island (closed_rect) and her seat follow it too.
+        // The window spans the whole work area at its top (size_for), its
+        // left edge on the area's: it never moves and never changes its
+        // width, whatever page the island opens (the settings' differ: the
+        // mail's 960 against another's 520). Moving a window's left corner,
+        // or growing and shrinking it about one, shows the old picture in
+        // the new place for a frame — the twitch at the centre and the
+        // right; the left never twitched because its x was always the
+        // area's. Now they are all like the left; the page lays the island
+        // out in the window at its own side (style.css isl-at-*).
         _ => match crate::notch::at_top(area.mon, size.0) {
             Some(pos) => {
                 isl.at = Side::Center;
@@ -313,7 +329,7 @@ fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
             }
             None => {
                 isl.at = wanted;
-                wanted.place(&area, size.0)
+                (area.x, area.y)
             }
         },
     };

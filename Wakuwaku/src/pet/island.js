@@ -681,14 +681,15 @@
     pinned.classList.toggle('gone', fit.modes.every(m => m === 'hidden') && !fit.more)
   }
   // The most the pins may take (the line before them too): at the top, what
-  // keeps the island in its window as it is (BASE less the 48 px roomFor
-  // adds, so the window never grows for them); on the strip, the room up to
+  // keeps the island in its window as it is (the window spans the whole work
+  // area, island.rs size_for, so its width is no limit and the island may
+  // use it; roomFor only ever adds height); on the strip, the room up to
   // what stands beside her capsule, so nothing there moves for them: the
   // middle run where it is centred (her capsule before it), else the free
   // room between the runs (growNode, and the middle's margin where nothing
   // is centred). head: what the capsule takes besides its pins.
   function pinRoom(head) {
-    if (home() !== 'taskbar') return BASE.width - 48 - head
+    if (home() !== 'taskbar') return innerWidth - 48 - head
     if (isSide() || !taskbarBuilt) return Infinity
     const pad = isCapsule() ? CAPSULE_X : 0
     const now = len(herSlot.getBoundingClientRect()) - 2 * pad
@@ -1020,8 +1021,11 @@
   // --- Room: the window grows before the island does, and shrinks after ----------------
 
   // The window with no extra room, by home: the taskbar is as wide as the
-  // screen, with its room above.
-  const baseRoom = () => (home() === 'taskbar' ? { width: innerWidth, height: TASKBAR_H + SETTINGS_ROOM } : BASE)
+  // screen, with its room above. The island's own is as wide as its whole
+  // work area too (island.rs size_for: its width and its left edge never
+  // change, so no page's width can move it — what made the centre and the
+  // right twitch while the left, whose x never moved, did not).
+  const baseRoom = () => (home() === 'taskbar' ? { width: innerWidth, height: TASKBAR_H + SETTINGS_ROOM } : { width: innerWidth, height: BASE.height })
 
   function roomFor(want) {
     // The taskbar: what grows up from it, or the settings standing above it,
@@ -1034,9 +1038,10 @@
       if (height <= TASKBAR_H + room) return null
       return { width: innerWidth, height }
     }
-    const width = want.width + 48
+    // Only its height can ask for more: its width is the area's already, and
+    // a narrower page leaves the window as wide as it was (no shrinking).
     const height = TOP + want.height + 24
-    return width <= BASE.width && height <= BASE.height ? null : { width, height }
+    return height <= BASE.height ? null : { width: innerWidth, height }
   }
 
   // The most the open island may be on the taskbar (zhoupengjie/Wakuwaku#55):
