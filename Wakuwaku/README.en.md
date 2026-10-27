@@ -24,6 +24,8 @@ This repository contains the desktop host, plugin SDK, storage and runtime manag
 
 Both **1.2.0** installers include renewable GitHub sign-in. Download the full and compact packages from [v1.2.0](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0). Legacy sessions without saved refresh tokens need one new sign-in.
 
+- Installed-release updates: automatic checks after launch and daily, manual checks, and an official release-page fallback when the API is unavailable. Upgrades use full or compact installers.
+- In-app tagline: “Everything is a Plugin”, with clear host and independent-plugin responsibilities.
 - Installation: same-volume staging, removal of verified obsolete owned files, verification reuse, visible progress and rollback; full and compact update packages.
 - Configuration: whole-configuration backups with preview, before-copies and transactional restore.
 - Sign-in: smaller device-code dialogs, accurate copy feedback, manual release of temporary pinning and island-position recovery.
@@ -44,7 +46,7 @@ See the [1.2.0 release notes](docs/release-1.2.0.md) for verification scope.
 
 Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows 11; other Windows releases and third-party taskbar software require separate verification.
 
-1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-1.2.0.exe` is for first installation or repair; `FISH-Dock-Update-1.2.0.exe` is for an existing 1.1.0 installation with intact base resources.
+1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-1.2.0.exe` is for first installation or repair; `FISH-Dock-Update-1.2.0.exe` is for an existing 1.1.0 or earlier 1.2.0 installation with intact base resources.
 2. Fully exit the previous version from the tray and any standalone OFM service. Run the installer and choose a destination. Fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock`; upgrades reuse the registered directory instead of moving it.
 3. Start **FISH Dock** from the desktop or Start menu. Node.js, Fixed Version WebView2, Windhawk, its compiler, and license notices are bundled. Business plugins are downloaded separately.
 4. The first launch confirms runtime terms and verifies resources. Later launches use installed files without repeatedly extracting the entire runtime.

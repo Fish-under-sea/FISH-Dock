@@ -22,7 +22,7 @@
 
 [Download](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0) · [中文](README.md) · [Official plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) · [Release notes](Wakuwaku/docs/release-1.2.0.md)
 
-**FISH Dock 1.2.0** ships as a full installer and a compact update package. Both include the GitHub sign-in persistence fix. Download them and the checksums from [v1.2.0](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0). This version adds transactional installation, verification reuse, whole-configuration backups and compact, dismissible sign-in dialogs.
+**FISH Dock 1.2.0** ships as a full installer and a compact update package. Both include the GitHub sign-in persistence fix, working update checks for installed releases, and the in-app “Everything is a Plugin” tagline. Download them and the checksums from [v1.2.0](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0). This version adds transactional installation, verification reuse, whole-configuration backups and compact, dismissible sign-in dialogs.
 
 ## Install
 
@@ -31,9 +31,11 @@ Choose the package for the published version and verify it with `SHA256SUMS.txt`
 | Package | When to use it |
 | --- | --- |
 | `FISH-Dock-Setup-1.2.0.exe` | First installation, missing runtimes or repair; includes the complete offline runtime. |
-| `FISH-Dock-Update-1.2.0.exe` | An existing 1.1.0 installation with intact base resources; contains changed files and prompts for the full installer if required resources are missing or damaged. |
+| `FISH-Dock-Update-1.2.0.exe` | An existing 1.1.0 or earlier 1.2.0 installation with intact base resources; contains changed files and prompts for the full installer if required resources are missing or damaged. |
 
  Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0, Fixed Version WebView2 155.0.4283.62, and Windhawk 1.7.3 with its LLVM-MinGW compiler. A separate Windhawk installation is unnecessary. The installer is currently unsigned.
+
+Installed releases support manual checks in About and Updates, plus checks after launch and daily. If the GitHub API is unavailable, checks fall back to the official release page. Upgrade with a package installer rather than replacing the host executable. Same-version revisions do not trigger a version-number notification; download the revised package and verify the latest checksum.
 
 ## Changes
 

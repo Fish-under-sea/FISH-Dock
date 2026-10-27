@@ -149,10 +149,14 @@ pub fn current() -> &'static str {
 }
 
 // A downloaded exe (or one told to, for tests): only those update.
-pub fn may_update() -> bool {
-    !cfg!(feature = "installed")
-        && (std::env::var("WAKUWAKU_UPDATE_FORCE").as_deref() == Ok("1") || !crate::data::from_source())
+#[derive(Debug,PartialEq)]
+struct UpdateMode { installed:bool, source:bool, may_check:bool, may_replace:bool }
+fn update_mode(installed:bool,source:bool,forced:bool)->UpdateMode {
+    let may_replace=!installed&&(forced||!source);
+    UpdateMode{installed,source:!installed&&source,may_check:installed||may_replace,may_replace}
 }
+fn current_mode()->UpdateMode { update_mode(cfg!(feature="installed"),crate::data::from_source(),std::env::var("WAKUWAKU_UPDATE_FORCE").as_deref()==Ok("1")) }
+pub fn may_update() -> bool { current_mode().may_replace }
 
 fn test_url(var: &str) -> Option<String> {
     std::env::var(var).ok().filter(|u| !u.trim().is_empty())
@@ -312,6 +316,7 @@ const HOPS: usize = 5;
 // A GET answered: the answer, the way it came (proxy::Way's name) and the
 // hosts it went by ("github.com → release-assets.githubusercontent.com").
 struct Answer {
+    final_url:String,
     res: ureq::http::Response<ureq::Body>,
     way: String,
     path: String,
@@ -346,7 +351,7 @@ fn get_way(way: &crate::proxy::Way, url: &str, seconds: u64, accept: Option<&str
     let mut hosts = vec![crate::proxy::host_of(url).unwrap_or_default()];
     for _ in 0..=HOPS {
         let path = hosts.join(" → ");
-        let mut req = agent.get(&at).header("user-agent", &format!("wakuwaku/{}", current()));
+        let mut req = agent.get(&at).header("user-agent", &format!("FISH-Dock/{}", current()));
         if let Some(accept) = accept {
             req = req.header("accept", accept);
         }
@@ -356,7 +361,7 @@ fn get_way(way: &crate::proxy::Way, url: &str, seconds: u64, accept: Option<&str
             Ok(res) => res,
         };
         if !res.status().is_redirection() {
-            return Ok(Answer { res, way: way.name(), path });
+            return Ok(Answer { res, way: way.name(), path, final_url:at });
         }
         let to = res.headers().get("location").and_then(|l| l.to_str().ok()).and_then(|l| redirected(&at, l));
         at = to.ok_or_else(|| Some(format!("{path}: a {} to nowhere it may go", res.status().as_u16())))?;
@@ -410,10 +415,35 @@ fn endpoints() -> Vec<(Source, String)> {
     [(Source::GitHub, test_url(GITHUB_TEST)), (Source::Gitee, test_url(GITEE_TEST))].into_iter().filter_map(|(source, url)| Some((source, url?))).collect()
 }
 
+// API 限流时只取官方 Release 重定向的版本和发行页，不制造未验证的安装载荷。
+fn public_release_url(url:&str)->Option<Found>{
+    let url=tauri::Url::parse(url).ok()?;
+    if url.scheme()!="https"||url.host_str()!=Some("github.com")||url.port().is_some()||!url.username().is_empty()||url.password().is_some()||url.query().is_some()||url.fragment().is_some(){return None;}
+    let tag=url.path().strip_prefix("/Fish-under-sea/FISH-Dock/releases/tag/")?;
+    let version=tag.strip_prefix('v').unwrap_or(tag);crate::plugin_manifest::version(version).ok()?;
+    Some(Found{source:Source::GitHub,version:version.into(),page:url.as_str().into(),exe:None,digest:None,size:0})
+}
+fn public_latest()->Result<Option<Found>,String>{
+    match get("https://github.com/Fish-under-sea/FISH-Dock/releases/latest",10,None){
+        Ok(answer)=>public_release_url(&answer.final_url).map(Some).ok_or_else(||"GitHub 官方发行页没有有效的正式版本重定向".into()),
+        Err(Miss::NotThere)=>Ok(None),Err(Miss::Failed(error))=>Err(error),
+    }
+}
+fn github_sources(api:impl FnOnce()->Result<Option<Found>,String>,page:impl FnOnce()->Result<Option<Found>,String>)->Result<Option<Found>,String>{
+    match api(){
+        Ok(Some(found))=>Ok(Some(found)),
+        Ok(None)=>page(),
+        Err(api_error)=>match page(){Ok(found)=>Ok(found),Err(page_error)=>Err(format!("API: {api_error}; official release page: {page_error}"))},
+    }
+}
+
 // What one place says.
 fn fetch(source: Source, url: &str) -> Result<Option<Found>, String> {
     match source {
-        Source::GitHub => Ok(get_json(url, "application/vnd.github+json")?.as_ref().and_then(github_release)),
+        Source::GitHub => {
+            let api=||Ok(get_json(url,"application/vnd.github+json")?.as_ref().and_then(github_release));
+            if url==GITHUB_LATEST { github_sources(api,public_latest) } else {api()}
+        },
         Source::Gitee => gitee_found(url),
     }
 }
@@ -536,7 +566,8 @@ fn tell(sh: &Arc<Shared>) {
 // are up.
 pub fn start(sh: &Arc<Shared>) {
     if cfg!(feature = "installed") {
-        sh.log("update: DSH-FISH installed build; upstream updates disabled");
+        sh.log("update: installed release; official checks enabled, upgrades use package installers");
+        schedule_checks(sh);
         return;
     }
     if let Some((pid, told)) = AFTER.lock().unwrap().clone() {
@@ -571,6 +602,10 @@ pub fn start(sh: &Arc<Shared>) {
         sh.log("update: run from the source tree: not looked for");
         return;
     }
+    schedule_checks(sh);
+}
+
+fn schedule_checks(sh:&Arc<Shared>){
     let sh = sh.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(20));
@@ -589,6 +624,7 @@ pub fn start(sh: &Arc<Shared>) {
 // For the settings: this version, the latest (its page the preferred
 // place's), and how an update goes.
 pub fn view(sh: &Shared) -> Value {
+    let mode=current_mode();
     let first = gitee_first(sh);
     let s = STATE.lock().unwrap();
     let latest = s.latest.as_ref().map(|r| {
@@ -596,14 +632,16 @@ pub fn view(sh: &Shared) -> Value {
             "version": r.version,
             "page": r.page(first),
             "newer": newer(&r.version, current()),
-            "canInstall": r.can_install(),
+            "canInstall": !mode.installed&&r.can_install(),
             "places": r.from.iter().map(|f| f.source.name()).collect::<Vec<_>>(),
         })
     });
     json!({
         "current": current(),
-        "may": may_update(),
-        "source": crate::data::from_source(),
+        "may": mode.may_replace,
+        "mayCheck": mode.may_check,
+        "installed": mode.installed,
+        "source": mode.source,
         "checking": s.checking,
         "checkedAt": s.checked_at,
         "latest": latest,
@@ -1063,6 +1101,10 @@ fn say_up(port: u16, gone: impl Fn() -> bool) -> Result<(), String> {
     }
     Err(why)
 }
+
+#[cfg(test)]
+#[path="updates_installed_tests.rs"]
+mod installed_tests;
 
 #[cfg(test)]
 mod tests {

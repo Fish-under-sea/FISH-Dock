@@ -24,6 +24,8 @@
 
 **1.2.0** 的完整安装包和精简更新包均包含登录保持修复，见 [v1.2.0 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0)。旧版未保存刷新令牌的账号需重新登录一次，后续自动续期。
 
+- 正式版检查更新：启动后及每天检查，支持手动检查；API 受限时回退官方 Release 页面，通过完整包或精简包升级。
+- 应用内标语：「Everything is a Plugin · 一切皆插件」，宿主与独立业务插件职责清晰。
 - 安装与更新：目标卷暂存、受管旧文件清理、重复校验复用、进度显示与失败回滚；提供完整包和精简更新包。
 - 整仓配置备份：包含宿主设置、布局、插件注册、各命名空间的持久配置和凭据；预览后恢复并保留原副本。
 - 登录与窗口：验证码在紧凑的 Dock 内弹窗中显示；临时锁定可手动解除，灵动岛位置随验证结束恢复。
@@ -44,7 +46,7 @@
 
 适用平台：**Windows 10/11 x64**。系统任务栏集成主要面向 Windows 11；其他系统版本与第三方任务栏软件组合需要单独验证。
 
-1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-1.2.0.exe` 用于首装或修复；`FISH-Dock-Update-1.2.0.exe` 适用于基础资源完整的已有 `1.1.0` 安装。
+1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-1.2.0.exe` 用于首装或修复；`FISH-Dock-Update-1.2.0.exe` 适用于基础资源完整的已有 `1.1.0` 或此前 `1.2.0` 安装。
 2. 从托盘完全退出旧版及单独运行的 OFM，再运行安装器并选择目录。新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock`；已有安装沿用登记目录覆盖升级，不自动搬迁。
 3. 通过桌面或开始菜单启动 **FISH Dock**。Node.js、固定版 WebView2、Windhawk 与编译器随包安装；业务插件另行下载。
 4. 首次启动需要确认运行时许可并校验资源；后续使用安装目录中的文件，不重复解压整套依赖。

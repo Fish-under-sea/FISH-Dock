@@ -60,12 +60,12 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark.png"><img src="assets/readme/section-install-light.png" alt="INSTALL · 安装使用" width="100%"></picture></h2>
 
-**FISH Dock 1.2.0** 提供完整安装包和精简更新包，二者均包含 GitHub 登录保持修复。下载及校验文件见 [v1.2.0 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0)。
+**FISH Dock 1.2.0** 提供完整安装包和精简更新包，二者均包含 GitHub 登录保持修复、正式版更新检查和应用内「Everything is a Plugin · 一切皆插件」标语修正。下载及校验文件见 [v1.2.0 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0)。
 
 | 安装包 | 使用场景 |
 | --- | --- |
 | `FISH-Dock-Setup-1.2.0.exe` | 首次安装、基础资源缺失或修复安装，包含完整离线运行时。 |
-| `FISH-Dock-Update-1.2.0.exe` | 已有 `1.1.0` 且基础资源完整时使用，只下载本次变更；缺失或损坏时提示改用完整包。 |
+| `FISH-Dock-Update-1.2.0.exe` | 已有 `1.1.0` 或此前 `1.2.0` 且基础资源完整时使用，只下载本次变更；缺失或损坏时提示改用完整包。 |
 
 1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.0) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源并展示运行时条款。
@@ -74,6 +74,8 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 5. 点击「检查更新」读取官方目录，按需安装 [FISH Dock Official Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。新插件安装成功即启用；凭据和服务参数仍需各自配置。
 
 安装包包含 Node.js 24.14.0、固定版 WebView2 155.0.4283.62、Windhawk 1.7.3 及 LLVM-MinGW 编译器，供对应插件按需调用；无需另外安装 Windhawk。安装包当前未做 Authenticode 签名。
+
+正式安装版在「关于」和「软件更新」均可检查官方新版本，并在启动后及每天自动检查。GitHub API 受限时自动回退官方 Release 页面；新版通过完整安装包或精简更新包升级，不单独替换宿主 EXE。同版本修订不会因为版本号相同自动提示，请从 Release 重新下载安装并核对最新 SHA-256。
 
 <h2 id="data"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-intro-dark.png"><img src="assets/readme/section-intro-light.png" alt="DATA · 数据边界" width="100%"></picture></h2>
 

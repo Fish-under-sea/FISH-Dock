@@ -2656,7 +2656,8 @@
   const aboutHTML = () => `${sec(T('settings.about'))}<div class="grp">
         <div class="r"><div class="grow">${esc(T('s.version', { version: snap.version }))}${snap.update?.latest?.newer ? ` <span class="chip">${esc(lang === 'zh' ? '发现新版本' : 'New version')} ${esc(snap.update.latest.version)}</span>` : ''}</div><button type="button" class="pbtn sm" data-update="check" ${snap.update?.checking || snap.update?.stage ? 'disabled' : ''}>${esc(snap.update?.checking ? T('s.updateChecking') : T('s.updateCheck'))}</button><span class="link" data-site="repo">${esc(T('home.repo'))} ›</span></div>
         ${snap.update?.error ? `<div class="note" role="status">${esc(T(`s.updateError.${snap.update.error.code}`, { detail: snap.update.error.detail || '' }))}</div>` : ''}
-        ${snap.update?.latest?.newer ? `<div class="r"><div class="grow d">${esc(lang === 'zh' ? '请前往发行页查看整包更新。' : 'View the full package on the release page.')}</div><button type="button" class="pbtn sm" data-update="page">${esc(T('s.updateNotes'))}</button></div>` : ''}
+        ${snap.update?.latest?.newer ? `<div class="r"><div class="grow d">${esc(lang === 'zh' ? '请前往官方发行页选择完整安装包或精简更新包。' : 'Choose a full installer or compact update on the official release page.')}</div><button type="button" class="pbtn sm" data-update="page">${esc(T('s.updateNotes'))}</button></div>` : ''}
+        ${snap.update?.checkedAt && snap.update?.latest && !snap.update.checking && !snap.update.error && !snap.update.latest.newer ? `<div class="note" role="status">${esc(T('s.updateLatest'))}</div>` : ''}
         <div class="note">${esc(T('home.intro'))}</div>
         <div class="note">${esc(T('home.upstream'))}</div>
         <div class="note">${esc(T('home.credits'))}</div>
@@ -2670,7 +2671,7 @@
   function pageUpdate() {
     const u = snap.update || {}
     const version = T('s.updateVersion', { version: u.current || snap.version })
-    if (!u.may) return `${sec(T('s.update'))}<div class="grp">${row(esc(version), esc(T('s.updateSource')), '')}</div>`
+    if (!(u.mayCheck ?? u.may)) return `${sec(T('s.update'))}<div class="grp">${row(esc(version), esc(T('s.updateSource')), '')}</div>`
     const latest = u.latest
     const newer = !!latest?.newer
     const mb = n => (n / 1048576).toFixed(1)
@@ -2679,16 +2680,20 @@
     else if (u.stage) state = T(`s.updateStage.${u.stage}`)
     else if (u.checking) state = T('s.updateChecking')
     else if (u.error) state = T(`s.updateError.${u.error.code}`, { detail: u.error.detail || '' })
+    else if (newer && u.installed) state = T('s.updateInstalledNewer', { version: latest.version })
     else if (newer && !latest.canInstall) state = T('s.updateError.noDigest')
     else if (newer) state = T('s.updateNewer', { version: latest.version })
     else if (latest) state = T('s.updateLatest')
     else if (u.checkedAt) state = T('s.updateNone')
+    if (u.installed) state = [T('s.updateInstalled'), state].filter(Boolean).join('\n')
     const busy = !!u.stage || !!u.checking
     // Not reached (a look or a download): the way it went, and to the Network proxy below.
     const unreached = !busy && ['check', 'download'].includes(u.error?.code)
     if (unreached) state += (lang === 'zh' ? '。' : '. ') + T('s.updateProxyHint')
     const way = unreached ? `<div class="r"><div class="grow d">${esc(T('s.net.now', { what: netNow() }))}</div><span class="link" data-net-go>${esc(T('s.netProxy'))} ›</span></div>` : ''
-    const buttons = newer
+    const buttons = u.installed
+      ? `<span class="btns"><button type="button" class="pbtn sm" data-update="check" ${busy ? 'disabled' : ''}>${esc(T('s.updateCheck'))}</button>${newer ? `<button type="button" class="pbtn sm al" data-update="page">${esc(T('s.updateDownload'))}</button>` : ''}</span>`
+      : newer
       ? `<span class="btns"><button class="pbtn sm" data-update="page">${esc(T('s.updateNotes'))}</button><button class="pbtn sm al" data-update="update" ${busy || !latest.canInstall ? 'disabled' : ''}>${esc(T('s.updateInstall'))}</button></span>`
       : `<button class="pbtn sm" data-update="check" ${busy ? 'disabled' : ''}>${esc(T('s.updateCheck'))}</button>`
     const title = newer ? `${version}${T('s.updateLatestIs', { version: latest.version })}` : version
@@ -2698,7 +2703,7 @@
     return `${sec(T('s.update'))}<div class="grp">
         ${row(esc(title), esc(state), buttons)}${way}
         ${row(esc(T('s.updateAuto')), esc([T('s.updateAutoNote'), when].filter(Boolean).join(' · ')), sw('autoUpdateCheck', snap.settings.autoUpdateCheck !== false))}
-        ${row(esc(T('s.updateFrom')), esc(T('s.updateFromNote')), seg('updateFrom', [['auto', T('s.updateFromAuto')], ['gitee', 'Gitee'], ['github', 'GitHub']], snap.settings.updateFrom || 'auto'))}
+        ${u.installed ? '' : row(esc(T('s.updateFrom')), esc(T('s.updateFromNote')), seg('updateFrom', [['auto', T('s.updateFromAuto')], ['gitee', 'Gitee'], ['github', 'GitHub']], snap.settings.updateFrom || 'auto'))}
       </div>`
   }
 

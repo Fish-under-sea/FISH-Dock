@@ -1019,7 +1019,7 @@ pub async fn settings_update(app: AppHandle, what: String) -> Value {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         "page" => crate::updates::open_page(&sh),
-        "update" => crate::updates::update_now(&sh),
+        "update" => { if cfg!(feature="installed"){crate::updates::open_page(&sh)}else{crate::updates::update_now(&sh)} },
         _ => {}
     }
     snapshot(&sh)
