@@ -27,7 +27,7 @@ Both **1.2.0** installers include renewable GitHub sign-in. Download the full an
 - Installed-release updates: automatic checks after launch and daily, manual checks, and an official release-page fallback when the API is unavailable. Upgrades use full or compact installers.
 - In-app tagline: “Everything is a Plugin”, with clear host and independent-plugin responsibilities.
 - Installation: same-volume staging, removal of verified obsolete owned files, verification reuse, visible progress and rollback; full and compact update packages.
-- Configuration: whole-configuration backups with preview, before-copies and transactional restore.
+- Configuration: whole-configuration backups with preview, before-copies and transactional restore — credentials and rosters included, mail bodies left out, archives from an older plugin version still restore.
 - Sign-in: smaller device-code dialogs, accurate copy feedback, manual release of temporary pinning and island-position recovery.
 - Runtime discovery: actual Node source, path and version, with recovery from stale overrides.
 
@@ -80,7 +80,7 @@ Management stays local. Transport uses HTTP and is intended only for trusted net
 
 The OFM **Service Settings → OFM Migration Backup** creates an OFM-only ZIP, excluding mail and usage statistics. It is unencrypted and may contain the local API Key, LAN Key, provider credentials, and EAC authorization.
 
-For a complete move, use **General → FISH Dock configuration and backups**. The ZIP includes host settings, layouts, extension registration and persistent namespace configuration, credentials, rosters and keys. It excludes caches, temporary files, program packages and old backups. The default export folder is `host/exports` in the configuration repository. Exported secrets are plaintext and are re-encrypted locally on restore; handle the archive like a password file.
+For a complete move, use **General → FISH Dock configuration and backups**. The ZIP includes host settings, layouts, extension registration and persistent namespace configuration, credentials, rosters and keys; **mail bodies (`host/mail-store`) stay out**, while account rosters and sign-in credentials travel with it. Runtime records (`trash`, `routing`, usage logs, model and market caches), caches, temporary files, program packages and old backups are excluded. The default export folder is `host/exports` in the configuration repository. Exported secrets are plaintext and are re-encrypted locally on restore; credentials the current user cannot decrypt travel as they are and need one sign-in on the target machine. Handle the archive like a password file.
 
 Exit standalone OFM but keep FISH Dock open for import. The app pauses its own model service and mail sync. Review the preview and confirm again. A whole-configuration archive restores the previewed scope and keeps a pre-import copy. Legacy backups keep their original scope; import old OFM material through the corresponding plugin migration entry. The app attempts rollback after activation failure. Existing `%USERPROFILE%\.dsh-fish` data is copied to `%USERPROFILE%\.fish-dock` and the old folder remains; an existing new folder is authoritative and is not merged. The archive supplies a fixed `README.md`.
 
@@ -100,7 +100,7 @@ Exit standalone OFM but keep FISH Dock open for import. The app pauses its own m
 
 ### GitHub and Plugin Configuration
 
-GitHub authentication uses a public OAuth Client ID and device flow. Tokens are encrypted by the host using DPAPI and are not exposed to plugins. `FISH_DOCK_GITHUB_CLIENT_ID` can select your own application. Provider-specific OAuth setup belongs to each plugin.
+GitHub authentication uses a public OAuth Client ID and device flow. Tokens are encrypted by the host using DPAPI and are not exposed to plugins. **One sign-in lasts**: credentials live in `host/keys` of the configuration repository, so installing or updating to a new version never touches them; every launch (including right after an update) rechecks the account identity and the main-repository star once, and an offline machine only shows “recheck pending” instead of clearing the session. With token expiry disabled on the OAuth application the issued token never expires, and the rotating refresh token covers older ones. `FISH_DOCK_GITHUB_CLIENT_ID` can select your own application. Provider-specific OAuth setup belongs to each plugin.
 
 The desktop uses **Rust + Tauri 2 + HTML/CSS/JavaScript**. The model UI uses **Node.js + React**. Installers use **NSIS 3**. Building requires Windows x64, MSVC/Rust, Node.js, NSIS, and pinned official runtime downloads. Offline builds require cached dependencies; retain lock files.
 
