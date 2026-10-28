@@ -57,7 +57,14 @@ Write-Host "编译主程序（feature installed）"
 # 本机工具链的 LTO 曾异常退出，沿用已验证的替代：关闭 LTO、16 个代码生成单元。
 $env:CARGO_PROFILE_RELEASE_LTO = 'false'
 $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = '16'
-& $Cargo build --locked --offline --release --features installed --manifest-path (Join-Path $app 'src-tauri/Cargo.toml')
+# 本机 cargo 的 TLS 栈取不到凭据（SEC_E_NO_CREDENTIALS），crates.io 连不上；
+# FISH_CARGO_VENDOR 指向一个本地 vendor 目录时改为纯离线解析，不再碰网络。
+$vendorArgs = @()
+if ($env:FISH_CARGO_VENDOR) {
+    $vendorArgs = @('--config', 'source.crates-io.replace-with="vendored"',
+                    '--config', "source.vendored.directory=`"$($env:FISH_CARGO_VENDOR -replace '\\','/')`"")
+}
+& $Cargo build --locked --offline --release --features installed @vendorArgs --manifest-path (Join-Path $app 'src-tauri/Cargo.toml')
 if ($LASTEXITCODE -ne 0) { throw "主程序编译失败：$LASTEXITCODE" }
 
 $stage = Join-Path (Split-Path $Output -Parent) 'stage'
