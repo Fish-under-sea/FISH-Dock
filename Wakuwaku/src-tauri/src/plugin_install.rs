@@ -132,6 +132,37 @@ impl Manager<'_> {
         if registry.entries.remove(id).is_none() { return Err("插件未安装".into()); }
         self.save(&registry)
     }
+    // prune_versions 在升级提交后删掉过期版本目录，只留当前激活版本与它之前的
+    // 一个（回退点）。以前每个版本都永久留在 packages/<id>/ 下，一次升级多一份
+    // 几十 MB；旧目录还带着旧 manifest，一旦有路径拼错就会读到旧界面。
+    // 只删 packages/<id>/ 下一层的版本目录，名字里带分隔符或点段的一律不碰。
+    pub fn prune_versions(&self, active:&Installed) -> Result<Vec<String>,String> {
+        let base=self.context.host.path().join("packages").join(&active.manifest.id);
+        let entries=match std::fs::read_dir(&base) {
+            Ok(entries)=>entries,
+            Err(error) if error.kind()==std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(_)=>return Err("插件版本目录读取失败".into()),
+        };
+        let active_version=&active.manifest.version;
+        let mut others:Vec<(std::time::SystemTime,String)>=Vec::new();
+        for entry in entries {
+            let entry=entry.map_err(|_|"插件版本目录条目读取失败")?;
+            if !entry.file_type().map_err(|_|"插件版本目录类型读取失败")?.is_dir() { continue; }
+            let name=entry.file_name().to_string_lossy().to_string();
+            if name.is_empty()||name.contains('/')||name.contains('\\')||name.contains("..") { continue; }
+            if &name==active_version { continue; }
+            let stamp=entry.metadata().and_then(|meta|meta.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            others.push((stamp,name));
+        }
+        // 最近写入的那个非激活版本就是回退点，留它；更老的没有任何入口。
+        others.sort_by(|a,b|b.0.cmp(&a.0).then_with(||b.1.cmp(&a.1)));
+        let mut removed=Vec::new();
+        for (_,name) in others.into_iter().skip(1) {
+            std::fs::remove_dir_all(base.join(&name)).map_err(|_|format!("过期版本目录清理失败：{name}"))?;
+            removed.push(name);
+        }
+        Ok(removed)
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -173,6 +204,37 @@ mod tests {
         assert!(manager.set_enabled("acme.weather",true).is_err());
         manager.uninstall("acme.weather").unwrap();assert!(manager.list().unwrap().is_empty());
         assert_eq!(std::fs::read(ns.path().join("keys/fixture.json")).unwrap(),b"synthetic-key");
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // 升级提交后只留当前版本与一个回退点：更老的版本目录没有任何入口，
+    // 留着既占地方，也让"读到旧界面"这种事故有可乘之机。
+    #[test] fn upgrade_keeps_active_and_one_rollback_version() {
+        let root=std::env::temp_dir().join(format!("fish-prune-{}-{}",std::process::id(),crate::now_ms())).join(".fish-dock");
+        fn namespace(root:PathBuf,id:&str,directory:&str)->Namespace {
+            crate::storage::initialize(&root,id,"1.0.0",1).unwrap();
+            let identity=crate::storage_context::Identity{plugin_id:id.into(),directory:directory.into(),plugin_version:"1.0.0".into(),data_schema:1};
+            std::fs::write(root.join("storage.json"),serde_json::to_vec(&identity).unwrap()).unwrap();
+            Namespace::existing(&root).unwrap().unwrap()
+        }
+        let host=namespace(root.join("host"),"host","host");
+        namespace(root.join(".plugin.acme.weather"),"acme.weather",".plugin.acme.weather");
+        let context=Context{root:root.clone(),host}; let manager=Manager{context:&context};
+        for version in ["1.0.0","1.1.0","1.2.0"] {
+            let (package,digest)=bundle(version,1);
+            manager.install(package,&digest,false).unwrap();
+            // 让目录写入时间有先后，避免依赖文件系统时钟精度来定回退点。
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let active=manager.list().unwrap().into_iter().find(|row|row.manifest.id=="acme.weather").unwrap();
+        assert_eq!(active.manifest.version,"1.2.0");
+        let removed=manager.prune_versions(&active).unwrap();
+        assert_eq!(removed,vec!["1.0.0".to_string()]);
+        let mut left:Vec<String>=std::fs::read_dir(root.join("host").join("packages").join("acme.weather")).unwrap()
+            .map(|entry|entry.unwrap().file_name().to_string_lossy().to_string()).collect();
+        left.sort();
+        assert_eq!(left,vec!["1.1.0".to_string(),"1.2.0".to_string()]);
+        // 空目录不是错误：没有旧版本时什么都不用删。
+        assert!(manager.prune_versions(&active).unwrap().is_empty());
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 }

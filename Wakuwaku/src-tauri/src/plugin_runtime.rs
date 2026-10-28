@@ -74,7 +74,13 @@ impl Runner {
             Err(error)=>Err(error),
         };
         match attempt {
-            Ok(row)=>{self.failures.remove(&id);Ok(row)},
+            Ok(row)=>{
+                self.failures.remove(&id);
+                // 新版已经激活、回滚点（上一版目录）还在：这时候才删过期版本。
+                // 清理失败只记一笔，不影响这次升级本身。
+                if let Err(error)=manager.prune_versions(&row){eprintln!("FISH Dock: 插件过期版本清理失败（{id}）：{error}");}
+                Ok(row)
+            },
             Err(error)=>{
                 if let Some(previous)=old {
                     let restored=self.restore_previous(manager,&previous,backup.as_deref(),node);

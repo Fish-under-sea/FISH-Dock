@@ -34,6 +34,9 @@
       const record = frames.get(key); if (!record) return
       clearTimeout(record.timer); (record.outer||record.frame).remove(); frames.delete(key)
       if (record.ticket) void invoke('extension_page_close',{ ticket:record.ticket }).catch(() => {})
+      // 正在看的那一页被 retire（升级后 digest 变了）：清掉 current，否则下一次
+      // enter 看到 key 没变就直接返回，留下一块空白，用户永远看不到新界面。
+      if (current === key) { current = ''; revision++ }
     }
     function sync(pages) {
       for (const [key,record] of frames) if (!pages.some(p => p.key === key && p.digest === record.digest)) retire(key)
