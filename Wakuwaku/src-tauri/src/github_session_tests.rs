@@ -78,6 +78,31 @@ fn incomplete_refresh_response_keeps_existing_credentials(){
  assert!(verify_with(&f.context,&mut a,now,&mut |_,_,_|answer(200,json!({"access_token":"synthetic-incomplete","expires_in":28800}))).is_err());
  let stored=load(&f.context).unwrap();assert_eq!(stored.token,"synthetic-old-access");assert_eq!(stored.refresh_token,"synthetic-old-refresh");
 }
+// 应用侧关掉令牌过期之后，GitHub 换发的是不带 expires_in、也不带 refresh_token 的
+// 长期令牌：这时的续期响应必须被接受，并把不再需要的刷新凭据清掉，而不是报错。
+#[test]
+fn a_refresh_after_the_app_stopped_expiring_tokens_keeps_the_new_permanent_access(){
+ let f=Fixture::new();let now=crate::now_ms();let mut a=account(now);a.expires_at=now-1;save(&f.context,&a).unwrap();
+ let mut http=|url:&str,_:Option<&str>,_:Option<&[(&str,&str)]>|{
+  if url.ends_with("access_token"){return answer(200,json!({"access_token":"synthetic-permanent","token_type":"bearer","scope":"read:user"}));}
+  if url.ends_with("/user"){answer(200,identity())}else{answer(204,json!({}))}
+ };
+ verify_with(&f.context,&mut a,now,&mut http).unwrap();
+ let stored=load(&f.context).unwrap();
+ assert_eq!(stored.token,"synthetic-permanent");
+ assert_eq!(stored.expires_at,0,"不再过期的令牌按永久处理");
+ assert!(stored.access_live(now+365*DAY));
+ assert!(stored.refresh_token.is_empty(),"不再需要刷新凭据");
+ assert_eq!(public(&f.context,&stored).unwrap()["requiresLogin"],false);
+}
+// 反过来：响应仍带 8 小时有效期却没有新刷新令牌，是异常，保留原凭据不动。
+#[test]
+fn a_short_lived_refresh_without_a_new_refresh_token_keeps_the_old_session(){
+ let f=Fixture::new();let now=crate::now_ms();let mut a=account(now);a.expires_at=now-1;save(&f.context,&a).unwrap();
+ assert!(verify_with(&f.context,&mut a,now,&mut |_,_,_|answer(200,json!({"access_token":"synthetic-short","expires_in":28800}))).is_err());
+ let stored=load(&f.context).unwrap();
+ assert_eq!(stored.token,"synthetic-old-access");assert_eq!(stored.refresh_token,"synthetic-old-refresh");
+}
 // 新版写入的记录多出字段时必须照旧读成同一份会话：一次登录在版本之间不变。
 #[test]
 fn a_newer_record_with_extra_fields_keeps_the_same_session(){

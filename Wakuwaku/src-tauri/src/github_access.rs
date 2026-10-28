@@ -149,7 +149,9 @@ fn refresh_with(context:&Context,account:&mut Account,now:u64,http:&mut Transpor
  }
  if status!=200 || value.get("error").is_some(){return Err(format!("GitHub 暂未完成登录续期（HTTP {status}），原登录资料已保留"));}
  let rotated=token_response(&value,now,&configured)?;
- if rotated.refresh_token.is_empty(){return Err("GitHub 续期响应缺少新刷新令牌，原登录资料已保留".into());}
+ // 应用关掉令牌过期后，换发的是不带 expires_in 的长期令牌，也不再给刷新令牌：
+ // 这一支照收，并把不再需要的刷新凭据清掉。仍带有效期却缺刷新令牌才算异常。
+ if rotated.expires_at>0 && rotated.refresh_token.is_empty(){return Err("GitHub 续期响应缺少新刷新令牌，原登录资料已保留".into());}
  account.token=rotated.token;account.expires_at=rotated.expires_at;
  account.refresh_token=rotated.refresh_token;account.refresh_expires_at=rotated.refresh_expires_at;account.client_id=rotated.client_id;
  // GitHub 会同时轮换并作废旧令牌。新令牌必须先持久化，再请求个人身份和 Star。
