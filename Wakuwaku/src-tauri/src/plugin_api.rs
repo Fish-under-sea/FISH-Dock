@@ -53,18 +53,46 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
         let id=id.ok_or("插件操作缺少 ID")?;
         // 下载不占用实例锁，网络失败不阻塞已安装插件的停用。
         if action=="enabled"&&enabled==Some(true){crate::github_access::require_plugin(context,&id)?;}
-        let package=if action=="install"{crate::github_access::require(context)?;Some(crate::plugin_store::obtain(context,&id)?)}else{None};
+        // 官方插件要 GitHub 登录与主仓 Star；第三方插件不经过这条授权，认证只约束官方。
+        let package=if action=="install"{
+            if !id.starts_with("fish."){return Err("第三方插件请从「第三方插件」页按包名安装".into());}
+            crate::github_access::require_plugin(context,&id)?;
+            Some(crate::plugin_store::obtain(context,&id)?)
+        }else{None};
         let manager=Manager{context};let node=node(context)?;
         let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
         match action.as_str(){
-            "install"=>{let (package,digest)=package.ok_or("插件包尚未就绪")?;runner.install(&manager,package,&digest,true,node.as_deref())?;},
+            "install"=>{let (package,digest)=package.ok_or("插件包尚未就绪")?;let official=package.manifest.id.starts_with("fish.");runner.install(&manager,package,&digest,official,node.as_deref())?;},
             "enabled"=>runner.set_enabled(&manager,&id,enabled.ok_or("插件启停操作缺少目标状态")?,node.as_deref())?,
+            "autostart"=>{manager.set_autostart(&id,enabled.ok_or("插件自启动设置缺少目标状态")?)?;},
             "uninstall"=>runner.uninstall(&manager,&id)?,
             _=>return Err("插件管理操作无效".into()),
         }
         let _=runner.view(&manager)?;drop(runner);
         view(context)
     }).await.map_err(|_|"插件管理任务意外结束")?
+}
+// 第三方插件：按 npm 包名检索与安装。来源是公开 registry，身份按第三方命名空间登记。
+#[tauri::command]
+pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:String,confirm:bool)->Result<Value,String>{
+    trusted(&window)?;
+    if action=="search"{
+        return tauri::async_runtime::spawn_blocking(move||{
+            let hits=crate::plugin_thirdparty::search(&query)?;
+            Ok(json!({"hits":hits}))
+        }).await.map_err(|_|"npm 检索任务意外结束")?;
+    }
+    if action!="install"{return Err("第三方插件操作无效".into());}
+    if !confirm{return Err("请确认安装第三方插件".into());}
+    tauri::async_runtime::spawn_blocking(move||{
+        let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
+        let (package,digest)=crate::plugin_thirdparty::obtain(context,&query)?;
+        let manager=Manager{context};let node=node(context)?;
+        let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
+        runner.install(&manager,package,&digest,false,node.as_deref())?;
+        let _=runner.view(&manager)?;drop(runner);
+        view(context)
+    }).await.map_err(|_|"第三方插件安装任务意外结束")?
 }
 #[tauri::command]
 pub async fn extension_auth(window:WebviewWindow,action:String)->Result<Value,String>{

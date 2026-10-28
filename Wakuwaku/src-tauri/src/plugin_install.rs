@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use crate::{plugin_manifest::Manifest, plugin_package::Package, storage::Source, storage_context::{Context, Namespace}};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all="camelCase")]
-pub struct Installed { pub manifest: Manifest, pub digest: String, pub official: bool, pub enabled: bool }
+pub struct Installed { pub manifest: Manifest, pub digest: String, pub official: bool, pub enabled: bool,
+    // 随 Dock 启动就把它的本机服务拉起来（旧注册表没有这一项时按开处理）。
+    #[serde(default = "desired_autostart")] pub autostart: bool }
+fn desired_autostart() -> bool { true }
 #[derive(Default,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Registry { schema: u32, entries: BTreeMap<String, Installed> }
@@ -56,7 +59,7 @@ impl Manager<'_> {
         self.recover_unlocked()?;
         let mut registry=self.registry()?;
         let previous=registry.entries.get(&package.manifest.id).cloned();
-        let row=Installed { manifest:package.manifest,digest:digest.to_ascii_lowercase(),official,enabled:previous.as_ref().map_or(true,|r|r.enabled) };
+        let row=Installed { manifest:package.manifest,digest:digest.to_ascii_lowercase(),official,enabled:previous.as_ref().map_or(true,|r|r.enabled),autostart:previous.as_ref().map_or(true,|r|r.autostart) };
         row.manifest.validate(&self.context.root,source(&row),&platform())?;
         let directory=self.directory(&row)?;
         // 发行文件仅写入摘要专属目录，旧版本始终可用。
@@ -114,6 +117,13 @@ impl Manager<'_> {
         let row=registry.entries.get_mut(id).ok_or("插件未安装")?;
         if enabled { self.verify(row)?; self.namespace(row)?; }
         row.enabled=enabled; let row=row.clone(); self.save(&registry)?; Ok(row)
+    }
+    pub fn set_autostart(&self,id:&str,autostart:bool) -> Result<Installed,String> {
+        let _lock=EDIT_REGISTRY.lock().map_err(|_|"插件安装锁不可用")?;
+        self.recover_unlocked()?;
+        let mut registry=self.registry()?;
+        let row=registry.entries.get_mut(id).ok_or("插件未安装")?;
+        row.autostart=autostart; let row=row.clone(); self.save(&registry)?; Ok(row)
     }
     pub fn uninstall(&self,id:&str) -> Result<(),String> {
         let _lock=EDIT_REGISTRY.lock().map_err(|_|"插件安装锁不可用")?;

@@ -34,7 +34,9 @@ impl Runner {
     }
     pub fn resume(&mut self,manager:&Manager<'_>,node:Option<&Path>)->Result<(),String>{
         manager.recover()?;
-        for row in manager.list()? {if row.enabled {let _=self.set_enabled(manager,&row.manifest.id,true,node);}}
+        // 关掉「自启动」的插件保持启用，但这次启动不拉起它的服务；用户点启用或
+        // 插件页的启动服务仍然照常启动。
+        for row in manager.list()? {if row.enabled && row.autostart {let _=self.set_enabled(manager,&row.manifest.id,true,node);}}
         Ok(())
     }
     pub fn call(&mut self,id:&str,method:&str,params:Value)->Result<Value,String>{

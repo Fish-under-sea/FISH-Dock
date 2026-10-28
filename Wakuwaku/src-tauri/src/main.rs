@@ -91,6 +91,7 @@ mod plugin_events;
 mod plugin_runtime;
 mod plugin_development;
 mod plugin_store;
+mod plugin_thirdparty;
 mod plugin_api;
 mod plugin_dependencies;
 mod github_access;
@@ -1751,6 +1752,7 @@ fn main() {
             plugin_api::extension_view,
             plugin_api::extension_catalog,
             plugin_api::extension_manage,
+            plugin_api::extension_thirdparty,
             plugin_api::extension_auth,
             plugin_api::extension_call,
             plugin_api::extension_page,

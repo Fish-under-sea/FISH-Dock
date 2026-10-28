@@ -34,6 +34,10 @@
 .extension-panel summary { cursor: pointer; min-height: 28px; }
 .extension-panel label { display: block; margin-block: 8px; }
 .extension-node { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--g3); background: var(--g1); color: var(--fg); border-radius: 6px; margin-block-end: 8px; }
+/* 第三方插件：按 npm 包名检索，结果与官方条目同一套卡片。 */
+#island-settings .extension-third { display: grid; gap: 8px; }
+#island-settings .extension-third-search { display: flex; align-items: center; gap: 8px; }
+#island-settings .extension-third-search input { flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--g3); background: var(--g1); color: var(--fg); border-radius: 6px; }
 /* 外观标签顺序支持鼠标拖动与键盘按钮。 */
 .tab-order { padding-block: 12px; }
 .tab-order ol { list-style: none; padding: 0; }

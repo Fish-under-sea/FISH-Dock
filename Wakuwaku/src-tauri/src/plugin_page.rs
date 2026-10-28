@@ -32,7 +32,17 @@ fn checked(ticket:&str)->Result<(Grant,crate::plugin_install::Installed),String>
  if !allowed(&grant,&row.manifest.id,&row.digest,row.enabled){return Err("页面票据与活动版本不匹配".into());}Ok((grant,row))
 }
 pub fn call(ticket:&str,method:&str,params:serde_json::Value)->Result<serde_json::Value,String>{
- let (grant,_)=checked(ticket)?;let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
+ let (grant,installed)=checked(ticket)?;
+ // 宿主自己的小接口：插件页可读写「随 Dock 启动就拉起服务」这一项，不进插件后端。
+ if method=="host.autostart" {
+  let manager=crate::plugin_install::Manager{context:crate::storage_context::current().ok_or("存储尚未就绪")?};
+  let autostart=match params.get("autostart").and_then(serde_json::Value::as_bool) {
+   Some(value)=>manager.set_autostart(&grant.id,value)?.autostart,
+   None=>installed.autostart,
+  };
+  return Ok(serde_json::json!({"autostart":autostart}));
+ }
+ let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
  if !runner.is_running(&grant.id){return Err("插件尚未运行".into());}
   if method=="gateway.open" {
    if !["fish.ofm","fish.magpie"].contains(&grant.id.as_str()){return Err("该插件没有本机服务页面".into());}
