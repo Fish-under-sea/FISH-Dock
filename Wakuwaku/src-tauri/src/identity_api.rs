@@ -71,10 +71,10 @@ pub async fn identity_export(app:AppHandle,window:WebviewWindow,directory:String
         let _paused=Paused::new(sh.clone(),origin)?;
         let _guard=crate::identity::operation_guard(&sh.identity_dir)?;
         let context=crate::storage_context::current().ok_or("配置仓未就绪")?;
-        let bytes=crate::config_backup::export(&context.root)?;
+        let (bytes,opaque)=crate::config_backup::export_with_report(&context.root)?;
         crate::identity_transfer::save(Some(&path),&bytes)?;
         sh.change(json!({"identityExportDirectory":directory.to_string_lossy()}));
-        Ok(json!({"saved":true,"path":path,"bytes":bytes.len(),"sha256":hash(&bytes),"missingCredentials":0}))
+        Ok(json!({"saved":true,"path":path,"bytes":bytes.len(),"sha256":hash(&bytes),"missingCredentials":opaque}))
     }).await.map_err(|_|"身份导出任务意外结束")?
 }
 #[tauri::command]

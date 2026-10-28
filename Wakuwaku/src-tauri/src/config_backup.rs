@@ -22,7 +22,7 @@ pub fn is_config(bytes: &[u8]) -> Result<bool,String> {
 pub struct Preview { pub owners: Vec<Identity>, pub files: usize, pub bytes: usize, pub missing: usize }
 const ENTRIES: usize = 8192;
 const JOURNAL: &str = "host/tmp/config-restore.json";
-const README: &str = "# FISH Dock 配置仓备份\n\n包含宿主设置、布局、插件注册信息及各插件的 config、keys、roster、credentials，以及宿主自定义插件、宠物、草稿和偏好。\n\n排除 tmp、exports、backups、WebView 缓存、服务锁、程序资源与可重新下载的插件包。目标机器缺少插件包时须在商店重新安装，配置继续保留。\n\n此 ZIP 未加密。邮件、GitHub 与宿主加密存储的凭据导出为便携明文，导入时由目标用户重新加密；第三方自行加密的资料可能仍需重新登录。旧备份按原范围恢复。\n";
+const README: &str = "# FISH Dock 配置仓备份\n\n包含宿主设置、布局、插件注册信息及各插件的 config、keys、roster、credentials，以及宿主自定义插件、宠物、草稿和偏好。\n\n邮件正文（host/mail-store）不在备份内；邮件账号花名册与登录凭据仍会带上，导入后重新收信即可。\n\n排除 tmp、exports、backups、运行态数据（trash、routing、使用记录、模型与市场缓存）、WebView 缓存、服务锁、程序资源与可重新下载的插件包。目标机器缺少插件包时须在商店重新安装，配置继续保留。\n\n此 ZIP 未加密。邮件、GitHub 与宿主加密存储的凭据导出为便携明文，导入时由目标用户重新加密；当前用户解不开的凭据原样带走，导入后需在该机器重新登录一次。旧备份按原范围恢复。\n";
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Entry { path: String, bytes: usize, sha256: String, encoding: String }
@@ -45,8 +45,17 @@ fn owner_path(root: &Path, owner: &Identity) -> Result<PathBuf, String> {
         crate::storage::namespace(root, &owner.plugin_id, &owner.directory, if owner.plugin_id.starts_with("fish.") { crate::storage::Source::OfficialCatalog } else { crate::storage::Source::ThirdParty })
     }
 }
+// 运行态与可重新下载的东西：读得到也不是配置，带进备份只会让它变大、
+// 让恢复变慢。按段名与文件名判断，不写死某个插件的路径。
+fn runtime_data(name: &str) -> bool {
+    let segment = |value: &str| name.split('/').any(|part| part == value);
+    if ["README.md", "service.lock", "cache", "node_modules", "codearts-cache", "trash", "routing", "tmp", "dist"].iter().any(|value| segment(value)) { return true; }
+    let file = name.rsplit('/').next().unwrap_or("");
+    file.ends_with(".bak") || file.ends_with(".jsonl") || file.ends_with(".tgz") || file.ends_with(".exe") || file.ends_with(".gz")
+        || matches!(file, "models.json" | "plugin-github.json" | "plugin-npm.json" | "providers-state.json" | "sync-server.magpie-backup" | "usage.jsonl")
+}
 fn included(owner: &Identity, name: &str) -> bool {
-    if name.split('/').any(|p| p == "README.md" || p == "service.lock" || p == "cache" || p == "node_modules" || p == "codearts-cache") { return false; }
+    if runtime_data(name) { return false; }
     if name.starts_with("credentials/magpie-runtime/") && name != "credentials/magpie-runtime/data" && !name.starts_with("credentials/magpie-runtime/data/") { return false; }
     if name.starts_with("config/windhawk/") && name != "config/windhawk/data" && !name.starts_with("config/windhawk/data/") { return false; }
     let category = name.split('/').next().unwrap_or("");
@@ -100,18 +109,26 @@ fn snapshot(root: &Path, owners: &[Identity]) -> Result<BTreeMap<String, Vec<u8>
     Ok(files)
 }
 fn dpapi(bytes: &[u8]) -> bool { bytes.starts_with(&[1,0,0,0,0xd0,0x8c,0x9d,0xdf,1,0x15,0xd1,0x11,0x8c,0x7a,0,0xc0,0x4f,0xc2,0x97,0xeb]) }
-pub fn export(root: &Path) -> Result<Vec<u8>, String> {
+pub fn export(root: &Path) -> Result<Vec<u8>, String> { export_with_report(root).map(|(bytes, _)| bytes) }
+// 导出并报告有多少份凭据只能原样带走：那份在目标机器上需要重新登录一次。
+pub fn export_with_report(root: &Path) -> Result<(Vec<u8>, usize), String> {
     recover(root)?;
     let owners = owners(root)?;
     let _lock = crate::storage_context::EDIT.lock().map_err(|_| "配置仓备份锁不可用")?;
     for owner in &owners { if let Some(ns)=crate::storage_context::Namespace::claimed(&owner_path(root,owner)?)? { crate::storage_transaction::recover_unlocked(&ns)?; } }
     let mut files = snapshot(root, &owners)?;
     let mut entries = Vec::new();
+    let mut opaque = 0usize;
     for (name, bytes) in files.iter_mut() {
         let encoding = if name == "host/credentials/mail-secrets.dpapi" {
             *bytes = serde_json::to_vec(&crate::mail_secrets::snapshot(&root.join("host"))?).map_err(|_| "邮件凭据编码失败")?; "mail-secrets"
         } else if dpapi(bytes) {
-            *bytes = crate::mail_secrets::unprotect(bytes)?; "dpapi"
+            // 解不开的 DPAPI（别的用户、别的机器、带 entropy）：原样带走，
+            // 目标机器上重新登录一次即可。不能让它把整包导出拖垮。
+            match crate::mail_secrets::unprotect(bytes) {
+                Ok(plain) => { *bytes = plain; "dpapi" }
+                Err(_) => { opaque += 1; "opaque" }
+            }
         } else { "plain" };
         entries.push(Entry { path:name.clone(), bytes:bytes.len(), sha256:sha(bytes), encoding:encoding.into() });
     }
@@ -119,7 +136,7 @@ pub fn export(root: &Path) -> Result<Vec<u8>, String> {
     entries.push(Entry {path:"README.md".into(),bytes:README.len(),sha256:sha(README.as_bytes()),encoding:"plain".into()});
     let manifest = Manifest { format:"fish-dock/config-backup".into(), version:1, owners, files:entries };
     files.insert("manifest.json".into(), serde_json::to_vec_pretty(&manifest).map_err(|_| "配置备份清单编码失败")?);
-    crate::identity_archive::zip_limits(&files, LIMIT, FILE_LIMIT, ENTRIES)
+    Ok((crate::identity_archive::zip_limits(&files, LIMIT, FILE_LIMIT, ENTRIES)?, opaque))
 }
 fn parse(root: &Path, bytes: &[u8]) -> Result<(Manifest,BTreeMap<String,Vec<u8>>),String> {
     let files = crate::identity_archive::unzip_limits(bytes, |name| name == "README.md" || name == "manifest.json" || name.split_once('/').is_some_and(|(_,p)| crate::storage::category_file(root,"config",p).is_ok()), LIMIT, FILE_LIMIT, ENTRIES)?;
@@ -131,7 +148,8 @@ fn parse(root: &Path, bytes: &[u8]) -> Result<(Manifest,BTreeMap<String,Vec<u8>>
         if !seen.insert(owner.directory.to_lowercase()) { return Err("配置备份命名空间重复".into()); }
         if let Some(current)=crate::storage_context::Namespace::claimed(&root.join(&owner.directory))? {
             let existing=current.identity();
-            if existing.plugin_id!=owner.plugin_id || existing.data_schema!=owner.data_schema || (owner.plugin_id!="host" && existing.plugin_version!=owner.plugin_version) { return Err("配置备份与目标插件版本或 schema 不匹配，请先安装对应版本".into()); }
+            // schema 是数据的形状，必须一致；版本号只是插件的标签，升级过也能恢复。
+            if existing.plugin_id!=owner.plugin_id || existing.data_schema!=owner.data_schema { return Err("配置备份与目标插件的归属或 schema 不匹配，请先迁移".into()); }
         } else {
             let directory=root.join(&owner.directory);
             if directory.exists() && std::fs::read_dir(&directory).map_err(|_|"目标命名空间读取失败")?.next().is_some() { return Err("目标插件目录已有未归属资料，请先迁移或选择干净数据根".into()); }
@@ -140,10 +158,10 @@ fn parse(root: &Path, bytes: &[u8]) -> Result<(Manifest,BTreeMap<String,Vec<u8>>
     if !manifest.owners.iter().any(|o|o.plugin_id=="host") { return Err("配置备份缺少宿主".into()); }
     seen.clear();
     for entry in &manifest.files {
-        if entry.path == "manifest.json" || !seen.insert(entry.path.to_lowercase()) || !["plain","dpapi","mail-secrets"].contains(&entry.encoding.as_str()) { return Err("配置清单包含重复文件或未知编码".into()); }
+        if entry.path == "manifest.json" || !seen.insert(entry.path.to_lowercase()) || !["plain","dpapi","opaque","mail-secrets"].contains(&entry.encoding.as_str()) { return Err("配置清单包含重复文件或未知编码".into()); }
         if entry.path != "README.md" { target(root,&manifest.owners,&entry.path,false)?; }
         if entry.encoding=="mail-secrets" && entry.path!="host/credentials/mail-secrets.dpapi" { return Err("邮件凭据归属无效".into()); }
-        if entry.encoding=="dpapi" && !entry.path.split('/').nth(1).is_some_and(|c|c=="keys"||c=="credentials") { return Err("加密凭据类别无效".into()); }
+        if matches!(entry.encoding.as_str(),"dpapi"|"opaque") && !entry.path.split('/').nth(1).is_some_and(|c|c=="keys"||c=="credentials") { return Err("加密凭据类别无效".into()); }
         let file=files.get(&entry.path).ok_or("配置备份缺少声明文件")?;
         if file.len()!=entry.bytes || sha(file)!=entry.sha256 { return Err("配置备份文件摘要不匹配".into()); }
     }
@@ -151,7 +169,8 @@ fn parse(root: &Path, bytes: &[u8]) -> Result<(Manifest,BTreeMap<String,Vec<u8>>
 }
 pub fn inspect(root:&Path, bytes:&[u8])->Result<Preview,String>{
     let(manifest,files)=parse(root,bytes)?;
-    Ok(Preview{owners:manifest.owners,files:manifest.files.len()-1,bytes:files.values().map(Vec::len).sum(),missing:0})
+    let missing=manifest.files.iter().filter(|e|e.encoding=="opaque").count();
+    Ok(Preview{owners:manifest.owners,files:manifest.files.len()-1,bytes:files.values().map(Vec::len).sum(),missing})
 }
 fn atomic(path:&Path,bytes:&[u8])->Result<(),String>{
     use std::io::Write;
@@ -220,6 +239,9 @@ pub fn restore(root:&Path,bytes:&[u8],mut activate:impl FnMut()->Result<(),Strin
         if entry.encoding=="mail-secrets" {let secrets:BTreeMap<String,String>=serde_json::from_slice(data).map_err(|_|"便携邮件凭据格式无效")?;*data=crate::mail_secrets::encode(&secrets)?;}
     }
     files.remove("manifest.json");files.remove("README.md");
+    // 宿主的归属记录由这台机器自己写（它按当前宿主版本迁移存储）；
+    // 把备份里那份旧版本写回去只会让版本倒退，再触发一次多余迁移。
+    files.remove("host/storage.json");
     let previous=snapshot(root,&manifest.owners.iter().filter(|o|root.join(&o.directory).is_dir()).cloned().collect::<Vec<_>>())?;
     let mut names=std::collections::BTreeSet::new();names.extend(previous.keys().cloned());names.extend(files.keys().cloned());
     // 新命名空间的归属同样纳入事务；现有归属保留目标机器版本。
@@ -374,7 +396,7 @@ mod tests {
         assert!(!files.contains_key(".fishplugin-magpie/credentials/magpie-runtime/magpie.exe"));
     }
     #[test]
-    fn tampering_and_wrong_namespace_version_are_rejected_before_overwrite() {
+    fn tampering_and_a_different_schema_are_rejected_before_overwrite() {
         let source = context(); fixture(&source);
         let bytes = export(&source.root).unwrap();
         let mut files = crate::identity_archive::unzip_limits(&bytes, |_| true, LIMIT, FILE_LIMIT, 8192).unwrap();
@@ -384,5 +406,67 @@ mod tests {
         target.plugin("fish.feishu", ".fishplugin-feishu", Source::OfficialCatalog, "2.0.0", 2).unwrap();
         assert!(restore(&target.root, &bytes, || Ok(())).is_err());
         assert!(target.host.read("config", "config.json").unwrap().is_none());
+    }
+    // 插件升级过也能恢复：版本号只是标签，数据的形状（schema）才必须一致。
+    #[test]
+    fn a_backup_from_an_older_plugin_version_still_restores() {
+        let source = context(); fixture(&source);
+        let bytes = export(&source.root).unwrap();
+        let target = context();
+        let plugin = target.plugin("fish.feishu", ".fishplugin-feishu", Source::OfficialCatalog, "2.0.0", 1).unwrap();
+        plugin.write("config", "notifications.json", b"old-plugin").unwrap();
+        restore(&target.root, &bytes, || Ok(())).unwrap();
+        let restored = Namespace::existing(&target.root.join(".fishplugin-feishu")).unwrap().unwrap();
+        assert_eq!(restored.identity().plugin_version, "2.0.0", "导入不改目标机器已装的版本");
+        assert_eq!(restored.read("config", "notifications.json").unwrap().unwrap(), b"synthetic-config");
+        assert_eq!(target.host.read("config", "config.json").unwrap(), source.host.read("config", "config.json").unwrap());
+    }
+    // 运行态与可重新下载的东西不进备份：凭据还在，垃圾不留。
+    #[test]
+    fn runtime_records_and_rewritable_assets_stay_out_of_the_backup() {
+        let context = context(); fixture(&context);
+        let magpie = context.plugin("fish.magpie", ".fishplugin-magpie", Source::OfficialCatalog, "1.0.1", 1).unwrap();
+        for (name, body) in [
+            ("magpie-runtime/data/trash/sessions/a/session.json", b"excluded-trash".as_slice()),
+            ("magpie-runtime/data/routing/2026-10-28.jsonl", b"excluded-routing".as_slice()),
+            ("magpie-runtime/data/models.json", b"excluded-models".as_slice()),
+            ("magpie-runtime/data/settings.json.bak", b"excluded-backup".as_slice()),
+            ("magpie/plugins/dist/plugin.tgz", b"excluded-tgz".as_slice()),
+            ("magpie/logins.json", b"synthetic-login".as_slice()),
+        ] {
+            magpie.write("credentials", name, body).unwrap();
+        }
+        let bytes = export(&context.root).unwrap();
+        let files = crate::identity_archive::unzip_limits(&bytes, |_| true, LIMIT, FILE_LIMIT, ENTRIES).unwrap();
+        assert!(files.contains_key(".fishplugin-magpie/credentials/magpie/logins.json"), "凭据照旧带走");
+        for name in ["trash", "routing", "models.json", "settings.json.bak", ".tgz"] {
+            assert!(!files.keys().any(|key| key.contains(name)), "运行态 {name} 不进备份");
+        }
+    }
+    // 别的用户、别的机器留下的 DPAPI：原样带走，不让整包导出失败。
+    #[test]
+    fn an_unreadable_credential_is_carried_as_is_instead_of_failing_the_export() {
+        let source = context(); fixture(&source);
+        let mut foreign = vec![1u8, 0, 0, 0, 0xd0, 0x8c, 0x9d, 0xdf, 1, 0x15, 0xd1, 0x11, 0x8c, 0x7a, 0, 0xc0, 0x4f, 0xc2, 0x97, 0xeb];
+        foreign.extend_from_slice(b"not-this-users-dpapi");
+        source.host.write("keys", "foreign.dpapi", &foreign).unwrap();
+        let (bytes, opaque) = export_with_report(&source.root).unwrap();
+        assert_eq!(opaque, 1, "解不开的凭据计入待重新登录数");
+        let files = crate::identity_archive::unzip_limits(&bytes, |_| true, LIMIT, FILE_LIMIT, ENTRIES).unwrap();
+        assert_eq!(files.get("host/keys/foreign.dpapi").unwrap(), &foreign, "原样带走");
+        assert_eq!(inspect(&source.root, &bytes).unwrap().missing, 1);
+        let target = context();
+        restore(&target.root, &bytes, || Ok(())).unwrap();
+        assert_eq!(target.host.read("keys", "foreign.dpapi").unwrap().unwrap(), foreign);
+    }
+    // 宿主的归属记录只由这台机器写：备份里的那份不覆盖它。
+    #[test]
+    fn the_host_ownership_record_is_never_rewritten_from_a_backup() {
+        let source = context(); fixture(&source);
+        let bytes = export(&source.root).unwrap();
+        let target = context();
+        let before = fs::read(target.host.path().join("storage.json")).unwrap();
+        restore(&target.root, &bytes, || Ok(())).unwrap();
+        assert_eq!(fs::read(target.host.path().join("storage.json")).unwrap(), before);
     }
 }
