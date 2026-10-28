@@ -4320,7 +4320,7 @@ dependencies = [
 
 [[package]]
 name = "wakuwaku"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "base64 0.22.1",
  "crc32fast",
