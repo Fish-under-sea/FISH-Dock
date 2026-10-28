@@ -62,8 +62,8 @@ test('用户原始 ICO 与 PNG 保持不变，托盘直接复用 ICO 内的原�
   assert.equal(png.readUInt32BE(20), 256)
 })
 
-test('1.2.1 更新版与双语关于页完整标明集成来源', () => {
-  assert.equal(config.version, '1.2.1')
+test('1.2.2 更新版与双语关于页完整标明集成来源', () => {
+  assert.equal(config.version, '1.2.2')
   assert.match(read('src-tauri/Cargo.toml'), /name = "wakuwaku"\s+version = "1\.2\.1"/)
   assert.match(read('src-tauri/Cargo.lock'), /name = "wakuwaku"\s+version = "1\.2\.1"/)
   for (const lang of ['zh', 'en']) {

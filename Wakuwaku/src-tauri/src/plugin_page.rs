@@ -34,7 +34,8 @@ fn checked(ticket:&str)->Result<(Grant,crate::plugin_install::Installed),String>
 pub fn call(ticket:&str,method:&str,params:serde_json::Value)->Result<serde_json::Value,String>{
  let (grant,installed)=checked(ticket)?;
  // 宿主自己的小接口：插件页可读写「随 Dock 启动就拉起服务」这一项，不进插件后端。
- if method=="host.autostart" {
+ // 前缀用 dock.：页面桥按设计拒绝 host. 与 plugin. 开头的方法，那两类名字留给后端。
+ if method=="dock.autostart" || method=="host.autostart" {
   let manager=crate::plugin_install::Manager{context:crate::storage_context::current().ok_or("存储尚未就绪")?};
   let autostart=match params.get("autostart").and_then(serde_json::Value::as_bool) {
    Some(value)=>manager.set_autostart(&grant.id,value)?.autostart,
