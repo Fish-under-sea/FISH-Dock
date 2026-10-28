@@ -1,8 +1,8 @@
 <p align="center"><img src="src-tauri/icons/dsh-fish.png" width="112" alt="FISH Dock 图标"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">AI 会话有处停靠，模型连接集中管理。</p>
-<p align="center"><strong>1.2.2</strong> · Windows x64 · MIT 代码许可</p>
-<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.2">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-1.2.2.md">更新记录</a></p>
+<p align="center"><strong>1.2.3</strong> · Windows x64 · MIT 代码许可</p>
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-1.2.3.md">更新记录</a></p>
 
 > **这是二次开发集成，不是上游官方发行版。** FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 的桌面与 AI 会话体验，集成 [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的模型渠道与 API 工作台。桌面核心与模型服务核心来自上游，原作者、版权和许可证见「来源与致谢」。
 
@@ -20,9 +20,9 @@
 
 **「本地」不等于本机离线推理。** 工作台、代理和数据在本机运行；模型请求仍发送到所选渠道的服务商。资格、额度、计费和可用性由服务商决定。本项目不承诺永久免费、无限额度或绕过服务限制。
 
-## 1.2.2 更新
+## 1.2.3 更新
 
-**1.2.2** 修好插件页的「自启动」开关：1.2.1 用的 `host.autostart` 会被页面桥按设计丢弃（`host.` 前缀留给插件后端），开关因此点不动；宿主侧接口改为 `dock.autostart`，插件页同步更新后即时生效，旧宿主上自动隐藏。1.2.1 的认证持久化、备份范围、PR #14 灵动岛落点、PR #15 账单分账与第三方插件都保留。见 [v1.2.2 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.2)。
+**1.2.3** 收插件更新的尾：升级**提交成功之后**才清理过期版本目录，只保留当前激活版本与最近一个回退点；插件页在 digest 变化后关掉旧票据、用新票据重建，不再有残留旧界面。主仓 #16 安装日志改为纯 ASCII 并另写 UTF-8 的 `install.log`，#17 密码输入框加可视切换按钮。见 [v1.2.3 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3)。
 
 - 正式版检查更新：启动后及每天检查，支持手动检查；API 受限时回退官方 Release 页面，通过完整包或精简包升级。
 - 应用内标语：「Everything is a Plugin · 一切皆插件」，宿主与独立业务插件职责清晰。
@@ -40,13 +40,13 @@
 - 插件中心和「关于」支持检查更新，目录含 GitHub API 回退，包大小自动换算单位。
 - 内置 Windhawk 与编译器；保留原生插件管理页、标签拖动及单双栏布局。
 
-完整变化和验证边界见 [1.2.2 更新记录](docs/release-1.2.2.md)。
+完整变化和验证边界见 [1.2.3 更新记录](docs/release-1.2.3.md)。
 
 ## 安装与更新
 
 适用平台：**Windows 10/11 x64**。系统任务栏集成主要面向 Windows 11；其他系统版本与第三方任务栏软件组合需要单独验证。
 
-1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.2) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-1.2.2.exe` 用于首装或修复；`FISH-Dock-Update-1.2.2.exe` 适用于基础资源完整的已有 `1.1.0` 或此前 `1.2.2` 安装。
+1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-1.2.2.exe` 用于首装或修复；`FISH-Dock-Update-1.2.2.exe` 适用于基础资源完整的已有 `1.1.0` 或此前 `1.2.2` 安装。
 2. 从托盘完全退出旧版及单独运行的 OFM，再运行安装器并选择目录。新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock`；已有安装沿用登记目录覆盖升级，不自动搬迁。
 3. 通过桌面或开始菜单启动 **FISH Dock**。Node.js、固定版 WebView2、Windhawk 与编译器随包安装；业务插件另行下载。
 4. 首次启动需要确认运行时许可并校验资源；后续使用安装目录中的文件，不重复解压整套依赖。
@@ -114,7 +114,7 @@ FISH-Dock/
 在桌面源码目录执行；构建宿主不再需要旧 OFM 源码树：
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <运行时缓存> --out <新的资源目录> --version 1.2.2
+node scripts/prepare-installer.mjs --downloads <运行时缓存> --out <新的资源目录> --version 1.2.3
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <资源目录> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
