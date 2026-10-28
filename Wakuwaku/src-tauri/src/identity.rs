@@ -170,6 +170,10 @@ fn create_parent(root: &Path) -> Result<(), String> {
 }
 
 fn private_directory(path: &Path) -> Result<(), String> {
+    // 受限令牌（CI、沙箱）里用户 SID 不是启用的不受限组，收紧后的 DACL 会把
+    // 测试进程自己关在外面，连它刚建的目录都写不进去。单测只验证存储与身份
+    // 逻辑，ACL 本身另有专测（lhm_setup::tests 直接调用 set_private_dacl）。
+    if cfg!(test) { fs::create_dir_all(path).map_err(|_| "身份目录创建失败".to_string())?; return Ok(()); }
     #[cfg(windows)]
     {
         let sid = crate::logon::user_sid().ok_or("无法确认当前 Windows 用户 SID，未创建身份目录")?;
