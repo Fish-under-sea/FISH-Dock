@@ -2018,7 +2018,7 @@ fn main() {
                         tokens_at = Some(std::time::Instant::now());
                         let count = watcher.is_widget_wanted("tokens").then(|| {
                             tokens.update(&claude_dir, &codex_dir, &agy_dirs, widgets::local_midnight());
-                            tokens::words(tokens.count())
+                            tokens::words(&tokens)
                         });
                         built_in("tokens", count);
                     }

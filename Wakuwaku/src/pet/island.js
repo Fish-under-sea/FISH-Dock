@@ -758,7 +758,7 @@
     const row = el('span', `wrow wr-${size}${isShown ? ' on' : ''}${open ? ' open' : ''}${card ? ' carded' : ''}`)
     row.dataset.widget = widget.id
     // The today card swiped a moment ago: its whole row slides to the new agent.
-    const swiped = WCards.kindOf(widget) === 'today' ? WCards.todayAnimClass() : ''
+    const swiped = ['today', 'tokens'].includes(WCards.kindOf(widget)) ? WCards.swipeAnimClass() : ''
     if (swiped) row.classList.add(...swiped.split(' '))
     row.innerHTML = WCards.rowHTML(widget, size, ctx, { open, card })
     fillHer(row, 14)
@@ -5895,18 +5895,26 @@
       { passive: false },
     )
     // A horizontal drag on the today row or card swipes between the agents
-    // that worked today (wcards.js todayCycle); the click it would have
-    // made is put aside, so a swipe does not open its settings.
-    let swipe = { x: 0, y: 0, at: 0, on: false, done: false }
+    // that worked today, and on the tokens row or card between those with a
+    // bill: both turn to the same agent (wcards.js cycleAgents); the click it
+    // would have made is put aside, so a swipe does not open its settings.
+    // A drag has to be a clear swipe: far enough (SWIPE_MIN), and mostly
+    // sideways (SWIPE_SLIDE, against the way it went up or down), so a
+    // careless press or a scroll across a row turns nothing.
+    const SWIPE_MIN = 56
+    const SWIPE_SLIDE = 1.6
+    let swipe = { x: 0, y: 0, at: 0, on: false, done: false, kind: '' }
     target.addEventListener('pointerdown', e => {
       const session = e.button === 0 && view === 'expanded' && e.target.closest('[data-jump]')
       pressed = { id: session ? session.dataset.jump : '', at: Date.now() }
-      swipe = { x: e.clientX, y: e.clientY, at: Date.now(), on: e.button === 0 && view === 'expanded' && !!e.target.closest('[data-widget="today"],[data-card="today"]'), done: false }
+      const kind = e.button === 0 && view === 'expanded' ? (e.target.closest('[data-widget="today"],[data-card="today"]') ? 'today' : e.target.closest('[data-widget="tokens"],[data-card="tokens"]') ? 'tokens' : '') : ''
+      swipe = { x: e.clientX, y: e.clientY, at: Date.now(), on: !!kind, kind, done: false }
     })
     target.addEventListener('pointerup', e => {
-      if (!swipe.on || e.button !== 0 || Date.now() - swipe.at > 1500) return
+      if (!swipe.on || e.button !== 0 || Date.now() - swipe.at > 1200) return
       const dx = e.clientX - swipe.x
-      if (Math.abs(dx) >= 28 && Math.abs(dx) > Math.abs(e.clientY - swipe.y) && WCards.todayCycle(dx < 0 ? 1 : -1)) {
+      const dy = Math.abs(e.clientY - swipe.y)
+      if (Math.abs(dx) >= SWIPE_MIN && Math.abs(dx) > dy * SWIPE_SLIDE && WCards.cycleAgents(swipe.kind, dx < 0 ? 1 : -1)) {
         swipe.done = true
         update()
       }

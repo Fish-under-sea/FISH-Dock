@@ -303,7 +303,7 @@ test("a widget's detail: a string is its extra, an object as it came; its sizes 
   assert.deepEqual(Widgets.sizesOf({ id: 'ci-main', label: 'main', value: '✓' }), ['s', 'm'])
   assert.deepEqual(Widgets.sizesOf({ id: 'monitor' }), ['s', 'm', 'l'])
   assert.deepEqual(Widgets.sizesOf({ id: 'today' }), ['s', 'm', 'l'])
-  assert.deepEqual(Widgets.sizesOf({ id: 'tokens' }), ['s', 'm'])
+  assert.deepEqual(Widgets.sizesOf({ id: 'tokens' }), ['s', 'm', 'l'])
 })
 
 // --- Several in one place (the design's §5) ----------------------------------------------
