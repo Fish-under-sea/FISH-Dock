@@ -121,6 +121,10 @@
   // or (step manual) the server's fields; busy while looking or signing in;
   // what came of the last try. Null while none is.
   let mailForm = null
+  // A password shown by its eye (#17), by the box's id (mail, lhmPass): drawn
+  // again it stays shown, so the page does not close it under the person's
+  // fingers; the settings closing empties it, since nothing of it is kept.
+  const eyeShown = new Set()
   // An account's delete asked once: asked again, it goes.
   let mailDelete = ''
   // A proxy address as typed and not yet kept (key: mailProxy, netProxy): being typed,
@@ -1088,11 +1092,16 @@
     const field = (key, label, attrs, value) => `<label class="fr"><span class="fl">${esc(label)}</span><input class="in" data-mon="${key}" value="${esc(`mon:${key}` in drafts ? drafts[`mon:${key}`] : value)}" spellcheck="false" ${attrs}></label>`
     // The password is never shown again: kept, it says so, and can be forgotten.
     const kept = m.lhmPass === true
+    // Its box, with an eye (#17) that shows what is typed: the row built by
+    // hand instead of by field(), because a label holds one control and its
+    // own click would hand the focus to the input — the eye must not be
+    // inside it. What is typed is kept by the input's own handler, as ever.
+    const passBox = passwordBox('lhmPass', `data-mon="lhmPass" autocomplete="off" placeholder="${esc(kept ? '••••••' : T('mon.lhmOptional'))}"`, `mon:lhmPass` in drafts ? drafts['mon:lhmPass'] : '')
     const forget = kept ? `<div class="fr"><span class="fl"></span><span class="d grow">${esc(T('mon.lhmPassKept'))}</span><button class="pbtn sm" data-lhm-forget>${esc(T('mon.lhmForget'))}</button></div>` : ''
     const reach =
       field('lhmPort', T('mon.lhmPort'), 'inputmode="numeric" placeholder="8085"', m.lhmPort || '') +
       field('lhmUser', T('mon.lhmUser'), `placeholder="${esc(T('mon.lhmOptional'))}" autocomplete="off"`, m.lhmUser || '') +
-      field('lhmPass', T('mon.lhmPass'), `type="password" autocomplete="off" placeholder="${esc(kept ? '••••••' : T('mon.lhmOptional'))}"`, '') +
+      `<div class="fr"><span class="fl">${esc(T('mon.lhmPass'))}</span>${passBox}</div>` +
       forget
     return `${head}${note}${sensors}${reach}`
   }
@@ -1344,6 +1353,28 @@
     ['none', T('mail.proxy.noneLong')],
   ]
 
+  // The eye as drawn: the outline in the markup (so it shows at once, and
+  // with no icon set the page may not have loaded), and, hidden, the slash
+  // across it; pressed, the slash is gone and it reads as "hide".
+  const eyeGlyph = shown => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.7-6.5 10-6.5S22 12 22 12s-3.7 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>${shown ? '' : '<path d="M4 19.5 19.5 4.5"/>'}</svg>`
+
+  // A password box and, beside it, the eye that shows what was typed
+  // (zhoupengjie/Wakuwaku#17): the box's type is turned over in place, so
+  // what is typed stays where it is, the form keeps the same value, and
+  // nothing of it is kept between openings — closed, the password is hidden
+  // again. The eye is offered only while there is something to show (a box
+  // being filled by typing is turned over by the input itself, syncEye), and
+  // aria-pressed carries that as well as the label (mail.showPassword /
+  // mail.hidePassword): the pressed eye means shown. The box itself is never
+  // disabled: an empty one is where the password gets typed.
+  function passwordBox(id, attrs, value) {
+    const shown = eyeShown.has(id)
+    const key = shown ? 'mail.hidePassword' : 'mail.showPassword'
+    const label = esc(T(key))
+    const off = value ? '' : ' disabled'
+    return `<span class="pw"><input class="in" value="${esc(value ?? '')}" spellcheck="false" ${attrs}${shown ? ' type="text"' : ' type="password"'} data-eye-for="${id}"><button type="button" class="eye" data-eye="${id}" aria-label="${label}" aria-pressed="${shown}" title="${label}"${off}>${eyeGlyph(shown)}</button></span>`
+  }
+
   // Setting an account up: the address, a name to send with, the password;
   // then the servers found (a line each) or not, and what the provider
   // wants for a password; and, folded as Thunderbird's manual setup, the
@@ -1352,13 +1383,19 @@
     const f = mailForm
     const field = (key, label, attrs = '') =>
       `<label class="fr"><span class="fl">${esc(label)}</span><input class="in" data-mf="${key}" value="${esc(f[key] ?? '')}" spellcheck="false" ${attrs}></label>`
+    // The password, with its eye: what was typed kept in place as its type
+    // is turned over, so focusing it again finds the eye where it was. The
+    // row is a div, not a label: a label belongs to one control, and the eye
+    // beside the box must not steal its focus.
+    const password = (label, attrs) =>
+      `<div class="fr"><label class="fl" for="mf-password">${esc(label)}</label>${passwordBox('mail', `id="mf-password" ${attrs} data-mf="password"`, String(f.password ?? ''))}</div>`
     // Gmail (found, or typed in): its app password asked for by name, and how to make one.
     const google = f.step !== 'start' && providerOf(f.host) === 'google'
     const keep = f.id ? T('mail.passwordKeep') : google ? T('mail.appPasswordPlaceholder') : ''
     const head = [
       field('address', T('mail.address'), `placeholder="you@example.com" autocomplete="off"${f.id ? ' disabled' : ''}`),
       field('name', T('mail.name'), `placeholder="${esc(T('mail.namePlaceholder'))}" autocomplete="off"`),
-      field('password', T(google ? 'mail.appPassword' : 'mail.password'), `type="password" autocomplete="off" placeholder="${esc(keep)}"`),
+      password(T(google ? 'mail.appPassword' : 'mail.password'), `autocomplete="off" placeholder="${esc(keep)}"`),
       google ? googleStepsHTML(String(f.address || '').trim()) : `<div class="note">${esc(T('mail.passwordNote'))}</div>`,
       f.step === 'start' || google ? '' : hintHTML(f.host),
     ].join('')
@@ -3136,6 +3173,9 @@
     // on next time only for a custom number kept.
     if (layer.contains(document.activeElement)) document.activeElement.blur()
     holdCustom = false
+    // Nothing of a password shown is remembered: the next opening has them
+    // hidden again (#17).
+    eyeShown.clear()
     window.pet.settingsClosed()
     window.Island?.changed()
   }
@@ -3254,6 +3294,14 @@
     }
     const tabButton = at('[data-tab]')
     if (tabButton) return setTab(tabButton.dataset.tab)
+    // A password's eye (#17): what was typed shown or hidden, nothing else
+    // touched; off while there is nothing to show, so a press does nothing.
+    const eye = at('[data-eye]')
+    if (eye) {
+      const input = eye.parentElement?.querySelector?.(`input[data-eye-for="${eye.dataset.eye}"]`)
+      if (input && !eye.disabled && input.value) paintEye(input, eye.getAttribute('aria-pressed') !== 'true')
+      return
+    }
     // A session: to its window (the settings close as it comes to the front).
     const session = at('[data-jump]')
     if (session) {
@@ -3969,6 +4017,38 @@
     redrawMail()
   }
 
+  // The eye on a password box (#17): turned over in place, the type of the
+  // box it belongs to (data-eye="<id>", its box data-eye-for="<id>"), so
+  // what is typed stays, keeps its caret, and is still sent as typed; shown
+  // it says hidden is what pressing it does. Both hooks are re-drawn, not
+  // appended: the box keeps its place in the page and in the tab order.
+  function paintEye(input, shown) {
+    const id = input.dataset.eyeFor
+    const eye = input.parentElement?.querySelector?.(`[data-eye="${id}"]`)
+    if (!eye) return
+    const key = shown ? 'mail.hidePassword' : 'mail.showPassword'
+    input.type = shown ? 'text' : 'password'
+    eye.classList.toggle('on', shown)
+    eye.setAttribute('aria-pressed', String(shown))
+    eye.setAttribute('aria-label', T(key))
+    eye.title = T(key)
+    // Drawn again, not just re-labelled: hidden, the slash across the eye;
+    // pressed, the eye alone.
+    eye.innerHTML = eyeGlyph(shown)
+    if (shown) eyeShown.add(id)
+    else eyeShown.delete(id)
+  }
+
+  // Typed in, or pasted into: the eye is offered while there is something to
+  // show, and the box is hidden again once the box is empty.
+  function syncEye(input) {
+    const eye = input.parentElement?.querySelector?.(`[data-eye="${input.dataset.eyeFor}"]`)
+    if (!eye) return
+    const filled = !!input.value
+    eye.disabled = !filled
+    if (!filled && eye.getAttribute('aria-pressed') === 'true') paintEye(input, false)
+  }
+
   layer.addEventListener('input', e => {
     if (e.target.dataset.mf && mailForm) mailForm[e.target.dataset.mf] = e.target.value
     if (e.target.dataset.proxyAt !== undefined) proxyTyped = { key: e.target.dataset.proxyAt, text: e.target.value, bad: false }
@@ -3987,6 +4067,10 @@
     if (e.target.dataset.field) drafts[e.target.dataset.field] = e.target.value
     if (e.target.dataset.mon) drafts[`mon:${e.target.dataset.mon}`] = e.target.value
     if (e.target.dataset.hold) drafts['hold:secs'] = e.target.value
+    // A password's eye goes with what is typed in it (#17): offered only
+    // while there is something to show, and the box hidden again once it is
+    // empty. Typed or pasted, never left over from before.
+    if (e.target.dataset.eyeFor) syncEye(e.target)
   })
 
   // The word an input method has chosen: looked for as if typed.

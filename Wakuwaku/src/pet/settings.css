@@ -735,6 +735,50 @@
   border-color: #5e9bff;
 }
 
+/* A password box and its eye (#17): the row is mostly one input, the eye
+   sitting at its right end. The input keeps the whole row's width (as every
+   other .in does: flex: 1 within .fr), the eye drawn over it. */
+#island-settings .pw {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+#island-settings .pw .in {
+  padding-right: 36px;
+  width: 100%;
+}
+
+#island-settings .pw .eye {
+  position: absolute;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  padding: 3px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--g4);
+  cursor: pointer;
+}
+
+#island-settings .pw .eye svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+#island-settings .pw .eye:hover { color: var(--fg); }
+#island-settings .pw .eye.on { color: #5e9bff; }
+#island-settings .pw .eye:disabled { opacity: .4; cursor: default; }
+#island-settings .pw .eye:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
+
 /* The monitor's how-often: − n s +. */
 #island-settings .every {
   min-width: 46px;

@@ -49,6 +49,8 @@ function page() {
   })
   vm.runInContext(`let tab = 'now', snap = null, isOpen = false, openedAt = 0, clockTimer = 0;
     let modelFocus = false, openRevision = 0, confirmActive = null, confirmQueue = [], welcomeOpen, partToShow, letterToOpen, thumbTimers = [], agentOpen, othersOpen, holdCustom;
+    // 密码的显示按钮（#17）：关闭时清掉，下次打开又是隐藏的。
+    const eyeShown = new Set();
     const PART_OF = {}, TABS = ['now', 'fish.ofm/main', 'mail'], tick = () => {};
     ${lifecycle}
     this.controls = { open, close, setTab, patch, currentTab: () => tab };`, context)
