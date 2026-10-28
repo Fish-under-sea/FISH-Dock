@@ -1873,6 +1873,15 @@ fn main() {
             }
             notify::register(&dir);
 
+            // 每次启动（含更新到新版本之后）自己把 GitHub 会话续上、把身份与主仓
+            // Star 复核一次，不必等用户点插件。离线或失败只停在「待复核」，凭据不动。
+            tauri::async_runtime::spawn_blocking(|| {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                if let Some(context) = crate::storage_context::current() {
+                    let _ = crate::github_access::resume(context);
+                }
+            });
+
             let today = widgets::Today::load(&dir, &widgets::local_date());
             let sh = Arc::new(Shared {
                 app: app.handle().clone(),

@@ -4,13 +4,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use crate::storage_context::Context;
 const DAY:u64=86_400_000;
+// 主仓 Star 的复核回执：一次联网核验管一周，离线时保留上次结论，不当作未登录。
+const STAR_WINDOW:u64=7*DAY;
+// 凭据记录自身的版本：只增字段，不删字段、不改类型，旧记录照旧读。
+const SCHEMA:u32=2;
 const VAULT:&str="github-access.dpapi";
+const VAULT_BACKUP:&str="github-access.dpapi.bak";
 const API:&str="https://api.github.com";
 // 桌面 Device flow 使用公开 Client ID，不携带 Client Secret；显式配置仍可覆盖。
 const DEFAULT_CLIENT_ID:&str="Ov23lisbBQRqCOm57AC6";
 #[derive(Default,Clone,Serialize,Deserialize)]
-#[serde(default,deny_unknown_fields)]
+#[serde(default)]
 struct Account {
+ schema_version:u32,
  token:String, refresh_token:String, client_id:String,
  login:String, user_id:u64, star_at:u64, star_checked_at:u64,
  expires_at:u64, refresh_expires_at:u64,
@@ -26,7 +32,7 @@ impl Account {
 struct Pending { root:std::path::PathBuf, client:String, code:String, user_code:String, expires_at:u64, next_at:u64, interval:u64 }
 static DEVICE:Mutex<Option<Pending>>=Mutex::new(None);
 static EDIT:Mutex<()>=Mutex::new(());
-fn receipt_valid(star_at:u64, now:u64)->bool{star_at>0&&now>=star_at&&now-star_at<DAY}
+fn receipt_valid(star_at:u64, now:u64)->bool{star_at>0&&now>=star_at&&now-star_at<STAR_WINDOW}
 fn star_status(status:u16)->Result<bool,String>{match status{204=>Ok(true),404=>Ok(false),_=>Err(format!("GitHub Star 校验未完成（HTTP {status}）"))}}
 fn client(context:&Context)->Result<Option<String>,String>{
  let configured=context.host.read("config","github-oauth.json")?.map(|bytes|serde_json::from_slice::<Value>(&bytes).map_err(|_|"GitHub 登录设置格式无效")).transpose()?;
@@ -37,13 +43,19 @@ fn client(context:&Context)->Result<Option<String>,String>{
  match value {Some(s) if !s.is_empty()&&s.len()<=100&&s.bytes().all(|b|b.is_ascii_alphanumeric())=>Ok(Some(s)),Some(_)=>Err("GitHub OAuth clientId 无效".into()),None=>Ok(None)}
 }
 fn load(context:&Context)->Result<Account,String>{
- match context.host.read("keys",VAULT)?{
-  None=>Ok(Account::default()),
-  Some(bytes)=>serde_json::from_slice(&crate::mail_secrets::unprotect(&bytes)?).map_err(|_|"GitHub 宿主凭据格式无效".into()),
+ let Some(bytes)=context.host.read("keys",VAULT)? else{return Ok(Account::default())};
+ let plain=crate::mail_secrets::unprotect(&bytes)?;
+ match serde_json::from_slice::<Account>(&plain){
+  Ok(account)=>Ok(account),
+  // 新版本留下的字段、或某个字段写成了别的类型：先把原文件留一份，再按空会话处理。
+  // 读不懂凭据不构成删除凭据的理由，下一次成功登录会覆盖它。
+  Err(_)=>{let _=context.host.write("keys",VAULT_BACKUP,&bytes);Ok(Account::default())}
  }
 }
 fn save(context:&Context,account:&Account)->Result<(),String>{
- let bytes=serde_json::to_vec(account).map_err(|_|"GitHub 凭据编码失败")?;
+ let mut account=account.clone();
+ account.schema_version=SCHEMA;
+ let bytes=serde_json::to_vec(&account).map_err(|_|"GitHub 凭据编码失败")?;
  let protected=crate::mail_secrets::protect(&bytes)?;
  context.host.write("keys",VAULT,&protected)
 }
@@ -117,7 +129,7 @@ fn token_response(data:&Value,now:u64,client:&str)->Result<Account,String>{
  let token=credential(data,"access_token")?;
  let expires_at=match data.get("expires_in"){Some(v)=>{let seconds=v.as_u64().filter(|s|*s>0).ok_or("GitHub 令牌有效期无效")?;now.saturating_add(seconds.saturating_mul(1000))},None=>0};
  let (refresh_token,refresh_expires_at)=if data.get("refresh_token").is_some(){let value=credential(data,"refresh_token")?;let seconds=data["refresh_token_expires_in"].as_u64().filter(|s|*s>0).ok_or("GitHub 刷新令牌有效期缺失")?;(value,now.saturating_add(seconds.saturating_mul(1000)))}else{(String::new(),0)};
- Ok(Account{token,expires_at,refresh_token,refresh_expires_at,client_id:client.into(),..Account::default()})
+ Ok(Account{schema_version:SCHEMA,token,expires_at,refresh_token,refresh_expires_at,client_id:client.into(),..Account::default()})
 }
 type Transport<'a> = dyn FnMut(&str,Option<&str>,Option<&[(&str,&str)]>)->Result<(u16,Vec<u8>),String> + 'a;
 fn invalidate(context:&Context,account:&mut Account)->Result<(),String>{
@@ -177,6 +189,25 @@ fn verify_with(context:&Context,account:&mut Account,now:u64,http:&mut Transport
  if !starred{return Err("已登录 GitHub，但尚未检测到主仓 Star，请点亮后重新验证".into());}Ok(())
 }
 fn verify(context:&Context,account:&mut Account)->Result<(),String>{verify_with(context,account,crate::now_ms(),&mut request)}
+// 每次启动（含更新到新版本后）先自己把会话续上、把身份与主仓 Star 复核一次：
+// 用户不必再点任何按钮。任何一步失败都只让状态停在「待复核」，凭据原样保留。
+pub(crate) fn resume_with(context:&Context,now:u64,http:&mut Transport<'_>)->Result<bool,String>{
+ let mut account=load(context)?;
+ if !account.session_live(now){return Ok(false);}
+ let mut acted=false;
+ if account.needs_refresh(now)||!account.access_live(now){
+  if account.refresh_live(now){let _=refresh_with(context,&mut account,now,http);acted=true;}
+ }
+ if account.session_live(now){
+  let last=account.last_star_check();
+  if account.user_id==0||last==0||!receipt_valid(last,now){let _=verify_with(context,&mut account,now,http);acted=true;}
+ }
+ Ok(acted)
+}
+pub fn resume(context:&Context)->Result<(),String>{
+ let _guard=EDIT.lock().map_err(|_|"GitHub 登录锁不可用")?;
+ resume_with(context,crate::now_ms(),&mut request).map(|_|())
+}
 pub fn check(context:&Context)->Result<Value,String>{
  let _guard=EDIT.lock().map_err(|_|"GitHub 登录锁不可用")?;
  let mut account=match poll(context)?{Some(account)=>{save(context,&account)?;account},None=>load(context)?};
@@ -239,7 +270,8 @@ mod session_tests;
   for id in ["fish.feishu","fish.clash","fish.magpie","fish.ofm"]{assert!(require_plugin(&context,id).unwrap_err().contains("登录 GitHub"));}
   assert!(require_plugin(&context,"acme.weather").is_ok());
  }
- #[test]fn offline_receipt_expires_and_future_timestamps_are_not_trusted(){
-  assert!(receipt_valid(100,101));assert!(!receipt_valid(0,101));assert!(!receipt_valid(102,101));assert!(!receipt_valid(100,100+DAY));
+ #[test]fn offline_receipt_holds_a_week_and_future_timestamps_are_not_trusted(){
+  assert!(receipt_valid(100,101));assert!(!receipt_valid(0,101));assert!(!receipt_valid(102,101));
+  assert!(receipt_valid(100,100+6*DAY),"一周内沿用上次复核结论");assert!(!receipt_valid(100,100+STAR_WINDOW));
  }
 }

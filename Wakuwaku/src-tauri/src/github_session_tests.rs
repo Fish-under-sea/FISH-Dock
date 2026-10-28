@@ -78,3 +78,47 @@ fn incomplete_refresh_response_keeps_existing_credentials(){
  assert!(verify_with(&f.context,&mut a,now,&mut |_,_,_|answer(200,json!({"access_token":"synthetic-incomplete","expires_in":28800}))).is_err());
  let stored=load(&f.context).unwrap();assert_eq!(stored.token,"synthetic-old-access");assert_eq!(stored.refresh_token,"synthetic-old-refresh");
 }
+// 新版写入的记录多出字段时必须照旧读成同一份会话：一次登录在版本之间不变。
+#[test]
+fn a_newer_record_with_extra_fields_keeps_the_same_session(){
+ let f=Fixture::new();let now=crate::now_ms();
+ let stored=json!({"schema_version":2,"token":"synthetic-access","refresh_token":"synthetic-refresh","client_id":DEFAULT_CLIENT_ID,"login":"fixture-user","user_id":42,"star_at":now,"star_checked_at":now,"expires_at":now+3_600_000,"refresh_expires_at":now+DAY,"scope":"read:user","token_type":"bearer"});
+ f.context.host.write("keys",VAULT,&crate::mail_secrets::protect(&serde_json::to_vec(&stored).unwrap()).unwrap()).unwrap();
+ let a=load(&f.context).unwrap();
+ assert_eq!(a.login,"fixture-user");assert_eq!(a.token,"synthetic-access");assert_eq!(a.refresh_token,"synthetic-refresh");
+ let state=public(&f.context,&a).unwrap();assert_eq!(state["authenticated"],true);assert_eq!(state["requiresLogin"],false);
+}
+// 令牌不过期的账号（OAuth 应用关闭过期后签发）永远不需要再登录一次。
+#[test]
+fn a_session_without_an_expiry_never_asks_for_a_new_login(){
+ let f=Fixture::new();let now=crate::now_ms();
+ let a=token_response(&json!({"access_token":"synthetic-permanent","scope":"read:user"}),now,DEFAULT_CLIENT_ID).unwrap();
+ assert_eq!(a.expires_at,0);assert!(a.access_live(now+365*DAY));assert!(!a.needs_refresh(now+365*DAY));
+ save(&f.context,&a).unwrap();
+ let state=public(&f.context,&load(&f.context).unwrap()).unwrap();
+ assert_eq!(state["authenticated"],true);assert_eq!(state["requiresLogin"],false);
+}
+// 启动检查（更新或重启之后）：该续期就续期、该复核就复核；任何失败都不清凭据。
+#[test]
+fn startup_resume_refreshes_and_verifies_without_clearing_on_failure(){
+ let f=Fixture::new();let now=crate::now_ms();let mut a=account(now);a.expires_at=now-1;a.star_at=0;a.star_checked_at=0;save(&f.context,&a).unwrap();
+ let before=f.context.host.read("keys",VAULT).unwrap().unwrap();
+ resume_with(&f.context,now,&mut |_,_,_|Err("synthetic offline".into())).unwrap();
+ assert_eq!(f.context.host.read("keys",VAULT).unwrap().unwrap(),before);
+ let state=public(&f.context,&load(&f.context).unwrap()).unwrap();
+ assert_eq!(state["authenticated"],true);assert_eq!(state["requiresLogin"],false);assert_eq!(state["verified"],false);
+}
+// 联网恢复后同一次启动检查把会话与 Star 一起补齐。
+#[test]
+fn startup_resume_completes_the_session_and_the_star_check(){
+ let f=Fixture::new();let now=crate::now_ms();let mut a=account(now);a.expires_at=now-1;a.star_at=0;a.star_checked_at=0;save(&f.context,&a).unwrap();
+ let mut http=|url:&str,token:Option<&str>,_form:Option<&[(&str,&str)]>|{
+  if url.ends_with("access_token"){return answer(200,rotated());}
+  assert_eq!(token,Some("synthetic-new-access"));
+  if url.ends_with("/user"){answer(200,identity())}else{answer(204,json!({}))}
+ };
+ assert!(resume_with(&f.context,now,&mut http).unwrap());
+ let state=public(&f.context,&load(&f.context).unwrap()).unwrap();
+ assert_eq!(state["authenticated"],true);assert_eq!(state["verified"],true);
+ assert_eq!(load(&f.context).unwrap().refresh_token,"synthetic-new-refresh");
+}
