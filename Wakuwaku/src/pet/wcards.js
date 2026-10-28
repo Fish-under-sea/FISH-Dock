@@ -116,7 +116,10 @@
   // The today card and the token widget swipe together between the agents
   // they have something of: one agent shown by both, so a swipe on either
   // turns both to it (widgets.rs words: agents beside vars, busiest first).
-  // The one swiped to, else the first (the busiest).
+  // The one swiped to, else the first (the busiest). A list that does not
+  // know the chosen agent shows its own first and leaves the choice alone:
+  // the two lists are not the same (today counts every agent, a bill only
+  // those that spent), and resetting here made them pull each other back.
   let selAgent = ''
   let todayAgents = []
   let tokenAgents = []
@@ -125,8 +128,8 @@
     if (!list.length) return null
     if (which === 'tokens') tokenAgents = list
     else todayAgents = list
-    if (!list.some(a => a.id === selAgent)) selAgent = list[0].id
-    return list.find(a => a.id === selAgent) || null
+    const shown = list.some(a => a.id === selAgent) ? selAgent : list[0].id
+    return list.find(a => a.id === shown) || null
   }
   const todayOf = w => agentsOf(w, 'today')
   const tokensOf = w => agentsOf(w, 'tokens')

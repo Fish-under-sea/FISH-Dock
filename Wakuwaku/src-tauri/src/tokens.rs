@@ -325,20 +325,30 @@ fn dsh_bill(day_start: u64) -> Count {
     let mut sum = Count::default();
     for path in files {
         let Some(text) = dsh_text(&path) else { continue };
-        for line in text.lines() {
-            if !line.contains("\"usage\"") || !line.contains("\"assistant/message\"") {
-                continue;
-            }
-            let Ok(e) = serde_json::from_str::<Value>(line) else { continue };
-            if at_of(&e) < Some(day_start) {
-                continue;
-            }
-            let usage = &e["data"]["usage"];
-            let n = |k: &str| usage[k].as_u64().unwrap_or(0);
-            let output = n("outputTokens");
-            sum.total += n("inputTokens") + n("cacheReadTokens") + output;
-            sum.output += output;
+        let part = dsh_sum(&text, day_start);
+        sum.total += part.total;
+        sum.output += part.output;
+    }
+    sum
+}
+
+// 一段会话日志里当天的用量：一行一个事件，只认模型自己的回答。生产路径与
+// 单测共用这一份，改了解析不会只剩测试还在自说自话。
+fn dsh_sum(text: &str, day_start: u64) -> Count {
+    let mut sum = Count::default();
+    for line in text.lines() {
+        if !line.contains("\"usage\"") || !line.contains("\"assistant/message\"") {
+            continue;
         }
+        let Ok(e) = serde_json::from_str::<Value>(line) else { continue };
+        if at_of(&e).is_none_or(|t| t < day_start) {
+            continue;
+        }
+        let usage = &e["data"]["usage"];
+        let n = |k: &str| usage[k].as_u64().unwrap_or(0);
+        let output = n("outputTokens");
+        sum.total += n("inputTokens") + n("cacheReadTokens") + output;
+        sum.output += output;
     }
     sum
 }
@@ -521,7 +531,8 @@ mod tests {
         drop(db);
         assert_eq!(zcode_bill(&zcode, day), Some(Count { total: 3_300, output: 300 }));
 
-        let opencode = dir.join("opencode.sqlite");        let db = rusqlite::Connection::open(&opencode).unwrap();
+        let opencode = dir.join("opencode.sqlite");
+        let db = rusqlite::Connection::open(&opencode).unwrap();
         db.execute_batch("CREATE TABLE message (time_created INTEGER, data TEXT)").unwrap();
         let msg = |at: u64, input: u64, output: u64| {
             db.execute("INSERT INTO message VALUES (?1, ?2)", rusqlite::params![at as i64, format!(r#"{{"tokens":{{"input":{input},"output":{output}}}}}"#)]).unwrap();
@@ -560,24 +571,7 @@ mod tests {
         dsh_written_since(&dir.join("sessions"), day, 3, &mut files);
         assert_eq!(files.len(), 1, "the session log is found under its project");
         let text = dsh_text(&files[0]).unwrap();
-        let sum = {
-            let mut sum = Count::default();
-            for line in text.lines() {
-                if !line.contains("\"usage\"") || !line.contains("\"assistant/message\"") {
-                    continue;
-                }
-                let e: Value = serde_json::from_str(line).unwrap();
-                if at_of(&e).is_none_or(|t| t < day) {
-                    continue;
-                }
-                let usage = &e["data"]["usage"];
-                let n = |k: &str| usage[k].as_u64().unwrap_or(0);
-                let output = n("outputTokens");
-                sum.total += n("inputTokens") + n("cacheReadTokens") + output;
-                sum.output += output;
-            }
-            sum
-        };
+        let sum = dsh_sum(&text, day);
         assert_eq!(sum, Count { total: (1_000 + 100 + 50) + (2_000 + 200 + 60), output: 110 });
         // No such folder at all: nothing found, no panic.
         let mut none = Vec::new();

@@ -225,7 +225,34 @@ test("today's card and the token widget turn to the same agent (its own bill)", 
   assert.match(dshCard, /<b>—<\/b><span>token<\/span>/)
 })
 
-test('a curve, a ring, bars: each to its own scale', () => {  assert.equal(WCards.spark([5], 56, 16, '#fff'), '')
+// 两块的 agent 集合不同（今天算了所有 agent，账单只算花过钱的）：谁的列表里没有
+// 选中的那个，就显示自己的第一个，但绝不把共享的选择改掉 —— 否则每渲染一次就互相
+// 拉回，滑到 dsh 也会立刻跳回最忙的那个。
+test('two widgets with different agent lists never pull the shared choice back', () => {
+  const tokens = { id: 'tokens', builtIn: true, value: { key: 'widget.tokensValue', vars: { total: '1.2M', output: '85K' }, agents: [
+    { id: 'claude', who: 'Claude', total: '850K', output: '40K' },
+    { id: 'zcode', who: 'ZCode', total: '60K', output: '12K' },
+  ] }, detail: { sizes: ['s', 'm', 'l'] } }
+  const only = { id: 'today', builtIn: true, value: { key: 'widget.todayValue', vars: { turns: '1', time: '0:06', approvals: '0' }, agents: [
+    { id: 'dsh', who: 'DeepSeek', turns: '1', time: '0:06', workedMs: 755474, approvals: '0', hours: [] },
+  ] }, detail: { sizes: ['s', 'm', 'l'], series: { points: new Array(24).fill(0) } } }
+  const all = [only, tokens]
+  // 初始：各自显示自己的第一个。
+  assert.equal(WCards.titleOf(only, dark), 'DeepSeek 今天')
+  assert.equal(WCards.titleOf(tokens, dark), 'Claude 的 token')
+  // 在 token 卡上滑一下。
+  assert.equal(WCards.cycleAgents('tokens', 1), 'zcode')
+  assert.equal(WCards.titleOf(tokens, dark), 'ZCode 的 token')
+  // 渲染另一块（它的列表里没有 zcode）：显示自己的第一个，选择保持不变。
+  assert.equal(WCards.titleOf(only, dark), 'DeepSeek 今天')
+  assert.equal(WCards.titleOf(tokens, dark), 'ZCode 的 token')
+  // 两块都照常出内容，谁也没有因此变空。
+  assert.match(WCards.cardHTML(only, dark, all), /DeepSeek|---|暂时|暂无/)
+  assert.match(WCards.cardHTML(tokens, dark, all), /ZCode/)
+})
+
+test('a curve, a ring, bars: each to its own scale', () => {
+  assert.equal(WCards.spark([5], 56, 16, '#fff'), '')
   const svg = WCards.spark([0, 10], 100, 20, '#fff', { pad: 0, fill: false, dot: false })
   assert.match(svg, /points="0,20 100,0"/)
   // A scale wider than the points (0 to 100 for a share).

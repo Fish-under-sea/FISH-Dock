@@ -53,6 +53,7 @@ pub fn snapshot(sh: &Shared) -> Value {
     let (win_light, win_accent) = crate::wallpaper::look();
     // Whether any of them is connected, as the island tells it (connection.rs):
     // the same full look the start takes, zcode and DSH and Reasonix included.
+    // conn and omp are still what the snapshot below reports.
     let conn = connection::connection(sh.port);
     let omp = connection::omp_hooks_status(sh.port);
     if connection::note_connected(connection::any_connected(sh.port)) {
