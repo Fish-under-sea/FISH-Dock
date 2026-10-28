@@ -103,7 +103,7 @@ test('卸载只删安装器放下的文件，绝不递归删除目录、绝不�
     assert.doesNotMatch(text.slice(text.indexOf('Section "Uninstall"')), /DSH-FISH\\data|DSH-FISH\\webview|\.dsh-fish|\.fish-dock|mail-secrets|channel-credentials|channel-pack/, '账号、密钥、用量、设置与 WebView 数据不在安装目录里，卸载不得提到删除它们')
     const uninstall = text.slice(text.indexOf('Section "Uninstall"'))
     const inner = [...uninstall.matchAll(/^\s*Delete "(\$INSTDIR\\[^"]+)"/gm)].map(m => m[1].replace(/^\$INSTDIR\\/, '').replace(/\\/g, '/'))
-    const owned = new Set(['DSH-FISH.exe', 'uninstall.exe', 'install-manifest.json', 'install-state.json', 'install-update.cjs', 'install-stop.ps1', ...files.map(name => `resources/${name}`)])
+    const owned = new Set(['DSH-FISH.exe', 'uninstall.exe', 'install-manifest.json', 'install-state.json', 'install-update.cjs', 'install-stop.ps1', 'install.log', ...files.map(name => `resources/${name}`)])
     for (const name of inner) assert.ok(owned.has(name), `卸载删除了安装器没放下的文件：${name}`)
     for (const name of files) assert.ok(inner.includes(`resources/${name}`), `卸载漏掉了：${name}`)
     // 安装目录之外只允许删自己建的两个快捷方式和开始菜单文件夹。
@@ -183,6 +183,35 @@ test('资源目录缺少清单或混入清单外文件时拒绝生成安装包',
     await rm(path.join(env.resources, 'node/node.exe'))
     await assert.rejects(resourceFiles(env.resources), /node\/node\.exe/)
   } finally { await rm(env.dir, { recursive: true, force: true }) }
+})
+
+// 安装日志乱码（#16）：安装段用 nsExec::ExecToLog 把 node.exe 的输出转进
+// 「显示详细信息」，而 nsExec 按 ANSI/OEM 代码页解释那些字节 —— node 写的是
+// UTF-8，中文进去就是一堆问号方块。安装器本身是 Unicode true，所以问题不在
+// NSIS 的界面文字，而在被转发的这一路输出：它必须是纯 ASCII。
+// 转出去的每一句 console 输出都是一段字面量或 SAY 里的模板，合起来只许 ASCII。
+test('写给安装日志的输出只用 ASCII，中文细节另写一份 install.log', async () => {
+  const file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-update.cjs')
+  const text = await readFile(file, 'utf8')
+  const shown = [...text.matchAll(/console\.(?:log|error)\(([^;\n]*)/g)].map(m => m[1])
+  assert.deepEqual(shown.length, 4, '安装日志的输出点应当只有这些：停止旧进程、进度、结果 JSON、失败')
+  for (const line of shown) assert.doesNotMatch(line, /[^\x00-\x7f]/, `安装日志里出现了非 ASCII：${line}`)
+  // 字面量干净还不够：报错会带上安装目录的路径，中文目录是常事，出口得再过
+  // 一道 ascii() 才保证那一屏永远是 ASCII。
+  assert.match(text, /const ascii = text/, '出口要有一个把非 ASCII 换掉的过滤')
+  for (const line of shown) assert.match(line, /^ascii\(/, `这条输出没过 ascii()：${line}`)
+  const say = text.slice(text.indexOf('const SAY = {'), text.indexOf('// 细节日志'))
+  assert.ok(say.length > 0, '输出的措辞都在 SAY 里')
+  for (const str of say.match(/'[^'\n]*'|`[^`\n]*`/g) || []) assert.doesNotMatch(str, /[^\x00-\x7f]/, `SAY 里出现了非 ASCII：${str}`)
+  // 进度与结果都经 report 出去：实参只能是 SAY 里的话，或者进度里那句
+  // 纯数字的模板（`${label} ${done}/${total} (${percent}%)`）。
+  const shape = /^SAY\.\w+\(.*\)$|^SAY\.\w+$/
+  const counts = /^`\$\{label\} \$\{done\}\/\$\{total\} \(\$\{percent\}%\)`$/
+  for (const call of text.matchAll(/report\(([^;\n]*)\)/g)) assert.ok(shape.test(call[1]) || counts.test(call[1]), `report 只许用 SAY：${call[1]}`)
+  // 给用户看的细节：UTF-8 带 BOM 的 install.log，一句一行。
+  assert.match(text, /install\.log/)
+  assert.match(text, /'\\ufeff'/)
+  assert.match(text, /appendFileSync\(file, [^;]*?,\s*'utf8'\)/)
 })
 
 test('生成的脚本能被离线 makensis 真正编译出安装包', async () => {

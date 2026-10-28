@@ -1,7 +1,36 @@
 // 安装器专用：按摘要归属更新，校验一次后同卷移动，失败恢复旧版本。
+// 日志分两路（#16）：安装器用 nsExec::ExecToLog 转发本程序的输出，而 nsExec
+// 按 ANSI/OEM 代码页解释这些字节，Node 写的是 UTF-8 —— 中文进「显示详细信息」
+// 就是乱码。所以走安装器日志的每一句都只用 ASCII（英文），给用户看细节的中文
+// 写进目标目录下的 install.log（UTF-8，带 BOM，记事本直接能读）。
 'use strict';
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
-const MANIFEST = 'install-manifest.json', STATE = 'install-state.json', TX = '.fish-install-transaction';
+const MANIFEST = 'install-manifest.json', STATE = 'install-state.json', TX = '.fish-install-transaction', LOG = 'install.log';
+// 安装器日志里只出现 ASCII：这段文字经 nsExec 按 OEM 代码页转出来。
+const SAY = {
+  stop: 'Stopping the running copy of this installation...',
+  verify: 'Checking the installed files',
+  prepare: 'Preparing the changed files',
+  commit: 'Committing the installation',
+  done: (replaced, reused, secs) => `Installation complete: ${replaced} replaced, ${reused} reused, ${secs} s`,
+  failed: message => 'Installation update failed: ' + message,
+};
+// 细节日志：UTF-8 带 BOM，换行用 CRLF，一句一行；写不进去也不影响安装。
+// BOM 只写一次：记事本靠它认出 UTF-8，Windows PowerShell 5.1 的 Get-Content 也一样。
+function detail(root) {
+  let file = null;
+  return function write(line) {
+    try {
+      if (!file) file = path.join(root, LOG);
+      const first = !fs.existsSync(file);
+      fs.appendFileSync(file, (first ? '\ufeff' : '') + line.replace(/\r?\n/g, ' ') + '\r\n', 'utf8');
+    } catch { file = null; }
+  };
+}
+// 出去的字一个都不能不过这里：报错信息里常有中文路径（安装目录可以是中文），
+// 在安装日志里只会变成乱码。装不成的那句话只说是什么错、错了哪个文件，中文
+// 细节和完整路径都在 install.log 里；ASCII 之外的字符换成问号。
+const ascii = text => String(text).replace(/[^\x20-\x7e]+/g, '?');
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const canonical = name => process.platform === 'win32' ? path.resolve(name).toLowerCase() : path.resolve(name);
 function relative(name) {
@@ -104,6 +133,8 @@ function update(stage, root, io = fs, options = {}) {
   if (ownedStage && !io.existsSync(stage)) throw Error('目标卷隔离暂存目录缺失');
   const source = resolver(stage, io), next = manifest(stage, io, source); if (!next) throw Error('缺少安装归属清单');
   const report = typeof options.report === 'function' ? options.report : () => {};
+  // 细节进 install.log；日志里写的是 ASCII 的进度与结果，细节留中文。
+  const log = options.log || (() => {});
   let lastPercent = -1, lastReport = 0;
   const progress = (label, done, total, force = false) => {
     const percent = Math.floor(done * 100 / Math.max(1, total));
@@ -118,7 +149,7 @@ function update(stage, root, io = fs, options = {}) {
     if (cached && cached.sha256 === f.sha256 && cached.stamp === fingerprint(meta) && prior.get(f.path.toLowerCase())?.sha256 === f.sha256) { metrics.cachedFiles++; return true; }
     return hashFile(io, file, metrics).sha256 === f.sha256;
   }
-  progress('校验安装资源', 0, next.files.length, true);
+  progress(SAY.verify, 0, next.files.length, true);
   const payload = next.payload ? new Set(next.payload) : null;
   for (const [index, f] of next.files.entries()) {
     const dest = target(f.path);
@@ -130,7 +161,7 @@ function update(stage, root, io = fs, options = {}) {
       if (!matches(incoming, f, false)) throw Error('发行文件校验失败：' + f.path);
       changed.push(f);
     }
-    progress('校验安装资源', index + 1, next.files.length);
+    progress(SAY.verify, index + 1, next.files.length);
   }
   const obsolete = previous.filter(f => !names.has(f.path.toLowerCase())).filter(f => matches(target(f.path), f, true));
   const entries = [...changed, ...obsolete, { path: MANIFEST }, { path: STATE }].map(f => ({ path: f.path, existed: io.existsSync(target(f.path)) }));
@@ -154,13 +185,13 @@ function update(stage, root, io = fs, options = {}) {
         catch (e) { if (!['EXDEV', 'EPERM', 'EACCES', 'EBUSY'].includes(e.code)) throw e; copied = true; }
       }
       if (copied) { io.copyFileSync(from, to); metrics.copiedFiles++; const checked = hashFile(io, to, metrics); if (checked.bytes !== f.bytes || checked.sha256 !== f.sha256) throw Error('安装暂存校验失败：' + f.path); }
-      progress('准备变更文件', index + 1, changed.length);
+      progress(SAY.prepare, index + 1, changed.length);
     }
     io.writeFileSync(path.join(staging, MANIFEST), next.raw);
     journal.phase = 'applying'; save(); lastPercent = -1;
     for (const [index, e] of entries.entries()) {
       if (e.path === STATE) continue;
-      put(e); progress('提交安装文件', index + 1, entries.length);
+      put(e); progress(SAY.commit, index + 1, entries.length);
     }
     const files = Object.create(null);
     for (const f of next.files) {
@@ -176,22 +207,35 @@ function update(stage, root, io = fs, options = {}) {
   recover(root, io);
   if (ownedStage && options.cleanupStage !== false) { resolver(stage, io); io.rmSync(stage, { recursive: true, force: true }); }
   const result = { version: next.version, replaced: changed.length, removed: obsolete.length, needsWebviewAcl: next.files.some(f => f.path.startsWith('resources/webview2/')) && (!receipt || changed.some(f => f.path.startsWith('resources/webview2/'))), ...metrics, elapsedMs: Date.now() - start };
-  report(`安装完成：替换 ${result.replaced}，复用 ${metrics.cachedFiles}，耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒`);
+  report(SAY.done(result.replaced, metrics.cachedFiles, (result.elapsedMs / 1000).toFixed(1)));
+  log(`安装完成：替换 ${result.replaced} 个文件，复用 ${metrics.cachedFiles} 个，耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒`);
   return result;
 }
 module.exports = { update, recover };
 if (require.main === module) {
+  // 安装器日志（nsExec 转出去的那一屏）只用 ASCII；细节写进 install.log。
+  // 出口都过 ascii()：连报错里带的中文路径也不会漏到那一屏上。
+  let log = () => {};
   try {
     if (!process.argv[2] || !process.argv[3]) throw Error('缺少安装暂存和目标路径');
     const stage = path.resolve(process.argv[2]), root = path.resolve(process.argv[3]);
     fs.mkdirSync(root, { recursive: true }); process.chdir(root);
+    // 每次安装一份新的详情日志：上次留下的不该和这一次混在一起。
+    try { fs.rmSync(path.join(root, LOG), { force: true }); } catch {}
+    log = detail(root);
+    log(`FISH Dock 安装详情 ${new Date().toISOString()}（安装暂存：${stage}，安装目录：${root}）`);
     const stop = path.join(stage, 'install-stop.ps1');
     if (process.platform === 'win32' && fs.existsSync(stop)) {
-      console.log('正在结束本安装的旧进程…');
+      console.log(ascii(SAY.stop));
+      log('正在结束本安装的旧进程…');
       require('node:child_process').execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', stop, '-InstallRoot', root], { stdio: 'inherit', windowsHide: true });
     }
-    const result = update(stage, root, fs, { report: console.log, cleanupStage: false });
+    const result = update(stage, root, fs, { report: text => console.log(ascii(text)), log, cleanupStage: false });
     if (result.needsWebviewAcl) fs.writeFileSync(path.join(stage, 'webview-acl-needed'), '1');
-    console.log(JSON.stringify(result));
-  } catch (e) { console.error('安装更新失败：' + e.message); process.exitCode = 1; }
+    console.log(ascii(JSON.stringify(result)));
+  } catch (e) {
+    console.error(ascii(SAY.failed(e.message)));
+    log('安装更新失败：' + e.message);
+    process.exitCode = 1;
+  }
 }

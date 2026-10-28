@@ -87,7 +87,10 @@ test('只有首次授权或 WebView2 变化时需要递归授权，其余更新�
 test('明确显示校验与提交进度，日志数量有上限', t => {
   const f = fixture(t), rows = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`resources/f${i}`, 'synthetic']))
   release(f.stage, rows); const events = []; update(f.stage, f.root, fs, { report: text => events.push(text) })
-  assert.ok(events.some(text => text.includes('校验')))
-  assert.ok(events.some(text => text.includes('完成')))
+  // 这些进的是安装器日志（nsExec::ExecToLog 转出去，按 OEM 代码页解释），
+  // 所以是英文（#16）：中文一句不进去。
+  assert.ok(events.some(text => text.includes('Checking')))
+  assert.ok(events.some(text => text.includes('complete')))
+  for (const text of events) assert.doesNotMatch(text, /[^\x00-\x7f]/, `安装器日志里出现了非 ASCII：${text}`)
   assert.ok(events.length < 50)
 })

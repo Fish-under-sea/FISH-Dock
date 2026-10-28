@@ -281,6 +281,8 @@ ${directoryLines}
   Delete "$INSTDIR\\install-state.json"
   Delete "$INSTDIR\\install-update.cjs"
   Delete "$INSTDIR\\install-stop.ps1"
+  ; 更新器写在安装目录里的详情日志（install-update.cjs，UTF-8）：不留下一份。
+  Delete "$INSTDIR\\install.log"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "\${UNINSTALL_KEY}"
 
