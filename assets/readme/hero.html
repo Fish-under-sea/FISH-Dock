@@ -64,7 +64,7 @@ h1{margin:0;font-size:140px;line-height:1;height:140px;white-space:nowrap}
 <div class="rule"><i></i><i></i><i></i></div>
 <p id="tagline" class="tagline">AI 会话有处停靠，模型连接集中管理</p>
 <p id="translation" class="translation pixel">Your sessions. Your models. Your dock.</p>
-<div class="chips pixel"><span>WINDOWS X64</span><span>1.2.0</span><span>MIT CODE</span></div>
+<div class="chips pixel"><span>WINDOWS X64</span><span id="chip-version">2.0.0</span><span>MIT CODE</span></div>
 </div>
 <div class="pane portrait"><img id="portrait" src="DSH-FISH.png" width="360" height="360" alt="DSH-FISH 吉祥物"></div>
 </div>
@@ -72,7 +72,7 @@ h1{margin:0;font-size:140px;line-height:1;height:140px;white-space:nowrap}
 <img class="mascot" src="mascot.png" width="188" height="239" alt="用户指定的求佛透明挂件">
 </section>
 <section class="metrics">
-<div id="stat-version" class="metric frame"><div class="metric-head pixel">VERSION<i class="lamp"></i></div><div class="metric-value"><span class="number pixel">1.2.0</span><span class="metric-label" data-zh="当前版本" data-en="CURRENT RELEASE"></span></div></div>
+<div id="stat-version" class="metric frame"><div class="metric-head pixel">VERSION<i class="lamp"></i></div><div class="metric-value"><span id="stat-version-number" class="number pixel">2.0.0</span><span class="metric-label" data-zh="当前版本" data-en="CURRENT RELEASE"></span></div></div>
 <div id="stat-desktop" class="metric frame"><div class="metric-head pixel">DESKTOP<i class="lamp"></i></div><div class="metric-value"><span class="number pixel">2 MODES</span><span class="metric-label" data-zh="任务栏 / 岛" data-en="BAR / ISLAND"></span></div></div>
 <div id="stat-mail" class="metric frame"><div class="metric-head pixel">MAIL<i class="lamp"></i></div><div class="metric-value"><span class="number pixel" data-zh="邮件管理" data-en="INBOX"></span><span class="metric-label" data-zh="聚合收件 / 一键已读" data-en="COMBINED / MARK READ"></span></div></div>
 <div id="stat-channels" class="metric frame"><div class="metric-head pixel">PLUGINS<i class="lamp"></i></div><div class="metric-value"><span class="number pixel">4</span><span class="metric-label" data-zh="官方插件" data-en="OFFICIAL PLUGINS"></span></div></div>
@@ -88,6 +88,8 @@ const en=params.get('lang')==='en';const plugin=params.get('variant')==='plugin'
 if(plugin){document.querySelector('.system-name').textContent='FISH // OFFICIAL PLUGIN WORKSPACE';document.querySelector('#portrait').src='DSH-model-broker.png';document.querySelector('#portrait').alt='DSH-model-broker 吉祥物';document.querySelector('#kicker').textContent=en?'OFFICIAL PLUGINS':'官方插件仓';document.querySelector('#tagline').textContent=en?'Four plugins. One dock.':'四个插件，一个 Dock 工作台';document.querySelector('#translation').textContent=en?'Install what you need. Run what you use.':'按需安装，按需运行。';document.querySelector('#stat-version .number').textContent='1.0.0';document.querySelector('#stat-desktop .number').textContent='4 PLUGINS';document.querySelector('#stat-channels .number').textContent='API 1'}
 for(const el of document.querySelectorAll('[data-zh]'))el.textContent=en?el.dataset.en:el.dataset.zh;
 if(plugin){document.querySelector('#stat-mail .number').textContent='4 PACKS';document.querySelector('#stat-mail .metric-label').textContent=en?'SINGLE PACKAGES':'独立单包';}
+// 版本号由渲染器从 tauri.conf.json 传入（?version=）：不在这里写死，免得发布时图片与文档不同步
+{const v=params.get('version');if(v&&!plugin){document.querySelector('#stat-version .number').textContent=v;const chip=document.querySelector('#chip-version');if(chip)chip.textContent=v;}}
 if(en&&!plugin){document.querySelector('#kicker').textContent='DESKTOP DOCK + MODEL GATEWAY';document.querySelector('#tagline').textContent='A dock for AI sessions. A home for model APIs.';document.querySelector('#tagline').style.fontSize='27px';}
 if(en&&plugin){document.querySelector('#kicker').textContent='OFFICIAL PLUGINS';document.querySelector('#tagline').textContent='Four plugins. One dock.';document.querySelector('#tagline').style.fontSize='27px';}
 </script>

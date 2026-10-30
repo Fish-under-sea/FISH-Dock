@@ -9,6 +9,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const assets = path.join(root, 'assets/readme')
 const heroVariant = process.env.README_VARIANT || ''
 const outputPrefix = process.env.README_OUTPUT_PREFIX || ''
+// 版本号只从 tauri.conf.json 读：README 里的 VERSION 卡片与 hero 徽标不许各写一份，
+// 否则发版时改了文档、图片还挂在旧版本上（2026-10-31 就是这样漏的）。
+const appVersion = (() => {
+  try {
+    const conf = JSON.parse(fs.readFileSync(path.join(root, 'Wakuwaku/src-tauri/tauri.conf.json'), 'utf8'))
+    return String(conf.version || '')
+  } catch { return '' }
+})()
 const edge = process.env.EDGE_BINARY || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fish-readme-'))
 const browser = spawn(edge, ['--headless=new','--disable-gpu','--disable-gpu-sandbox','--disable-features=CalculateNativeWinOcclusion','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'], { stdio:'ignore' })
@@ -28,7 +36,7 @@ try {
   await call('Emulation.setDeviceMetricsOverride',{width:2200,height:1300,deviceScaleFactor:1,mobile:false})
   await call('Emulation.setDefaultBackgroundColorOverride',{color:{r:0,g:0,b:0,a:0}})
   for(const lang of ['zh','en'])for(const theme of ['light','dark']){
-    await call('Page.navigate',{url:pathToFileURL(path.join(assets,'hero.html')).href+`?lang=${lang}&theme=${theme}&variant=${encodeURIComponent(heroVariant)}`})
+    await call('Page.navigate',{url:pathToFileURL(path.join(assets,'hero.html')).href+`?lang=${lang}&theme=${theme}&variant=${encodeURIComponent(heroVariant)}&version=${encodeURIComponent(appVersion)}`})
     await until(()=>evaluate(`document.readyState==='complete' && document.documentElement.lang==='${lang==='en'?'en':'zh-CN'}' && document.documentElement.dataset.theme==='${theme}'`))
     await evaluate('document.fonts.ready.then(()=>true)')
     assert.ok(await evaluate("[...document.images].every(i=>i.complete&&i.naturalWidth>0)"),'图片缺失')
