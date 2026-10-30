@@ -46,6 +46,7 @@ use tauri::AppHandle;
 use crate::{i18n, now_ms, settings, shared, Shared};
 
 pub mod agent;
+mod backoff;
 mod discover;
 mod imap;
 pub mod letters;
@@ -636,6 +637,8 @@ pub async fn mail_save(app: AppHandle, account: Value, password: String) -> Valu
         if let Err(error) = keep_accounts(&sh, &all, Some((&id, &password))) {
             return json!({ "ok": false, "error": { "kind": "keep", "text": error } });
         }
+        // 用户刚改过账户（多半是来修连接的）：把退避与熔断清掉，立刻用新设置重试一次。
+        backoff::save(&sh.dir, &id, &backoff::State::default());
     }
     json!({ "ok": true, "unread": unread, "snapshot": settings::snapshot(&sh) })
 }
@@ -665,6 +668,10 @@ pub async fn mail_switch(app: AppHandle, id: String, on: bool) -> Value {
         }
         if let Err(error) = keep_accounts(&sh, &all, None) {
             return json!({ "ok": false, "error": { "kind": "keep", "text": error } });
+        }
+        // 用户手动打开这个账户（多半是来重连的）：清掉退避与熔断，立刻再试。
+        if on {
+            backoff::save(&sh.dir, &id, &backoff::State::default());
         }
     }
     settings::snapshot(&sh)

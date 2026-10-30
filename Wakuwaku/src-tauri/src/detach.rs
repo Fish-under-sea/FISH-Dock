@@ -37,7 +37,7 @@
 // her, a terminal, an app's own shell): she starts herself again through
 // spawn, once (FLAG), and this copy goes. Not run from the source tree.
 
-pub const FLAG: &str = "--wakuwaku-out-of-job";
+pub const FLAG: &str = "--fish-dock-out-of-job";
 
 #[cfg(windows)]
 mod imp {

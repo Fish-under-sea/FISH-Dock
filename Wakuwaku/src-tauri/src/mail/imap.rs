@@ -106,8 +106,38 @@ impl Fail {
         };
         match self {
             Fail::Login(t) => json!({ "kind": kind, "text": text, "why": login_why(t) }),
+            // 握手期断开、握手后被服务器关掉：这两种最常见，给一句能照做的「为什么」
+            // （代理/TUN、端口、证书），别只甩一句「出错了」。
+            Fail::Tls(t) => json!({ "kind": kind, "text": text, "why": tls_why(t) }),
+            Fail::Other(t) => json!({ "kind": kind, "text": text, "why": other_why(t) }),
             _ => json!({ "kind": kind, "text": text }),
         }
+    }
+}
+
+// 加密连接为什么失败，按它的字句：握手期被对端关掉（代理/TUN 劫持、端口不是
+// IMAP+TLS、证书被中间人换了），或证书没通过校验。
+pub fn tls_why(text: &str) -> &'static str {
+    let t = text.to_ascii_lowercase();
+    if t.contains("eof") && (t.contains("handshake") || t.contains("during")) {
+        "handshakeEof"
+    } else if t.contains("certificate") || t.contains("cert") || t.contains("verify") {
+        "certificate"
+    } else {
+        ""
+    }
+}
+
+// 其他失败里能说出所以然的：服务器把连接关掉（代理/TUN 不稳、端口不对、服务器
+// 限制这台客户端），或者服务器一直不回话。
+pub fn other_why(text: &str) -> &'static str {
+    let t = text.to_ascii_lowercase();
+    if t.contains("closed the connection") || t.contains("server closed") {
+        "closedByPeer"
+    } else if t.contains("stopped answering") || t.contains("timed out") || t.contains("10060") {
+        "stalled"
+    } else {
+        ""
     }
 }
 
@@ -711,5 +741,22 @@ mod tests {
         assert_eq!(login_why("LOGINDISABLED"), "");
         assert_eq!(Fail::Login("Invalid credentials (Failure)".into()).json(), json!({ "kind": "login", "text": "Invalid credentials (Failure)", "why": "badPassword" }));
         assert_eq!(Fail::Connect("refused".into()).json(), json!({ "kind": "connect", "text": "refused" }));
+    }
+
+    // 错误分类文案（t12）：TLS 握手期 EOF、握手后被服务器关掉，都要带一句能照做的 why。
+    #[test]
+    fn the_common_failures_say_what_to_check() {
+        assert_eq!(tls_why("unexpected EOF during handshake"), "handshakeEof");
+        assert_eq!(tls_why("unexpected eof"), "");
+        assert_eq!(tls_why("certificate verify failed"), "certificate");
+        assert_eq!(tls_why("something else"), "");
+        assert_eq!(other_why("the server closed the connection"), "closedByPeer");
+        assert_eq!(other_why("IMAP server closed the connection"), "closedByPeer");
+        assert_eq!(other_why("the server stopped answering"), "stalled");
+        assert_eq!(other_why("由于连接方在一段时间后没有正确答复或连接的主机没有反应，连接尝试失败。 (os error 10060)"), "stalled");
+        assert_eq!(Fail::Tls("unexpected EOF during handshake".into()).json(), json!({ "kind": "tls", "text": "unexpected EOF during handshake", "why": "handshakeEof" }));
+        assert_eq!(Fail::Other("the server closed the connection".into()).json(), json!({ "kind": "other", "text": "the server closed the connection", "why": "closedByPeer" }));
+        // 认不出的失败：不带 why，前端照旧用通用文案。
+        assert_eq!(Fail::Other("odd".into()).json(), json!({ "kind": "other", "text": "odd", "why": "" }));
     }
 }

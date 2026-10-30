@@ -31,7 +31,9 @@ fn view(context:&Context)->Result<Value,String>{
     let manager=Manager{context};
     let runtime=discovery(context)?;
     let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
-    Ok(json!({"installed":runner.view(&manager)?,"node":runtime.path,"runtime":runtime,"root":context.root,"star":star}))
+    // fetch 是每个插件最近一次安装用的是哪条下载源（npm / 镜像 / GitHub）与耗时：
+    // 用户要求「UI 上能看到当前用的是哪条源」，所以跟着视图一起给前端。
+    Ok(json!({"installed":runner.view(&manager)?,"node":runtime.path,"runtime":runtime,"root":context.root,"star":star,"fetch":crate::plugin_store::fetch_records(context)}))
 }
 #[tauri::command]
 pub async fn extension_view(window:WebviewWindow)->Result<Value,String>{
@@ -78,8 +80,8 @@ pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:Strin
     trusted(&window)?;
     if action=="search"{
         return tauri::async_runtime::spawn_blocking(move||{
-            let hits=crate::plugin_thirdparty::search(&query)?;
-            Ok(json!({"hits":hits}))
+            let report=crate::plugin_thirdparty::search(&query)?;
+            Ok(json!({"hits":report.hits,"hidden":report.hidden}))
         }).await.map_err(|_|"npm 检索任务意外结束")?;
     }
     if action!="install"{return Err("第三方插件操作无效".into());}

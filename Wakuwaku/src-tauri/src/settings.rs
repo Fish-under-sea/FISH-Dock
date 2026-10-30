@@ -68,6 +68,16 @@ pub fn snapshot(sh: &Shared) -> Value {
     let mut settings = sh.settings.lock().unwrap().clone();
     settings.insert("settingsPin".into(), json!(sh.flag("settingsPin")));
     settings.insert("settingsTop".into(), json!(sh.flag("settingsTop")));
+    // Windows' own mode and accent colour (settings_win_look sets them).
+    // 「跟随系统」读 DWM/Explorer 的颜色（theme::system_accent，读不到就是没有，
+    // 前端只提示原因）；「自定义」时 accentFollows=false。
+    let system_accent = crate::theme::system_accent().or(win_accent.map(|a| a.base));
+    let win_look = json!({
+        "light": win_light,
+        "accent": system_accent,
+        "accentMode": if sh.setting("accentFollows") == false { "custom" } else { "system" },
+        "accentAvailable": system_accent.is_some(),
+    });
     json!({
         "settings": Value::Object(settings),
         "authFocusActive": sh.auth_focus_active(),
@@ -165,7 +175,7 @@ pub fn snapshot(sh: &Shared) -> Value {
         "displayCount": sh.screens().areas.len(),
         "loginAtStart": connection::is_open_at_login(),
         // Windows' own mode and accent colour (settings_win_look sets them).
-        "winLook": { "light": win_light, "accent": crate::theme::current_accent().or(win_accent.map(|a| a.base)) },
+        "winLook": win_look,
         // The desktop's picture as it is (paper.rs).
         "winPaper": crate::paper::now(),
         "version": sh.app.package_info().version.to_string(),
@@ -540,6 +550,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "pet" => v.as_str().is_some_and(|id| data::pets(&sh.dir).iter().any(|p| p.id == id)),
         "scale" => v.as_f64().is_some_and(|s| data::SCALES.iter().any(|(_, x)| (x - s).abs() < 1e-9)),
         "details" | "walk" | "look" | "sound" | "dnd" | "hideInFullscreen" | "onboarded" | "out" | "settingsPin" | "settingsTop" | "oledShift" | "autoUpdateCheck" => is_bool,
+        // 强调色跟随系统（true，默认）还是自定义（false，settings_win_look）。
+        "accentFollows" => is_bool,
         // Where an update is downloaded from first (updates.rs gitee_first).
         "updateFrom" => matches!(v.as_str(), Some("auto" | "github" | "gitee")),
         // Crash reports sent by themselves, never, or asked about (crash.rs).
@@ -720,8 +732,9 @@ pub async fn settings_show_pet(app: AppHandle, on: bool) -> Value {
     snapshot(&sh)
 }
 
-// Windows' own light or dark mode, or its accent colour ("#rrggbb"), set
-// as Settings → Personalization → Colors sets them (theme.rs).
+// Windows' own light or dark mode, or its accent colour: "system" 回到跟随系统
+//（不再写 Windows 的颜色，只把它现在的颜色读出来给页面）；"#rrggbb" 是自定义
+//（写进 Windows，并记住 accentFollows=false）。theme.rs 做实际的事。
 #[tauri::command]
 pub async fn settings_win_look(app: AppHandle, light: Option<bool>, accent: Option<String>) -> Value {
     let sh = shared(&app);
@@ -729,11 +742,16 @@ pub async fn settings_win_look(app: AppHandle, light: Option<bool>, accent: Opti
         let ok = crate::theme::set_mode(light);
         sh.log(&format!("settings: Windows' mode set {}: {ok}", if light { "light" } else { "dark" }));
     }
-    if let Some(rgb) = accent.as_deref().and_then(crate::theme::parse) {
-        let picked = accent.unwrap_or_default();
-        let (later_sh, later_picked) = (sh.clone(), picked.clone());
-        let came = crate::theme::set_accent(rgb, move |note| later_sh.log(&format!("settings: Windows' accent {later_picked}: {note}")));
-        sh.log(&format!("settings: Windows' accent set {picked}: {came}"));
+    if accent.as_deref() == Some("system") {
+        apply_patch(&sh, &json!({ "accentFollows": true }));
+        sh.log("settings: Windows' accent follows the system again");
+    } else if let Some(picked) = accent.clone() {
+        if let Some(rgb) = crate::theme::parse(&picked) {
+            apply_patch(&sh, &json!({ "accentFollows": false }));
+            let (later_sh, later_picked) = (sh.clone(), picked.clone());
+            let came = crate::theme::set_accent(rgb, move |note| later_sh.log(&format!("settings: Windows' accent {later_picked}: {note}")));
+            sh.log(&format!("settings: Windows' accent set {picked}: {came}"));
+        }
     }
     snapshot(&sh)
 }
@@ -999,17 +1017,25 @@ pub async fn settings_gallery(app: AppHandle, page: Option<u64>, sort: Option<St
     let sh = shared(&app);
     let sort = sort.unwrap_or_default();
     let query = query.unwrap_or_default();
-    let got = tauri::async_runtime::spawn_blocking(move || fetch::gallery(page.unwrap_or(1), &sort, &query)).await;
+    // 缓存在她的数据目录（fetch.rs gallery_cache_*）：离线时图库仍给上一页。
+    let cache_dir = sh.dir.clone();
+    let got = tauri::async_runtime::spawn_blocking(move || fetch::gallery(page.unwrap_or(1), &sort, &query, &cache_dir)).await;
     match got {
-        Ok(Ok(page)) => json!({ "ok": true, "items": page["items"], "page": page["page"], "totalPages": page["totalPages"], "total": page["total"] }),
+        // 离线命中缓存：ok=true 且 offline=true，前端标「离线/缓存」而非报错。
+        Ok(Ok(page)) => {
+            let offline = page["offline"].as_bool().unwrap_or(false);
+            let note = page["error"].as_str().map(str::to_string);
+            json!({ "ok": true, "offline": offline, "error": note, "items": page["items"], "page": page["page"], "totalPages": page["totalPages"], "total": page["total"] })
+        }
         Ok(Err(e)) => json!({ "ok": false, "error": fetch::describe(sh.lang(), &e) }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
     }
 }
 
-// Her updates, from the General page: look now, the latest release's page,
-// install it (updates.rs). The snapshot as it is then (a look or an
-// install goes on on its own thread, pushed as it goes).
+// Her updates, from the General page: look now, the release notes again, install
+// it (updates.rs). The snapshot as it is then (a look, a notes read or an
+// install goes on on its own thread, pushed as it goes). 安装版也一样在应用内
+// 下载安装器 —— 不再打开浏览器。
 #[tauri::command]
 pub async fn settings_update(app: AppHandle, what: String) -> Value {
     let sh = shared(&app);
@@ -1020,8 +1046,9 @@ pub async fn settings_update(app: AppHandle, what: String) -> Value {
             // Its "looking" shown at once.
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        "page" => crate::updates::open_page(&sh),
-        "update" => { if cfg!(feature="installed"){crate::updates::open_page(&sh)}else{crate::updates::update_now(&sh)} },
+        // 公告重读（关于页的「重试」）。
+        "notes" => crate::updates::refresh_notes(&sh),
+        "update" => crate::updates::update_now(&sh),
         _ => {}
     }
     snapshot(&sh)
@@ -1097,6 +1124,12 @@ pub async fn settings_open_site(app: AppHandle, place: String, account: Option<S
 }
 
 fn site_url(place: &str, account: Option<&str>) -> String {
+    // 关于页品牌图那个彩蛋（用户 2026-10-31）：地址在 config，默认是临时落地页。
+    // 这里不做白名单常量，改 config::OFFICIAL_SITE_DEFAULT（或设环境变量
+    // FISH_DOCK_OFFICIAL_SITE）就能换目标，前端只发 place = "officialSite"。
+    if place == "officialSite" {
+        return crate::config::official_site();
+    }
     let url = match place {
         "repo" => REPO,
         "githubDevice" => "https://github.com/login/device",
@@ -1150,6 +1183,22 @@ mod tests {
         assert_eq!(site_url("googleAppPasswords", Some("a@b@gmail.com")), "https://myaccount.google.com/apppasswords");
         assert_eq!(site_url("googleAppPasswords", None), "https://myaccount.google.com/apppasswords");
         assert_eq!(site_url("yahooAppPasswords", Some("me@yahoo.com")), "https://login.yahoo.com/account/security");
+    }
+
+    // 关于页品牌图的彩蛋（用户 2026-10-31）：网址只从 config 来，前端只报 place。
+    #[test]
+    fn the_about_mark_opens_the_configured_official_site() {
+        use super::site_url;
+        use crate::config;
+        // 没设环境变量时就是 config 的默认值（当前是临时落地页，不是正式官网）。
+        assert_eq!(site_url("officialSite", None), config::official_site());
+        assert_eq!(site_url("officialSite", None), config::OFFICIAL_SITE_DEFAULT);
+        // 换一个账号参数也不受影响（它不是 Google 那一类 authuser 页）。
+        assert_eq!(site_url("officialSite", Some("me@gmail.com")), config::OFFICIAL_SITE_DEFAULT);
+        // 设了环境变量，同一次点击传出去的就是新值 —— 证明地址没写死在前端。
+        std::env::set_var("FISH_DOCK_OFFICIAL_SITE", "https://example.test/new-home");
+        assert_eq!(site_url("officialSite", None), "https://example.test/new-home");
+        std::env::remove_var("FISH_DOCK_OFFICIAL_SITE");
     }
 
     #[test]

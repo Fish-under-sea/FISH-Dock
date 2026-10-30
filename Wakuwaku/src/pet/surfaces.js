@@ -1,13 +1,8 @@
 // The rects the page hands the Rust side as "solid": page px (x, y, w, h)
 // where the window takes the mouse whatever the page says of the pointer
-// (island.rs set_editing, pointer.rs look). island.js sends the edit bar and
-// whatever picker.js has open; models.js's console layer (#models-host) is
-// one of them too — it is not a child of the island, so WebView2's own
-// mouseenter / mouseleave never say the pointer is on it, and its frame is
-// another origin, so nothing inside it reaches this page either. Without the
-// rect the window lets a real press on the console through to the desktop
-// under it (2026-10-20). Loaded by the page before island.js and models.js,
-// and required by the tests.
+// (island.rs set_editing, pointer.rs look). island.js sends the settings, the
+// edit bar and whatever picker.js has open. Loaded by the page before
+// island.js, and required by the tests.
 ;(function (root) {
   // A couple of px more all round: caught, WebView2 hit-tests the pointer a
   // pixel or so from where the Rust side read it, so a press on the very edge

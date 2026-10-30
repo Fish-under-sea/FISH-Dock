@@ -997,6 +997,10 @@ fn show_or_hide(sh: &Arc<Shared>) {
         }
     }
     if let Some(win) = window(sh) {
+        // 隐藏即休（power::webview_rest）：岛藏起来时它的页面也一起歇——
+        // IsVisible 关掉（rAF 停下、定时器被节流）、内存目标降到最低。改前
+        // 只有 win.hide()，页面照旧绘制与计时，正是 pet.rs #14 修过的同一个坑。
+        crate::power::webview_rest(&win, !want);
         let _ = if want { win.show() } else { win.hide() };
     }
     // The blur under the island goes with it, and comes back with it (backplate.rs).
@@ -1064,6 +1068,9 @@ fn handoff_cover(sh: &Arc<Shared>) -> bool {
     };
     let Some(win) = window(sh) else { return false };
     lay(&win, pos, size);
+    // 显示即醒：接手 Windows 任务栏前，岛的页面必须先恢复 IsVisible 与
+    // 内存目标，否则窗口显示了出来，页面还以为自己看不见（不绘制）。
+    crate::power::webview_rest(&win, false);
     let _ = win.show();
     let shown = std::time::Instant::now();
     // Over Windows' own, which is kept on top too.

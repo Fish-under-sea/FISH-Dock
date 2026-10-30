@@ -4,13 +4,13 @@
 #island-settings .extension-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-block-end: 10px; }
 #island-settings .extension-actions [aria-pressed='true'] { background: var(--g3); color: var(--fg); box-shadow: inset 0 0 0 1px currentColor; }
 #island-settings .extension-list { display: grid; align-content: start; gap: 8px; }
-#island-settings .extension-card { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; border-radius: 12px; background: var(--g1); padding: 10px 12px; }
+#island-settings .extension-card { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; border-radius: 12px; background: var(--g1); padding: 10px 14px; }
 #island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
 #island-settings .extension-card-title { display: flex; flex: 1 1 160px; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; min-width: 0; line-height: 1.4; }
 #island-settings .extension-card-title strong { font-size: 13px; }
 #island-settings .extension-version, #island-settings .extension-state { color: var(--g4); font-size: 12px; }
 #island-settings .extension-card-actions, #island-settings .extension-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-#island-settings .extension-update { color: var(--ok, #34b97c); font-size: 12px; font-weight: 600; }
+#island-settings .extension-update { color: var(--ok-ink); font-size: 12px; font-weight: 600; }
 #island-settings .extension-card p { margin: 0; padding: 0; line-height: 1.45; }
 #island-settings .extension-card .extension-description { font-size: 12px; }
 #island-settings .extension-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 12px; margin: 0; padding: 0; font-size: 12px; line-height: 1.45; color: var(--g4); }
@@ -38,6 +38,14 @@
 #island-settings .extension-third { display: grid; gap: 8px; }
 #island-settings .extension-third-search { display: flex; align-items: center; gap: 8px; }
 #island-settings .extension-third-search input { flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--g3); background: var(--g1); color: var(--fg); border-radius: 6px; }
+/* 第三方导入视觉对齐（用户 2026-10-31）：结果行沿用 .extension-card 的几何（左内衬 14px、
+   与 pbtn sm 同高 28px）；窄窗搜索行换行不下溢、长包名换行不撑破卡片；提示行用与
+   「来源 · 上次同步」同级的 note 小字（12px、现有灰 --g4）。只用现有 CSS 变量，不写 hex。 */
+#island-settings .extension-third { min-width: 0; }
+#island-settings .extension-third-search { flex-wrap: wrap; }
+#island-settings .extension-third-search input { min-height: 28px; line-height: 1.3; }
+#island-settings .extension-third .extension-card-title strong { overflow-wrap: anywhere; word-break: break-word; }
+#island-settings .extension-third .note { font-size: 12px; color: var(--g4); }
 /* 外观标签顺序支持鼠标拖动与键盘按钮。 */
 .tab-order { padding-block: 12px; }
 .tab-order ol { list-style: none; padding: 0; }
@@ -51,3 +59,21 @@
 .extension-service-content { display: block; flex: 1; width: 100%; min-height: 0; border: 0; border-radius: 18px; background: var(--g1); }
 .extension-frame:focus-visible { outline: 2px solid #80b6ff; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .extension-panel *, .extension-frame { animation: none; transition: none; transform: none; } }
+
+/* 插件卡上的自启动控件（#22 / 2026-10-31 三态统一）：三态是**同一个按钮**——
+   同一个 class（.pbtn.sm.hook）、同 height/padding/圆角/字号/左右内衬，只有配色与
+   文案不同（用户：没有自启动功能的也要给按钮，只是换底色）。颜色一律走 settings.css
+   里的主题变量，这里不写 hex：
+     开（有服务且开着）＝ --hook-on 红，「关闭自启动」；
+     关（有服务但关着）＝ --hook-off 蓝（强调色），「随 dock 启动」；
+     没有本机服务        ＝ --hook-none 绿，「无需自启动」（纯装饰，点了不发 IPC）。
+   位置固定在「停用/启用」左侧，所有插件卡一致。 */
+#island-settings .extension-card-actions .pbtn.hook { min-width: 96px; padding: 0 12px; }
+#island-settings .extension-card-actions .pbtn.hook[data-hook='on'] { border-color: transparent; background: var(--hook-on); color: var(--hook-on-ink); }
+#island-settings .extension-card-actions .pbtn.hook[data-hook='on']:hover:not(:disabled) { filter: brightness(1.12); }
+#island-settings .extension-card-actions .pbtn.hook[data-hook='off'] { border-color: transparent; background: var(--hook-off); color: var(--hook-off-ink); }
+#island-settings .extension-card-actions .pbtn.hook[data-hook='off']:hover:not(:disabled) { filter: brightness(1.12); }
+#island-settings .extension-card-actions .pbtn.hook[data-hook='none'] { border-color: transparent; background: var(--hook-none); color: var(--hook-none-ink); cursor: default; }
+#island-settings .extension-card-actions .pbtn.hook[data-hook='none']:hover { filter: none; }
+/* 目录条目的一行说明（OFM 的「此插件于 10 月 25 日暂停维护」）。 */
+#island-settings .extension-card .extension-note { color: var(--g4); font-size: 12px; }

@@ -1,5 +1,5 @@
 //! GitHub 登录凭据仅驻留宿主；公开视图不含令牌或设备密钥。
-use std::{sync::Mutex, time::Duration};
+use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use crate::storage_context::Context;
@@ -37,7 +37,7 @@ fn star_status(status:u16)->Result<bool,String>{match status{204=>Ok(true),404=>
 fn client(context:&Context)->Result<Option<String>,String>{
  let configured=context.host.read("config","github-oauth.json")?.map(|bytes|serde_json::from_slice::<Value>(&bytes).map_err(|_|"GitHub 登录设置格式无效")).transpose()?;
  let value=configured.and_then(|v|v.get("clientId").and_then(Value::as_str).map(str::to_owned))
-  .or_else(||std::env::var("FISH_DOCK_GITHUB_CLIENT_ID").ok())
+  .or_else(crate::config::github_client_id_override)
   .or_else(||option_env!("FISH_DOCK_GITHUB_CLIENT_ID").map(str::to_owned))
   .or_else(||Some(DEFAULT_CLIENT_ID.to_owned()));
  match value {Some(s) if !s.is_empty()&&s.len()<=100&&s.bytes().all(|b|b.is_ascii_alphanumeric())=>Ok(Some(s)),Some(_)=>Err("GitHub OAuth clientId 无效".into()),None=>Ok(None)}
@@ -70,10 +70,11 @@ fn public(context:&Context,account:&Account)->Result<Value,String>{
  Ok(json!({"configured":client(context)?.is_some(),"authenticated":live,"login":account.login,"verified":live&&account.user_id>0&&receipt_valid(account.star_at,now),"checkedAt":account.star_at,"lastCheckedAt":last_star_check,"expiresAt":account.expires_at,"needsRefresh":account.needs_refresh(now),"refreshable":account.refresh_live(now),"needsStarCheck":needs_star_check,"requiresLogin":requires_login,"pending":pending}))
 }
 pub fn view(context:&Context)->Result<Value,String>{let _guard=EDIT.lock().map_err(|_|"GitHub 登录锁不可用")?;public(context,&load(context)?)}
-// 固定域名、禁止重定向且限制响应大小，避免认证头随跳转外送。
+// 固定域名、禁止重定向且限制响应大小，避免认证头随跳转外送。超时取
+// proxy::auth_timeout（FISH_DOCK_AUTH_TIMEOUT_MS 可覆盖，默认 20 秒）。
 fn request(url:&str,token:Option<&str>,form:Option<&[(&str,&str)]>)->Result<(u16,Vec<u8>),String>{
  for way in crate::proxy::web_ways(url){
-  let Some(agent)=way.agent_with(Duration::from_secs(20),|c|c.max_redirects(0).http_status_as_error(false))else{continue};
+  let Some(agent)=way.agent_with(crate::proxy::auth_timeout(),|c|c.max_redirects(0).http_status_as_error(false))else{continue};
   let result=if let Some(form)=form{
    agent.post(url).header("User-Agent","FISH-Dock").header("Accept","application/json").send_form(form.iter().copied())
   }else{

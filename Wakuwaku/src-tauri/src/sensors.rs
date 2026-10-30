@@ -49,15 +49,21 @@ use crate::lhm::Kind;
 
 // Her exe with this is the elevated helper (main.rs): `SENSORS_FLAG <port>
 // <dataDir>`.
-pub const SENSORS_FLAG: &str = "--wakuwaku-sensors";
+pub const SENSORS_FLAG: &str = "--fish-dock-sensors";
 // The elevated one-time setup: `SETUP_FLAG <port> <sid> <dataDir> [pawnio]`.
-pub const SETUP_FLAG: &str = "--wakuwaku-sensors-setup";
+pub const SETUP_FLAG: &str = "--fish-dock-sensors-setup";
 // The elevated removal: `REMOVE_FLAG <sid> <dataDir>`.
-pub const REMOVE_FLAG: &str = "--wakuwaku-sensors-remove";
+pub const REMOVE_FLAG: &str = "--fish-dock-sensors-remove";
 
 // The task's name for a user (its SID): the Task Scheduler's folder is the
 // whole computer's, so the name carries the SID (as her logon task does).
+// 2.0.0 起叫「FISH Dock sensors-<SID>」；1.x 留下的「Wakuwaku sensors-<SID>」
+// 仍按旧名认出来并删掉（legacy_task_name），否则改名后旧任务会继续在每次登录
+// 时以最高权限拉起旧的助手副本（#t16 旧定义清理）。
 pub fn task_name(sid: &str) -> String {
+    format!("FISH Dock sensors-{sid}")
+}
+pub fn legacy_task_name(sid: &str) -> String {
     format!("Wakuwaku sensors-{sid}")
 }
 
@@ -72,7 +78,10 @@ pub fn task_name(sid: &str) -> String {
 pub const HELPER_PROTOCOL: u32 = 1;
 // The helper copy's name in its admin-only folder (see admin_dir); a name of
 // its own, so it is clear in the Task Scheduler and Task Manager what runs.
-pub const HELPER_EXE: &str = "wakuwaku-sensors.exe";
+// 2.0.0 起叫 FISH-Dock-sensors.exe；旧副本 wakuwaku-sensors.exe 在 setup/remove
+// 时一并清掉，不留两个助手。
+pub const HELPER_EXE: &str = "FISH-Dock-sensors.exe";
+pub const LEGACY_HELPER_EXE: &str = "wakuwaku-sensors.exe";
 
 // The DACL the helper's folder is given and then checked against: it and the
 // exe in it are writable by administrators and SYSTEM alone, and the user
@@ -269,7 +278,7 @@ fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-const DESCRIPTION: &str = "Reads the CPU's temperature and power through PawnIO and hands them to Wakuwaku. Runs as administrator (PawnIO needs it), only reads, and is taken away when the reading is turned off. 读取 CPU 温度和功耗（经 PawnIO 驱动），交给 Wakuwaku；以管理员身份运行，只读。";
+const DESCRIPTION: &str = "Reads the CPU's temperature and power through PawnIO and hands them to FISH Dock. Runs as administrator (PawnIO needs it), only reads, and is taken away when the reading is turned off. 读取 CPU 温度和功耗（经 PawnIO 驱动），交给 FISH Dock；以管理员身份运行，只读。";
 
 // The task for this user (`sid`): her exe as the helper, at this user's
 // logon, with the highest rights available (PawnIO needs them), restarted if
@@ -280,7 +289,7 @@ pub fn task_xml(sid: &str, exe: &str, args: &str) -> String {
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Author>Wakuwaku</Author>
+    <Author>FISH Dock</Author>
     <Description>{DESCRIPTION}</Description>
   </RegistrationInfo>
   <Triggers>
@@ -558,7 +567,12 @@ mod imp {
     #[link(name = "advapi32")]
     extern "system" {
         fn ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl: *const u16, revision: u32, sd: *mut *mut core::ffi::c_void, size: *mut u32) -> i32;
-        fn ConvertSecurityDescriptorToStringSecurityDescriptorW(sd: *const core::ffi::c_void, revision: u32, info: u32, sddl: *mut *mut u16, len: *mut u32) -> i32;
+        // PSECURITY_DESCRIPTOR is PVOID in the SDK: *mut c_void. lhm_setup.rs
+        // declares this same symbol with this same signature on purpose — two
+        // differing declarations of one extern (here *const, there *mut) is
+        // what rustc's clashing_extern_declarations warns about, and two
+        // types for one ABI is a bug waiting to happen.
+        fn ConvertSecurityDescriptorToStringSecurityDescriptorW(sd: *mut core::ffi::c_void, revision: u32, info: u32, sddl: *mut *mut u16, len: *mut u32) -> i32;
         fn SetFileSecurityW(file: *const u16, info: u32, sd: *const core::ffi::c_void) -> i32;
         fn GetFileSecurityW(file: *const u16, info: u32, sd: *mut u8, len: u32, needed: *mut u32) -> i32;
     }
@@ -639,6 +653,11 @@ mod imp {
     // task runs it with the highest rights at every logon, so it must not sit
     // where the user can replace it.
     fn admin_dir() -> Option<std::path::PathBuf> {
+        Some(std::path::Path::new(&std::env::var("ProgramFiles").ok()?).join("FISH Dock").join("sensors"))
+    }
+    // 1.x 的助手副本目录（%ProgramFiles%\Wakuwaku\sensors）：升级/关闭时连它一起收，
+    // 否则旧副本会一直躺在 Program Files 里，旧任务还会指着它跑。
+    fn legacy_admin_dir() -> Option<std::path::PathBuf> {
         Some(std::path::Path::new(&std::env::var("ProgramFiles").ok()?).join("Wakuwaku").join("sensors"))
     }
 
@@ -691,7 +710,7 @@ mod imp {
         let mut text: *mut u16 = std::ptr::null_mut();
         let mut len = 0u32;
         // SAFETY: our own descriptor; the string it makes is ours to free.
-        if unsafe { ConvertSecurityDescriptorToStringSecurityDescriptorW(buf.as_ptr() as *const core::ffi::c_void, 1, DACL_SECURITY_INFORMATION, &mut text, &mut len) } == 0 || text.is_null() {
+        if unsafe { ConvertSecurityDescriptorToStringSecurityDescriptorW(buf.as_ptr() as *mut core::ffi::c_void, 1, DACL_SECURITY_INFORMATION, &mut text, &mut len) } == 0 || text.is_null() {
             return Err("the folder's security did not read as text".into());
         }
         // SAFETY: a null-terminated wide string of `len`, freed once read.
@@ -1097,6 +1116,17 @@ mod imp {
             return;
         }
         log("the helper is in an administrator-only folder");
+        // 1.x 留下的旧任务与旧助手副本：新任务注册成功之前先收掉，避免改名后开机
+        // 跑两个助手（旧的还指着 %ProgramFiles%\Wakuwaku\sensors\wakuwaku-sensors.exe）。
+        let _ = crate::logon::remove(&legacy_task_name(sid));
+        let _ = std::process::Command::new("schtasks").args(["/End", "/TN", &legacy_task_name(sid)]).output();
+        if let Some(legacy) = legacy_admin_dir() {
+            let _ = std::fs::remove_dir_all(&legacy);
+            if let Some(parent) = legacy.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+            log("the old Wakuwaku helper copy and task are cleaned up");
+        }
         let exe = copy.to_string_lossy().into_owned();
         let xml = task_xml(sid, &exe, &helper_args(port, data));
         match crate::logon::register(&task_name(sid), &xml) {
@@ -1124,10 +1154,18 @@ mod imp {
         // its exe is held open, so the copy could not be deleted (seen in
         // the test VM: the folder stayed with the exe in it).
         let _ = std::process::Command::new("schtasks").args(["/End", "/TN", &task_name(sid)]).output();
+        // 旧任务（1.x 的「Wakuwaku sensors-<SID>」）也先停掉：改名后它仍会在登录时
+        // 以最高权限拉起旧副本，必须一起收掉（#t16）。
+        let _ = std::process::Command::new("schtasks").args(["/End", "/TN", &legacy_task_name(sid)]).output();
         match crate::logon::remove(&task_name(sid)) {
             Ok(true) => log("the task is removed"),
             Ok(false) => log("there was no task to remove"),
             Err(e) => log(&format!("the task was not removed: {e}")),
+        }
+        match crate::logon::remove(&legacy_task_name(sid)) {
+            Ok(true) => log("the old Wakuwaku sensors task is removed"),
+            Ok(false) => {}
+            Err(e) => log(&format!("the old Wakuwaku sensors task was not removed: {e}")),
         }
         let _ = std::fs::remove_file(dir(data).join("token"));
         log("the token is deleted: a helper still running stops");
@@ -1150,6 +1188,17 @@ mod imp {
                 let _ = std::fs::remove_dir(parent);
             }
             log(if gone { "the helper copy is removed" } else { "the helper copy could not be removed (still in use)" });
+        }
+        // 1.x 的助手副本目录一起收；旧任务已经不跑了，这里不需要等句柄。
+        if let Some(legacy) = legacy_admin_dir() {
+            match std::fs::remove_dir_all(&legacy) {
+                Ok(()) => log("the old Wakuwaku helper copy is removed"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => log(&format!("the old Wakuwaku helper copy was not removed: {e}")),
+            }
+            if let Some(parent) = legacy.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
         }
     }
 }
@@ -1317,17 +1366,20 @@ mod tests {
     fn the_task_runs_the_helper_elevated_at_logon() {
         let exe = r"D:\Program Files\张三 & co\wakuwaku.exe";
         let args = helper_args(47213, std::path::Path::new(r"C:\data\x"));
-        assert_eq!(args, "--wakuwaku-sensors 47213 \"C:\\data\\x\"");
+        assert_eq!(args, "--fish-dock-sensors 47213 \"C:\\data\\x\"");
         let xml = task_xml("S-1-5-21-1-2-3-1001", exe, &args);
         assert!(xml.contains("<UserId>S-1-5-21-1-2-3-1001</UserId>"));
         assert!(xml.contains("<RunLevel>HighestAvailable</RunLevel>"));
         assert!(xml.contains(r"<Command>D:\Program Files\张三 &amp; co\wakuwaku.exe</Command>"));
-        assert!(xml.contains("--wakuwaku-sensors 47213"));
+        assert!(xml.contains("--fish-dock-sensors 47213"));
         // Started again if it fails, on battery too, never ended for running long.
         assert!(xml.contains("<RestartOnFailure>"));
         assert!(xml.contains("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"));
         assert!(xml.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
-        assert_eq!(task_name("S-1-5-21-9"), "Wakuwaku sensors-S-1-5-21-9");
+        assert_eq!(task_name("S-1-5-21-9"), "FISH Dock sensors-S-1-5-21-9");
+        // 旧名仍能被指认与删除（#t16）：改名后旧任务不能继续在登录时跑旧副本。
+        assert_eq!(legacy_task_name("S-1-5-21-9"), "Wakuwaku sensors-S-1-5-21-9");
+        assert_ne!(task_name("S-1-5-21-9"), legacy_task_name("S-1-5-21-9"));
     }
 
     // The token is checked, and only a reading with a known id and a finite

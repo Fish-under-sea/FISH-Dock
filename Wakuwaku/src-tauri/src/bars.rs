@@ -288,6 +288,9 @@ fn create(sh: &Arc<Shared>, label: String, area: Area, edge: Edge) {
         if gone {
             return close(&sh, Gone { label, hwnd, mon: area.mon, edge, work_side: None });
         }
+        // 显示即醒（power::webview_rest）：新建的条窗是 visible(false) 建的，
+        // 第一次显示前把 IsVisible 与内存目标一起恢复。
+        crate::power::webview_rest(&win, false);
         let _ = win.show();
         let laid = match (win.outer_position(), win.outer_size()) {
             (Ok(p), Ok(s)) => format!("({}, {}, {}, {})", p.x, p.y, s.width, s.height),
@@ -417,6 +420,8 @@ pub fn full_screen(sh: &Shared, cover: Option<Mon>) {
     };
     for (label, hide) in changed {
         if let Some(win) = window(sh, &label) {
+            // 隐藏即休：让开时它的页面一起歇（IsVisible + 内存目标最低）。
+            crate::power::webview_rest(&win, hide);
             let _ = if hide { win.hide() } else { win.show() };
         }
         sh.log(&format!("bars: {label} {}", if hide { "stepped aside (an app full screen there)" } else { "back" }));
@@ -556,6 +561,7 @@ pub fn barpop_place(app: tauri::AppHandle, w: f64, h: f64) {
     let rect = pop_rect(edge, strip, mon, button, (px(w), px(h)));
     let Some(win) = sh.app.get_webview_window(POP) else { return };
     lay(&win, rect);
+    crate::power::webview_rest(&win, false);
     let _ = win.show();
     if let Some(p) = OPEN.lock().unwrap().as_mut() {
         p.rect = Some(rect);
@@ -604,6 +610,9 @@ fn hide_pop(sh: &Shared) {
     taskbar::thumbs(taskbar::WATCH_BARS, Vec::new());
     taskbar::watch_presses(taskbar::WATCH_BARS, false);
     if let Some(win) = sh.app.get_webview_window(POP) {
+        // 隐藏即休：列表窗口建好就一直在（POP_MADE），收起时它的页面必须
+        // 一起歇，否则一个看不见的 webview 常驻着绘制与计时。
+        crate::power::webview_rest(&win, true);
         let _ = win.hide();
     }
     let _ = sh.app.emit_to(POP, "barpop:gone", json!({}));
@@ -797,5 +806,39 @@ mod tests {
         assert_eq!(waiting(&json!([{ "kind": "permission" }, { "kind": "question" }])), json!({ "n": 2, "kind": "approve" }));
         assert_eq!(waiting(&json!([{ "kind": "plan" }])), json!({ "n": 1, "kind": "approve" }));
         assert_eq!(waiting(&json!([{ "kind": "question" }, { "kind": "permission" }])), json!({ "n": 2, "kind": "answer" }));
+    }
+
+    // t22 路 A：副屏有一条条带真的显示着（ready、没被全屏藏、strip 已给）时
+    // any_shown 为真；其余状态都为假。asks_seen 靠它判断「还有地方能答」。
+    // 注意 any_shown 自己要锁 BARS，所以每次改完都放开锁再调，别死锁。
+    #[test]
+    fn a_strip_up_on_another_display_is_shown() {
+        let mk = |ready: bool, hidden: bool, strip: Option<Mon>| Bar {
+            label: "bar-1".into(),
+            mon: (1920, 0, 1920, 1080),
+            sf: 1.0,
+            edge: Edge::Bottom,
+            hwnd: 0,
+            strip,
+            ready,
+            hidden,
+            sent: Value::Null,
+            paper: Value::Null,
+            work_side: None,
+            work_at: None,
+        };
+        // 别把全局状态留给（并行跑的）别的测试，跑完还原。
+        let saved = std::mem::take(&mut *BARS.lock().unwrap());
+        BARS.lock().unwrap().push(mk(true, false, Some((1920, 1032, 1920, 48))));
+        assert!(any_shown(), "ready, not hidden, a strip: shown");
+        BARS.lock().unwrap()[0].hidden = true;
+        assert!(!any_shown(), "an app full screen there: not shown");
+        BARS.lock().unwrap()[0].hidden = false;
+        BARS.lock().unwrap()[0].ready = false;
+        assert!(!any_shown(), "page not ready: not shown");
+        BARS.lock().unwrap()[0].ready = true;
+        BARS.lock().unwrap()[0].strip = None;
+        assert!(!any_shown(), "strip not granted yet: not shown");
+        *BARS.lock().unwrap() = saved;
     }
 }

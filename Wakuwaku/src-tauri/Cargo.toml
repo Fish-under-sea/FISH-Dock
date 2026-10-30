@@ -1,9 +1,16 @@
 [package]
-name = "wakuwaku"
-version = "1.2.3"
+# 2.0.0 名字层改名（#t16）：包名 wakuwaku → fish-dock，产出程序叫 FISH-Dock.exe。
+# 包名与二进制名不同是刻意的：包名要 Cargo 合法（小写连字符），而 Windows 上用户
+# 看到、任务计划/注册表/快捷方式指向的必须是 FISH-Dock.exe。
+name = "fish-dock"
+version = "2.0.0"
 edition = "2021"
 license = "MIT"
 authors = ["Pengjie Zhou"]
+
+[[bin]]
+name = "FISH-Dock"
+path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

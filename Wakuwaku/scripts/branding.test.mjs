@@ -12,8 +12,12 @@ const { t } = require('../src/shared/i18n.js')
 
 test('应用元数据、通知与用户品牌一致，内部身份保持兼容', () => {
   assert.equal(config.productName, 'FISH Dock')
-  assert.equal(config.identifier, 'com.fish.dshfish')
-  assert.deepEqual(config.bundle.icon, ['icons/DSH-FISH-Windows.ico', 'icons/dsh-fish.png'])
+  assert.equal(config.identifier, 'com.fish.dock')
+  assert.deepEqual(config.bundle.icon, ['icons/FISH-Dock-Windows.ico', 'icons/fish-dock.png'])
+  // 旧图标名保留一版别名（#27 P1）：两个文件都还在，字节一致。
+  for (const alias of ['src-tauri/icons/DSH-FISH-Windows.ico', 'src-tauri/icons/dsh-fish.png']) {
+    assert.ok(fs.existsSync(new URL(alias, root)), `旧图标别名要留一版：${alias}`)
+  }
   const notify = read('src-tauri/src/notify.rs')
   assert.ok(notify.includes(`pub const APP_ID: &str = "${config.identifier}";`))
   assert.ok(notify.includes('.title("FISH Dock")'))
@@ -29,13 +33,13 @@ test('中英文设置、托盘和版本文案使用 FISH Dock', () => {
 
 test('托盘、通知和 README 使用用户原图，不再引用自绘素材', () => {
   const source = read('src-tauri/src/tray.rs')
-  assert.ok(source.includes('include_bytes!("../icons/dsh-fish.png")'))
+  assert.ok(source.includes('include_bytes!("../icons/fish-dock.png")'))
   assert.ok(!source.includes('include_bytes!("../icons/tray/'))
   const notify = read('src-tauri/src/notify.rs')
-  assert.ok(notify.includes('include_bytes!("../icons/dsh-fish.png")'))
+  assert.ok(notify.includes('include_bytes!("../icons/fish-dock.png")'))
   assert.ok(notify.includes('dir.join("fish-dock-user-icon-v1.png")'))
   for (const file of ['README.md', 'README.en.md']) {
-    assert.ok(read(file).includes('src="src-tauri/icons/dsh-fish.png"'))
+    assert.ok(read(file).includes('src="src-tauri/icons/fish-dock.png"'))
     assert.ok(!read(file).includes('art/fish-dock-master.png'))
   }
 })
@@ -62,10 +66,11 @@ test('用户原始 ICO 与 PNG 保持不变，托盘直接复用 ICO 内的原�
   assert.equal(png.readUInt32BE(20), 256)
 })
 
-test('1.2.3 更新版与双语关于页完整标明集成来源', () => {
-  assert.equal(config.version, '1.2.3')
-  assert.match(read('src-tauri/Cargo.toml'), /name = "wakuwaku"\s+version = "1\.2\.3"/)
-  assert.match(read('src-tauri/Cargo.lock'), /name = "wakuwaku"\s+version = "1\.2\.3"/)
+test('2.0.0 版与双语关于页完整标明集成来源', () => {
+  assert.equal(config.version, '2.0.0')
+  // #t16/#t18：包名 wakuwaku → fish-dock（产物仍是 FISH-Dock.exe，见 Cargo.toml 的 [[bin]]）。
+  assert.match(read('src-tauri/Cargo.toml'), /name = "fish-dock"\s+version = "2\.0\.0"/)
+  assert.match(read('src-tauri/Cargo.lock'), /name = "fish-dock"\s+version = "2\.0\.0"/)
   for (const lang of ['zh', 'en']) {
     assert.match(t(lang, 'home.intro'), /FISH Dock/)
     assert.match(t(lang, 'home.upstream'), /Wakuwaku/)

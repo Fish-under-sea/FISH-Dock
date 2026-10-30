@@ -37,13 +37,19 @@
 import { spawn } from 'node:child_process'
 import http from 'node:http'
 
-// Filled in as she writes the file (connection.rs omp_extension).
-const PORT = Number("__WAKUWAKU_PORT__") || 47213
-const EXE = "__WAKUWAKU_EXE__"
-const DATA = "__WAKUWAKU_DATA__"
+// Filled in as she writes the file (connection.rs omp_extension). 2.0.0 起两套
+// 占位符都写、都填：新名（FISH_DOCK 前缀）是正式名，旧名（WAKUWAKU 前缀）保留，
+// 因为已经发出去的 2.0.0 插件副本只认旧字面量（#t16：不许静默删旧名）。
+const choose = (now, legacy) => (now && !now.startsWith('__')) ? now : ((legacy && !legacy.startsWith('__')) ? legacy : '')
+const PORT = Number(choose("__FISH_DOCK_PORT__", "__WAKUWAKU_PORT__")) || 47213
+const EXE = choose("__FISH_DOCK_EXE__", "__WAKUWAKU_EXE__")
+const DATA = choose("__FISH_DOCK_DATA__", "__WAKUWAKU_DATA__")
 
 const PATH = '/hook?from=wakuwaku&agent=omp'
-const ENSURE_FLAG = '--wakuwaku-ensure-running'
+// #t18：写出名是 --fish-dock-ensure-running。旧 exe 认的 --wakuwaku-ensure-running
+// 只在读取侧兼容（flags.rs 别名表）：这份扩展由当前版本写出，宿主也是当前版本，
+// 不需要在命令行里塞两个开关（塞了会打乱后面的 who/source 位置参数）。
+const ENSURE_FLAG = '--fish-dock-ensure-running'
 // How long a word to her may take, and the last one as omp exits.
 const POST_MS = 1500
 const LAST_MS = 1000
@@ -57,7 +63,7 @@ const MAX_TEXT = 2000
 const MAX_PLAN = 60 * 1000
 const MAX_TOOLS = 200
 
-const filled = value => (value && !value.startsWith('__WAKUWAKU_') ? value : '')
+const filled = value => (value && !value.startsWith('__') ? value : '')
 
 // What every copy of this module shares in the process.
 const S = (globalThis.__wakuwakuOmp1 ??= {

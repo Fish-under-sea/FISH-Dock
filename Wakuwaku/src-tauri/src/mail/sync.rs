@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use io_imap::types::mailbox::Mailbox;
 use serde_json::json;
 
+use super::backoff::{self, Step};
 use super::imap::{self, session, Fail, Session};
 use super::proxy;
 use super::store::{self, Entry, Folder, Offline, Store};
@@ -51,16 +52,51 @@ pub fn run(sh: &Arc<Shared>, account: &Account, watch: &Watch) {
     let st = store::of(sh, account);
     // The newest unread letter seen: one newer is new mail.
     let mut newest_seen: Option<u32> = None;
-    tell(sh, account, watch, &st, "connecting", &mut None);
-    let mut failures = 0u32;
+    // 退避与熔断的状态（backoff.rs）：跨重启从盘上接着来。
+    let mut state = backoff::load(&sh.dir, &account.id);
+    if state.paused {
+        // 上次熔断着退出：不立刻连，下面那圈先把它报出来，等手动重试。
+        paused_status(sh, watch, &state);
+    } else {
+        // 重启后不立刻风暴：上次的等待还没走完，就先等完那一段。
+        let left = state.remaining(now());
+        if !left.is_zero() {
+            sh.log(&format!("mail {}: waiting {left:?} more after a restart ({} failures in a row)", account.id, state.failures));
+            watch.rest(left);
+            if watch.stopped() {
+                return;
+            }
+        }
+        tell(sh, account, watch, &st, "connecting", &mut newest_seen);
+    }
     while !watch.stopped() {
+        // 熔断中：不自动重连，等手动重试（mail_kick / 刷新）或停。失败原因一直挂着，
+        // 不再被下一轮的「connecting」盖掉。
+        if state.paused {
+            paused_status(sh, watch, &state);
+            while !watch.stopped() && !watch.kick.load(Ordering::SeqCst) {
+                watch.rest(Duration::from_secs(1));
+            }
+            if watch.stopped() {
+                break;
+            }
+            // 手动重试：清空退避与熔断，立刻再连。
+            watch.kick.store(false, Ordering::SeqCst);
+            state.retry_now();
+            backoff::save(&sh.dir, &account.id, &state);
+            sh.log(&format!("mail {}: retry asked; connecting again now", account.id));
+            tell(sh, account, watch, &st, "connecting", &mut newest_seen);
+        }
         // Letters that would not come down (the server said no): not asked again this time.
         let mut skip: HashSet<(Folder, u32)> = HashSet::new();
+        let started = Instant::now();
         let result = (|| -> Result<(), Fail> {
             let mut conn = session(&account.server, &password_of(sh, account)?, CONNECT)?;
             *watch.socket.lock().unwrap() = conn.socket.try_clone().ok();
             *watch.via.lock().unwrap() = conn.proxy.as_ref().map(|p| p.at());
-            failures = 0;
+            // 注意：这里**不**清零失败计数。旧代码一「连上」就计数归零，可服务器常常
+            // 接受连接、过一会儿在 IDLE 里掐断——那样每轮都算第 1 次，退避永远停在
+            // 第一档（现装日志里 294 次失败有 279 次是「1 in a row」，间隔恒定 ~180s）。
             let mut sent_at: Option<Instant> = None;
             loop {
                 if watch.stopped() {
@@ -122,21 +158,49 @@ pub fn run(sh: &Arc<Shared>, account: &Account, watch: &Watch) {
         if watch.stopped() {
             break;
         }
-        failures += 1;
-        sh.log(&format!("mail {}: {:?} ({} in a row)", account.id, fail, failures));
-        watch.set(json!({ "state": "error", "error": fail.json() }));
+        // 连接活过 STABLE_MS 才叫健康：它之后的断开（服务器闲置超时、代理重启）不算
+        // 风暴的一部分，清零后这次失败又从第 1 档起。短命连接（几秒/几分钟就被掐）则累计。
+        if started.elapsed() >= Duration::from_millis(backoff::STABLE_MS) {
+            state.healthy();
+        }
+        let seed = (now() as u64).wrapping_mul(6364136223846793005).wrapping_add(state.failures as u64);
+        let step = state.fail(now(), seed);
+        state.last_error = Some(fail.json());
+        backoff::save(&sh.dir, &account.id, &state);
+        sh.log(&format!("mail {}: {:?} ({} in a row)", account.id, fail, state.failures));
+        let mut status = json!({ "state": "error", "error": fail.json(), "failures": state.failures });
+        if let Step::Wait(d) = &step {
+            status["retryInMs"] = json!(d.as_millis() as u64);
+        }
+        watch.set(status);
         sh.push_settings();
-        if failures >= 2 {
+        if state.failures >= 2 {
             show(sh, account, None, &[], false);
         }
-        // A password said no: not again soon, or the account may be locked.
-        let wait = if matches!(fail, Fail::Login(_)) { 300 } else { [15, 30, 60, 120, 300][(failures as usize - 1).min(4)] };
         // A kick from before (a letter sent, Refresh pressed) is no reason
         // to try again at once: cleared, so the wait is waited; one during
         // it (Refresh pressed now) tries once more, then it waits again.
         watch.kick.store(false, Ordering::SeqCst);
-        rest_or_new_way(account, watch, Duration::from_secs(wait));
+        match step {
+            Step::Wait(d) => rest_or_new_way(account, watch, d),
+            Step::Paused => {
+                sh.log(&format!("mail {}: paused after {} failures in a row; waiting for a manual retry", account.id, state.failures));
+                show(sh, account, None, &[], false);
+                // 下一圈走上面的熔断分支，等手动重试。
+            }
+        }
     }
+}
+
+// 熔断时的状态：状态、原因、连续失败次数，以及「可以手动重试」。
+fn paused_status(sh: &Shared, watch: &Watch, state: &backoff::State) {
+    watch.set(json!({
+        "state": "paused",
+        "error": state.last_error.clone().map_or(serde_json::Value::Null, |v| v),
+        "failures": state.failures,
+        "paused": true,
+    }));
+    sh.push_settings();
 }
 
 // The wait after a failure, ended early when the way to the server is not

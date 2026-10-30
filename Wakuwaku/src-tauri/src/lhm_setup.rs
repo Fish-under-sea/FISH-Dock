@@ -91,7 +91,7 @@ const FOLDER: &str = "LibreHardwareMonitor";
 const MARKER: &str = "wakuwaku-installed.json";
 // Her exe with this, run as administrator, does that one step (admin): the
 // one way she writes there.
-pub const ADMIN_FLAG: &str = "--wakuwaku-lhm";
+pub const ADMIN_FLAG: &str = "--fish-dock-lhm";
 // That folder's DACL, protected from Program Files' own: SYSTEM and the
 // Administrators all, Users read and run (FILE_GENERIC_READ |
 // FILE_GENERIC_EXECUTE), each to its files and folders; its owner the
@@ -1091,6 +1091,10 @@ fn visible_owner(sh:&Shared)->Result<isize,String>{
         crate::island::open_settings(&state,Some("widgets:monitor"));
         let result=(||{
             let window=state.app.get_webview_window("island").ok_or("设置窗口尚未就绪")?;
+            // 显示即醒：这里的 show 是 open_settings 之外的兜底，因此也走同一个
+            // 唤醒入口（power::webview_rest），避免出现「窗口看得见、页面还以为
+            // 自己看不见而不绘制」。
+            crate::power::webview_rest(&window,false);
             window.show().map_err(|_|"设置窗口未能显示")?;
             window.set_always_on_top(true).map_err(|_|"设置窗口未能置顶")?;
             window.set_focus().map_err(|_|"设置窗口未能取得焦点")?;
@@ -1679,6 +1683,10 @@ mod imp {
     #[link(name = "advapi32")]
     extern "system" {
         fn ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl: *const u16, revision: u32, descriptor: *mut *mut c_void, size: *mut u32) -> i32;
+        // PSECURITY_DESCRIPTOR is PVOID in the SDK: *mut c_void. sensors.rs
+        // declares this same symbol with this same signature on purpose (two
+        // differing declarations is clashing_extern_declarations, and two types
+        // for one ABI is a bug waiting to happen).
         fn ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor: *mut c_void, revision: u32, info: u32, sddl: *mut *mut u16, len: *mut u32) -> i32;
         fn GetNamedSecurityInfoW(name: *const u16, kind: u32, info: u32, owner: *mut *mut c_void, group: *mut *mut c_void, dacl: *mut *mut c_void, sacl: *mut *mut c_void, descriptor: *mut *mut c_void) -> u32;
         #[cfg(test)]
@@ -2445,7 +2453,7 @@ mod tests {
         let t = answer("7-0", "0\r\n");
         assert_eq!(asked_by_test(&dir, "7-0", Path::new(r"C:\w\wakuwaku.exe"), &format!("{ADMIN_FLAG} noStartup"), &dir, Some(60_000), patience), Asked::Ran(Some(0)));
         let v = t.join().unwrap();
-        assert_eq!((v["params"].as_str(), v["wait"].as_bool()), (Some("--wakuwaku-lhm noStartup"), Some(true)));
+        assert_eq!((v["params"].as_str(), v["wait"].as_bool()), (Some("--fish-dock-lhm noStartup"), Some(true)));
         assert!(v["file"].as_str().unwrap().ends_with("wakuwaku.exe"));
         let t = answer("7-1", "declined");
         assert_eq!(asked_by_test(&dir, "7-1", Path::new(r"C:\x\LibreHardwareMonitor.exe"), "", &dir, None, patience), Asked::Declined);

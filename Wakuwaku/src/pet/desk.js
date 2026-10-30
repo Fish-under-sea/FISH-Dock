@@ -835,6 +835,8 @@
   toastEl.hidden = true
   document.body.append(toastEl)
   let toastTimer = 0
+  // 轻提示在板上停留两秒（前端的界面节奏，就地具名常量；不是可配置的部署项）。
+  const TOAST_MS = 2000
   function toast(b, text) {
     const { w } = G.boardBox(b.entry)
     toastEl.textContent = text
@@ -842,7 +844,7 @@
     toastEl.style.left = `${Math.round(b.x + w / 2)}px`
     toastEl.style.top = `${Math.round(b.y + G.BOARD.head + 10)}px`
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toastEl.hidden = true), 2000)
+    toastTimer = setTimeout(() => (toastEl.hidden = true), TOAST_MS)
   }
 
   // Folded to its title bar, or open again.

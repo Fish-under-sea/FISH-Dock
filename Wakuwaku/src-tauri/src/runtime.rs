@@ -28,7 +28,9 @@ pub const REQUIRED: [&str; 14] = [
     "windhawk/Compiler/LICENSE.TXT",
 ];
 const SCHEMA: u32 = 2;
-const PRODUCT: &str = "DSH-FISH";
+// 安装资源清单里的 product：2.0.0 起写 "FISH Dock"（旧名清理 #27 P1），
+// 但机器上还装着旧包（写 "DSH-FISH"）时也得读得动，所以两个都认。
+const PRODUCTS: [&str; 2] = ["FISH Dock", "DSH-FISH"];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FileRecord { pub path: String, pub bytes: u64, pub sha256: String }
@@ -121,7 +123,7 @@ fn read_manifest(root: &Path) -> Result<(Manifest, String), String> {
 }
 
 fn records(m: &Manifest) -> Result<std::collections::BTreeMap<String, &FileRecord>, String> {
-    if m.schema != SCHEMA || m.product != PRODUCT || m.architecture != "x86_64" || m.version.is_empty() {
+    if m.schema != SCHEMA || !PRODUCTS.contains(&m.product.as_str()) || m.architecture != "x86_64" || m.version.is_empty() {
         return Err(reinstall("安装资源清单的版本或架构无效".into()));
     }
     let mut names = std::collections::BTreeSet::new();
@@ -301,11 +303,28 @@ fn grant_webview_read(path: &Path) -> Result<(), String> {
 #[cfg(feature = "installed")]
 static INSTALLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
-#[cfg(feature = "installed")]
+// 数据根的名字只有一份：config::HOME_NAME（2.0.0 改名 %LOCALAPPDATA%\FISH Dock；
+// 与安装器的一致性说明写在那个常量上，这里只取用，不再各写一个同名字面量）。
+
+// app_home_from 是数据根的唯一来源：FISH_DOCK_APP_HOME（非空、绝对路径）优先，
+// 否则 %LOCALAPPDATA%\FISH Dock。空串与相对路径按「没设」处理，回落默认——排障时
+// 手滑写出这两种值，不该把数据根指到半截路径上。
+//
+// 别再借用 FISH_DOCK_HOME：那是「统一数据根」（storage_context.rs，凭据、roster、
+// keys 那一套，默认 %USERPROFILE%\.fish-dock）的覆盖名，与这里的数据根是两个根，
+// 共用一个变量会把两边指到同一目录。旧名的 DSH_FISH_RUNTIME_HOME 也不再认：2.0.0
+// 只认新根，迁移与删旧由安装器负责，宿主不读旧目录。
+#[cfg(any(feature = "installed", test))]
+fn app_home_from(override_home: Option<std::ffi::OsString>, local_app_data: Option<std::ffi::OsString>) -> Result<PathBuf, String> {
+    let chosen = override_home.filter(|raw| !raw.is_empty()).map(PathBuf::from).filter(|path| path.is_absolute());
+    if let Some(path) = chosen { return Ok(path); }
+    let local = local_app_data.ok_or("找不到 LOCALAPPDATA 用户目录")?;
+    Ok(PathBuf::from(local).join(crate::config::HOME_NAME))
+}
+
+#[cfg(any(feature = "installed", test))]
 pub fn app_home() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("DSH_FISH_RUNTIME_HOME").filter(|p| !p.is_empty()) { return Ok(path.into()); }
-    let local = std::env::var_os("LOCALAPPDATA").ok_or("找不到 LOCALAPPDATA 用户目录")?;
-    Ok(PathBuf::from(local).join("DSH-FISH"))
+    app_home_from(std::env::var_os("FISH_DOCK_APP_HOME"), std::env::var_os("LOCALAPPDATA"))
 }
 
 /// Where the installer expanded Node, WebView2 and the local model service: the
@@ -373,8 +392,8 @@ pub fn prepare() -> Result<(), String> {
     let home = app_home()?;
     let resources = resources_directory()?;
     prepare_at(&resources, &home, &mut |terms| prompt_terms(terms), &mut |webview| grant_webview_read(webview))?;
-    if let Some(override_path) = std::env::var_os("WAKUWAKU_USER_DATA").filter(|p| !p.is_empty()) {
-        create_directories(Path::new(&override_path))?;
+    if let Some(override_path) = crate::config::user_data_override() {
+        create_directories(&override_path)?;
     } else {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let old = exe.parent().ok_or("找不到程序目录")?.join("wakuwaku-data");
@@ -404,6 +423,7 @@ mod tests {
     use std::{fs, sync::atomic::{AtomicU64, Ordering}};
     use sha2::{Digest, Sha256};
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    // 改环境变量的用例互斥；与 config.rs 的测试共用同一把锁（两边都会动 FISH_DOCK_APP_HOME）。
     struct Temp(PathBuf);
     impl Temp { fn new() -> Self {
         let p = std::env::temp_dir().join(format!("fish-runtime-test-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
@@ -633,5 +653,50 @@ mod tests {
         assert!(error.contains("沙箱读取权限"), "{error}");
         assert!(error.contains("重新运行安装程序"), "{error}");
         assert!(!verified_marker(&home).exists(), "授权失败不能记成已验证，修好后要能重试");
+    }
+
+    // 2.0.0 的数据根改名：安装器会删旧目录 %LOCALAPPDATA%\DSH-FISH，宿主必须
+    // 已经在用 %LOCALAPPDATA%\FISH Dock 这套活数据，否则被删的就是正在用的。
+    #[test]
+    fn app_home_default_is_fish_dock_under_local_app_data() {
+        let local = std::ffi::OsString::from(r"C:\Users\me\AppData\Local");
+        let home = app_home_from(None, Some(local)).unwrap();
+        assert_eq!(home, PathBuf::from(r"C:\Users\me\AppData\Local").join("FISH Dock"));
+        assert_eq!(home.file_name().and_then(|name| name.to_str()), Some("FISH Dock"));
+        let text = home.to_string_lossy();
+        assert!(text.ends_with("FISH Dock"), "{text}");
+        assert!(!text.contains("DSH-FISH"), "数据根不能再落到旧名上：{text}");
+        // 没有 LOCALAPPDATA 就该报错，而不是猜一个目录。
+        assert!(app_home_from(None, None).is_err());
+    }
+
+    // 排障与测试用：FISH_DOCK_APP_HOME 覆盖数据根（绝对路径）。FISH_DOCK_HOME
+    // 是统一数据根的覆盖名，宿主读 app_home() 时只用本变量，不借用它。
+    #[test]
+    fn app_home_takes_the_fish_dock_app_home_override_from_the_environment() {
+        let _serial = crate::config::ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let previous = std::env::var_os("FISH_DOCK_APP_HOME");
+        let target = std::env::temp_dir().join("fish-dock-app-home-override");
+        std::env::set_var("FISH_DOCK_APP_HOME", &target);
+        let home = app_home();
+        match &previous {
+            Some(value) => std::env::set_var("FISH_DOCK_APP_HOME", value),
+            None => std::env::remove_var("FISH_DOCK_APP_HOME"),
+        }
+        assert_eq!(home.unwrap(), target);
+        // 覆盖变量只影响 app_home()：默认根的名字仍是 %LOCALAPPDATA%\FISH Dock。
+        assert_eq!(app_home_from(None, Some(std::ffi::OsString::from(r"C:\Users\me\AppData\Local"))).unwrap(),
+                   PathBuf::from(r"C:\Users\me\AppData\Local").join("FISH Dock"));
+    }
+
+    // 空串与相对路径按「没设」处理：排障时手滑写出这两种值，宁可按默认走，
+    // 也不要把数据根指到一个相对于当前目录的半截路径上。
+    #[test]
+    fn app_home_ignores_an_empty_or_relative_override() {
+        let local = || std::ffi::OsString::from(r"C:\Users\me\AppData\Local");
+        let default = PathBuf::from(r"C:\Users\me\AppData\Local").join("FISH Dock");
+        assert_eq!(app_home_from(Some(std::ffi::OsString::from("")), Some(local())).unwrap(), default);
+        assert_eq!(app_home_from(Some(std::ffi::OsString::from(r"relative\fish-dock")), Some(local())).unwrap(), default);
+        assert_eq!(app_home_from(Some(std::ffi::OsString::from(".")), Some(local())).unwrap(), default);
     }
 }

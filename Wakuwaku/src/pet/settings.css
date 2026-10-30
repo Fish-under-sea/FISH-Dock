@@ -8,6 +8,21 @@
   --g4: #8e8e93;
   --g5: #a1a1a6;
   --fg: #f5f5f7;
+  /* 插件卡自启动三态的配色（2026-10-31 / t36 改过底色）。三态同尺寸，只差底色与
+     文案；ink 一律白（暗底上的白字），底色取本文件里既有的深档：
+     红 = .pbtn.no 的 #c42b3c、蓝 = .pbtn.al 的 #005fb8、绿 = .note.ok 的 #0f7b3f。
+     （原来暗色用亮档 #ff6b7a/#34d27b，白字压上去只有 2.75 / 1.97，t36 审计抓出来的。） */
+  --hook-on: #c42b3c;
+  --hook-on-ink: #ffffff;
+  --hook-off: #005fb8;
+  --hook-off-ink: #ffffff;
+  --hook-none: #0f7b3f;
+  --hook-none-ink: #ffffff;
+  /* 语义字色（t36）：暗色白/浅色字，亮色深色字；规则别写字面色，用这几个 token。 */
+  --accent-ink: #5e9bff;
+  --ok-ink: #34d27b;
+  --bad-ink: #ff6b7a;
+  --warn-ink: #ffb340;
   --spring: cubic-bezier(0.3, 1.45, 0.5, 1);
   position: absolute;
   top: 0;
@@ -56,9 +71,25 @@
   --g1: #ffffff;
   --g2: #f0f0f0;
   --g3: #d9d9d9;
-  --g4: #8a8a8a;
-  --g5: #5d5d5d;
+  /* 亮色主题的次要灰压到 #5d5d5d（原来 #g5 那一档）：#8a8a8a 的白底 12px 灰字只有
+     3.45:1。t38：再给 --g5 让出一档 #3a3a3c（比 --g4 更深一步，取自暗色主题 --g3 的
+     同一支中性灰，没有新造色相）——这样 --fg > --g5 > --g4 能看出三档，
+     且三档都在 4.5:1 以上。#8a8a8a 在白底只有 3.45，做不了这一档。 */
+  --g4: #5d5d5d;
+  --g5: #3a3a3c;
   --fg: #1b1b1b;
+  /* 三态在亮色下：底色用深档，ink 白（浅底白字才够对比；深字压深底会掉到 2:1）。 */
+  --hook-on: #c42b3c;
+  --hook-on-ink: #ffffff;
+  --hook-off: #005fb8;
+  --hook-off-ink: #ffffff;
+  --hook-none: #0f7b3f;
+  --hook-none-ink: #ffffff;
+  /* 语义字色在亮色主题用同色系的深档（都是本文件里已有的值）。 */
+  --accent-ink: #005fb8;
+  --ok-ink: #0f7b3f;
+  --bad-ink: #c42b3c;
+  --warn-ink: #8e3d08;
 }
 
 .tb-light #island-settings [data-mood],
@@ -164,7 +195,8 @@
 }
 
 .tb-light #island-settings .star.on {
-  color: #c97a00;
+  /* #c97a00 在白色上只有 3.35:1；换亮色主题的 warn 深档（--warn-ink = #8e3d08，6.9:1）。 */
+  color: var(--warn-ink);
 }
 
 #island[data-view='settings'] #island-her {
@@ -254,7 +286,8 @@
 }
 
 #island-settings .s-head .x.g.on {
-  background: #0a84ff;
+  /* 原来 #0a84ff 上的白字只有 3.65:1；换成既有的深档 #005fb8（亮色覆盖里本来就是它）。 */
+  background: #005fb8;
   color: #ffffff;
 }
 
@@ -364,6 +397,13 @@
 
 /* Where a part of a page begins (settings.js part), to scroll to: nothing to see. */
 .s-body > .part {
+  display: block;
+  height: 0;
+}
+
+/* A part inside a group (the welcome card, in the Agent page's 「其它」): the
+   same, nothing to see. */
+#island-settings .grp > .part {
   display: block;
   height: 0;
 }
@@ -548,7 +588,7 @@
 
 #island-settings .in-use {
   flex: none;
-  color: #34d27b;
+  color: var(--ok-ink);
 }
 
 #island-settings .note {
@@ -558,7 +598,7 @@
 }
 
 #island-settings .note.err {
-  color: #ff6b7a;
+  color: var(--bad-ink);
 }
 
 /* A crash report as it would be sent (pageCrash): its own lines, scrolled. */
@@ -582,12 +622,12 @@
   padding: 10px 14px;
   border-radius: 18px;
   background: rgba(94, 155, 255, 0.14);
-  color: #cfe0ff;
+  color: var(--accent-ink);
 }
 
 #island-settings .link {
   flex: none;
-  color: #5e9bff;
+  color: var(--accent-ink);
   font-size: 12px;
   cursor: pointer;
 }
@@ -695,13 +735,16 @@
 }
 
 #island-settings .pbtn.al {
-  border-color: #5e9bff;
-  background: #5e9bff;
-  color: #04122b;
+  /* t38：暗色主题也走「暗色白字」。原来是亮蓝 #5e9bff + 深字 #04122b（6.75:1 数值够，
+     但方向与口径相反）。底色压到既有深档 #005fb8、ink 改白 —— 与亮色那条一致，
+     白字压 #005fb8 = 6.31:1。 */
+  border-color: #005fb8;
+  background: #005fb8;
+  color: #ffffff;
 }
 
 #island-settings .pbtn.no {
-  color: #ff6b7a;
+  color: var(--bad-ink);
 }
 
 #island-settings .pbtn.sm {
@@ -775,7 +818,7 @@
 }
 
 #island-settings .pw .eye:hover { color: var(--fg); }
-#island-settings .pw .eye.on { color: #5e9bff; }
+#island-settings .pw .eye.on { color: var(--accent-ink); }
 #island-settings .pw .eye:disabled { opacity: .4; cursor: default; }
 #island-settings .pw .eye:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
 
@@ -808,7 +851,7 @@
 }
 
 #island-settings .note.lhm-note.bad {
-  color: #ffb340;
+  color: var(--warn-ink);
 }
 
 #island-settings .fr.lhw {
@@ -858,7 +901,7 @@
 }
 
 #island-settings .d.bad {
-  color: #ffb340;
+  color: var(--warn-ink);
 }
 
 /* Setting a mail account up: label, box. */
@@ -939,7 +982,7 @@
   padding: 4px 0;
   border: 0;
   background: none;
-  color: #5e9bff;
+  color: var(--accent-ink);
   font-size: 12px;
   cursor: pointer;
 }
@@ -983,7 +1026,7 @@
 }
 
 #island-settings .note.ok {
-  color: #34d27b;
+  color: var(--ok-ink);
 }
 
 /* The inbox: a line a letter, bold with a blue dot while unread. */
@@ -1054,7 +1097,7 @@
 }
 
 #island-settings .letter.unread .twisty {
-  color: #5e9bff;
+  color: var(--accent-ink);
 }
 
 #island-settings .letter .cnt {
@@ -1096,15 +1139,15 @@
 }
 
 #island-settings .chip.running {
-  color: #5e9bff;
+  color: var(--accent-ink);
 }
 
 #island-settings .chip.done {
-  color: #34d27b;
+  color: var(--ok-ink);
 }
 
 #island-settings .chip.failed {
-  color: #ff6b7a;
+  color: var(--bad-ink);
 }
 
 #island-settings .agent-pick {
@@ -1189,7 +1232,7 @@
 }
 
 #island-settings .star.on {
-  color: #ffb340;
+  color: var(--warn-ink);
 }
 
 #island-settings .mail-bar .star {
@@ -1230,7 +1273,7 @@
 }
 
 #island-settings .talk.failed .talk-h {
-  color: #ff8a96;
+  color: var(--bad-ink);
 }
 
 #island-settings .t-start,
@@ -1265,7 +1308,8 @@
   margin: 8px 0 6px auto;
   padding: 6px 10px;
   border-radius: 12px 12px 4px 12px;
-  background: #0a84ff;
+  /* 同上：白字压在 #0a84ff 上只有 3.65:1，换既有深档 #005fb8。 */
+  background: #005fb8;
   color: #fff;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1402,7 +1446,7 @@
 }
 
 #island-settings .unfile:hover {
-  color: #ff6b7a;
+  color: var(--bad-ink);
 }
 
 /* The letter put aside, at the top of the inbox. */
@@ -1538,7 +1582,7 @@
 
 #island-settings .mi.on::after {
   content: ' ✓';
-  color: #34d27b;
+  color: var(--ok-ink);
 }
 
 /* Wide enough for 「和邮件页一样（手动）」 and Claude Sonnet 4.6 (Thinking). */
@@ -2730,7 +2774,7 @@
 }
 
 #island-settings .wc-err b {
-  color: #ff6b7a;
+  color: var(--bad-ink);
 }
 
 .isl-light #island-settings .wc-err,
@@ -2749,130 +2793,23 @@
   font-size: 11.5px;
 }
 
-/* --- The Local models page (settings.js drawBody, models.js) -----------------------
-   Our Free Model's own console, unchanged, in a frame the page keeps: the frame is
-   the page, so the box it sits in has no padding of its own and no scrollbar; the
-   note over it says only what is happening until it is there (and why, if it is
-   not). */
-#island-settings .s-models {
-  position: relative;
-  box-sizing: border-box;
-  height: 100%;
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--g1);
-}
-
-#island-settings .s-models-slot {
-  width: 100%;
-  height: 100%;
-  background: var(--g1);
-}
-
-/* The frame itself: a layer of its own on the body, put over the slot and taken
-   off screen instead of being moved (models.js says why). Rounded here rather
-   than by the slot, since it is not the slot's child; away it keeps its size,
-   so nothing inside reflows unnoticed. */
-#models-host {
-  position: fixed;
-  z-index: 2147483000;
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--g1, #1c1c1e);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-#models-host.away {
-  left: -99999px !important;
-  top: 0 !important;
-}
-
-#models-host iframe {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  display: block;
-}
-
-#island-settings .s-models-note {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-  box-sizing: border-box;
-  background: var(--g1);
-  color: var(--g4);
-  text-align: center;
-}
-
-#island-settings .s-models-note[hidden] {
-  display: none;
-}
-
-#island-settings .s-models-asking {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  max-width: 420px;
-}
-
-#island-settings .s-models-title {
-  color: var(--fg);
-  font-size: 14px;
-}
-
-#island-settings .s-models-detail {
-  max-width: 100%;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--g2);
-  color: var(--g5);
-  font-size: 12px;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-#island-settings .s-models-spin {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 2px var(--g3);
-  border-top-color: var(--fg);
-  animation: s-models-breath 1.4s ease-in-out infinite;
-}
-
 /* 身份备份与原生文件窗口；长目录不撑开设置面板。 */
-#island-settings .identity-panel { margin: 14px 0; padding: 14px; border-radius: 12px; background: var(--g1); }
-#island-settings .identity-panel h3 { margin: 0 0 8px; font-size: 14px; }
+/* 配置与备份块（2026-10-31 从插件页搬到通用页）：盒子几何与 .grp 一致（18px 圆角、
+   无外边距），左右内衬与 .r 一致（14px），标题字号与行标题一致；块内按钮不再被抬到
+   32px（站内 .pbtn 是 28px），输入框与 .in 同高（30px）同圆角（15px）。 */
+#island-settings .identity-panel { box-sizing: border-box; margin: 0; padding: 12px 14px; border-radius: 18px; background: var(--g1); }
+#island-settings .identity-panel h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 #island-settings .identity-panel p { margin: 8px 0; overflow-wrap: anywhere; }
 #island-settings .identity-label { display: block; margin: 12px 0 6px; }
-#island-settings .identity-directory { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--g3); border-radius: 7px; background: var(--g2); color: var(--fg); }
+#island-settings .identity-directory { box-sizing: border-box; width: 100%; min-width: 0; height: 30px; padding: 0 12px; border: 1px solid var(--g3); border-radius: 15px; background: var(--g2); color: var(--fg); }
 #island-settings .identity-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-#island-settings .identity-panel button { min-height: 32px; }
 #island-settings .identity-panel :focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
 #island-settings .identity-preview { border-top: 1px solid var(--g3); margin-top: 14px; padding-top: 12px; }
 #island-settings .identity-error, #island-settings .identity-warning { color: #ffad79; }
 .tb-light #island-settings .identity-error, .tb-light #island-settings .identity-warning { color: #8e3d08; }
 
-@keyframes s-models-breath {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-/* 全屏确认留在 Dock 内；原生 dialog 限定键盘焦点并覆盖模型 iframe。 */
-#island-settings .s-fullscreen-dialog { box-sizing: border-box; width: min(360px, calc(100vw - 40px)); max-height: min(70vh, calc(100vh - 32px)); max-height: min(70dvh, calc(100dvh - 32px)); padding: 16px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); color: var(--fg); box-shadow: none; overflow: auto; }
-#island-settings .s-fullscreen-dialog:not([open]) { display: none; }
-#island-settings .s-fullscreen-dialog::backdrop { background: transparent; }
-#island-settings .s-fullscreen-dialog h2 { margin: 0 0 8px; font-size: 16px; }
-#island-settings .s-fullscreen-dialog p { margin: 0 0 12px; line-height: 1.5; }
+/* 确认弹窗留在 Dock 内（settings.js seatDialog / DialogAnchor 把它贴在岛的锚点上）；
+   原生 dialog 限定键盘焦点。宽度按岛的最窄口径来，不用视口的一半。 */
 #island-settings .s-confirm-dialog { box-sizing: border-box; width: min(360px, calc(100vw - 40px)); max-height: min(70vh, calc(100vh - 32px)); max-height: min(70dvh, calc(100dvh - 32px)); padding: 16px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); color: var(--fg); box-shadow: none; overflow: auto; }
 #island-settings .s-confirm-dialog:not([open]) { display: none; }
 #island-settings .s-confirm-dialog::backdrop { background: transparent; }
@@ -2882,11 +2819,6 @@
 #island-settings .s-device-code { display: block; margin: 12px 0 20px; padding: 12px; font-size: 28px; letter-spacing: .12em; text-align: center; user-select: text; background: var(--g2); border: 1px solid var(--g3); border-radius: 8px; overflow-wrap: anywhere; }
 #island-settings .s-device-code[hidden], #island-settings .s-device-actions[hidden] { display: none; }
 #island-settings .s-device-actions { margin-bottom: 12px; }
-#island-settings .s-fullscreen-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
-#island-settings .s-fullscreen-actions button { min-height: 36px; padding: 8px 12px; border: 1px solid var(--g3); border-radius: 9px; background: var(--g2); color: var(--fg); cursor: pointer; }
-#island-settings .s-fullscreen-actions button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
-#island-settings .s-fullscreen-actions button:disabled { opacity: .5; cursor: progress; }
-#island-settings .s-fullscreen-error { margin-top: 14px; color: #ffad79; overflow-wrap: anywhere; }
 
 /* 模组管理使用外观页的字号和间距，标题、状态、内容各自对齐。 */
 #island-settings .windhawk-panel { box-sizing: border-box; margin-top: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 1.5; }
@@ -2912,3 +2844,168 @@
 #island-settings .windhawk-panel [hidden] { display: none; }
 .s-tabs { touch-action: pan-y; user-select: none; cursor: grab; }
 .s-tabs.dragging, .s-tabs.dragging button { cursor: grabbing; }
+
+/* 关于页（#22）：标语置顶、许可与归属折叠。公告区不设高度上限——设置页正文本身
+   就是滚动容器，再套一层 max-height 会在「图二」那种短窗口里把公告压成一条缝，
+   又和下面的折叠错开左边界（用户：没有视觉对齐）。 */
+#island-settings .slogan { padding: 18px 2px 6px; }
+#island-settings .slogan .t { font-size: 21px; font-weight: 650; letter-spacing: .2px; }
+#island-settings .slogan .d { margin-top: 4px; font-size: 12px; color: var(--g5); }
+#island-settings .notes { display: flex; flex-direction: column; gap: 10px; padding: 0; }
+#island-settings .note-row { padding: 10px 14px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); }
+/* 公告头部（2026-10-31）：版本号那行删了，日期并到标题这一行（同一行、同一内衬），
+   标题与日期左边界和下面的要点一致；字色字号字重都沿用原来的（.nt 12px、.d 的灰）。 */
+#island-settings .note-row .nt { margin: 0; font-size: 12px; line-height: 1.5; }
+#island-settings .note-row .nt .d { font-size: 12px; }
+#island-settings .note-row .nb { margin-top: 4px; font-size: 12px; color: var(--g5); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+/* 新特性要点：一条一行，长行就地换行，不许把面板撑出横向滚动（用户：公告太长）。 */
+/* 要点：不用 <ul> 默认的 18px 缩进，改成行内圆点——这样标题行、要点、折叠行、
+   来源行都从同一条 14px 左内衬起（用户 2026-10-31：做好视觉对齐）。 */
+#island-settings .notes-points { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+#island-settings .notes-points li { overflow-wrap: anywhere; word-break: break-word; }
+#island-settings .notes-points li::before { content: '· '; color: var(--g4); }
+/* 行内标记渲染成真的元素（用户 2026-10-31：不许把 ** 和反引号露在界面上）。 */
+#island-settings .notes-points strong, #island-settings .notes-more strong { font-weight: 700; }
+#island-settings .notes-points code, #island-settings .notes-more code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11.5px; }
+/* 「查看完整说明」：默认收起，展开后的正文同样就地换行；summary 与上面内容对齐。 */
+#island-settings .notes-more { margin-top: 8px; padding: 0; }
+#island-settings .notes-more > summary { padding: 0; font-size: 12px; color: var(--g5); }
+#island-settings .notes-more > .nb { padding: 0; }
+#island-settings .fold { padding: 0; }
+#island-settings .fold > summary { padding: 10px 14px; line-height: 26px; font-size: 13px; color: var(--g5); cursor: pointer; }
+#island-settings .fold > .note { margin-top: 4px; padding: 0 14px; }
+
+/* 关于页（截图意见 1–4）：
+   1) hero 是第一屏、也是 .about 的第一个子元素：品牌图最前，下面版本行与说明，
+      整列居中（图 margin-inline:auto，视觉中心与文字中心同一条竖线）；
+   2) 公告列表、骨架屏、许可与归属、说明文案共用同一个左边界（14px 内衬），不再
+      一行 2px+10px、一行顶格；
+   3) 红圈那块「版本 + 现在检查 + 已经是最新版本」卡片删掉，只留规格 7 的版本行。
+
+   .about 只做 DOM 分组，display:contents 让它不生成盒子，页面间距与以前一模一样。 */
+#island-settings .about {
+  display: contents;
+}
+
+#island-settings .about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 16px auto 4px;
+  max-width: 560px;
+  padding: 0 14px;
+  text-align: center;
+}
+
+/* 品牌图的彩蛋外壳（2026-10-31）：看起来仍是那张图——无边框、无背景、不占额外
+   空间，居中与 72×72 都由它带着（margin 从 .about-mark 挪到这里）；反馈只有
+   cursor 与 hover 的一点亮度，按下轻缩一下。不加文字、不加外链图标。 */
+#island-settings .about-hero .about-mark-btn {
+  display: block;
+  margin: 0 auto 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+#island-settings .about-hero .about-mark-btn:hover .about-mark { filter: brightness(1.08); }
+#island-settings .about-hero .about-mark-btn:active .about-mark { transform: scale(0.98); }
+#island-settings .about-hero .about-mark-btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; border-radius: 16px; }
+
+/* 品牌图：72px（原图 256 的 2 倍图里读出），不拉伸、不可拖；居中由上面的按钮给。 */
+#island-settings .about-hero .about-mark {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+#island-settings .about-hero .slogan {
+  margin: 0 auto;
+  padding: 0;
+}
+
+/* 公告还在读时的骨架：与真公告同样的内衬、圆角、条数，读到时不跳。纯装饰
+   （aria-hidden），读屏由上面那句「正在读取更新公告…」念。 */
+#island-settings .notes-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 14px 10px;
+}
+
+#island-settings .notes-skeleton .sk {
+  min-height: 3.4em;
+  border: 1px solid var(--g3);
+  border-radius: 12px;
+  background: var(--g1);
+  animation: about-sk 1.4s ease-in-out infinite;
+}
+
+@keyframes about-sk {
+  0%, 100% { opacity: .5; }
+  50% { opacity: .9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #island-settings .notes-skeleton .sk { animation: none; }
+}
+
+/* 读到 / 在读 / 读不到：一行话 + 重试，左边界与上面一致。 */
+#island-settings .about-said {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 14px 10px;
+}
+
+#island-settings .about-said .note {
+  padding: 0;
+}
+
+/* 版本行（版本号 + 现在检查 + 项目主页）：hero 里的一行，居中，不是卡片。 */
+#island-settings .about-version {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 0 10px;
+  color: var(--g4);
+  font-size: 12px;
+}
+
+#island-settings .about-version .ver {
+  font-weight: 600;
+  color: var(--g5);
+}
+
+/* 强调色的两态（跟随系统 / 自定义）。 */
+#island-settings .winaccent-mode {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+#island-settings .winaccent-mode .d {
+  color: var(--g5);
+  font-size: 12px;
+}
+
+/* 设置面板跟着停靠边（#22）：面板就长在停靠条里——#island-settings 是 #island 的
+   子元素（index.html），island.js 的 sizeOf('settings') 又把 island 的宽高设成面板
+   的 offsetWidth/offsetHeight，所以面板宽度＝岛宽度。停靠边对齐因此由 #island-bar
+   负责：.home-island.isl-at-left 左贴 8px、.isl-at-right 右贴 8px、居中停靠
+   （island.js placeAnchor 只挂 left/right 两个类）由条自己的居中给出。
+   这里只把面板钉在岛的左上角：以前若在岛内再偏 8px / 再 translateX(-50%)，内容会
+   在岛里右移 8px、左右内边距挤成 22/6，看着反而和条不齐。 */
+.home-island #island-settings,
+.home-island.isl-at-left #island-settings,
+.home-island.isl-at-right #island-settings { left: 0; right: auto; transform: none; }

@@ -1,8 +1,8 @@
-<p align="center"><img src="src-tauri/icons/dsh-fish.png" width="112" alt="FISH Dock icon"></p>
+<p align="center"><img src="src-tauri/icons/fish-dock.png" width="112" alt="FISH Dock icon"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">A place for AI sessions to dock, and model connections to come together.</p>
-<p align="center"><strong>1.2.3</strong> · Windows x64 · MIT-licensed code</p>
-<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-1.2.3.md">Release notes</a></p>
+<p align="center"><strong>2.0.0</strong> · Windows x64 · MIT-licensed code</p>
+<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.0">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-2.0.0.md">Release notes</a></p>
 
 > **A derivative integration, not an official upstream release.** FISH Dock builds on the desktop and AI-session experience of [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) and integrates the model channels and API workspace of [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model). Both core systems remain upstream work. Original authors, copyrights, and licenses are credited below.
 
@@ -20,9 +20,13 @@ This repository contains the desktop host, plugin SDK, storage and runtime manag
 
 **Local does not mean offline model inference.** The workspace, proxy, and stored data run on your computer. Model requests still go to the selected provider. Eligibility, quotas, pricing, and availability are controlled by those providers. This project does not promise unlimited usage, permanently free access, or bypasses for provider restrictions.
 
-## New in 1.2.3
+## New in 2.0.0
 
-**1.2.3** closes the loop on plugin updates: superseded version directories are pruned only after the new version commits, keeping the active version plus one rollback point; the plugin page closes the old ticket and rebuilds with a fresh one once its digest changes, so no stale UI survives. #16 makes installer logs pure ASCII and writes a UTF-8 `install.log` beside them, and #17 adds a show-password toggle to password fields. Download from [v1.2.3](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3).
+**2.0.0** finishes the legacy-name and version work: every version position (`tauri.conf.json`, `Cargo.toml`, the Claude Code plugin manifest, the installer and these documents) is `2.0.0`, and the old executable is no longer kept as a rollback copy. Legacy names split three ways: internal identities (the uninstall entry `Uninstall\DSH-FISH`, the executable name `DSH-FISH.exe`, the Run value name and the `--wakuwaku-at-login` switch) are untouched; user-facing names (the Task Scheduler author and description, the user data directory) become `FISH Dock`; old uninstall entries and run values pointing at the old executable are removed on install once they are proven ours. The user data directory migrates to `%LOCALAPPDATA%\FISH Dock` and the old `%LOCALAPPDATA%\DSH-FISH` is deleted right after the copy verifies; if it does not finish, the old directory stays as it was. Download from [v2.0.0](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.0).
+
+- Versions and packaging: the host metadata, Cargo lock file and installer agree on `2.0.0`; full and compact packages ship together.
+- Autostart hook: the host writes the existing registry `autostart` field, so plugin cards and the plugin service page share one truth; plugins without a service show “no autostart needed”.
+- No rollback point: once a plugin update commits, only the current version directory is kept and the old executable is gone.
 
 - Installed-release updates: automatic checks after launch and daily, manual checks, and an official release-page fallback when the API is unavailable. Upgrades use full or compact installers.
 - In-app tagline: “Everything is a Plugin”, with clear host and independent-plugin responsibilities.
@@ -40,13 +44,13 @@ These existing capabilities are retained:
 - About/plugin update checks, catalog API fallback and readable KB/MB/GB package sizes.
 - Bundled Windhawk/compiler, native management pages, draggable tabs and configurable columns.
 
-See the [1.2.3 release notes](docs/release-1.2.3.md) for verification scope.
+See the [2.0.0 release notes](docs/release-2.0.0.md) for verification scope.
 
 ## Installation and Updates
 
 Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows 11; other Windows releases and third-party taskbar software require separate verification.
 
-1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-1.2.2.exe` is for first installation or repair; `FISH-Dock-Update-1.2.2.exe` is for an existing 1.1.0 or earlier 1.2.2 installation with intact base resources.
+1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.0) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-2.0.0.exe` is for first installation or repair; `FISH-Dock-Update-2.0.0.exe` is for an existing installation with intact base resources.
 2. Fully exit the previous version from the tray and any standalone OFM service. Run the installer and choose a destination. Fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock`; upgrades reuse the registered directory instead of moving it.
 3. Start **FISH Dock** from the desktop or Start menu. Node.js, Fixed Version WebView2, Windhawk, its compiler, and license notices are bundled. Business plugins are downloaded separately.
 4. The first launch confirms runtime terms and verifies resources. Later launches use installed files without repeatedly extracting the entire runtime.
@@ -114,7 +118,7 @@ FISH-Dock/
 From the desktop directory; the host build no longer needs the old OFM snapshot:
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <runtime-cache> --out <new-resource-directory> --version 1.2.3
+node scripts/prepare-installer.mjs --downloads <runtime-cache> --out <new-resource-directory> --version 2.0.0
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <prepared-directory> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
@@ -135,4 +139,4 @@ The application uses the user's original blue-haired character icon, not redrawn
 
 ## Feedback and Security
 
-Report Windows and application versions, docking mode, reproduction steps, and redacted logs through [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues). Never upload usable keys, full Cookies, private mail, or backup ZIPs, including in vulnerability reports. The 1.2.2 full installer, compact update package and checksums are available in the linked release.
+Report Windows and application versions, docking mode, reproduction steps, and redacted logs through [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues). Never upload usable keys, full Cookies, private mail, or backup ZIPs, including in vulnerability reports. The full installer, compact update package and checksums for this release are available in the linked release.

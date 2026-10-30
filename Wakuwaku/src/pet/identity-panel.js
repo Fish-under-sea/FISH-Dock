@@ -1,4 +1,5 @@
-// 身份 ZIP 只通过原生命令操作；页面不接触密码，也不接收任意导入路径。
+// 配置与备份的 ZIP 只通过原生命令操作；页面不接触密码，也不接收任意导入路径。
+// （这个面板在设置页的通用 tab，软件更新下面；插件 tab 的身份卡在 extension-panel.js。）
 ;(function () {
   const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
   function create({ invoke, confirm, lang, redraw }) {
@@ -45,7 +46,9 @@
         }
       })
     }
-    function render() {
+    // 配置与备份这一块（用户 2026-10-30：它在通用页的软件更新下面，不在插件页）。
+    // 名字说明它就是备份面板：插件页那一侧只留 extension-panel 的 GitHub 身份卡。
+    function renderBackup() {
       const disabled = working ? ' disabled' : ''
       const missing = view?.missingMailCredentials || 0
       const configSummary = preview?.configuration ? `<p>${escape(text('将恢复宿主与插件：', 'Host and extensions to restore: '))}${preview.configuration.owners.map(owner => escape(owner.plugin_id + ' ' + owner.plugin_version + ' · schema ' + owner.data_schema)).join('、')}</p><p>${escape(text('持久文件：', 'Persistent files: '))}${preview.configuration.files}${escape(text('；程序包不包含在备份中，配置将保留供重新安装后使用。', '; packages are excluded. Configuration is kept for reinstall.'))}</p>` : ''
@@ -76,7 +79,7 @@
       if (importing) importing.onclick = commit
       void load()
     }
-    return { render, mount, load, preview: choose, export: save, import: commit, setDirectory(value) { directory = value; edited = true }, busy: () => working }
+    return { renderBackup, mount, load, preview: choose, export: save, import: commit, setDirectory(value) { directory = value; edited = true }, busy: () => working }
   }
   window.IdentityPanel = { create }
 })()

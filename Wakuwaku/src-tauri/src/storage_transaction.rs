@@ -134,6 +134,48 @@ pub fn restore(namespace: &Namespace, backup: &Path) -> Result<PathBuf, String> 
     commit_rows(namespace, &recovery, |_| Ok(()))?;
     Ok(namespace.path().join("backups").join(recovery.id))
 }
+// prune_staging 清掉「确认无主」的事务暂存目录（<root>/tmp/txn-*）。
+//
+// prepare() 先把要写的字节放进 tmp/<id>、把旧字节放进 backups/<id>，最后才发布
+// tmp/storage-transaction.json 这份 journal；提交成功时只删 journal，tmp/<id> 与
+// backups/<id> 都留在盘上。backups/<id> 是 restore() 要用的恢复副本，必须留；
+// tmp/<id> 一旦没有 journal 就是纯垃圾——本机 host/tmp 那 6 个（10-26 到今天）
+// 就是这么攒下来的。
+//
+// 归属判定用 journal，不看 mtime：journal 里的 id 是唯一「进行中」的那个事务。
+// journal 存在却解析不了（损坏）时一个都不删——读不了就等于判断不了归属。
+// 另加 EDIT 锁：prepare()/apply()/restore() 全程持锁，所以握到锁之后看到的
+// 「没有 journal 的 txn 目录」不可能是别人正在写的那一份（不会误删在途事务）。
+pub fn prune_staging(root: &Path) -> Result<Vec<String>, String> {
+    let _lock = EDIT.lock().map_err(|_| "分类事务锁不可用")?;
+    let temporary = root.join("tmp");
+    let entries = match fs::read_dir(&temporary) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_) => return Err("事务暂存目录读取失败".into()),
+    };
+    let live = match fs::read(temporary.join("storage-transaction.json")).ok() {
+        None => None,
+        Some(bytes) => match serde_json::from_slice::<Journal>(&bytes) {
+            Ok(journal) => Some(journal.id),
+            // 损坏的 journal 由 recover 报错等人处理，这里不越权删任何东西。
+            Err(_) => return Ok(Vec::new()),
+        },
+    };
+    let mut removed = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|_| "事务暂存条目读取失败")?;
+        // file_type() 不跟随符号链接：链接不会被当成目录删掉。
+        if !entry.file_type().map_err(|_| "事务暂存条目类型读取失败")?.is_dir() { continue; }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("txn-") || name.len() > 100 || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') { continue; }
+        if live.as_deref() == Some(name.as_str()) { continue; }
+        fs::remove_dir_all(entry.path()).map_err(|_| format!("事务暂存目录清理失败：{name}"))?;
+        removed.push(name);
+    }
+    removed.sort();
+    Ok(removed)
+}
 
 #[cfg(test)]
 mod tests {
@@ -209,6 +251,85 @@ mod tests {
             assert!(apply(&plugin, BTreeMap::from([("keys/api.json".into(), Some(b"bad".to_vec())), (bad.into(), None)])).is_err());
             assert_eq!(plugin.read("keys", "api.json").unwrap().unwrap(), b"kept");
         }
+        fs::remove_dir_all(plugin.path()).unwrap();
+    }
+    // #t11 回归①：事务提交完只删 journal，tmp/<id> 就留在盘上了（本机 host/tmp 攒了 6 个）。
+    // 没有 journal 指认它 → 无主 → 清掉；backups/<id> 是 restore() 要用的恢复副本，必须留。
+    #[test]
+    fn txn_staging_without_a_journal_is_removed_and_the_recovery_copy_kept() {
+        let plugin = namespace();
+        plugin.write("keys", "api.json", b"old").unwrap();
+        let journal = prepare(&plugin, BTreeMap::from([("keys/api.json".into(), Some(b"new".to_vec()))])).unwrap();
+        let stage = plugin.path().join("tmp").join(&journal.id);
+        let recovery = plugin.path().join("backups").join(&journal.id);
+        assert!(stage.is_dir() && recovery.join("transaction.json").is_file());
+        // 提交完成：journal 消失，暂存与恢复副本原样留着。
+        fs::remove_file(plugin.path().join(JOURNAL)).unwrap();
+        let removed = prune_staging(plugin.path()).unwrap();
+        assert_eq!(removed, vec![journal.id.clone()], "无主的暂存目录要被清掉");
+        assert!(!stage.exists(), "无主暂存目录必须不存在");
+        assert!(recovery.join("transaction.json").is_file(), "恢复副本是 restore() 的来源，不许删");
+        // 正常事务与用户文件都不受影响。
+        assert_eq!(plugin.read("keys", "api.json").unwrap().unwrap(), b"old");
+        assert!(plugin.path().join("tmp/README.md").is_file(), "tmp 下的目录说明不是事务残留");
+        fs::remove_dir_all(plugin.path()).unwrap();
+    }
+    // #t11 回归②：journal 还在 = 这个事务进行中，暂存目录一个都不许动；也不能把恢复流程搞坏。
+    #[test]
+    fn txn_staging_under_a_live_journal_is_kept() {
+        let plugin = namespace();
+        plugin.write("keys", "api.json", b"old").unwrap();
+        let journal = prepare(&plugin, BTreeMap::from([("keys/api.json".into(), Some(b"new".to_vec()))])).unwrap();
+        let stage = plugin.path().join("tmp").join(&journal.id);
+        assert!(prune_staging(plugin.path()).unwrap().is_empty(), "进行中的事务不许被清");
+        assert!(stage.is_dir());
+        assert!(plugin.path().join(JOURNAL).exists());
+        // 清过之后恢复还能照常把这份事务做完。
+        recover_unlocked(&plugin).unwrap();
+        assert_eq!(plugin.read("keys", "api.json").unwrap().unwrap(), b"new");
+        assert!(!stage.exists() || stage.is_dir(), "恢复不依赖我们删没删");
+        // 事务结束后再清：这次它就是无主的了。
+        assert!(prune_staging(plugin.path()).unwrap().iter().all(|name| name == &journal.id));
+        assert!(!stage.exists());
+        fs::remove_dir_all(plugin.path()).unwrap();
+    }
+    // #t11 回归③：journal 损坏时判断不了归属，一个都不删、更不许 panic。
+    #[test]
+    fn txn_prune_keeps_everything_when_the_journal_is_unreadable() {
+        let plugin = namespace();
+        plugin.write("keys", "api.json", b"old").unwrap();
+        let journal = prepare(&plugin, BTreeMap::from([("keys/api.json".into(), Some(b"new".to_vec()))])).unwrap();
+        let stage = plugin.path().join("tmp").join(&journal.id);
+        fs::write(plugin.path().join(JOURNAL), b"not a journal").unwrap();
+        assert!(prune_staging(plugin.path()).unwrap().is_empty(), "读不出 journal 就不许删任何暂存目录");
+        assert!(stage.is_dir());
+        // 顺带：坏 journal 仍然由 recover 如实报错，而不是被悄悄当成「没事」。
+        assert!(recover_unlocked(&plugin).is_err());
+        fs::remove_dir_all(plugin.path()).unwrap();
+    }
+    // #t11 回归④：清理失败只报错，不 panic——调用点（启动时的 cleanup）据此只记日志。
+    #[test]
+    fn txn_prune_reports_failure_instead_of_panicking() {
+        let plugin = namespace();
+        fs::remove_dir_all(plugin.path().join("tmp")).unwrap();
+        fs::write(plugin.path().join("tmp"), b"not a directory").unwrap();
+        assert!(prune_staging(plugin.path()).is_err(), "读不了暂存目录要如实返回错误");
+        fs::remove_dir_all(plugin.path()).unwrap();
+    }
+    // #t11 回归⑤：真实副本的现场——host/tmp 里只有一堆无主 txn-* 与 README.md，
+    // 清完之后只剩 README.md，别的什么都不碰。
+    #[test]
+    fn txn_prune_clears_ownerless_staging_and_leaves_everything_else() {
+        let plugin = namespace();
+        let temporary = plugin.path().join("tmp");
+        for name in ["txn-3920-1793015486376-0", "txn-49948-1793088689563-0"] { fs::create_dir_all(temporary.join(name)).unwrap(); }
+        fs::write(temporary.join("txn-3920-1793015486376-0/staged.bin"), b"staged").unwrap();
+        fs::write(temporary.join("keep-me.txt"), b"user file").unwrap();
+        let removed = prune_staging(plugin.path()).unwrap();
+        assert_eq!(removed, vec!["txn-3920-1793015486376-0".to_string(), "txn-49948-1793088689563-0".to_string()]);
+        let mut left: Vec<String> = fs::read_dir(&temporary).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().to_string()).collect();
+        left.sort();
+        assert_eq!(left, vec!["README.md".to_string(), "keep-me.txt".to_string()]);
         fs::remove_dir_all(plugin.path()).unwrap();
     }
 }

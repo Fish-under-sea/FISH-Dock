@@ -1,8 +1,8 @@
-<p align="center"><img src="src-tauri/icons/dsh-fish.png" width="112" alt="FISH Dock 图标"></p>
+<p align="center"><img src="src-tauri/icons/fish-dock.png" width="112" alt="FISH Dock 图标"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">AI 会话有处停靠，模型连接集中管理。</p>
-<p align="center"><strong>1.2.3</strong> · Windows x64 · MIT 代码许可</p>
-<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-1.2.3.md">更新记录</a></p>
+<p align="center"><strong>2.0.0</strong> · Windows x64 · MIT 代码许可</p>
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.0">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-2.0.0.md">更新记录</a></p>
 
 > **这是二次开发集成，不是上游官方发行版。** FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 的桌面与 AI 会话体验，集成 [Our Free Model / dsh-our-free-model](https://github.com/Ebony-Vinyl/dsh-our-free-model) 的模型渠道与 API 工作台。桌面核心与模型服务核心来自上游，原作者、版权和许可证见「来源与致谢」。
 
@@ -20,9 +20,13 @@
 
 **「本地」不等于本机离线推理。** 工作台、代理和数据在本机运行；模型请求仍发送到所选渠道的服务商。资格、额度、计费和可用性由服务商决定。本项目不承诺永久免费、无限额度或绕过服务限制。
 
-## 1.2.3 更新
+## 2.0.0 更新
 
-**1.2.3** 收插件更新的尾：升级**提交成功之后**才清理过期版本目录，只保留当前激活版本与最近一个回退点；插件页在 digest 变化后关掉旧票据、用新票据重建，不再有残留旧界面。主仓 #16 安装日志改为纯 ASCII 并另写 UTF-8 的 `install.log`，#17 密码输入框加可视切换按钮。见 [v1.2.3 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3)。
+**2.0.0** 收旧名与版本的尾：所有版本位（`tauri.conf.json`、`Cargo.toml`、Claude Code 插件清单、安装器与文档）统一为 `2.0.0`，旧版 exe 不再留作回滚副本。旧名按三档处理——内部身份（卸载表登记名 `Uninstall\DSH-FISH`、主程序文件名 `DSH-FISH.exe`、Run 值名与 `--wakuwaku-at-login` 开关）一个字没动；给人看的名字（任务计划里的作者与说明、用户数据目录）换成 `FISH Dock`；旧卸载登记与指向旧 exe 的自启动值在安装时按归属清理。用户数据目录迁到 `%LOCALAPPDATA%\FISH Dock` 后直接删除旧的 `%LOCALAPPDATA%\DSH-FISH`，没迁完就原样保留并提示。见 [v2.0.0 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.0)。
+
+- 版本与打包：Dock、宿主元数据、Cargo 锁文件与安装器版本一致为 `2.0.0`；完整包与精简更新包同版发布。
+- 自启动钩子：宿主写注册表既有 `autostart` 字段，插件卡面与插件服务页同一份真相；无服务的插件显示「无需自启动」。
+- 移除旧版回滚点：插件升级提交成功后只保留当前版本目录，旧 exe 不再留存。
 
 - 正式版检查更新：启动后及每天检查，支持手动检查；API 受限时回退官方 Release 页面，通过完整包或精简包升级。
 - 应用内标语：「Everything is a Plugin · 一切皆插件」，宿主与独立业务插件职责清晰。
@@ -40,13 +44,13 @@
 - 插件中心和「关于」支持检查更新，目录含 GitHub API 回退，包大小自动换算单位。
 - 内置 Windhawk 与编译器；保留原生插件管理页、标签拖动及单双栏布局。
 
-完整变化和验证边界见 [1.2.3 更新记录](docs/release-1.2.3.md)。
+完整变化和验证边界见 [2.0.0 更新记录](docs/release-2.0.0.md)。
 
 ## 安装与更新
 
 适用平台：**Windows 10/11 x64**。系统任务栏集成主要面向 Windows 11；其他系统版本与第三方任务栏软件组合需要单独验证。
 
-1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.2.3) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-1.2.2.exe` 用于首装或修复；`FISH-Dock-Update-1.2.2.exe` 适用于基础资源完整的已有 `1.1.0` 或此前 `1.2.2` 安装。
+1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.0) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-2.0.0.exe` 用于首装或修复；`FISH-Dock-Update-2.0.0.exe` 适用于基础资源完整的已有安装。
 2. 从托盘完全退出旧版及单独运行的 OFM，再运行安装器并选择目录。新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock`；已有安装沿用登记目录覆盖升级，不自动搬迁。
 3. 通过桌面或开始菜单启动 **FISH Dock**。Node.js、固定版 WebView2、Windhawk 与编译器随包安装；业务插件另行下载。
 4. 首次启动需要确认运行时许可并校验资源；后续使用安装目录中的文件，不重复解压整套依赖。
@@ -114,7 +118,7 @@ FISH-Dock/
 在桌面源码目录执行；构建宿主不再需要旧 OFM 源码树：
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <运行时缓存> --out <新的资源目录> --version 1.2.3
+node scripts/prepare-installer.mjs --downloads <运行时缓存> --out <新的资源目录> --version 2.0.0
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <资源目录> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
@@ -135,4 +139,4 @@ node --test "test/*.test.js" "scripts/*.test.mjs"
 
 ## 反馈与安全
 
-在 [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues) 提供系统与应用版本、停靠模式、复现步骤和脱敏日志。不要上传真实密钥、完整 Cookies、私人邮件或备份 ZIP。漏洞报告也不要公开附上可用凭据。1.2.2 双包及校验文件见上方正式 Release。
+在 [FISH Dock Issues](https://github.com/Fish-under-sea/FISH-Dock/issues) 提供系统与应用版本、停靠模式、复现步骤和脱敏日志。不要上传真实密钥、完整 Cookies、私人邮件或备份 ZIP。漏洞报告也不要公开附上可用凭据。本版双包及校验文件见上方正式 Release。

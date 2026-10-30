@@ -46,6 +46,7 @@ mod audio;
 mod backplate;
 mod bars;
 mod clock;
+mod config;
 mod connection;
 mod crash;
 mod data;
@@ -61,6 +62,7 @@ mod events_reasonix;
 mod dsh_bridge;
 mod events_zcode;
 mod fetch;
+mod flags;
 mod focus;
 mod fullscreen;
 mod model_focus;
@@ -152,8 +154,8 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 // The island's own animation of taking her in, before she counts as in.
 const ABSORB_MS: u64 = 380;
 
-// Her port, unless WAKUWAKU_PORT says another (a test's copy, mostly).
-const DEFAULT_PORT: u16 = 47213;
+// Her port, unless FISH_DOCK_PORT / WAKUWAKU_PORT say another (a test's copy, mostly).
+const DEFAULT_PORT: u16 = crate::config::DEFAULT_PORT;
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -223,6 +225,13 @@ pub struct Shared {
     pub evals: Mutex<(u64, std::collections::HashMap<u64, std::sync::mpsc::Sender<Value>>)>,
 }
 
+// 一条问题在这台机器上还有没有地方答：她在，或她只是被全屏藏起、而另一块屏
+// 上还有一条副屏条带（bars.rs bars::any_shown）把问题显示在胶囊里。用户自己
+// 把她藏起来（托盘）或勿扰时，仍算没人能答——和以前一样（`hidden`/`dnd` 先挡）。
+fn asks_answerable(visible: bool, hidden: bool, dnd: bool, fullscreen: bool, bars_shown: bool) -> bool {
+    visible || (!hidden && !dnd && (fullscreen || bars_shown))
+}
+
 impl Shared {
     pub fn setting(&self, key: &str) -> Value {
         self.settings.lock().unwrap().get(key).cloned().unwrap_or(Value::Null)
@@ -265,7 +274,7 @@ impl Shared {
     // test that cannot wait (state.rs is_shown).
     pub fn idle_hide_ms(&self) -> u64 {
         static TEST: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
-        let test = *TEST.get_or_init(|| std::env::var("WAKUWAKU_IDLE_HIDE_MS").ok().and_then(|s| s.parse().ok()));
+        let test = *TEST.get_or_init(crate::config::idle_hide_override);
         test.unwrap_or_else(|| self.setting("idleHideMin").as_u64().unwrap_or(state::IDLE_HIDE_MIN) * 60 * 1000)
     }
 
@@ -280,7 +289,7 @@ impl Shared {
     // apply_visibility); it had them even while her capsule on another
     // display showed (the test session, 2026-10-13).
     pub fn asks_seen(&self) -> bool {
-        self.is_visible() || (!self.hidden.load(Ordering::SeqCst) && !self.flag("dnd") && self.is_fullscreen())
+        asks_answerable(self.is_visible(), self.hidden.load(Ordering::SeqCst), self.flag("dnd"), self.is_fullscreen(), bars::any_shown())
     }
 
     pub fn is_visible(&self) -> bool {
@@ -306,10 +315,15 @@ impl Shared {
             // their memory (#14).
             let webview_eco = power::webview_eco(quiet);
             let windows = self.app.webview_windows();
+            // 每个页面按它自己该不该歇着来设（power::resting）：人回到电脑前，
+            // 隐藏着的页面仍然降到最低，不跟着一起抬回 normal。
+            let mut low = 0;
             for window in windows.values() {
-                power::webview_memory(window, quiet);
+                let rest = power::resting(window, quiet);
+                low += usize::from(rest);
+                power::webview_memory(window, rest);
             }
-            self.log(&format!("quiet: {quiet} (efficiency mode set: {eco}; for {webview_eco} of WebView2's processes; memory {} for {} pages)", if quiet { "low" } else { "normal" }, windows.len()));
+            self.log(&format!("quiet: {quiet} (efficiency mode set: {eco}; for {webview_eco} of WebView2's processes; memory low for {low} of {} pages)", windows.len()));
             self.to_pages("pet:quiet", json!({ "on": quiet }));
             wake_monitor();
             // The plugins she runs at their quiet pace, or back to their own.
@@ -350,7 +364,7 @@ impl Shared {
     // on her own port, with her own data folder; a test's copy on another
     // port, or with a folder of its own, leaves it as it is.
     pub fn keeps_login(&self) -> bool {
-        self.port == DEFAULT_PORT && std::env::var_os("WAKUWAKU_USER_DATA").is_none()
+        self.port == DEFAULT_PORT && crate::config::user_data_override().is_none()
     }
 
     // Start at login kept up as she starts, off the thread starting her
@@ -783,6 +797,9 @@ impl Shared {
     // open settings get the keyboard straight back.
     pub fn show_window(&self, win: &WebviewWindow) {
         self.shuffle_until.store(now_ms() + 500, Ordering::SeqCst);
+        // 显示即醒：IsVisible 与内存目标一起恢复（power.rs），再显示窗口，
+        // 顺序与 pet.rs 改前自己调 as_ref().show() 时一致。
+        power::webview_rest(win, false);
         let _ = win.show();
         if self.island.lock().unwrap().settings_open && win.label() != "island" {
             if let Some(island) = self.app.get_webview_window("island") {
@@ -1186,13 +1203,13 @@ pub(crate) fn wake_pointer() {
     }
 }
 
-// Nobody at the keyboard or mouse this long: quiet (Shared::check_quiet).
-// WAKUWAKU_QUIET_AFTER_MS, for a test that cannot wait; 0 never.
-pub const QUIET_AFTER_MS: u64 = 90_000;
-
+// Nobody at the keyboard or mouse this long: quiet (Shared::check_quiet). The
+// number lives in one place only, config::DEFAULT_QUIET_AFTER_MS, which
+// FISH_DOCK_QUIET_AFTER_MS (then the old WAKUWAKU_QUIET_AFTER_MS) overrides —
+// for a test that cannot wait; 0 never.
 fn quiet_after_ms() -> u64 {
     static AFTER: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-    *AFTER.get_or_init(|| std::env::var("WAKUWAKU_QUIET_AFTER_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(QUIET_AFTER_MS))
+    *AFTER.get_or_init(|| crate::config::quiet_after().as_millis() as u64)
 }
 
 // What WebView2 is started with: wry's own (its Office and PDF parts and
@@ -1215,7 +1232,7 @@ pub fn browser_args(sh: &Shared) -> &'static str {
             }
             None => sh.log("webview: its card left to Chromium (her display's card not told, or it renders nothing)"),
         }
-        if let Ok(more) = std::env::var("WAKUWAKU_BROWSER_ARGS") {
+        if let Some(more) = crate::config::browser_args_extra() {
             args = format!("{args} {more}");
         }
         args
@@ -1510,7 +1527,7 @@ fn main() {
     // Her exe again, as the taskbar's guard (shell.rs): it waits for her to
     // end, and gives Windows' taskbar back if she could not; and sees
     // whether she crashed (crash.rs; her data folder is the file's).
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = crate::flags::modernize(std::env::args().collect());
     if let Some(at) = args.iter().position(|arg| arg == windhawk::ADMIN_FLAG) {
         std::process::exit(windhawk::admin(args.get(at + 1).map(String::as_str).unwrap_or(""), &args));
     }
@@ -1518,7 +1535,7 @@ fn main() {
     // before the uninstaller deletes her program, and gone. Early, before the
     // port is taken, the runtime prepared or anything shown: an uninstall must
     // not start her. Another installation's task is left as it is.
-    if args.iter().any(|a| a == connection::UNINSTALL_CLEANUP_FLAG) {
+    if args.iter().any(|a| a == connection::UNINSTALL_CLEANUP_FLAG || a == connection::LEGACY_UNINSTALL_CLEANUP_FLAG) {
         match connection::login_uninstall_cleanup() {
             Ok(said) => {
                 if let Some(said) = said {
@@ -1560,12 +1577,12 @@ fn main() {
     // folder (and "pawnio" to install the driver first); the removal the SID
     // and the folder.
     if let Some(at) = args.iter().position(|a| a == sensors::SENSORS_FLAG) {
-        let port = args.get(at + 1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+        let port = args.get(at + 1).and_then(|p| p.parse().ok()).unwrap_or_else(crate::config::port);
         let data = args.get(at + 2).map(PathBuf::from).unwrap_or_else(data::folder);
         return sensors::run_helper(port, &data);
     }
     if let Some(at) = args.iter().position(|a| a == sensors::SETUP_FLAG) {
-        let port = args.get(at + 1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+        let port = args.get(at + 1).and_then(|p| p.parse().ok()).unwrap_or_else(crate::config::port);
         let sid = args.get(at + 2).cloned().unwrap_or_default();
         let data = args.get(at + 3).map(PathBuf::from).unwrap_or_else(data::folder);
         let with_pawnio = args.iter().any(|a| a == "pawnio");
@@ -1582,11 +1599,13 @@ fn main() {
     if let Some(at) = args.iter().position(|a| a == lhm_setup::ADMIN_FLAG) {
         std::process::exit(lhm_setup::admin(&args[at + 1..]));
     }
-    let port: u16 = std::env::var("WAKUWAKU_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+    let port: u16 = crate::config::port();
     if let Some(at) = args.iter().position(|a| a == connection::ENSURE_FLAG || a == connection::LEGACY_ENSURE_FLAG) {
         return ensure_running(port, &args[at + 1..]);
     }
-    if std::env::args().any(|a| a == connection::CODEX_FLAG) {
+    // 用归一后的 args，不用 std::env::args()：Codex 里现存的钩子可能还写着旧开关
+    // （--wakuwaku-codex-hook），归一之后才是这里认的新名（#t18）。
+    if args.iter().any(|a| a.as_str() == connection::CODEX_FLAG) {
         return codex_hook(port);
     }
     if let Some(at) = args.iter().position(|a| a == connection::AGY_FLAG) {
@@ -2118,7 +2137,7 @@ fn main() {
             // island's display, and one under it.
             let watcher = sh.clone();
             spawn_named("fullscreen", move || loop {
-                let wait = Duration::from_millis(1500);
+                let wait = crate::config::fullscreen_interval();
                 let asked = fullscreen::wait(wait);
                 watcher.look_fullscreen(asked);
                 island::look_over_max(&watcher);
@@ -2130,7 +2149,7 @@ fn main() {
             let ticker = sh.clone();
             spawn_named("ticker", move || {
                 for n in 1u64.. {
-                    std::thread::sleep(Duration::from_millis(500));
+                    std::thread::sleep(crate::config::ticker_interval());
                     let now = now_ms();
                     let hold = ticker.hold();
                     if n % 2 == 0 {
@@ -2249,7 +2268,7 @@ fn main() {
                 sh.log("quitting: the bar given back, the mail stopped");
                 island::release_bar(&sh);
                 mail::stop_all(&sh);
-                // The local model service she runs (oflm.rs): no node.exe left.
+                // The plugins' side services (plugin_api): no node.exe left.
                 plugin_api::shutdown();
                 sh.log("quitting: done");
             }
@@ -2300,5 +2319,35 @@ mod tests {
         // No one there: nothing tried.
         drop(server);
         assert!(!post_and_go(port, "agy", &event));
+    }
+
+    // t22 路 A：一块副屏条带显示着问题时也算「有地方答」（bars.rs any_shown），
+    // 但主屏现有判定不变，用户自己藏起/勿扰仍不算。
+    #[test]
+    fn a_prompt_on_another_display_strip_still_counts_as_answerable() {
+        // 看得见：无论条带，都能答。
+        assert!(asks_answerable(true, false, false, false, false));
+        assert!(asks_answerable(true, true, false, false, false));
+        // 没有副屏条带时，与旧公式逐项一致（主屏行为不变）。
+        for visible in [false, true] {
+            for hidden in [false, true] {
+                for dnd in [false, true] {
+                    for fullscreen in [false, true] {
+                        assert_eq!(
+                            asks_answerable(visible, hidden, dnd, fullscreen, false),
+                            visible || (!hidden && !dnd && fullscreen),
+                            "visible={visible} hidden={hidden} dnd={dnd} fullscreen={fullscreen}"
+                        );
+                    }
+                }
+            }
+        }
+        // 新增：她被全屏藏起、没被用户藏、没勿扰，但另一块屏有条带 → 能答。
+        assert!(asks_answerable(false, false, false, false, true));
+        // 但用户自己藏起或勿扰时，有条带也不算。
+        assert!(!asks_answerable(false, true, false, false, true));
+        assert!(!asks_answerable(false, false, true, false, true));
+        // 都没有：没人能答。
+        assert!(!asks_answerable(false, false, false, false, false));
     }
 }

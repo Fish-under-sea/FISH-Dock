@@ -2,7 +2,7 @@
 param([Parameter(Mandatory=$true)][string]$InstallRoot)
 $ErrorActionPreference='Stop'
 $root=[IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
-$owned=@(Get-CimInstance Win32_Process | Where-Object {$_.ExecutablePath -and ([IO.Path]::GetDirectoryName($_.ExecutablePath) -eq $root) -and $_.Name -in @('DSH-FISH.exe','wakuwaku.exe')})
+$owned=@(Get-CimInstance Win32_Process | Where-Object {$_.ExecutablePath -and ([IO.Path]::GetDirectoryName($_.ExecutablePath) -eq $root) -and $_.Name -in @('FISH-Dock.exe','DSH-FISH.exe','wakuwaku.exe')})
 $descendants=@();$parents=@($owned | ForEach-Object {[int]$_.ProcessId})
 $all=@(Get-CimInstance Win32_Process)
 while($parents.Count -gt 0){$children=@($all|Where-Object {$parents -contains [int]$_.ParentProcessId});$descendants+=$children;$parents=@($children|ForEach-Object {[int]$_.ProcessId})}
@@ -16,4 +16,4 @@ foreach($app in $owned){
  }}
 }
 foreach($child in $descendants){$still=Get-CimInstance Win32_Process -Filter ('ProcessId={0}' -f $child.ProcessId);if($still -and $still.CreationDate -eq $child.CreationDate -and $still.ExecutablePath -eq $child.ExecutablePath){Stop-Process -Id $child.ProcessId -Force -ErrorAction Stop}}
-if(@(Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -and ([IO.Path]::GetDirectoryName($_.ExecutablePath) -eq $root) -and $_.Name -in @('DSH-FISH.exe','wakuwaku.exe')}).Count){throw '安装目录仍有程序运行，请退出该实例后重试'}
+if(@(Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -and ([IO.Path]::GetDirectoryName($_.ExecutablePath) -eq $root) -and $_.Name -in @('FISH-Dock.exe','DSH-FISH.exe','wakuwaku.exe')}).Count){throw '安装目录仍有程序运行，请退出该实例后重试'}

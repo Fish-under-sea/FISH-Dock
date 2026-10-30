@@ -10,6 +10,12 @@
 //   (webview_eco), and their memory kept low (webview_memory).
 // - How long since the keyboard or mouse was last touched (idle_ms), for
 //   the quiet state: she holds still and the loops look less often.
+//
+// 内存预算（红线《禁止屎山十条》：「不可见的 webview 不得常驻」）：一个页面
+// 看不见时就该歇着——resting 是这件事唯一的判据（页面自己隐藏，或没人在电脑
+// 前），webview_rest 是唯一的动作入口（WebView2 的 IsVisible 与内存目标一起
+// 设）。窗口自己的 show/hide 各有各的附带事（main.rs show_window 的焦点、
+// island.rs 的 backplate），仍由调用方做，这里不代劳。
 
 #[cfg(windows)]
 mod imp {
@@ -230,3 +236,23 @@ mod imp {
 }
 
 pub use imp::{idle_ms, process_eco, thread_brisk, thread_eco, webview_eco, webview_memory};
+
+// 一个页面此刻该不该把内存降到最低：它自己看不见（隐藏即休），或者没人在
+// 电脑前（main.rs check_quiet）。两件事共用这一个判据，免得各处各写一套，
+// 也免得「人回来了」把已经隐藏的页面的内存目标又抬回 normal（实测就是这样：
+// check_quiet 对所有窗口一律设 normal，隐藏的页面白占着）。
+// 读不到可见性时按「看得见」处理：宁可多占一点，也不要该绘制的页面不绘制。
+pub fn resting(window: &tauri::WebviewWindow, quiet: bool) -> bool {
+    quiet || !window.is_visible().unwrap_or(true)
+}
+
+// 隐藏即休 / 显示即醒。看不见时两件事一起做：
+// - WebView2 的 IsVisible 关掉：页面收到 document.hidden，rAF 停下、定时器被
+//   节流（pet.rs 的 #14 已经证明只关窗口不关 IsVisible 时，页面照旧播放、
+//   照旧走动，吃掉它自己 renderer 的一半与 GPU 进程的大半）；
+// - 内存目标降到最低：WebView2 把能还的还给系统（SetMemoryUsageTargetLevel）。
+// 看得见时两样都恢复，顺序是先 IsVisible 再显示窗口，与改前一致。
+pub fn webview_rest(window: &tauri::WebviewWindow, rest: bool) {
+    let _ = if rest { window.as_ref().hide() } else { window.as_ref().show() };
+    webview_memory(window, rest);
+}

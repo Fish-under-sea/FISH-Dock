@@ -1,16 +1,19 @@
 // The settings, grown out of the island: one click on it opens them (and only
 // then does the island take the keyboard); Esc, a click outside, ✕ or the head
-// close them. Five pages:
-//   now       General: the welcome (nothing connected yet) or a line on the
-//             agents connected, the sessions (a click on one goes to its
-//             window), four quick switches; the alerts (how long endings
-//             stay, idle sessions, notifications, sound, prompts, quiet),
-//             start at login and the language, her updates, crash reports, about
+// close them. Five pages, in the spec's order（规格-设置页排序.txt）:
+//   now       General: four quick switches, the quiet, start at login and the
+//             language, the network proxy, her updates, crash reports, about
 //   agents    the agents she follows (agents.js): each found here a row (how
 //             it stands, what she can do for it, connect, repair, remove),
-//             opened in place to its details; the others to get
-//   look      her home (island, taskbar), size, strolls, eyes; Windows' own
-//             mode and accent colour; her and the pets (downloaded, the gallery)
+//             opened in place to its details; then the sessions (a click on
+//             one goes to its window), the idle sessions, notifications,
+//             prompts, the alerts (how long endings stay); the others to get,
+//             the welcome card while nothing is connected, and what writing
+//             puts where
+//   look      her home (island, taskbar): the display, then the built-in ones
+//             (taskbar, island, Windows' mode and accent colour, the wallpaper
+//             and Windhawk), the tab order, her (size, strolls, eyes) and the
+//             pets (downloaded, the gallery)
 //   widgets   plugins: the built-in ones, those she runs for you (how each is and where it is put, no switch: placed is on; their settings folded under), turns, nudges, waku, and how to write one
 //   mail      mail accounts, and setting one up as Thunderbird does: an address and a password, the server found or typed
 //
@@ -35,18 +38,25 @@
 
   // The island's colours (on black), the same as island.js.
   const COLOR = { idle: '#8e8e93', working: '#5e9bff', waiting: '#ffb340', done: '#34d27b', review: '#b18cff', error: '#ff5c6c' }
-  // Six pages: General (the sessions, the alerts, startup and the
-  // language), Agent (connecting them, right after General), Look (her
-  // home, Windows, her and the pets), Plugins, Mail and Local models (Our
-  // Free Model's own console, in a frame: models.js). The pets, the alerts
-  // and connecting were pages of their own: asked for by those names
-  // (island.rs asks for the pets, or connecting), the page they are part of
-  // opens, scrolled to them (PART_OF, showPart); connecting while the
-  // welcome shows is the welcome, at General's top.
+  // Pages: General (four quick switches, the quiet, startup and the
+  // language, the network, her updates, crash reports and about), Agent
+  // (connecting them and what she follows, right after General), Look (her
+  // home, Windows, the tab order, her and the pets), Mail, and Plugins (the
+  // official ones' own pages come from extension-panel.js). The pets,
+  // the alerts and connecting were pages of their own: asked for by those
+  // names (island.rs asks for the pets, or connecting), the page they are
+  // part of opens, scrolled to them (PART_OF, showPart); connecting while the
+  // welcome shows is the welcome, in the Agent page's 「其它」.
   let TABS = [...window.ExtensionTabs.CORE]
   const TAB_KEY = { now: 's.tabGeneral', agents: 's.tabAgents', look: 's.tabLook', widgets: 's.tabWidgets', mail: 's.tabMail' }
   const tabTitle = key => TAB_KEY[key] ? T(TAB_KEY[key]) : extensionPanel.pages().find(page => page.key === key)?.title || key
-  const PART_OF = { identity: 'now', pets: 'look', place: 'look', alerts: 'now', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
+  // #23：栏目搬到哪一页，跳转就落到哪一页。会话、提醒、闲置、通知、提示、写入说明都
+  // 跟 Agent 走；身份面板跟插件走；安静（勿扰/全屏隐藏）留在通用。连接（欢迎卡）在
+  // Agent 页的「其它」里，part 名 welcome。
+  // backup 是「FISH Dock 配置与备份」（identity-panel.js）：2026-10-30 从插件页搬到
+  // 通用页软件更新下面。identity 仍是插件页（那里是 extension-panel 的 GitHub 身份卡），
+  // 两个名字各指各的地方，别混。
+  const PART_OF = { identity: 'widgets', backup: 'now', pets: 'look', place: 'look', quiet: 'now', sessions: 'agents', alerts: 'agents', hold: 'agents', idle: 'agents', notify: 'agents', prompts: 'agents', others: 'agents', files: 'agents', welcome: 'agents', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
   const HOMES = ['island', 'taskbar']
@@ -102,7 +112,7 @@
   // is downloaded, any other words are looked for as the site's own search
   // box looks: a name, part of one, a word of its description). Each ask
   // numbered: a slower answer to an earlier search never lands over a later.
-  const gallery = { sort: 'popular', query: '', items: [], page: 0, totalPages: 1, total: 0, loading: false, error: '', getting: '', asked: 0 }
+  const gallery = { sort: 'popular', query: '', items: [], page: 0, totalPages: 1, total: 0, loading: false, error: '', offline: false, getting: '', asked: 0 }
   let searchTimer
   const isLink = text => /:\/\/|codex-pets\.net/i.test(text)
   let thumbTimers = []
@@ -189,12 +199,6 @@
     <div class="s-ask"></div>
     <div class="s-body"></div>
     <div class="s-foot"><span class="foot-text"></span><span class="grow"></span><span class="ver"></span></div>
-    <dialog class="s-fullscreen-dialog" aria-labelledby="s-fullscreen-title">
-      <h2 id="s-fullscreen-title">检测到其他应用全屏</h2>
-      <p>是否取消本地模型面板的置顶和锁定，让全屏应用完整显示？</p>
-      <div class="s-fullscreen-actions"><button type="button" data-fullscreen-keep autofocus>保持</button><button type="button" data-fullscreen-cancel>取消置顶和锁定</button></div>
-      <p class="s-fullscreen-error" role="alert" hidden></p>
-    </dialog>
     <dialog class="s-confirm-dialog" aria-labelledby="s-confirm-title" aria-describedby="s-confirm-message">
       <h2 id="s-confirm-title">确认操作</h2>
       <p id="s-confirm-message"></p>
@@ -227,8 +231,29 @@
     confirmDialog.querySelector('[data-device-actions]').hidden = !device
     confirmDialog.querySelector('[data-device-error]').hidden = true
     confirmDialog.showModal()
+    // 弹窗落在岛内（dialog-anchor.js 记着为什么 UA 会把它钉在屏幕正中），
+    // 并跟着岛继续变形（长高、换侧）。
+    seatDialog(confirmDialog)
+    window.DialogAnchor?.watch(confirmDialog, document.getElementById('island'), viewportNow, anchorNow)
     confirmOk.focus()
   }
+  // 把弹窗摆进岛里：岛的矩形与视口都是 CSS px（DIP 缩放与多显示器随岛窗口
+  // 走，不用另算）；岛的哪一侧由 island.js 放在 body 上的锚点类给出。
+  const viewportNow = () => ({ width: innerWidth, height: innerHeight })
+  const anchorNow = () => window.DialogAnchor.anchorOf(document.body.classList)
+  function seatDialog(dialog) {
+    const island = document.getElementById('island')
+    if (!island || !window.DialogAnchor) return null
+    return window.DialogAnchor.apply(dialog, island.getBoundingClientRect(), viewportNow(), anchorNow())
+  }
+  // 弹窗开着时岛被藏起又露出 / 设置重画 / 岛被提到上面（island:look-here）：
+  // 这些时机尺寸可能没变（ResizeObserver 不报），所以在这里再摆一次。
+  const reseatConfirm = () => {
+    if (confirmDialog.open) seatDialog(confirmDialog)
+  }
+  window.pet?.onLookHere?.(reseatConfirm)
+  window.pet?.onSettingsChanged?.(reseatConfirm)
+  window.pet?.onUpdate?.(reseatConfirm)
   function finishConfirm(result) {
     if (!confirmActive) return
     const current = confirmActive
@@ -386,7 +411,9 @@
 
   // --- The pages -------------------------------------------------------------------------
 
-  function pageNow() {
+  // 会话列表：Agent 页的（#23）。会话是 Agent 的，放在「已找到的 Agent」下面读得通；
+// 通用页只留 4 个快捷开关。
+  function pageSessions() {
     const s = snap.settings
     const sessions = snap.sessions || []
     // Each session: its name, and where it is (or how its turn ended).
@@ -408,17 +435,21 @@
           })
           .join('')
       : `<div class="note">${esc(T('home.noSessions', { list: toolNames(toolsHere()) }))}</div>`
-    // Her out on the desktop; and her home, the next one at a press.
+    return `${sec(T('home.sessions'))}<div class="grp">${list}</div>`
+  }
+
+  // General's quick switches (her out on the desktop, the next home at a press).
+  function pageNow() {
+    const s = snap.settings
     const tiles = [
       ['show', 'eye', T('s.outTile'), !snap.hidden && s.out === true],
       ['dnd', 'moon', T('menu.dnd'), s.dnd],
       ['sound', 'sound', T('settings.sound'), s.sound],
       ['home', 'pill', T(HOME_KEY[s.display] || 's.displayIsland'), true],
     ]
-    return `${sec(T('home.sessions'))}<div class="grp">${list}</div>
-      ${sec(T('s.quick'))}<div class="tiles">${tiles
-        .map(([key, icon, label, on]) => `<div class="tile${on ? ' on' : ''}" data-tile="${key}"><span class="c">${svg(icon)}</span>${esc(label)}</div>`)
-        .join('')}</div>`
+    return `${sec(T('s.quick'))}<div class="tiles">${tiles
+      .map(([key, icon, label, on]) => `<div class="tile${on ? ' on' : ''}" data-tile="${key}"><span class="c">${svg(icon)}</span>${esc(label)}</div>`)
+      .join('')}</div>`
   }
 
   function pagePets() {
@@ -442,6 +473,11 @@
       .join('')
     const more =
       gallery.loading ? `<div class="note">${esc(T('home.getting'))}</div>` : gallery.page < gallery.totalPages ? `<button class="pbtn wide" data-more>${esc(T('home.more'))}</button>` : ''
+    // 离线命中缓存：一句话说明这是上次的图库（stale-while-revalidate 的可见面），
+    // 不是错误红字；联网后任何一次翻页/搜索都会自动换成新读到的。
+    const offlineNote = gallery.offline && gallery.items.length
+      ? `<div class="note" role="status">${esc(T('home.galleryOffline'))}</div>`
+      : ''
     // The button downloads a link, and looks for other words.
     const fetchLabel = fetching ? T('settings.fetching') : T(isLink(typedRef.trim()) ? 'settings.fetch' : 's.search')
     const q = gallery.query
@@ -450,7 +486,7 @@
     return `${sec(T('home.installed'))}<div class="grp">${installed}</div>
       ${sec(T('s.download'))}<div class="grp"><div class="r"><input class="in" id="s-ref" spellcheck="false" placeholder="${esc(T('s.fetchPlaceholder'))}"><button class="pbtn al" data-fetch ${fetching ? 'disabled' : ''}>${esc(fetchLabel)}</button></div>${note}</div>
       <div class="sec row-sec"><span class="ellip">${esc(listTitle)}</span><span class="grow"></span>${seg('gallery', [['popular', T('home.popular')], ['newest', T('home.newest')]], gallery.sort)}</div>
-      ${gallery.error ? `<div class="note err">${esc(T('home.galleryError', { message: gallery.error }))}</div>` : ''}${none}
+      ${gallery.error ? `<div class="note err">${esc(T('home.galleryError', { message: gallery.error }))}</div>` : ''}${none}${offlineNote}
       <div class="cards">${cards}</div>${more}
       <div class="links"><span class="link" data-site="site">${esc(T('settings.browse'))} ›</span></div>`
   }
@@ -751,23 +787,25 @@
     })
   }
 
+  // 外观（规格 17–24，逐条同序）：显示方式 → 内置（任务栏参数 → 灵动岛参数 →
+  // Windows，Windhawk 与它同一个分节）→ 标签页排序 → 她 → 宠物与图库。
   function pageLook() {
     const s = snap.settings
     return `${sec(T('home.display'))}<div class="modes">
         <div class="mode${s.display === 'taskbar' ? '' : ' on'}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span>${esc(T('s.displayIsland'))}</div></div>
         <div class="mode${s.display === 'taskbar' ? ' on' : ''}" data-mode="taskbar"><div class="pv"><s></s></div><div class="l"><span class="rd"></span>${esc(T('s.displayTaskbar'))}</div></div>
       </div>
+      ${sec(T('s.builtin'))}
       ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div></div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
       ${part('place', '')}<div class="grp">${islandPosRow()}${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
       ${pageWindows()}
-      ${window.pet.mac ? '' : windhawkPanel.render()}
+      ${pageTabOrder()}
       ${sec(T('s.her'))}<div class="grp">
         ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
         ${row(esc(T('s.details')), esc(T('s.detailsNote')), sw('details', s.details !== false))}
         ${row(esc(T('s.walk')), esc(T('s.walkNote')), sw('walk', s.walk))}
         ${row(esc(T('s.look')), '', sw('look', s.look))}
       </div>
-      ${pageTabOrder()}
       ${part('pets', pagePets())}`
   }
 
@@ -781,20 +819,32 @@
     '#7a7574', '#5d5a58', '#68768a', '#515c6b', '#567c73', '#486860', '#498205', '#107c10',
     '#767676', '#4c4a48', '#69797e', '#4a5459', '#647c64', '#525e54', '#847545', '#7e735f',
   ]
-  // The accent colours held back for now: DWM's frames' colour does not yet
-  // follow them for sure (theme.rs set_accent), 2026-10-10.
-  const ACCENT_PICKER = false
+  // 强调色（截图验收 A）：两态——「跟随系统」（默认，读 DWM/Explorer 的颜色，
+  // theme::system_accent）与「自定义」（48 色 + 自己挑的那个）。不再写死
+  // ACCENT_PICKER=false 把它藏起来；只有系统颜色完全读不到时才提示原因，自定义
+  // 取色器照旧可用。
   function pageWindows() {
     const look = snap.winLook || {}
     const accent = String(look.accent || '').toLowerCase()
+    const mode = look.accentMode === 'custom' ? 'custom' : 'system'
+    const available = look.accentAvailable !== false
     // One picked outside these (its own colour in Windows' settings): last, ringed.
     const colours = /^#[0-9a-f]{6}$/.test(accent) && !ACCENTS.includes(accent) ? [...ACCENTS, accent] : ACCENTS
     const swatches = colours.map(c => `<span class="acc${c === accent ? ' on' : ''}" data-accent="${c}" style="background:${c}" title="${c}"></span>`).join('')
+    const why = available
+      ? ''
+      : `<div class="note" role="status">${esc(lang === 'zh' ? '系统里读不到强调色（DWM 与 Explorer 都没写），下面挑一个就好。' : "Windows' accent colour could not be read here; pick one below.")}</div>`
     return `${sec(T('s.windows'))}<div class="grp">
         ${row(esc(T('s.winMode')), esc(T('s.winModeNote')), seg('winMode', [['light', T('s.winMode.light')], ['dark', T('s.winMode.dark')]], look.light ? 'light' : 'dark'))}
-        ${ACCENT_PICKER ? `<div class="r col"><div>${esc(T('s.winAccent'))}</div><div class="accents">${swatches}</div></div>` : ''}
+        <div class="r col"><div class="t">${esc(T('s.winAccent'))}</div><div class="winaccent-mode">${[['system', lang === 'zh' ? '跟随系统' : 'Follow Windows'], ['custom', lang === 'zh' ? '自定义' : 'Custom']]
+          .map(([k, label]) => `<button type="button" class="pbtn sm${mode === k ? ' al' : ''}" data-winaccent="${k}" aria-pressed="${mode === k}">${esc(label)}</button>`)
+          .join('')}${
+          mode === 'system' && available
+            ? `<span class="acc on" style="background:${esc(accent || 'transparent')}" title="${esc(accent || '')}"></span><span class="d">${esc(accent || '')}</span>`
+            : ''
+        }</div>${why}${mode === 'custom' ? `<div class="accents">${swatches}</div>` : ''}</div>
       </div>
-      ${pagePaper()}`
+      ${pagePaper()}${window.pet.mac ? '' : windhawkPanel.render()}`
   }
 
   // Windows' dialog open for the desktop's picture: its own mark, held until
@@ -856,7 +906,8 @@
       </div>`
   }
 
-  function pageAlerts() {
+  // 提醒：她有事告诉你、又不需要回答的时候。归 Agent 页（#23，与通知同域）。
+  function pageHold() {
     const s = snap.settings
     // When she has something to tell that needs no answer (a turn's end, a
     // hello, a plugin's nudge): the island open, a ring round it (the flow
@@ -886,19 +937,39 @@
         ? `<span class="hold-secs"><input class="in secs" data-hold="secs" value="${esc(typed)}" inputmode="numeric" maxlength="5" placeholder="${window.Flow.HOLD_MIN}–${window.Flow.HOLD_MAX}" title="${range}" aria-label="${range}" spellcheck="false" autocomplete="off"${holdOff ? ' disabled' : ''}><span class="d">${esc(T('s.holdUnit'))}</span></span>`
         : ''
     const holdPick = holdOff ? seg('hold', holds, holdOn).replace('class="seg"', 'class="seg off" aria-disabled="true"') : seg('hold', holds, holdOn)
-    const waits = WAITS.map(w => [w, w >= 60 ? T('settings.minutes', { n: Math.round(w / 60) }) : T('settings.seconds', { n: w })])
+    return `${sec(T('s.holdTitle'))}<div class="grp"><div class="r col cue"><div><div>${esc(T('s.endCue'))}</div><div class="d">${esc(T('s.endCueNote'))}</div></div>${seg('endCue', cues, cue)}</div><div class="r col cue hold${holdOff ? ' off' : ''}"><div><div class="t">${esc(T('s.hold'))}</div><div class="d">${esc(T(`s.holdNote.${cue}`))}</div></div><div class="hold-pick">${holdPick}${secs}</div></div></div>`
+  }
+
+  // 闲置多久算闲置（Agent 页，与上面的会话列表同看）。
+  function pageIdle() {
+    const s = snap.settings
     const idles = IDLE_HIDES.map(m => [m, !m ? T('s.idleAlways') : m >= 60 ? T('s.paperHours', { n: m / 60 }) : T('s.minutesShort', { n: m })])
+    return `${sec(T('s.idleTitle'))}<div class="grp">${row(esc(T('s.idleHide')), esc(T('s.idleHideNote')), seg('idleHideMin', idles, s.idleHideMin))}</div>`
+  }
+
+  // 通知（等待/完成/错误/声音）——Agent 页。
+  function pageNotify() {
+    const s = snap.settings
     const notify = s.notify || {}
-    return `${sec(T('s.holdTitle'))}<div class="grp"><div class="r col cue"><div><div>${esc(T('s.endCue'))}</div><div class="d">${esc(T('s.endCueNote'))}</div></div>${seg('endCue', cues, cue)}</div><div class="r col cue hold${holdOff ? ' off' : ''}"><div><div class="t">${esc(T('s.hold'))}</div><div class="d">${esc(T(`s.holdNote.${cue}`))}</div></div><div class="hold-pick">${holdPick}${secs}</div></div></div>
-      ${sec(T('s.idleTitle'))}<div class="grp">${row(esc(T('s.idleHide')), esc(T('s.idleHideNote')), seg('idleHideMin', idles, s.idleHideMin))}</div>
-      ${sec(T('settings.notify'))}<div class="grp">
+    return `${sec(T('settings.notify'))}<div class="grp">
         ${row(esc(T('settings.notifyWaiting')), '', sw('notify.waiting', notify.waiting))}
         ${row(esc(T('settings.notifyDone')), '', sw('notify.done', notify.done))}
         ${row(esc(T('settings.notifyError')), '', sw('notify.error', notify.error))}
         ${row(esc(T('settings.sound')), '', sw('sound', s.sound))}
-      </div>
-      ${sec(T('settings.prompts'))}<div class="grp">${row(esc(T('settings.promptWait')), esc(T('settings.promptWaitNote')), seg('promptWaitSec', waits, s.promptWaitSec))}</div>
-      ${sec(T('s.quiet'))}<div class="grp">
+      </div>`
+  }
+
+  // 等她回答多久（Agent 页）。
+  function pagePrompts() {
+    const s = snap.settings
+    const waits = WAITS.map(w => [w, w >= 60 ? T('settings.minutes', { n: Math.round(w / 60) }) : T('settings.seconds', { n: w })])
+    return `${sec(T('settings.prompts'))}<div class="grp">${row(esc(T('settings.promptWait')), esc(T('settings.promptWaitNote')), seg('promptWaitSec', waits, s.promptWaitSec))}</div>`
+  }
+
+  // 安静：勿扰与全屏时隐藏——留在通用页（#23）。
+  function pageQuiet() {
+    const s = snap.settings
+    return `${sec(T('s.quiet'))}<div class="grp">
         ${row(esc(T('menu.dnd')), esc(T('s.dndNote')), sw('dnd', s.dnd))}
         ${row(esc(T('settings.hideInFullscreen')), '', sw('hideInFullscreen', s.hideInFullscreen, snap.fullscreenAvailable ? '' : 'disabled'))}
       </div>`
@@ -1223,6 +1294,9 @@
     const kind = err?.kind || 'other'
     const why = loginWhy(err)
     if (why) return T(whyKey(why, server?.host))
+    // 握手期 EOF、证书、握手后被关掉、服务器不回话：imap.rs 给了 why，用它的人话。
+    const reason = err?.why && ['handshakeEof', 'certificate', 'closedByPeer', 'stalled'].includes(err.why) ? err.why : ''
+    if (reason) return T(`mail.err.why.${reason}`)
     const where = server ? `${server.host}:${server.port}` : ''
     // The server's own words (or the proxy's), where they say why.
     const detail = err?.text && ['login', 'refused', 'other', 'recipient', 'notProxy', 'proxyRefused', 'proxyServer'].includes(kind) ? (lang === 'zh' ? '：' : ': ') + err.text : ''
@@ -1270,6 +1344,8 @@
     // Through a proxy: which.
     const via = st.via ? ` · ${T('mail.via', { proxy: st.via })}` : ''
     if (st.state === 'ok') return { text: (st.unread ? T('mail.unread', { n: st.unread }) : T('mail.none')) + down + via }
+    // 熔断：连续失败多次已暂停自动重连，原因 + 次数摆出来，并给手动重试（账户行的重试按钮）。
+    if (st.state === 'paused') return { text: `${T('mail.paused', { n: st.failures || 0 })} ${mailError(st.error, a)}`, bad: true, paused: true }
     if (st.state === 'error') return { text: mailError(st.error, a), bad: true }
     return { text: T('mail.connecting') }
   }
@@ -2026,7 +2102,7 @@
     const rows = accounts
       .map(a => {
         const note = mailNote(a)
-        return `<div class="r"><span class="wi" style="color:${a.on ? '#5e9bff' : COLOR.idle}">${Widgets.icon('mail')}</span><div class="grow"><div class="ellip">${esc(a.address)}</div><div class="d${note.bad ? ' bad' : ''}">${esc(note.text)}</div></div><button class="pbtn sm" data-mail-edit="${esc(a.id)}">${esc(T('pl.settings'))}</button>${sw('mail:' + a.id, a.on)}</div>`
+        return `<div class="r"><span class="wi" style="color:${a.on ? '#5e9bff' : COLOR.idle}">${Widgets.icon('mail')}</span><div class="grow"><div class="ellip">${esc(a.address)}</div><div class="d${note.bad ? ' bad' : ''}">${esc(note.text)}</div></div>${note.paused ? `<button class="pbtn sm" data-mail-retry="${esc(a.id)}">${esc(T('mail.retry'))}</button>` : ''}<button class="pbtn sm" data-mail-edit="${esc(a.id)}">${esc(T('pl.settings'))}</button>${sw('mail:' + a.id, a.on)}</div>`
       })
       .join('')
     const add = mailForm ? '' : `<div class="r"><button class="pbtn wide" data-mail-add>${esc(T('mail.add'))}</button></div>`
@@ -2666,6 +2742,11 @@
       </div>`
   }
 
+  // Agent（规格 8–15，逐条同序）：已找到的 Agent → 会话列表 → 闲置的会话 →
+  // 通知 → 提示 → 提醒（规格未列，与通知同域）→ 其它 → 写入说明。
+  // 「其它」：还没找到的 Agent 每条给「连接」（规格 13「可一键连接」，写的是它自己
+  // 的配置文件，见 agentDo；失败进 failed → 写入说明），另有连接前的欢迎卡。
+  // 「已找到」区仍留 连接/修复/移除，两处语义不同。
   function pageAgents() {
     const here = Agents.here(snap)
     const away = Agents.elsewhere(snap)
@@ -2677,28 +2758,238 @@
     const rows = here.length ? here.map(agentRow).join('') : `<div class="note">${esc(T('ag.noneHere'))}</div>`
     // What the icons are, once.
     const legend = Agents.CAPS.map(cap => `<span class="ag-key"><span class="cap yes">${Agents.CAP_GLYPH[cap]}</span>${esc(T(`ag.cap.${cap}`))}</span>`).join('')
-    const others = away.length
-      ? `${sec(T('ag.others'))}<div class="grp">
-          <div class="r go" data-ag-others><span class="fi chev${othersOpen || !here.length ? ' open' : ''}">\uE76C</span><div class="grow ellip">${esc(nameList(lang, away.map(id => Agents.byId(id).name), 'and'))}</div><span class="d">${esc(T('ag.othersNote'))}</span></div>
-          ${othersOpen || !here.length ? away.map(id => `<div class="r"><div class="grow"><div>${esc(Agents.byId(id).name)}${Agents.byId(id).aka ? `<span class="ver">${esc(Agents.byId(id).aka)}</span>` : ''}</div><div class="d">${esc(T(`ag.how.${id}`))}</div></div><span class="link" data-site="${Agents.byId(id).site}">${esc(T('ag.get'))} ›</span></div>`).join('') : ''}
-        </div>`
-      : ''
+    // Nothing connected yet: the welcome card, here rather than on General.
+    const welcome = cardShows() ? part('welcome', welcomeBlock()) : ''
+    const others =
+      away.length || welcome
+        ? part(
+            'others',
+            `${sec(T('ag.others'))}<div class="grp">${welcome}${
+              away.length
+                ? `<div class="r go" data-ag-others><span class="fi chev${othersOpen || !here.length ? ' open' : ''}">\uE76C</span><div class="grow ellip">${esc(nameList(lang, away.map(id => Agents.byId(id).name), 'and'))}</div><span class="d">${esc(T('ag.othersNote'))}</span></div>
+          ${othersOpen || !here.length ? away.map(id => `<div class="r"><div class="grow"><div>${esc(Agents.byId(id).name)}${Agents.byId(id).aka ? `<span class="ver">${esc(Agents.byId(id).aka)}</span>` : ''}</div><div class="d">${esc(T(`ag.how.${id}`))}</div></div><button class="pbtn sm" data-agent="${esc(id)}:install" ${connecting ? 'disabled' : ''}>${esc(T('ag.do.install'))}</button><span class="link" data-site="${Agents.byId(id).site}">${esc(T('ag.get'))} ›</span></div>`).join('') : ''}`
+                : ''
+            }</div>`,
+          )
+        : ''
     return `<div class="sec row-sec"><span class="ellip">${esc(T('ag.found', { n: here.length }))}</span><span class="grow"></span>${all}</div>
       <div class="grp ag-list">${rows}</div>
       ${here.length ? `<div class="ag-legend">${legend}</div><div class="note ag-legend-note">${esc(T('ag.legend'))}</div>` : ''}
-      ${others}`
+      ${part('sessions', pageSessions())}
+      ${part('alerts', `${part('idle', pageIdle())}${part('notify', pageNotify())}${part('prompts', pagePrompts())}${part('hold', pageHold())}`)}
+      ${others}
+      ${part('files', pageWriteNotes())}`
   }
 
-  // About: this version, the project's page, the credits (General's foot).
-  const aboutHTML = () => `${sec(T('settings.about'))}<div class="grp">
-        <div class="r"><div class="grow">${esc(T('s.version', { version: snap.version }))}${snap.update?.latest?.newer ? ` <span class="chip">${esc(lang === 'zh' ? '发现新版本' : 'New version')} ${esc(snap.update.latest.version)}</span>` : ''}</div><button type="button" class="pbtn sm" data-update="check" ${snap.update?.checking || snap.update?.stage ? 'disabled' : ''}>${esc(snap.update?.checking ? T('s.updateChecking') : T('s.updateCheck'))}</button><span class="link" data-site="repo">${esc(T('home.repo'))} ›</span></div>
-        ${snap.update?.error ? `<div class="note" role="status">${esc(T(`s.updateError.${snap.update.error.code}`, { detail: snap.update.error.detail || '' }))}</div>` : ''}
-        ${snap.update?.latest?.newer ? `<div class="r"><div class="grow d">${esc(lang === 'zh' ? '请前往官方发行页选择完整安装包或精简更新包。' : 'Choose a full installer or compact update on the official release page.')}</div><button type="button" class="pbtn sm" data-update="page">${esc(T('s.updateNotes'))}</button></div>` : ''}
-        ${snap.update?.checkedAt && snap.update?.latest && !snap.update.checking && !snap.update.error && !snap.update.latest.newer ? `<div class="note" role="status">${esc(T('s.updateLatest'))}</div>` : ''}
-        <div class="note">${esc(T('home.intro'))}</div>
-        <div class="note">${esc(T('home.upstream'))}</div>
-        <div class="note">${esc(T('home.credits'))}</div>
+  // 写入说明（规格 15）：连接写的是各工具自己的配置文件；写入失败时，把文件和
+  // 原因列出来。用同一份来源：连上的（Agents.read 的 shown）与这次失败的 failed
+  // （agentDo 记下的 error / kind / folder），和每行展开的详情同源，不另存一份。
+  function pageWriteNotes() {
+    const ids = [...new Set([...Agents.here(snap), ...Object.keys(failed)])].filter(id => Agents.byId(id))
+    const rows = ids
+      .map(id => {
+        const r = Agents.read(snap, id) || {}
+        const bad = failed[id] ? failedHTML(id) : ''
+        if (!bad && !r.shown) return ''
+        const where = r.shown ? `<div class="d mono">${esc(r.shown)}</div>` : ''
+        return `<div class="r col"><div class="t">${esc(Agents.byId(id).name)}</div>${where}${bad}</div>`
+      })
+      .filter(Boolean)
+      .join('')
+    return `${sec(T('ag.files'))}<div class="grp"><div class="note">${esc(T('ag.filesNote'))}</div>${rows}</div>`
+  }
+
+  // 关于页（截图意见 1–4 的落点）：hero 是第一屏、也是这一块 DOM 的第一个子元素
+  // ——品牌图最前（用户：图片放首位），下面版本行（规格 7：版本号 + 现在检查 +
+  // 项目主页），再下面说明文案；整块左右居中，图自身也 margin-inline:auto，所以
+  // 视觉中心和文字中心在同一条竖线上。下面是更新公告与折叠的许可归属。
+  //
+  // 公告四态（有内容 / 读取中 / 还没有 / 读不到），见 notesKind 与 aboutNotes：
+  // 宿主先把盘上那份缓存灌进快照（updates.rs notes_load），到了就立刻画；还在读
+  // 就画骨架屏；读不到给一句实话 + 「重试」；仓库还没有发行时是「还没有」而不是
+  // 「离线读不到」。任何一个状态都有内容，不会永远空白，也不写死高度。
+  //
+  // 用户红圈那块（.about-version 里的状态话与「应用内更新」按钮）已删：那两件是
+  // 「软件更新」那一节的活，两处并存就是功能重叠；这里只留规格 7 要的那三样。
+  const NOTES_TIMEOUT_MS = 8000
+  // 公告四态的名字进常量，免得各处比字符串（红线 5：不许裸值）。
+  const NOTES_HAVE = 'have'
+  const NOTES_LOADING = 'loading'
+  const NOTES_EMPTY = 'empty'
+  const NOTES_FAILED = 'failed'
+  // 骨架屏的行数：和首次读到时最常见的一屏条数一致，读到后高度变化最小。
+  const NOTES_SKELETON_ROWS = 3
+  // 公告只显示最新一条，正文只列这么多个要点（用户 2026-10-30：太长，只看新特性）。
+  const NOTES_HIGHLIGHT_MAX = 5
+  // 「新特性」一类章节的标题：命中就只取这一节的条目。
+  const NOTES_FEATURE_SECTION = /^#{1,6}\s*(?:新特性|新增|新功能|更新内容|what'?s\s*new|highlights?|new\s+features?|features)\s*[:：]?\s*$/i
+  // 一份 Markdown 正文里的一条要点（-、*、+、1.、1) 都算）。
+  const NOTES_BULLET = /^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/
+  // Markdown 标题行（章节切分用）。
+  const NOTES_HEADING = /^\s{0,3}#{1,6}\s/
+  // 反过来：这些章节写的是「怎么验证 / 怎么装 / 边界」，不是这一版的新东西。1.x 的
+  // 正文实测就没有「新特性」标题，只有 ## 验证、## 安装 这一类（见 build\t30-measure
+  // .mjs 的探测输出），降级取要点时跳过它们，用户要的是「只看新版本特性」。
+  // 注意：中文没有 \b 词边界（汉字不算 \w），所以结尾用「行尾或空白/冒号/括号」来收，
+  // 不能用 \b —— 用 \b 会让「## 验证」这种标题一条都匹配不上（实测踩过）。
+  const NOTES_NON_FEATURE_SECTION = /^#{1,6}\s*(?:验证与边界|验证说明|验证|安装资源|安装|配套|边界|说明|其它|其他|测试|scope|verify|verifying|installation|install|tests?|notes?)(?:$|[\s:：（(])/i
+  let notesLoadingAt = 0
+  let notesTimedOut = false
+  let notesWake = 0
+  // 公告还在读时，八秒后把「读取中」改成「读不到 + 重试」（draw 一帧）。
+  function noteNotesLoading(state) {
+    if (state !== 'loading') {
+      notesLoadingAt = 0
+      notesTimedOut = false
+      clearTimeout(notesWake)
+      return
+    }
+    if (notesLoadingAt || notesTimedOut) return
+    notesLoadingAt = Date.now()
+    clearTimeout(notesWake)
+    notesWake = setTimeout(() => {
+      notesTimedOut = true
+      draw()
+    }, NOTES_TIMEOUT_MS)
+  }
+  // 宿主给的公告快照 → 该画哪一态。有内容优先（缓存先到就先画，不等网络），其次
+  // 看宿主说的状态：error 是读不到；ok/empty 是读通了但没有发行；loading 超时也算
+  // 读不到，好把「重试」递出去。
+  function notesKind(notes) {
+    if (Array.isArray(notes?.entries) && notes.entries.length) return NOTES_HAVE
+    if (notes?.state === 'error') return NOTES_FAILED
+    if (notes?.state === 'ok' || notes?.state === 'empty') return NOTES_EMPTY
+    if (notes?.state === 'loading' && !notesTimedOut) return NOTES_LOADING
+    return NOTES_FAILED
+  }
+  // 正文切成章节：标题属于它**下面**那段（不是上面），第一个标题之前的散段算一节
+  // （heading 为空）。切错一次就会把「## 验证」的条目当成上一节的，实测踩过。
+  function notesSections(body) {
+    const lines = String(body || '').split(/\r?\n/)
+    const marks = []
+    lines.forEach((line, i) => {
+      if (NOTES_HEADING.test(line)) marks.push({ i, heading: line.trim() })
+    })
+    const sections = []
+    if (!marks.length || marks[0].i > 0) sections.push({ heading: '', from: 0, to: marks.length ? marks[0].i : lines.length })
+    marks.forEach((mark, n) => {
+      const next = n + 1 < marks.length ? marks[n + 1].i : lines.length
+      sections.push({ heading: mark.heading, from: mark.i + 1, to: next })
+    })
+    return { lines, sections }
+  }
+  // 这一节的要点，取到 max 条为止。
+  function notesBullets(lines, section, max, into) {
+    for (let i = section.from; i < section.to && into.length < max; i++) {
+      const item = lines[i].match(NOTES_BULLET)
+      if (item) into.push(item[1])
+    }
+  }
+  // 公告正文 → 展示的要点（最多 max 条），先探测再降级，三条路都不许给空白：
+  //  1) 认得出「新特性 / What's New」这一节 —— 只取这一节；
+  //  2) 认不出 —— 按顺序取章节，跳过「验证 / 安装 / 边界」这类不是新东西的章节；
+  //  3) 全是这类章节或没有要点 —— 退回正文前 max 条（再没有就是空数组，由
+  //     noteRow 的折叠块给出整段正文，界面不会空）。
+  // 纯函数：about-update.test.js 与 build\t30-measure.mjs 拿真实 release 正文打它。
+  function notesHighlights(body, max) {
+    const { lines, sections } = notesSections(body)
+    const points = []
+    const feature = sections.find(s => NOTES_FEATURE_SECTION.test(s.heading))
+    if (feature) notesBullets(lines, feature, max, points)
+    for (const s of sections) {
+      if (points.length >= max) break
+      if (feature || NOTES_NON_FEATURE_SECTION.test(s.heading)) continue
+      notesBullets(lines, s, max, points)
+    }
+    if (!points.length) for (const s of sections) notesBullets(lines, s, max, points)
+    return points.slice(0, max)
+  }
+  // 行内标记：**粗体**、`代码` 渲染成真的元素（用户 2026-10-31：不许把 ** 和反引号
+  // 露在界面上，全站统一这一套）。先转义再替换，内容仍是纯文本，不会注入标签。
+  function notesInline(value) {
+    return esc(String(value ?? ''))
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+  }
+  // 最新一条公告（2026-10-31 改）：版本号那行删掉，日期并到标题同一行
+  // 「FISH Dock 1.2.3 · 2026-10-28」；下面是要点，其余正文折进「查看完整说明」，
+  // 默认收起。字色字号字重都没变（标题 .nt 12px、日期仍用 .d 的灰）。
+  function noteRow(e) {
+    const zh = lang === 'zh'
+    const when = String(e.at || '').slice(0, 10)
+    const head = [e.title ? notesInline(e.title) : '', when ? `<span class="d">· ${esc(when)}</span>` : ''].filter(Boolean).join(' ')
+    const points = notesHighlights(e.body, NOTES_HIGHLIGHT_MAX)
+    const list = points.length ? `<ul class="notes-points">${points.map(p => `<li>${notesInline(p)}</li>`).join('')}</ul>` : ''
+    const full = String(e.body || '').trim()
+    const more = full
+      ? `<details class="fold notes-more"><summary>${esc(zh ? '查看完整说明' : 'Full release notes')}</summary><div class="nb">${full.split(/\r?\n/).map(notesInline).join('\n')}</div></details>`
+      : ''
+    return `<div class="note-row">${head ? `<div class="nt">${head}</div>` : ''}${list}${more}</div>`
+  }
+  // 骨架屏：与真公告同样的内衬与圆角，读到时不跳；纯装饰，读屏念上面那句话。
+  function notesSkeleton() {
+    return `<div class="notes-skeleton" aria-hidden="true">${'<span class="sk"></span>'.repeat(NOTES_SKELETON_ROWS)}</div>`
+  }
+  function aboutNotes(notes) {
+    const zh = lang === 'zh'
+    const retry = `<button type="button" class="pbtn sm" data-update="notes">${esc(zh ? '重试' : 'Retry')}</button>`
+    const kind = notesKind(notes)
+    // 来源与上次同步：一眼看出这份公告是哪条源、什么时候读的（t10 要求 UI 可见）。
+    const when = notes.at ? new Date(notes.at).toLocaleString(zh ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+    const originLine = (notes.source && kind === NOTES_HAVE)
+      ? `<div class="note">${esc((zh ? '来源：' : 'From: ') + notes.source + (when ? (zh ? ' · 上次同步 ' : ' · last read ') + when : ''))}</div>`
+      : ''
+    // 缓存优先：有内容立刻画。这次没读到但盘上有旧的，在下面补一句实话 + 重试
+    // （红线：失败必须可见，不许静默吞掉）。failure 是宿主给的人话原因，没有时
+    // 退回 error.detail（旧快照兼容）。
+    if (kind === NOTES_HAVE) {
+      const failed = notes.failure ? String(notes.failure) : notes.error?.detail || ''
+      const late = failed
+        ? `<div class="about-said"><div class="note err" role="status">${esc((zh ? '上面是上次读到的公告，最新一次没读到：' : 'These are the notes last read; the newest could not be read: ') + failed)}</div>${retry}</div>`
+        : ''
+      // 只画最新一条（宿主给的是新到旧），旧的整条不再铺开。
+      return `<div class="notes">${notes.entries.slice(0, 1).map(noteRow).join('')}</div>${originLine}${late}`
+    }
+    if (kind === NOTES_EMPTY) return `<div class="about-said"><div class="note" role="status">${esc(zh ? '还没有发布过更新公告，有新版本时这里会有。' : 'No release notes yet; they appear with the first release.')}</div>${retry}</div>`
+    if (kind === NOTES_LOADING) return `<div class="about-said"><div class="note" role="status" aria-busy="true">${esc(zh ? '正在读取更新公告…' : 'Reading the release notes…')}</div>${retry}</div>${notesSkeleton()}`
+    const detail = notes?.error?.detail ? `：${notes.error.detail}` : ''
+    const why = notes?.state === 'error'
+      ? (zh ? '更新公告没读到' : 'The release notes could not be read') + detail
+      : notesTimedOut
+        ? zh ? '更新公告读取超时了（网络可能不通），可以重试。' : 'Reading the release notes timed out; try again.'
+        : zh ? '离线：还没读到过更新公告，联网后会自动读。' : 'Offline: the release notes have not been read yet; they come when it is online.'
+    return `<div class="about-said"><div class="note err" role="status">${esc(why)}</div>${retry}</div>`
+  }
+  // hero：品牌图 → 版本行（规格 7）→ 说明文案；一个居中的竖列。
+  // 品牌图是个彩蛋（用户 2026-10-31）：点它开官网。这里**不写任何网址**——只发
+  // data-site="officialSite"，由本文件唯一的 [data-site] 处理器交给宿主
+  // settings_open_site（settings.rs site_url → config::official_site）。要换地址：
+  // 改 config.rs 的 OFFICIAL_SITE_DEFAULT，或设环境变量 FISH_DOCK_OFFICIAL_SITE，
+  // 这个文件与样式都不用动（当前默认值是临时落地页，不是正式官网）。
+  // 键盘可达：它是真 <button type="button">，Enter/空格与点击同一条路。
+  function aboutHero() {
+    const u = snap.update || {}
+    const busy = !!u.checking || !!u.stage
+    return `<div class="about-hero">
+        <button type="button" class="about-mark-btn" data-site="officialSite" aria-label="${esc(lang === 'zh' ? '关于 · 打开官网' : 'About · open the official site')}"><img class="about-mark" src="about-mark.png" alt="FISH Dock" width="72" height="72" decoding="async"></button>
+        <div class="about-version"><span class="ver">${esc(T('s.version', { version: snap.version }))}</span><button type="button" class="pbtn sm" data-update="check" ${busy ? 'disabled' : ''}>${esc(u.checking ? T('s.updateChecking') : T('s.updateCheck'))}</button><span class="link" data-site="repo">${esc(T('home.repo'))} ›</span></div>
+        <div class="slogan"><div class="t">Everything is a Plugin</div><div class="d">${esc(lang === 'zh' ? '一切皆插件 · 一个 Windows 桌面宿主' : 'Everything is a plugin · a Windows desktop host')}</div></div>
       </div>`
+  }
+  const aboutHTML = () => {
+    const notes = snap.update?.notes && typeof snap.update.notes === 'object' ? snap.update.notes : {}
+    const zh = lang === 'zh'
+    return `<div class="about">${aboutHero()}
+      ${sec(T('settings.about'))}<div class="grp about-body">
+        <div class="r col"><div class="t">${esc(zh ? '更新公告' : 'Release notes')}</div>${aboutNotes(notes)}</div>
+        <details class="fold"><summary>${esc(zh ? '许可与归属' : 'License and credits')}</summary>
+          <div class="note">${esc(T('home.intro'))}</div>
+          <div class="note">${esc(T('home.upstream'))}</div>
+          <div class="note">${esc(T('home.credits'))}</div>
+        </details>
+      </div>
+    </div>`
+  }
 
   // Her updates (updates.rs): this version and the latest, its notes and
   // Update, or a look now; how an update goes (downloaded, checked, waiting
@@ -2717,9 +3008,8 @@
     else if (u.stage) state = T(`s.updateStage.${u.stage}`)
     else if (u.checking) state = T('s.updateChecking')
     else if (u.error) state = T(`s.updateError.${u.error.code}`, { detail: u.error.detail || '' })
-    else if (newer && u.installed) state = T('s.updateInstalledNewer', { version: latest.version })
     else if (newer && !latest.canInstall) state = T('s.updateError.noDigest')
-    else if (newer) state = T('s.updateNewer', { version: latest.version })
+    else if (newer) state = T(latest.installer ? 's.updateNewerInstaller' : 's.updateNewer', { version: latest.version })
     else if (latest) state = T('s.updateLatest')
     else if (u.checkedAt) state = T('s.updateNone')
     if (u.installed) state = [T('s.updateInstalled'), state].filter(Boolean).join('\n')
@@ -2728,10 +3018,10 @@
     const unreached = !busy && ['check', 'download'].includes(u.error?.code)
     if (unreached) state += (lang === 'zh' ? '。' : '. ') + T('s.updateProxyHint')
     const way = unreached ? `<div class="r"><div class="grow d">${esc(T('s.net.now', { what: netNow() }))}</div><span class="link" data-net-go>${esc(T('s.netProxy'))} ›</span></div>` : ''
-    const buttons = u.installed
-      ? `<span class="btns"><button type="button" class="pbtn sm" data-update="check" ${busy ? 'disabled' : ''}>${esc(T('s.updateCheck'))}</button>${newer ? `<button type="button" class="pbtn sm al" data-update="page">${esc(T('s.updateDownload'))}</button>` : ''}</span>`
-      : newer
-      ? `<span class="btns"><button class="pbtn sm" data-update="page">${esc(T('s.updateNotes'))}</button><button class="pbtn sm al" data-update="update" ${busy || !latest.canInstall ? 'disabled' : ''}>${esc(T('s.updateInstall'))}</button></span>`
+    // 内置更新（截图意见 4）：检查 → 应用内下载装包 → 拉起安装器，全程不打开
+    // 浏览器 / GitHub（安装版也一样，updates.rs install_installer）。
+    const buttons = newer
+      ? `<span class="btns"><button type="button" class="pbtn sm" data-update="check" ${busy ? 'disabled' : ''}>${esc(T('s.updateCheck'))}</button><button type="button" class="pbtn sm al" data-update="update" ${busy || !latest.canInstall ? 'disabled' : ''}>${esc(lang === 'zh' ? '应用内更新' : 'Update here')}</button></span>`
       : `<button class="pbtn sm" data-update="check" ${busy ? 'disabled' : ''}>${esc(T('s.updateCheck'))}</button>`
     const title = newer ? `${version}${T('s.updateLatestIs', { version: latest.version })}` : version
     const when = u.checkedAt
@@ -2740,7 +3030,7 @@
     return `${sec(T('s.update'))}<div class="grp">
         ${row(esc(title), esc(state), buttons)}${way}
         ${row(esc(T('s.updateAuto')), esc([T('s.updateAutoNote'), when].filter(Boolean).join(' · ')), sw('autoUpdateCheck', snap.settings.autoUpdateCheck !== false))}
-        ${u.installed ? '' : row(esc(T('s.updateFrom')), esc(T('s.updateFromNote')), seg('updateFrom', [['auto', T('s.updateFromAuto')], ['gitee', 'Gitee'], ['github', 'GitHub']], snap.settings.updateFrom || 'auto'))}
+        ${row(esc(T('s.updateFrom')), esc(T('s.updateFromNote')), seg('updateFrom', [['auto', T('s.updateFromAuto')], ['gitee', 'Gitee'], ['github', 'GitHub']], snap.settings.updateFrom || 'auto'))}
       </div>`
   }
 
@@ -2772,24 +3062,24 @@
       </div>`
   }
 
-  // --- The welcome: the agents connected, at the top of General -----------------------
+  // --- The welcome: the agents connected, in the Agent page's 「其它」 ---------------
   // While nothing is connected (and until one sends its first event, before
   // she is set up, onboarded): a card with a button for each one on this
   // computer, as equals (whichever one uses, or all), in a row: its name,
   // and under it how it stands; under them what each still needs, or why it
   // could not be written; what the buttons write; Claude Code's plugin the
   // other way. The same model as the Agent page (agents.js: what is here,
-  // how each stands, the same buttons). Once one is connected, General has
-  // a line on them instead, which opens the Agent page (agentsLine). (The
-  // appearance session's spec, 2026-10-13.)
+  // how each stands, the same buttons). (The appearance session's spec,
+  // 2026-10-13; on General until #23, then moved to 其它, the page's place for
+  // connecting: the spec's 通用 has the four quick switches first.)
   // "Not now" said (connectHintOff: the welcome's 以后再说, the island's
-  // 不用提醒) and nothing connected: the welcome folded to one row at the
-  // page's top; opened again by its 去连接, or by asking for connecting.
+  // 不用提醒) and nothing connected: the welcome folded to one row; opened
+  // again by its 去连接, or by asking for connecting.
   let welcomeOpen = false
   const anyIn = () => Agents.TABLE.some(a => Agents.isIn(snap, a.id))
   const welcomeFolded = () => snap.settings.connectHintOff === true && !welcomeOpen && !anyIn()
   const showWelcome = () => !anyIn() || !snap.settings.onboarded
-  // The card itself, not General's line: shown, and none connected for real yet.
+  // The card itself: shown, and none connected for real yet.
   const cardShows = () => showWelcome() && !toolsHere().some(tool => toolState(tool) === 'seen')
 
   // The ones on this computer, in the table's order (agents.js here), but
@@ -2914,19 +3204,6 @@
       </div>`
   }
 
-  // General's line on the agents once one is connected: how many, their
-  // names, how many to repair or still to connect; a click opens the Agent
-  // page. Its dot: amber while one wants a repair, else green (one seen) or
-  // blue (written, waiting).
-  function agentsLine() {
-    const s = Agents.summary(snap, known())
-    const n = s.connected.length
-    const what = [n ? toolNames(s.connected, 'and') : '', s.wants.length ? T('ag.lineFix', { n: s.wants.length }) : '', s.none.length ? T('ag.lineMore', { n: s.none.length }) : '']
-    const mood = s.wants.length ? 'waiting' : s.on.length ? 'done' : 'working'
-    const title = n ? T(n === 1 ? 'ag.line1' : 'ag.line', { n }) : T('ag.lineRepair')
-    return `<div class="grp"><div class="r go" data-tab="agents"><span class="dot" style="background:${COLOR[mood]}"></span><div class="grow"><div>${esc(title)}</div><div class="d ellip">${esc(what.filter(Boolean).join(' · '))}</div></div><span class="link">${esc(T('wc.manage'))}</span></div></div>`
-  }
-
   // Her taskbar on the main display alone (no taskbar on the others), or
   // on all of them (bars.rs); with one display, shown greyed (the appearance
   // session's spec, as Windows' own "show my taskbar on all displays").
@@ -2940,22 +3217,23 @@
     return row(esc(T('s.taskbarDisplays')), esc(note), control)
   }
 
-  // General: the welcome (nothing connected yet) or the line on the agents
-  // connected, the sessions and the quick switches, the alerts, startup and
-  // the language, her updates, her crash reports and what this is.
-  // Connecting them is the Agent page's.
+  // General（规格 1–7，逐条同序）：4 个快捷开关 → 安静 → 启动和语言 → 网络代理
+  // → 软件更新 → 关于。规格 1–7 之间不许插别的节（用户 2026-10-30：都没有按规格
+  // 排序），所以崩溃报告——规格里没有、构建不带上报时整段为空——排在关于之后；
+  // 欢迎卡与「N 个 agent」那一行在 Agent 页（连接是 Agent 页的事，见 pageAgents
+  // 的「其它」）。
   function pageGeneral() {
-    return `${cardShows() ? part('welcome', welcomeBlock()) : agentsLine()}${pageNow()}
-      ${part('alerts', pageAlerts())}
+    return `${pageNow()}
+      ${part('quiet', pageQuiet())}
       ${sec(T('s.startLang'))}<div class="grp">
         ${row(esc(T('settings.startAtLogin')), esc(T('home.pluginStart')), sw('login', snap.loginAtStart))}
         ${row(esc(T('home.language')), '', seg('lang', [['auto', T('settings.languageAuto')], ['zh', '中文'], ['en', 'EN']], snap.settings.lang))}
       </div>
-      ${part('identity', identityPanel.render())}
-      ${part('update', pageUpdate())}
       ${part('net', pageNet())}
-      ${part('crash', pageCrash())}
-      ${aboutHTML()}`
+      ${part('update', pageUpdate())}
+      ${part('backup', identityPanel.renderBackup())}
+      ${aboutHTML()}
+      ${part('crash', pageCrash())}`
   }
 
   const PAGES = { now: pageGeneral, agents: pageAgents, look: pageLook, widgets: pageWidgets, mail: pageMail }
@@ -3013,8 +3291,8 @@
       (box.id ? `#${box.id}` : box.dataset.field ? `[data-field="${box.dataset.field}"]` : box.dataset.mon ? `[data-mon="${box.dataset.mon}"]` : box.dataset.hold ? '[data-hold]' : box.dataset.mf ? `[data-mf="${box.dataset.mf}"]` : box.dataset.w ? `[data-w="${box.dataset.w}"]` : box.dataset.proxyAt !== undefined ? `[data-proxy-at="${box.dataset.proxyAt}"]` : null)
     const caret = which ? box.selectionStart : null
     const changed = setHTML(body, PAGES[tab]())
-    if (tab === 'now') identityPanel.mount(body)
     if (tab === 'widgets') extensionPanel.mount(body)
+    if (tab === 'now') identityPanel.mount(body)
     if (tab === 'look') { mountTabOrder(); windhawkPanel.mount(body) }
     if (reset) {
       body.scrollTop = 0
@@ -3049,6 +3327,8 @@
     layer.classList.toggle('extension-compact', extension && !servicePage && !wide)
     const width = servicePage ? SERVICE_W : wide ? WIDE_W : extension ? 620 : 0
     layer.style.width = width ? `${Math.min(width, screen.availWidth - 40)}px` : ''
+    // 关于页的公告：还在读就排一次「八秒后改成超时」的重绘（见 aboutHTML）。
+    noteNotesLoading(tab === 'now' ? snap.update?.notes?.state || 'loading' : 'ok')
     drawHead()
     drawTabs()
     drawBody(reset)
@@ -3130,12 +3410,9 @@
       if (!isOpen || revision !== openRevision) return
       const remembered = next || (!wasOpen && got.settings.settingsLastTab)
       if (tab === initialTab && (TABS.includes(remembered) || extensionPanel.pages().some(page => page.key === remembered))) tab = remembered
-      // Connecting while the welcome card shows (nothing connected yet):
-      // the card, at General's top; else the Agent page.
-      if (partToShow === 'connect' && cardShows()) {
-        tab = 'now'
-        partToShow = 'welcome'
-      }
+      // 连接（island.js 的提示）：欢迎卡在 Agent 页的「其它」里，落到卡上；
+      // 已经连着（没有卡）就停在 Agent 页顶。
+      if (partToShow === 'connect') partToShow = cardShows() ? 'welcome' : ''
       draw(true)
       showPart()
       if (tab === 'look') { loadGallery(false); if (!window.pet.mac) void windhawkPanel.load() }
@@ -3203,6 +3480,7 @@
     const asked = ++gallery.asked
     gallery.loading = true
     gallery.error = ''
+    gallery.offline = false
     draw()
     const got = await window.pet.settings.gallery(more ? gallery.page + 1 : 1, gallery.sort, gallery.query)
     if (asked !== gallery.asked) return
@@ -3212,6 +3490,9 @@
       gallery.page = got.page || 1
       gallery.totalPages = got.totalPages || 1
       gallery.total = got.total ?? gallery.items.length
+      // 离线命中缓存：宿主给 offline=true 与一句原因，这里只标状态，不当错误盖住列表。
+      gallery.offline = got.offline === true
+      gallery.error = gallery.offline ? '' : (got.error || '')
     } else {
       gallery.error = got.error
     }
@@ -3477,8 +3758,14 @@
     if (crashButton && !crashButton.disabled) return window.pet.settings.crash(crashButton.dataset.crash).then(got => ((snap = got), draw()))
     const paperButton = at('[data-paper]')
     if (paperButton && !paperButton.disabled) return paperDo(paperButton.dataset.paper)
+    // 强调色：跟随系统 / 自定义 两种；挑一个颜色就是自定义（settings_win_look）。
+    const accentMode = at('[data-winaccent]')
+    if (accentMode) {
+      const want = accentMode.dataset.winaccent === 'system' ? 'system' : String(snap.winLook?.accent || '').toLowerCase() || 'system'
+      return window.pet.settings.winLook({ accent: want }).then(got => ((snap = got), draw()))
+    }
     const accent = at('[data-accent]')
-    if (accent && ACCENT_PICKER) return window.pet.settings.winLook({ accent: accent.dataset.accent }).then(got => ((snap = got), draw()))
+    if (accent) return window.pet.settings.winLook({ accent: accent.dataset.accent }).then(got => ((snap = got), draw()))
     const use = at('[data-use]')
     if (use) return patch({ pet: use.dataset.use })
     if (at('[data-fetch]')) {
@@ -3662,6 +3949,12 @@
       // The server asked now (the list follows as the store changes).
       window.pet.mail.kick(inboxId())
       loadInbox(false)
+      return true
+    }
+    // 熔断后的手动重试：清掉退避与暂停，让这个账户马上再连一次（mail.rs mail_kick）。
+    const retryMail = at('[data-mail-retry]')
+    if (retryMail) {
+      window.pet.mail.kick(retryMail.dataset.mailRetry)
       return true
     }
     if (at('[data-mail-more]')) {

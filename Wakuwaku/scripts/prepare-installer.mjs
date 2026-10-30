@@ -9,7 +9,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const MANIFEST_SCHEMA = 2
-export const PRODUCT = 'DSH-FISH'
+// 2.0.0 起资源清单里的 product 与安装归属清单统一成 "FISH Dock"（#27 P1）。
+// 旧包写的是 "DSH-FISH"：宿主 runtime.rs 与安装器都还认它（升级链不断）。
+export const PRODUCT = 'FISH Dock'
 export const ARCHITECTURE = 'x86_64'
 /// 程序启动必需的文件；与 src-tauri/src/runtime.rs 的 REQUIRED 保持一致。
 export const REQUIRED = [

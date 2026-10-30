@@ -412,7 +412,9 @@
     )
   }
 
-  setInterval(tickClock, 5000)
+  // 时钟/日期刷新间隔（前端界面节奏，就地具名常量；与 island.js 各自 bundle 各留一份）。
+  const CLOCK_TICK_MS = 5000
+  setInterval(tickClock, CLOCK_TICK_MS)
   addEventListener('resize', () => {
     startScale = 0
     drawStart()

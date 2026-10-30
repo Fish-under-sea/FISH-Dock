@@ -280,7 +280,7 @@ pub fn apply_visibility(sh: &Shared) {
     }
     if let Some(win) = window(sh) {
         if want {
-            let _ = win.as_ref().show();
+            // 显示即醒在 show_window 里（power::webview_rest），这里不重复调。
             sh.show_window(&win);
             // Hidden, her page heard no updates (main.rs to_pages): the
             // whole state now, whether quiet with it.
@@ -295,9 +295,11 @@ pub fn apply_visibility(sh: &Shared) {
 // the window alone hidden, the page went on playing her clips and walking
 // her about unseen, its timers never throttled (#14: half her renderer's and
 // most of her GPU process's time while she was home).
+// 内存目标也一起降到最低（power::webview_rest）：歇着的页面把能还的还给系统，
+// 不是只停下绘制。
 fn hide_window(win: &WebviewWindow) {
     let _ = win.hide();
-    let _ = win.as_ref().hide();
+    crate::power::webview_rest(win, true);
 }
 
 // Her window on the screen now. Asked from anywhere (main.rs to_pages),

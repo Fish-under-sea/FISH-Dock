@@ -12,7 +12,7 @@ test('标签栏支持鼠标拖动，拖动后的单击不会切换标签',()=>{c
 test('微小位移保留正常点击，触控取消后不残留拖动状态',()=>{const s=strip();s.fire('pointerdown');s.fire('pointermove',{clientX:177});s.fire('pointerup');assert.equal(s.el.scrollLeft,0);assert.equal(s.fire('click').stopped,false);s.fire('pointerdown',{pointerType:'touch'});s.fire('pointermove',{clientX:80,pointerType:'touch'});s.fire('pointercancel');assert.ok(!s.classes.has('dragging'));assert.equal(s.fire('click',{detail:0}).stopped,false)})
 test('纵向滚轮横移标签，控制键缩放与原生横向滚动保留',()=>{const s=strip();assert.equal(s.fire('wheel').prevented,true);assert.equal(s.el.scrollLeft,80);assert.equal(s.fire('wheel',{ctrlKey:true}).prevented,false);assert.equal(s.fire('wheel',{deltaX:100}).prevented,false)})
 test('默认仅核心页；新插件页追加，旧 models 固定入口不再渲染', () => {
-  assert.deepEqual(plain(tabs.order([], ['fish.ofm/console'])), ['now','agents','look','widgets','mail','fish.ofm/console'])
+  assert.deepEqual(plain(tabs.order([], ['fish.ofm/console'])), ['now','agents','look','mail','widgets','fish.ofm/console'])
 })
 test('插件停用隐藏但重启后恢复位置；无效与重复ID不渲染', () => {
   const saved = ['look','fish.ofm/console','now','look','bad/path/escape','mail']
@@ -25,7 +25,7 @@ test('移动可见标签保留隐藏历史并限制128条；恢复默认只需�
   assert.deepEqual(plain(tabs.order(moved, ['fish.ofm/console'])).slice(0,3), ['fish.ofm/console','look','now'])
   assert.ok(moved.includes('fish.magpie/console'))
   assert.ok(moved.length <= 128)
-  assert.deepEqual(plain(tabs.order([], [])), ['now','agents','look','widgets','mail'])
+  assert.deepEqual(plain(tabs.order([], [])), ['now','agents','look','mail','widgets'])
 })
 test('移除当前页面时选择最近可见项，合法键双向一致', () => {
   assert.equal(tabs.nearest('fish.ofm/console', ['now','fish.ofm/console','look'], ['now','look']), 'look')

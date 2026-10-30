@@ -24,6 +24,6 @@
   "webview2_license": {
     "filename": "WebView2-Fixed-Version.html",
     "url": "https://developer.microsoft.com/microsoft-edge/api/eula/webview2?locale=en-us&fixed=true",
-    "sha256": "a75e803e5567be164c62b6a3dc756188df6d0f91c2d913f4c4ae75db3ad61c34"
+    "sha256": "5aed9c5db23729193a47a1097c23f14db15e5835fde8fb251cec33384a4cd146"
   }
 }

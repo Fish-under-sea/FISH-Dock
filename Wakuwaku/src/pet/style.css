@@ -150,7 +150,8 @@ body {
 #panel .code {
   margin: 0 0 8px;
   padding: 6px 8px;
-  max-height: 96px;
+  /* 40vh 内滚动（新-1）：正文/diff 需要的高度（至多此限），不再被 96px 卡死。 */
+  max-height: min(40vh, 220px);
   overflow: auto;
   border-radius: 6px;
   background: #f3f4f7;
@@ -161,7 +162,7 @@ body {
 }
 
 #panel .code.plan {
-  max-height: 140px;
+  max-height: min(40vh, 260px);
   font-family: inherit;
 }
 

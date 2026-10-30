@@ -14,7 +14,30 @@ const SAY = {
   commit: 'Committing the installation',
   done: (replaced, reused, secs) => `Installation complete: ${replaced} replaced, ${reused} reused, ${secs} s`,
   failed: message => 'Installation update failed: ' + message,
+  migrate: 'Moving your data to its new home',
+  migrated: (files, secs) => `Data moved to its new home: ${files} files verified, ${secs} s`,
+  kept: 'Data left where it is: its new home already exists or was not asked for',
+  migrateFailed: message => 'Data was NOT moved, and the old directory is untouched: ' + message,
 };
+/// #27-D：用户数据目录从旧名迁到新名（都在 %LOCALAPPDATA% 下）。
+/// 新名字面量必须与 src-tauri/src/runtime.rs 的 app_home() 完全一致，
+/// 也和 scripts/installer.mjs 导出的 HOME_DIRECTORY / LEGACY_HOME_DIRECTORY 一致
+/// （installer.test.mjs 里有一条断言盯着这三处不许漂移）。
+const HOME_FROM = 'DSH-FISH', HOME_TO = 'FISH Dock';
+/// #27 P0 后半：比上面那对更早的遗留 —— %LOCALAPPDATA%\FISH\worker.json。
+/// 它不是一个产品的数据根，只是旧版本留在那里的一个文件：新数据根就绪之后才删，
+/// 删文件本身，`FISH` 目录空了才顺手收掉（里面还有别人的东西就原样留着）。
+const STALE_DIR = 'FISH', STALE_FILE = 'worker.json';
+/// 显式指定过数据目录时（用户自己选的家），安装器一律不碰任何目录。
+/// 只认 2.0.0 的覆盖名：宿主已经不再读 DSH_FISH_RUNTIME_HOME，机器上残留那个
+/// 变量的用户仍然是「用默认新根」，把它算进来会让 #27-D 静默失效
+/// （旧目录既不迁也不删）。installer.test.mjs 有一条断言盯着这份名单。
+const HOME_OVERRIDES = ['FISH_DOCK_APP_HOME'];
+/// 迁移只在安装器显式要求时发生：默认不动手，跑测试或手工调用都不会迁。
+const MIGRATE_FLAG = '--migrate-home', MIGRATE_SKIP = 'FISH_DOCK_SKIP_HOME_MIGRATION';
+/// WebView2 的子进程可能还在往旧目录里写，复制期间摘要对不上是常事：
+/// 每次失败都把半成品新目录整个删掉、旧目录原样留下，再重试。
+const MIGRATE_ATTEMPTS = 3;
 // 细节日志：UTF-8 带 BOM，换行用 CRLF，一句一行；写不进去也不影响安装。
 // BOM 只写一次：记事本靠它认出 UTF-8，Windows PowerShell 5.1 的 Get-Content 也一样。
 function detail(root) {
@@ -33,9 +56,14 @@ function detail(root) {
 const ascii = text => String(text).replace(/[^\x20-\x7e]+/g, '?');
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const canonical = name => process.platform === 'win32' ? path.resolve(name).toLowerCase() : path.resolve(name);
+/// 安装根下的主程序名：2.0.0 起是 FISH-Dock.exe（#27 P2），旧发行名留在名单里
+/// 是为了读得动旧归属清单（升级时旧清单里写的就是 DSH-FISH.exe / wakuwaku.exe），
+/// 也为了把便携版旁边那份旧传感器助手（wakuwaku-sensors.exe）当成受管文件收走：
+/// 它不在新清单里，「旧清单有、新清单无」正好删掉，不留两个助手（#t16）。
+const EXE_NAMES = ['FISH-Dock.exe', 'DSH-FISH.exe', 'wakuwaku.exe', 'wakuwaku-sensors.exe'];
 function relative(name) {
   if (typeof name !== 'string' || name.includes('\\') || name.includes(':') || name.split('/').some(p => !p || p === '.' || p === '..' || /[<>"|?*\x00-\x1f]/.test(p) || /[. ]$/.test(p) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p))) throw Error('安装清单路径无效');
-  if (!['DSH-FISH.exe', 'wakuwaku.exe', 'install-update.cjs', 'install-stop.ps1'].includes(name) && !name.startsWith('resources/')) throw Error('安装清单路径不属于发行资源');
+  if (![...EXE_NAMES, 'install-update.cjs', 'install-stop.ps1'].includes(name) && !name.startsWith('resources/')) throw Error('安装清单路径不属于发行资源');
   return name;
 }
 // 一次安装内父目录只检查一次；缓存不跨安装，文件自身始终重新检查。
@@ -109,7 +137,7 @@ function legacy(root, io, target, metrics) {
   const rows = m.files.map(f => ({ ...f, path: relative('resources/' + f.path) }));
   for (const f of rows) if (!/^[a-f0-9]{64}$/.test(f.sha256) || !Number.isSafeInteger(f.bytes)) throw Error('旧运行资源清单摘要无效');
   rows.push({ path: 'resources/manifest.json', ...hashFile(io, file, metrics) });
-  for (const name of ['DSH-FISH.exe', 'wakuwaku.exe']) {
+  for (const name of EXE_NAMES) {
     const p = target(name); if (!io.existsSync(p)) continue;
     const fd = io.openSync(p, 'r'), head = Buffer.alloc(2); try { io.readSync(fd, head, 0, 2, 0); } finally { io.closeSync(fd); }
     if (head[0] === 77 && head[1] === 90) rows.push({ path: name, ...hashFile(io, p, metrics) });
@@ -123,6 +151,38 @@ function loadState(root, old, io, target) {
     const record = JSON.parse(io.readFileSync(file, 'utf8'));
     return record.schema === 1 && record.root === canonical(root) && record.manifest === old.hash && record.files && typeof record.files === 'object' ? record : null;
   } catch { return null; }
+}
+/// 更新之后 `resources/` 下不该留下任何空目录：旧版本的运行时目录、换版后没人用的
+/// 子目录、以及只有目录没有文件的层级（NSIS 的 `File /r` 会造出这种空壳，旧清单里
+/// 从来没有它们的记录，所以「旧清单有、新清单无」这条规则管不到它们）。
+/// 判据只有一条：**空**。这一轮更新只搬清单里的文件，新版本要用的目录里必然有文件，
+/// 空着就说明它是上一版留下的壳；`resources/` 顶层本身不删（安装器要它）。
+/// 链接一律跳过：跟着链接走会把树外的东西算进来，也可能删掉别处的东西。
+/// 目录被占用（句柄、WebView2 子进程）时删不掉，留着即可，下一次更新再收。
+function pruneEmpty(root, io) {
+  const resources = path.join(root, 'resources');
+  let rootMeta; try { rootMeta = io.lstatSync(resources); } catch { return []; }
+  if (!rootMeta.isDirectory() || rootMeta.isSymbolicLink()) return [];
+  const dirs = [];
+  (function walk(dir, depth) {
+    for (const entry of io.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const full = path.join(dir, entry.name);
+      dirs.push({ full, depth: depth + 1, name: path.relative(root, full).split(path.sep).join('/') });
+      walk(full, depth + 1);
+    }
+  })(resources, 0);
+  // 最深的先收：父目录只有等子目录删完才可能变空。
+  dirs.sort((a, b) => b.depth - a.depth || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const pruned = [];
+  for (const { full, name } of dirs) {
+    let meta; try { meta = io.lstatSync(full); } catch { continue; }
+    if (!meta.isDirectory() || meta.isSymbolicLink()) continue;
+    let entries; try { entries = io.readdirSync(full); } catch { continue; }
+    if (entries.length) continue;
+    try { io.rmdirSync(full); pruned.push(name); } catch { continue; }
+  }
+  return pruned;
 }
 function update(stage, root, io = fs, options = {}) {
   const start = Date.now(), metrics = { hashedBytes: 0, hashedFiles: 0, cachedFiles: 0, movedFiles: 0, copiedFiles: 0 };
@@ -141,8 +201,21 @@ function update(stage, root, io = fs, options = {}) {
     if (force || percent >= lastPercent + 10 || Date.now() - lastReport >= 1000) { report(`${label} ${done}/${total} (${percent}%)`); lastPercent = percent; lastReport = Date.now(); }
   };
   io.mkdirSync(root, { recursive: true }); const target = resolver(root, io); recover(root, io);
-  const old = manifest(root, io, target), previous = old ? old.files : legacy(root, io, target, metrics), receipt = loadState(root, old, io, target);
-  const prior = new Map(previous.map(f => [f.path.toLowerCase(), f])), good = new Map(), changed = [], names = new Set(next.files.map(f => f.path.toLowerCase()));
+  const old = manifest(root, io, target), previous = old ? old.files.slice() : legacy(root, io, target, metrics), receipt = loadState(root, old, io, target);
+  const names = new Set(next.files.map(f => f.path.toLowerCase()));
+  // #t18 / t17 FAIL-3：旧发行名（DSH-FISH.exe / wakuwaku.exe / wakuwaku-sensors.exe）
+  // 不能只在「没有 install-manifest.json」时才扫。有清单的安装里，旧 exe 可能只被清单
+  // 记了一个、旁边还摆着另几个（1.2.3 的清单只记 DSH-FISH.exe）：以前它们原样留着，
+  // 升级后安装目录里同时有几个能启动的主程序。这里把「磁盘上确实存在、且新清单不再
+  // 发行」的旧 exe 无条件并进受管清单，后面「旧清单有、新清单无」的规则就会收走它们。
+  const known = new Set(previous.map(f => f.path.toLowerCase()));
+  for (const name of EXE_NAMES) {
+    const key = name.toLowerCase();
+    if (names.has(key) || known.has(key)) continue;
+    let full; try { full = target(name); } catch { continue; }
+    if (stat(io, full)) { previous.push({ path: name }); known.add(key); }
+  }
+  const prior = new Map(previous.map(f => [f.path.toLowerCase(), f])), good = new Map(), changed = [];
   function matches(file, f, allowCache) {
     const meta = stat(io, file); if (!meta || !meta.isFile() || meta.size !== BigInt(f.bytes)) return false;
     const cached = allowCache && receipt?.files[f.path];
@@ -163,8 +236,23 @@ function update(stage, root, io = fs, options = {}) {
     }
     progress(SAY.verify, index + 1, next.files.length);
   }
-  const obsolete = previous.filter(f => !names.has(f.path.toLowerCase())).filter(f => matches(target(f.path), f, true));
-  const entries = [...changed, ...obsolete, { path: MANIFEST }, { path: STATE }].map(f => ({ path: f.path, existed: io.existsSync(target(f.path)) }));
+  // ── 受管旧文件：旧归属清单里有、新清单里没有 → 一律清掉 ──────────────────
+  // 这里**不按摘要过滤**。上一版安装中途被打断、或程序自己改写过同名文件时，
+  // 现场内容与旧清单记的摘要对不上 —— 那恰恰是最常见的残留来源；按摘要过滤
+  // 等于把它们永久留在安装目录里，也就是「旧版本文件越攒越多」。
+  // 只有一种情形不动：该路径现在不是普通文件（目录、链接、设备等）—— 那已经
+  // 不是我们放下的那个文件，删它就是越界。跳过并记一行，不中断安装。
+  const obsolete = previous.filter(f => !names.has(f.path.toLowerCase()));
+  const stale = [], occupied = [], presentBefore = new Set();
+  for (const f of obsolete) {
+    let full;
+    try { full = target(f.path); } catch { occupied.push(f); continue; }
+    const meta = stat(io, full);
+    if (meta && (!meta.isFile() || meta.isSymbolicLink())) { occupied.push(f); continue; }
+    if (meta) presentBefore.add(f.path);
+    stale.push(f);
+  }
+  const entries = [...changed, ...stale, { path: MANIFEST }, { path: STATE }].map(f => ({ path: f.path, existed: io.existsSync(target(f.path)) }));
   const dir = path.join(root, TX), staging = path.join(dir, 'new');
   io.mkdirSync(path.join(dir, 'old'), { recursive: true }); io.mkdirSync(staging, { recursive: true });
   const journal = { schema: 1, committed: false, phase: 'preparing', entries };
@@ -206,12 +294,123 @@ function update(stage, root, io = fs, options = {}) {
   }
   recover(root, io);
   if (ownedStage && options.cleanupStage !== false) { resolver(stage, io); io.rmSync(stage, { recursive: true, force: true }); }
-  const result = { version: next.version, replaced: changed.length, removed: obsolete.length, needsWebviewAcl: next.files.some(f => f.path.startsWith('resources/webview2/')) && (!receipt || changed.some(f => f.path.startsWith('resources/webview2/'))), ...metrics, elapsedMs: Date.now() - start };
+  // 旧文件已经随事务目录一起清掉，这里只负责「记账」与「收拾空壳」：
+  // 删掉的个数按「更新前在、更新后不在」数，不是按计划数；空目录把 resources/ 整棵
+  // 走一遍（判据只有「空」，见 pruneEmpty）。
+  // 这一步是新版本已经装好之后的收尾：出错只记一行，绝不把装好的版本判成失败。
+  let cleaned = 0, pruned = [];
+  try {
+    cleaned = stale.filter(f => presentBefore.has(f.path) && !io.existsSync(target(f.path))).length;
+    pruned = pruneEmpty(root, io);
+  } catch { /* 收尾失败不影响已提交的安装，下一次更新会接着收 */ }
+  log(`清理 ${cleaned} 个旧文件（旧归属清单里 ${obsolete.length} 个不再随新版本发行${occupied.length ? `，其中 ${occupied.length} 个路径已被目录或链接占据、按无归属内容保留` : ''}）`);
+  if (pruned.length) log(`回收 ${pruned.length} 个空目录：${pruned.join('、')}`);
+  if (occupied.length) log('这些路径现在不是普通文件，未删除：' + occupied.map(f => f.path).join('、'));
+  const result = { version: next.version, replaced: changed.length, removed: cleaned, obsolete: obsolete.length, prunedDirs: pruned.length, occupied: occupied.length, needsWebviewAcl: next.files.some(f => f.path.startsWith('resources/webview2/')) && (!receipt || changed.some(f => f.path.startsWith('resources/webview2/'))), ...metrics, elapsedMs: Date.now() - start };
   report(SAY.done(result.replaced, metrics.cachedFiles, (result.elapsedMs / 1000).toFixed(1)));
   log(`安装完成：替换 ${result.replaced} 个文件，复用 ${metrics.cachedFiles} 个，耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒`);
   return result;
 }
-module.exports = { update, recover };
+/// 一棵目录树里的全部普通文件：相对路径（用 `/` 分隔）、字节数与 SHA-256，按路径排序。
+/// 迁移前后各盘一次，两份清单必须逐条对上，才敢删旧目录。
+/// 链接（含 Windows 的 junction）与非普通文件一律拒绝：跟着链接走会把树外的东西也算进来。
+function inventoryTree(root, io = fs) {
+  const rows = [];
+  (function walk(dir) {
+    for (const entry of io.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name), name = path.relative(root, full).split(path.sep).join('/');
+      if (entry.isSymbolicLink()) throw Error('用户数据目录里有链接，已停止迁移：' + name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!entry.isFile()) throw Error('用户数据目录里有非普通文件，已停止迁移：' + name);
+      const { bytes, sha256 } = hashFile(io, full);
+      rows.push({ path: name, bytes, sha256 });
+    }
+  })(root);
+  return rows.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+const sameInventory = (a, b) => a.length === b.length && a.every((f, i) => f.path === b[i].path && f.bytes === b[i].bytes && f.sha256 === b[i].sha256);
+/// 要迁移的两个目录。返回 null 就是「这次不动任何目录」：
+/// 显式指定过数据目录、被开关关掉、或连 %LOCALAPPDATA% 都读不到。
+function homePaths(env = process.env) {
+  const off = String(env[MIGRATE_SKIP] ?? '').trim().toLowerCase();
+  if (off && off !== '0' && off !== 'false') return null;
+  if (HOME_OVERRIDES.some(name => env[name] && String(env[name]).length)) return null;
+  const local = env.LOCALAPPDATA;
+  if (!local) return null;
+  const from = path.join(local, HOME_FROM), to = path.join(local, HOME_TO);
+  if (canonical(from) === canonical(to)) return null;
+  return { from, to };
+}
+/// #27-D：迁移完成后直接删掉旧目录，不留回滚副本（任务清单「遗留目录迁完直接删」）。
+/// 顺序是「整树盘点 → 逐个复制 → 逐个核对摘要 → 两份清单对齐 → 才删旧目录」。
+/// 任何一步不对：把刚建出来的新目录整个删掉、旧目录一个字节都不动，然后报错。
+/// 删旧目录本身失败不算迁移失败（数据已经在新目录里核对过了），只记一行、返回 removed:false。
+function migrateHome(from, to, io = fs, options = {}) {
+  const report = typeof options.report === 'function' ? options.report : () => {};
+  const log = options.log || (() => {});
+  const attempts = Math.max(1, options.attempts ?? MIGRATE_ATTEMPTS);
+  // 只迁这一对目录名，且必须在同一个父目录下：挡住把别的路径喂进来的调用。
+  if (path.basename(from) !== HOME_FROM || path.basename(to) !== HOME_TO) throw Error('用户数据迁移的目录名不对：' + from + ' → ' + to);
+  if (canonical(path.dirname(from)) !== canonical(path.dirname(to))) throw Error('用户数据迁移要求两个目录在同一个父目录下');
+  if (!io.existsSync(from)) return { migrated: false, removed: false, reason: 'absent', files: 0 };
+  if (io.existsSync(to)) { report(SAY.kept); return { migrated: false, removed: false, reason: 'target-exists', files: 0 }; }
+  const start = Date.now();
+  report(SAY.migrate);
+  let last = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const before = inventoryTree(from, io);
+      io.mkdirSync(to, { recursive: true });
+      try {
+        for (const f of before) {
+          const parts = f.path.split('/'), source = path.join(from, ...parts), dest = path.join(to, ...parts);
+          io.mkdirSync(path.dirname(dest), { recursive: true });
+          io.copyFileSync(source, dest);
+          const { bytes, sha256 } = hashFile(io, dest);
+          if (bytes !== f.bytes || sha256 !== f.sha256) throw Error('用户数据迁移后摘要不一致：' + f.path);
+        }
+        if (!sameInventory(before, inventoryTree(to, io))) throw Error('用户数据迁移后的清单与旧目录不一致');
+      } catch (error) {
+        // 半成品新目录整个删掉：留着它，下一次就会被「新目录已存在」挡住，永远迁不完。
+        try { io.rmSync(to, { recursive: true, force: true }); } catch { /* 旧目录完好，这一份残骸由下一次重试或用户手动清 */ }
+        throw error;
+      }
+      let removed = false;
+      try { io.rmSync(from, { recursive: true, force: true }); removed = !io.existsSync(from); }
+      catch (error) { log('旧用户数据目录删除失败（数据已迁到新目录并核对过，可稍后手动删除）：' + error.message); }
+      if (!removed) log('旧用户数据目录仍在（可能有文件被占用）：' + from);
+      report(SAY.migrated(before.length, ((Date.now() - start) / 1000).toFixed(1)));
+      return { migrated: true, removed, reason: removed ? 'removed' : 'delete-failed', files: before.length, from, to, attempts: attempt };
+    } catch (error) {
+      last = error;
+      log(`用户数据迁移第 ${attempt}/${attempts} 次未成功：${error.message}`);
+    }
+  }
+  report(SAY.migrateFailed(last.message));
+  throw last;
+}
+/// #27 P0 后半：%LOCALAPPDATA%\FISH\worker.json 这个更早的遗留。
+/// 前提是「新数据根已就绪」—— %LOCALAPPDATA%\FISH Dock 真的在，才认为迁移或
+/// 落位已经完成，删这个旧文件；不在就一个字节都不碰。三闸照旧：显式指定过数据
+/// 目录、被 FISH_DOCK_SKIP_HOME_MIGRATION 关掉、或读不到 LOCALAPPDATA 时不动。
+/// 只删这一个文件；`FISH` 目录空了才顺手收，里面还有别人的东西就留着。
+function staleWorker(env = process.env, io = fs, options = {}) {
+  const log = typeof options.log === 'function' ? options.log : () => {};
+  const home = homePaths(env);
+  if (!home) return { removed: false, reason: 'skipped' };
+  if (!io.existsSync(home.to)) return { removed: false, reason: 'no-new-root' };
+  const folder = path.join(path.dirname(home.to), STALE_DIR), file = path.join(folder, STALE_FILE);
+  if (!io.existsSync(file)) return { removed: false, reason: 'absent' };
+  try {
+    io.rmSync(file, { force: true });
+    try { if (io.readdirSync(folder).length === 0) io.rmdirSync(folder); } catch { /* 目录还在用就留着 */ }
+    return { removed: true, reason: 'removed', file };
+  } catch (error) {
+    log('旧的 %LOCALAPPDATA%\\' + STALE_DIR + '\\' + STALE_FILE + ' 删除失败（可稍后手动删除）：' + error.message);
+    return { removed: false, reason: 'delete-failed' };
+  }
+}
+module.exports = { update, recover, migrateHome, homePaths, inventoryTree, staleWorker, HOME_FROM, HOME_TO, HOME_OVERRIDES, MIGRATE_FLAG, MIGRATE_SKIP, MIGRATE_ATTEMPTS, STALE_DIR, STALE_FILE };
 if (require.main === module) {
   // 安装器日志（nsExec 转出去的那一屏）只用 ASCII；细节写进 install.log。
   // 出口都过 ascii()：连报错里带的中文路径也不会漏到那一屏上。
@@ -230,8 +429,32 @@ if (require.main === module) {
       log('正在结束本安装的旧进程…');
       require('node:child_process').execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', stop, '-InstallRoot', root], { stdio: 'inherit', windowsHide: true });
     }
-    const result = update(stage, root, fs, { report: text => console.log(ascii(text)), log, cleanupStage: false });
+    // 安装器那一屏只有这一个出口：进度、迁移与结果都从这里出去，全都过 ascii()。
+    const report = text => console.log(ascii(text));
+    const result = update(stage, root, fs, { report, log, cleanupStage: false });
     if (result.needsWebviewAcl) fs.writeFileSync(path.join(stage, 'webview-acl-needed'), '1');
+    // #27-D：文件事务提交之后才迁移用户数据目录，且只有安装器显式传了 --migrate-home 才动手。
+    // 迁移失败不回滚已经装好的程序：旧目录原样保留，落一个标记文件让安装器把话说清楚，
+    // 退出码仍是 0（重跑一次安装程序就能补上）。
+    if (process.argv.includes(MIGRATE_FLAG)) {
+      const home = homePaths();
+      if (!home) {
+        result.home = { migrated: false, removed: false, reason: 'skipped', files: 0 };
+        log('未迁移用户数据目录：显式指定了数据目录、被 FISH_DOCK_SKIP_HOME_MIGRATION 关掉，或读不到 LOCALAPPDATA。');
+      } else {
+        try {
+          result.home = migrateHome(home.from, home.to, fs, { report, log });
+          log(`用户数据目录迁移完成：${home.from} → ${home.to}（${result.home.files} 个文件已核对，旧目录${result.home.removed ? '已删除' : '仍在，可稍后手动删除'}）`);
+        } catch (e) {
+          result.home = { migrated: false, removed: false, reason: 'failed', files: 0, from: home.from, to: home.to };
+          log('用户数据目录迁移未完成，旧目录已原样保留：' + e.message);
+          try { fs.writeFileSync(path.join(stage, 'home-migration-failed'), '1'); } catch {}
+        }
+      }
+      // 新数据根就绪之后，收掉更早遗留的 %LOCALAPPDATA%\FISH\worker.json（#27 P0）。
+      result.staleWorker = staleWorker(process.env, fs, { log });
+      if (result.staleWorker.removed) log('已删除更早遗留的 %LOCALAPPDATA%\\FISH\\worker.json');
+    }
     console.log(ascii(JSON.stringify(result)));
   } catch (e) {
     console.error(ascii(SAY.failed(e.message)));

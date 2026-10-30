@@ -249,11 +249,38 @@ pub enum Way {
     Straight,
 }
 
-// Connecting at most so long, and the answer's head in so long after: a
-// way that goes nowhere (one straight through a VPN's TUN may) fails in
-// seconds, not at the end of a download's ten minutes.
-const CONNECT: Duration = Duration::from_secs(15);
-const HEAD: Duration = Duration::from_secs(30);
+// The layers of every call's budget now live in crate::config (single entry,
+// red line 5): the values and their environment overrides are there; this
+// module keeps the public names so call sites stay put, and delegates.
+// CONNECT and HEAD clamp to the whole call at use, in agent_with.
+
+// A whole number of milliseconds from an override text (or none), or the
+// default when it is empty, not a number, or out of range. Kept here (public
+// to the crate) so tests and updates.rs inject values instead of mutating
+// process globals (red line 9); the parsing itself is config::ms_of.
+pub(crate) fn timeout_ms_of(text: Option<&str>, default_ms: u64) -> Duration {
+    crate::config::ms_of(text, default_ms)
+}
+
+pub fn connect_timeout() -> Duration {
+    crate::config::net_connect_timeout()
+}
+
+pub fn head_timeout() -> Duration {
+    crate::config::net_head_timeout()
+}
+
+pub fn pet_timeout() -> Duration {
+    crate::config::pet_timeout()
+}
+
+pub fn update_timeout() -> Duration {
+    crate::config::update_timeout()
+}
+
+pub fn auth_timeout() -> Duration {
+    crate::config::auth_timeout()
+}
 
 impl Way {
     // For the log: "through Windows' proxy http://127.0.0.1:7890",
@@ -276,16 +303,19 @@ impl Way {
         }
     }
 
-    // An agent for it, a whole call at most `timeout` (and CONNECT, HEAD),
-    // its config as `tweak` makes it; none for a proxy ureq cannot take.
+    // An agent for it, a whole call at most `timeout` (and CONNECT, HEAD as
+    // configured), its config as `tweak` makes it; none for a proxy ureq
+    // cannot take.
     pub fn agent_with(&self, timeout: Duration, tweak: impl FnOnce(ConfigBuilder<AgentScope>) -> ConfigBuilder<AgentScope>) -> Option<ureq::Agent> {
+        let connect = connect_timeout().min(timeout);
+        let head = head_timeout().min(timeout);
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(timeout))
-            .timeout_connect(Some(CONNECT.min(timeout)))
-            .timeout_recv_response(Some(HEAD.min(timeout)));
+            .timeout_connect(Some(connect))
+            .timeout_recv_response(Some(head));
         Some(match self {
             Way::Through(p) => tweak(config.proxy(Some(ureq::Proxy::new(p).ok()?))).build().new_agent(),
-            Way::Manual(p) => crate::mail::proxy::through(p, CONNECT.min(timeout), tweak(config)),
+            Way::Manual(p) => crate::mail::proxy::through(p, connect, tweak(config)),
             Way::Straight => tweak(config.proxy(None)).build().new_agent(),
             Way::Default => tweak(config).build().new_agent(),
         })
@@ -346,12 +376,25 @@ pub fn web_ways_by(url: &str, via: &Via) -> Vec<Way> {
 // a proxy listening on this computer at a port such apps use (Clash 7890,
 // Clash Verge 7897, v2rayN 10809 HTTP, 10808 SOCKS), for the page to
 // suggest: `listening`, { address, kind } or null.
+//
+// A proxy's port is probed before GitHub is asked through it (#21-B): a
+// port nothing listens on says so at once — "代理 {addr} 没有开" / "the
+// proxy at {addr} is not listening" — instead of a tunnel's words; the
+// straight ways (Default, Straight) are probed by their own call.
 pub fn test(via: &Via) -> Value {
     const URL: &str = "https://github.com/";
     let mut failed = json!({ "ok": false, "via": null, "error": "no way" });
     for way in web_ways_by(URL, via) {
+        // The proxy's port first: nothing listening there, that is the
+        // answer (the person's own words, not a tunnel's).
+        if let (Some(proxy), Some(address)) = (way_proxy(&way), way.proxy_at()) {
+            if !port_open(&proxy, crate::config::proxy_probe_timeout()) {
+                failed = json!({ "ok": false, "via": address, "error": port_closed_text(&address), "portClosed": true });
+                continue;
+            }
+        }
         let started = std::time::Instant::now();
-        let Some(agent) = way.agent_with(Duration::from_secs(10), |c| c.http_status_as_error(false).max_redirects(0)) else { continue };
+        let Some(agent) = way.agent_with(crate::config::proxy_test_timeout(), |c| c.http_status_as_error(false).max_redirects(0)) else { continue };
         match agent.get(URL).header("user-agent", &format!("wakuwaku/{}", crate::updates::current())).call() {
             Ok(_) => return json!({ "ok": true, "via": way.proxy_at(), "ms": started.elapsed().as_millis() as u64 }),
             Err(e) => failed = json!({ "ok": false, "via": way.proxy_at(), "error": e.to_string() }),
@@ -361,9 +404,38 @@ pub fn test(via: &Via) -> Value {
     failed
 }
 
+// The proxy a way goes through, when it goes through one.
+fn way_proxy(way: &Way) -> Option<Proxy> {
+    match way {
+        Way::Through(url) => Proxy::parse(url, Kind::Http),
+        Way::Manual(p) => Some(p.clone()),
+        Way::Default | Way::Straight => None,
+    }
+}
+
+// Whether a proxy's port answers a TCP connect: it being closed is the
+// first thing to know of a manual or Windows proxy (the tunnel's error for
+// it says nothing of the port). A name is looked up (or the local host,
+// where the name does not resolve here: this computer's own proxies are
+// what the page mostly sets).
+pub(crate) fn port_open(proxy: &Proxy, wait: Duration) -> bool {
+    use std::net::ToSocketAddrs;
+    let addrs = (proxy.host.as_str(), proxy.port).to_socket_addrs().map(|it| it.collect::<Vec<_>>()).unwrap_or_default();
+    let addrs = if addrs.is_empty() { vec![std::net::SocketAddr::from(([127, 0, 0, 1], proxy.port))] } else { addrs };
+    addrs.iter().any(|addr| std::net::TcpStream::connect_timeout(addr, wait).is_ok())
+}
+
+// What the page says of a proxy's port nothing answers on.
+fn port_closed_text(address: &str) -> String {
+    match crate::i18n::lang("") {
+        "zh" => format!("代理 {address} 没有开：这个端口上没有程序在听，先启动代理软件，或换一个地址"),
+        _ => format!("the proxy at {address} is not listening: nothing answers on that port — start the proxy app, or try another address"),
+    }
+}
+
 fn listening() -> Option<(u16, Kind)> {
     [(7890, Kind::Http), (7897, Kind::Http), (10809, Kind::Http), (10808, Kind::Socks5)].into_iter().find(|(port, _)| {
-        std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], *port)), Duration::from_millis(300)).is_ok()
+        std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], *port)), crate::config::proxy_connect_timeout()).is_ok()
     })
 }
 
@@ -463,5 +535,37 @@ mod tests {
         assert_eq!(Way::Through("http://127.0.0.1:7890".into()).proxy_at().as_deref(), Some("127.0.0.1:7890"));
         assert_eq!(Via::of(&json!({ "mode": "manual", "kind": "socks5", "address": "127.0.0.1:10808" })).map(|v| v.json()), Some(json!({ "mode": "manual", "kind": "socks5", "address": "127.0.0.1:10808" })));
         assert_eq!(Via::of(&json!({ "mode": "follow" })), None);
+    }
+
+    // #21-B：netProxy 的端口先探测——开着与没开，两种结论（测试自己起一个
+    // 监听端口当「开着」，另挑一个没程序听的端口当「没开」）。
+    #[test]
+    fn a_proxys_port_is_probed_before_github_is_asked() {
+        use std::net::TcpListener;
+        // 开着：本测试进程听上它。
+        let server = TcpListener::bind(("127.0.0.1", 0)).expect("listen");
+        let port = server.local_addr().expect("addr").port();
+        let open = Proxy { kind: Kind::Http, host: "127.0.0.1".into(), port };
+        assert!(port_open(&open, Duration::from_millis(600)), "监听中的端口应判为开");
+        // 没开：找一个人工端口，先确认没有程序在听。
+        let closed = 'found: {
+            for probe in 40000u16..40100 {
+                let p = Proxy { kind: Kind::Http, host: "127.0.0.1".into(), port: probe };
+                if TcpListener::bind(("127.0.0.1", probe)).is_err() {
+                    // 已被占（可能是 TIME_WAIT 存根）：跳过。
+                    continue;
+                }
+                break 'found p;
+            }
+            panic!("找不到一个空闲端口");
+        };
+        assert!(!port_open(&closed, Duration::from_millis(300)), "无人监听的端口应判为关");
+        // 代理两种说法都在：直连一句话，代理失败一句话。
+        let zh = port_closed_text("127.0.0.1:7890");
+        assert!(zh.contains("7890") && zh.contains("没有开"), "{zh}");
+        let at = Way::Manual(Proxy { kind: Kind::Socks5, host: "127.0.0.1".into(), port: 10808 });
+        assert_eq!(way_proxy(&at).map(|p| p.at()).as_deref(), Some("127.0.0.1:10808"));
+        assert_eq!(way_proxy(&Way::Straight), None);
+        assert_eq!(way_proxy(&Way::Through("http://127.0.0.1:7890".into())).map(|p| p.port), Some(7890));
     }
 }

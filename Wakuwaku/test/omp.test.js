@@ -205,7 +205,9 @@ test('her not up as a session starts: her exe asked to start her, saying it is o
     await settle()
     assert.equal(runs.length, 1)
     assert.equal(runs[0].exe, 'C:\\waku\\pet\\wakuwaku.exe')
-    assert.deepEqual(runs[0].args, ['--wakuwaku-ensure-running', 'omp', 'resume'])
+    // #t18：写出名是 --fish-dock-ensure-running（旧 --wakuwaku-ensure-running 只在
+    // 读取侧兼容，见 src-tauri/src/flags.rs 的别名表）。
+    assert.deepEqual(runs[0].args, ['--fish-dock-ensure-running', 'omp', 'resume'])
     assert.equal(runs[0].options.env.WAKUWAKU_PORT, String(port))
     assert.equal(runs[0].options.env.WAKUWAKU_USER_DATA, 'C:\\waku\\data')
     assert.equal(runs[0].options.detached, true)

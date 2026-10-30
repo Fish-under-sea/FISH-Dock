@@ -79,6 +79,20 @@ pub fn parse(hex: &str) -> Option<[u8; 3]> {
     Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
 }
 
+// "#rrggbb" 的三种 Windows 来源合成一个颜色，给「跟随系统」用：
+//   colorization  DWM 的 ColorizationColor，0xAARRGGBB（帧色，最接近用户看到的）
+//   dwm_accent    DWM 的 AccentColor，0xFFBBGGRR
+//   menu          Explorer\Accent 的 AccentColorMenu，0xFFBBGGRR（用户挑的那个）
+// 从上往下取第一个有颜色的；全没有（裸配置）就是 None —— 前端据此只提示原因，
+// 仍然让自定义取色器可用。
+pub fn accent_from(colorization: Option<u32>, dwm_accent: Option<u32>, menu: Option<u32>) -> Option<String> {
+    let argb = colorization
+        .filter(|v| v & 0x00ff_ffff != 0)
+        .map(|v| ((v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff));
+    let abgr = dwm_accent.or(menu).map(|v| (v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff));
+    argb.or(abgr).map(|(r, g, b)| format!("#{r:02x}{g:02x}{b:02x}"))
+}
+
 #[cfg(windows)]
 mod imp {
     use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
@@ -205,6 +219,20 @@ mod imp {
         Some(format!("#{:02x}{:02x}{:02x}", v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff))
     }
 
+    // System 的强调色，给「跟随系统」（accent_from 的说明见上）：DWM 的
+    // ColorizationColor / AccentColor（ColorizationOpaqueBlend 只影响透明度，
+    // 不参与取色），再退到 Explorer 的 AccentColorMenu。
+    pub fn system_accent() -> Option<String> {
+        let dwm = RegKey::predef(HKEY_CURRENT_USER).open_subkey(r"Software\Microsoft\Windows\DWM").ok();
+        let colorization: Option<u32> = dwm.as_ref().and_then(|k| k.get_value("ColorizationColor").ok());
+        let accent: Option<u32> = dwm.as_ref().and_then(|k| k.get_value("AccentColor").ok());
+        let menu = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent")
+            .ok()
+            .and_then(|k| k.get_value::<u32, _>("AccentColorMenu").ok());
+        super::accent_from(colorization, accent, menu)
+    }
+
     // The registry's DWM colours (its frames' and their afterglow, its
     // accent), and its frames' as read there.
     fn write_dwm_registry(rgb: [u8; 3], argb: u32) {
@@ -290,16 +318,20 @@ mod imp {
     pub fn current_accent() -> Option<String> {
         None
     }
+    // 「跟随系统」在没有 Windows 的地方没有可读的强调色。
+    pub fn system_accent() -> Option<String> {
+        None
+    }
     pub fn set_accent(_rgb: [u8; 3], _later: impl Fn(String) + Send + 'static) -> String {
         String::new()
     }
 }
 
-pub use imp::{current_accent, set_accent, set_mode};
+pub use imp::{set_accent, set_mode, system_accent};
 
 #[cfg(test)]
 mod tests {
-    use super::{palette, parse};
+    use super::{accent_from, palette, parse};
 
     #[test]
     fn palette_keeps_the_colour_in_the_middle_and_shades_round_it() {
@@ -317,5 +349,19 @@ mod tests {
         assert_eq!(parse("#ff8c00"), Some([0xff, 0x8c, 0x00]));
         assert_eq!(parse("ff8c00"), None);
         assert_eq!(parse("#fff"), None);
+    }
+
+    #[test]
+    fn system_accent_prefers_dwm_and_falls_back_to_explorer() {
+        // DWM ColorizationColor 0xAABBGGRR? 不：它是 0xAARRGGBB。
+        assert_eq!(accent_from(Some(0xc400_78d7), None, None).as_deref(), Some("#0078d7"));
+        // 只有 AccentColor（0xFFBBGGRR）。
+        assert_eq!(accent_from(None, Some(0xffd7_7800), None).as_deref(), Some("#0078d7"));
+        // 只有 Explorer 的 AccentColorMenu。
+        assert_eq!(accent_from(None, None, Some(0xffd7_7800)).as_deref(), Some("#0078d7"));
+        // 全没有：不编一个颜色出来。
+        assert_eq!(accent_from(None, None, None), None);
+        // 全黑（0）当作没设。
+        assert_eq!(accent_from(Some(0), None, None), None);
     }
 }

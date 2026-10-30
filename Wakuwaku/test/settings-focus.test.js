@@ -6,7 +6,7 @@ const { test } = require('node:test')
 
 const styles = fs.readFileSync(path.join(__dirname, '../src/pet/settings.css'), 'utf8')
 test('确认弹窗尺寸紧凑，遮罩不把整个 Dock 背景压暗', () => {
-  for (const selector of ['s-confirm-dialog', 's-fullscreen-dialog']) {
+  for (const selector of ['s-confirm-dialog']) {
     const rule = styles.match(new RegExp(`#island-settings \\.${selector} \\{([^}]+)\\}`))?.[1] || ''
     assert.match(rule, /width:\s*min\(360px, calc\(100vw - 40px\)\)/)
     assert.match(rule, /max-height:\s*min\(70vh, calc\(100vh - 32px\)\)/)
@@ -38,7 +38,7 @@ function page() {
     extensionPage: { park() {} },
     extensionPanel: { pages:()=>[{key:'fish.ofm/main'}], load:async()=>{} },
     draw: () => calls.push('draw'), relayout() {}, showPart() {}, loadGallery() {},
-    cardShows: () => false, openLetter() {}, syncFullscreenPrompt() {},
+    cardShows: () => false, openLetter() {},
     window: { pet: {
       keyboard() {}, settingsClosed() {}, settings: {
         get: () => new Promise(resolve => replies.push(() => resolve(snapshot()))),
@@ -48,7 +48,7 @@ function page() {
     } },
   })
   vm.runInContext(`let tab = 'now', snap = null, isOpen = false, openedAt = 0, clockTimer = 0;
-    let modelFocus = false, openRevision = 0, confirmActive = null, confirmQueue = [], welcomeOpen, partToShow, letterToOpen, thumbTimers = [], agentOpen, othersOpen, holdCustom;
+    let openRevision = 0, confirmActive = null, confirmQueue = [], welcomeOpen, partToShow, letterToOpen, thumbTimers = [], agentOpen, othersOpen, holdCustom;
     // 密码的显示按钮（#17）：关闭时清掉，下次打开又是隐藏的。
     const eyeShown = new Set();
     const PART_OF = {}, TABS = ['now', 'fish.ofm/main', 'mail'], tick = () => {};
@@ -94,4 +94,12 @@ test('其他标签页打开关闭不改变窗口锁定置顶偏好', () => {
   const p = page()
   p.open('mail'); p.close()
   assert.deepEqual(p.calls, [])
+})
+// t22 FAIL-4：弹窗重摆不能只挂 ResizeObserver（尺寸不变时它不报）。设置页要在
+// 岛露出（island:look-here）/设置重画/岛更新时再摆一次。
+test('弹窗在岛露出或设置变化时补摆一次，不只靠 ResizeObserver', () => {
+  assert.match(source, /if \(confirmDialog\.open\) seatDialog\(confirmDialog\)/)
+  for (const channel of ['onLookHere', 'onSettingsChanged', 'onUpdate']) {
+    assert.match(source, new RegExp(`window\\.pet\\?\\.${channel}\\?\\.\\(reseatConfirm\\)`), `应在 ${channel} 时补摆`)
+  }
 })

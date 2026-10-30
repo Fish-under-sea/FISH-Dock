@@ -12,7 +12,7 @@ use crate::{data, i18n, now_ms, pet, Shared};
 const TRAY_ID: &str = "main";
 
 fn face(_mood: &str) -> &'static [u8] {
-    include_bytes!("../icons/dsh-fish.png")
+    include_bytes!("../icons/fish-dock.png")
 }
 
 // Where the menu opens: the tray icon, her, or her home's window.

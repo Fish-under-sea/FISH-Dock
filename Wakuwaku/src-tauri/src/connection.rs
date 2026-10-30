@@ -16,9 +16,11 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
-pub const ENSURE_FLAG: &str = "--wakuwaku-ensure-running";
-pub const CODEX_FLAG: &str = "--wakuwaku-codex-hook";
-pub const AGY_FLAG: &str = "--wakuwaku-agy-hook";
+// #t18：写出名一律 --fish-dock-*；旧名（--wakuwaku-*、--claude-pets-ensure-running）
+// 只作读取兼容，表在 flags.rs，进程启动时归一。
+pub const ENSURE_FLAG: &str = "--fish-dock-ensure-running";
+pub const CODEX_FLAG: &str = "--fish-dock-codex-hook";
+pub const AGY_FLAG: &str = "--fish-dock-agy-hook";
 const URL_MARK: &str = "from=wakuwaku";
 // What the app wrote before it was called Wakuwaku (claude-pets).
 pub const LEGACY_ENSURE_FLAG: &str = "--claude-pets-ensure-running";
@@ -197,13 +199,16 @@ fn same_path(p: &str) -> String {
 }
 
 // Ours: what this version installs, and what older ones did.
+// #t18：旧名也算「我们这一条」——只认新名会让旧条目在下一次去重时被当成别人的，
+// 既不会被迁移成新名，也可能被重复插入一条。
 fn is_ours(hook: &Value) -> bool {
     let mut text = [hook.get("url"), hook.get("command")].iter().flatten().map(|v| v.to_string()).collect::<Vec<_>>().join(" ");
     for arg in hook.get("args").and_then(Value::as_array).into_iter().flatten() {
         text.push(' ');
         text.push_str(&arg.to_string());
     }
-    [URL_MARK, ENSURE_FLAG, CODEX_FLAG, ZCODE_FLAG, REASONIX_FLAG, LEGACY_URL_MARK, LEGACY_ENSURE_FLAG, "claude-hook.js"].iter().any(|m| text.contains(m))
+    let now = [URL_MARK, ENSURE_FLAG, CODEX_FLAG, ZCODE_FLAG, REASONIX_FLAG, "claude-hook.js"];
+    now.iter().any(|m| text.contains(m)) || crate::flags::legacy_names().any(|m| text.contains(m)) || text.contains(LEGACY_URL_MARK)
 }
 
 // Our hooks, event by event.
@@ -1105,17 +1110,27 @@ pub fn omp_here() -> bool {
 
 // The extension as a copy of her on this port, this exe and this data
 // folder ("" for her own) writes it.
+//
+// #t16 占位符双写：模板里新名（__FISH_DOCK_*__）与旧名（__WAKUWAKU_*__）都在，
+// 这里两套都填。旧名不能删——已经发出去的 2.0.0 插件副本只认旧字面量，删了它们
+// 读到的就是未填的占位符；读取侧也两套都认（模板里的 choose）。
 pub fn omp_extension(port: u16, exe: &str, data: &str) -> String {
-    OMP_SOURCE
-        .replace("\"__WAKUWAKU_PORT__\"", &format!("\"{port}\""))
-        .replace("\"__WAKUWAKU_EXE__\"", &json!(exe).to_string())
-        .replace("\"__WAKUWAKU_DATA__\"", &json!(data).to_string())
+    let filled = |source: String| {
+        source
+            .replace("\"__FISH_DOCK_PORT__\"", &format!("\"{port}\""))
+            .replace("\"__WAKUWAKU_PORT__\"", &format!("\"{port}\""))
+            .replace("\"__FISH_DOCK_EXE__\"", &json!(exe).to_string())
+            .replace("\"__WAKUWAKU_EXE__\"", &json!(exe).to_string())
+            .replace("\"__FISH_DOCK_DATA__\"", &json!(data).to_string())
+            .replace("\"__WAKUWAKU_DATA__\"", &json!(data).to_string())
+    };
+    filled(OMP_SOURCE.to_string())
 }
 
 // What this copy writes: her data folder only when she was given one
-// (WAKUWAKU_USER_DATA, a test's copy), for the one the extension starts.
+// (WAKUWAKU_USER_DATA, a test's copy; via config::user_data_override), for the one the extension starts.
 fn omp_wanted(port: u16) -> String {
-    omp_extension(port, &launch_command(), &std::env::var("WAKUWAKU_USER_DATA").unwrap_or_default())
+    omp_extension(port, &launch_command(), &crate::config::user_data_override().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
 }
 
 // How the files stand against what this copy writes (None: no file in that
@@ -1206,7 +1221,7 @@ fn write_omp_files(files: &[PathBuf], action: &str, want: &str) -> Result<(), St
 // Tried with the desktop app 3.15.3 (2026-10-15): it reads the file for each
 // new session, no restart needed.
 
-pub const ZCODE_FLAG: &str = "--wakuwaku-zcode-hook";
+pub const ZCODE_FLAG: &str = "--fish-dock-zcode-hook";
 // ZCode's 7 events, and how long each may run (ms): the prompt waits for the
 // person, past her own wait (asks.rs ASK_TIMEOUT_MS); ZCode's default is 60 s.
 pub const ZCODE_PROMPT_TIMEOUT_MS: u64 = 600_000;
@@ -1408,7 +1423,7 @@ pub fn write_zcode_hooks(action: &str) -> Result<(), String> {
 // so, not "connected" because a file was written. DSH watches its patch
 // layers (dsh-hmr), so a row added while it runs may load at once.
 
-pub const DSH_FLAG: &str = "--wakuwaku-dsh-hook";
+pub const DSH_FLAG: &str = "--fish-dock-dsh-hook";
 const DSH_PLUGIN: &str = include_str!("../../integrations/dsh/wakuwaku.js");
 const DSH_PACKAGE: &str = include_str!("../../integrations/dsh/package.json");
 // Its folder in DSH's home, its file there, and the row's name for it: its
@@ -2269,7 +2284,7 @@ pub fn dsh_at_start(port: u16, setting: &Value) -> Vec<String> {
 // ~/.reasonix/settings.json, 4 of these events and no session id
 // (reasonix_line).
 
-pub const REASONIX_FLAG: &str = "--wakuwaku-reasonix-hook";
+pub const REASONIX_FLAG: &str = "--fish-dock-reasonix-hook";
 // The events she follows, each with a hook of ours; how long each may run
 // (ms): Reasonix waits on every one of them, and one of its gating events
 // (PreToolUse, UserPromptSubmit) timing out blocks the call or the prompt,
@@ -2672,7 +2687,10 @@ pub fn versions() -> Value {
 // Run from the source tree (cargo, its target folder), she writes no build's
 // path over another exe's; her own value she keeps up.
 
-pub const AT_LOGIN_FLAG: &str = "--wakuwaku-at-login";
+pub const AT_LOGIN_FLAG: &str = "--fish-dock-at-login";
+// #27 P0：1.x 写下的自启动与登录任务用的是旧开关名，旧安装包的卸载器也用它。
+// 留着识别、不删 —— 认不出就会把用户原来的开机自启动当成别人的。
+pub const LEGACY_AT_LOGIN_FLAG: &str = "--wakuwaku-at-login";
 pub const BY_TASK: &str = "task";
 const BY_RUN: &str = "run";
 
@@ -2680,12 +2698,13 @@ const BY_RUN: &str = "run";
 // installation's own, taken away before the uninstaller deletes her program.
 // The task's name holds the user's SID, which the uninstaller cannot work
 // out, so it asks her.
-pub const UNINSTALL_CLEANUP_FLAG: &str = "--wakuwaku-uninstall-cleanup";
+pub const UNINSTALL_CLEANUP_FLAG: &str = "--fish-dock-uninstall-cleanup";
+pub const LEGACY_UNINSTALL_CLEANUP_FLAG: &str = "--wakuwaku-uninstall-cleanup";
 
 // Started at login: by her logon task (task) or the Run value (run); none
-// when started any other way.
+// when started any other way. The 2.0.0 flag and the old one both count.
 pub fn started_by(args: &[String]) -> Option<&'static str> {
-    let at = args.iter().position(|a| a == AT_LOGIN_FLAG)?;
+    let at = args.iter().position(|a| a == AT_LOGIN_FLAG || a == LEGACY_AT_LOGIN_FLAG)?;
     Some(if args.get(at + 1).map(String::as_str) == Some(BY_TASK) { BY_TASK } else { BY_RUN })
 }
 
@@ -2765,6 +2784,33 @@ mod rules {
             return RunFix::Keep;
         }
         RunFix::Rewrite(if exists(was) { "another copy of her" } else { "gone" })
+    }
+
+    // What becomes of the value the OLD name left behind (#27 P0): 1.x wrote
+    // its start at login under "Wakuwaku". Naming the same program, it is
+    // moved to this product's name; naming another program (a real Wakuwaku),
+    // it is left where it is and only mentioned.
+    #[derive(Debug, PartialEq)]
+    pub enum Legacy {
+        // No old value, or this product's own name already has one: nothing
+        // to move, and never over a setting the person already made.
+        Nothing,
+        // Another program's: left as it is, named in the log.
+        Theirs(String),
+        // This program's, under the old name: moved to the new one.
+        Move(String),
+    }
+
+    pub fn legacy_fix(legacy: Option<&str>, current: Option<&str>, exe: &str) -> Legacy {
+        let Some(was) = legacy else { return Legacy::Nothing };
+        if current.is_some() {
+            return Legacy::Nothing;
+        }
+        if same_path(program_of(was)) == same_path(exe) {
+            Legacy::Move(was.to_string())
+        } else {
+            Legacy::Theirs(was.to_string())
+        }
     }
 
     // What becomes of her logon task: there while start at login is hers,
@@ -2875,12 +2921,46 @@ mod rules {
             assert_eq!(own_task("Wakuwaku", TASK, Some(&seen("", "", true)), ""), Own::Theirs);
         }
     }
+
+    // #27 P0：旧发行名 Wakuwaku 的 Run 项怎么处理。
+    #[cfg(test)]
+    mod legacy_tests {
+        use super::{legacy_fix, Legacy};
+
+        const EXE: &str = r"C:\Users\me\AppData\Local\Programs\FISH Dock\FISH-Dock.exe";
+
+        // ① 旧项指向本安装目录里的这个程序：搬到新名下。
+        #[test] fn an_old_name_pointing_at_this_program_is_moved() {
+            let was = format!(r#""{EXE}" --wakuwaku-at-login run"#);
+            assert_eq!(legacy_fix(Some(&was), None, EXE), Legacy::Move(was.clone()));
+            // 旧版本写的裸路径（没有开关）也算本程序。
+            let bare = format!(r#""{EXE}""#);
+            assert_eq!(legacy_fix(Some(&bare), None, EXE), Legacy::Move(bare));
+            // 大小写、斜杠不同，同一个程序。
+            let written = r"c:/users/ME/appdata/local/programs/fish dock/fish-dock.EXE --wakuwaku-at-login run";
+            assert!(matches!(legacy_fix(Some(written), None, EXE), Legacy::Move(_)));
+        }
+
+        // ② 旧项指向别的程序（真的 Wakuwaku）：原样保留，只提示。
+        #[test] fn an_old_name_pointing_elsewhere_is_left_alone() {
+            let theirs = r#""D:\Tools\Wakuwaku\wakuwaku.exe" --wakuwaku-at-login run"#;
+            assert_eq!(legacy_fix(Some(theirs), None, EXE), Legacy::Theirs(theirs.to_string()));
+            assert_eq!(legacy_fix(Some(r#""C:\Windows\notepad.exe""#), None, EXE), Legacy::Theirs(r#""C:\Windows\notepad.exe""#.to_string()));
+        }
+
+        // 没有旧项，或新名已经有值：什么都不动（绝不覆盖用户现在的设置）。
+        #[test] fn no_old_name_or_a_value_already_there_changes_nothing() {
+            let was = format!(r#""{EXE}" --wakuwaku-at-login run"#);
+            assert_eq!(legacy_fix(None, None, EXE), Legacy::Nothing);
+            assert_eq!(legacy_fix(Some(&was), Some("something the person set"), EXE), Legacy::Nothing);
+        }
+    }
 }
 
 #[cfg(windows)]
 mod login {
     use super::launch_command;
-    use super::rules::{login_of, own_task, run_command, run_fix, task_args, task_fix, Login, Own, RunFix, TaskFix};
+    use super::rules::{legacy_fix, login_of, own_task, run_command, run_fix, task_args, task_fix, Legacy, Login, Own, RunFix, TaskFix};
     use crate::logon;
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
     use winreg::RegKey;
@@ -2889,7 +2969,10 @@ mod login {
     // Task Manager's Startup apps: those turned off there, by name, their
     // first byte odd (03; turned on again, 02).
     const APPROVED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
-    const NAME: &str = "Wakuwaku";
+    const NAME: &str = "FISH Dock";
+    // 旧发行名（#27 P0）：1.x 的 Run 值与登录任务都叫这个。留着识别与迁移，
+    // 卸载时也按它认自己写过的那条任务。
+    const LEGACY_NAME: &str = "Wakuwaku";
 
     fn value(name: &str) -> Option<String> {
         RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(RUN, KEY_READ).and_then(|k| k.get_value::<String, _>(name)).ok()
@@ -2921,9 +3004,11 @@ mod login {
 
     // On for this program: a Run value naming it (written by an older
     // version or moved here as she started, too), not turned off in Task
-    // Manager.
+    // Manager. A value 1.x left under the old name counts too, until the
+    // start moves it (at_start_named).
     pub fn is_on() -> bool {
-        login(NAME, &launch_command()) == Login::Mine
+        let exe = launch_command();
+        login(NAME, &exe) == Login::Mine || login(LEGACY_NAME, &exe) == Login::Mine
     }
 
     // This user's logon task: the Run value's name, "at logon", their SID;
@@ -2971,11 +3056,41 @@ mod login {
 
     // The switch: the Run value and the logon task, or neither.
     pub fn set(on: bool) -> Result<(), String> {
-        set_named(NAME, &launch_command(), on)
+        let exe = launch_command();
+        // #27 P0：旧名 "Wakuwaku" 那一项 —— 指向本程序时跟着改名或清掉（
+        // StartupApproved 里的旧标记一并清掉，否则新名会被它“看起来关着”）；
+        // 指向别的程序就一个字节都不动。
+        let old = value(LEGACY_NAME);
+        let moving = matches!(legacy_fix(old.as_deref(), value(NAME).as_deref(), &exe), Legacy::Move(_));
+        if moving || (!on && login(LEGACY_NAME, &exe) == Login::Mine) {
+            let _ = delete(RUN, LEGACY_NAME);
+            let _ = delete(APPROVED, LEGACY_NAME);
+        }
+        set_named(NAME, &exe, on)
     }
 
     fn at_start_named(name: &str, exe: &str, from_source: bool) -> Vec<String> {
         let mut said = Vec::new();
+        // #27 P0：1.x 的 Run 值叫 "Wakuwaku"。指向本程序就搬成新名（连
+        // StartupApproved 的旧标记一起清），指向别的程序就留着并提示 ——
+        // 真 Wakuwaku 的自启动不能被顶掉。
+        if name == NAME {
+            match legacy_fix(value(LEGACY_NAME).as_deref(), value(NAME).as_deref(), exe) {
+                Legacy::Move(was) => {
+                    let now = run_command(exe);
+                    said.push(match write(NAME, &now) {
+                        Ok(()) => {
+                            let _ = delete(RUN, LEGACY_NAME);
+                            let _ = delete(APPROVED, LEGACY_NAME);
+                            format!("start at login moved from the old name Wakuwaku: {was}; now {now}")
+                        }
+                        Err(e) => format!("start at login moved from the old name Wakuwaku: {was}; not written anew: {e}"),
+                    });
+                }
+                Legacy::Theirs(was) => said.push(format!("an old Wakuwaku start at login points at {was}; left as it is")),
+                Legacy::Nothing => {}
+            }
+        }
         let was = value(name);
         if let RunFix::Rewrite(why) = run_fix(was.as_deref(), exe, from_source, |p| std::path::Path::new(p).is_file()) {
             let now = run_command(exe);
@@ -3002,11 +3117,16 @@ mod login {
     // taken away, or turned off in Task Manager): the task goes, and true
     // (she goes too).
     pub fn task_unwanted() -> bool {
-        if login(NAME, &launch_command()) != Login::Off {
+        let exe = launch_command();
+        // The old name counts while it still names this program: a logon task
+        // left over from 1.x must not be read as "start at login is off".
+        if login(NAME, &exe) == Login::Mine || login(LEGACY_NAME, &exe) == Login::Mine {
             return false;
         }
-        if let Ok((task, _)) = task_of(NAME) {
-            let _ = logon::remove(&task);
+        for name in [NAME, LEGACY_NAME] {
+            if let Ok((task, _)) = task_of(name) {
+                let _ = logon::remove(&task);
+            }
         }
         true
     }
@@ -3019,16 +3139,22 @@ mod login {
     // the program is gone the task starts nothing).
     pub fn uninstall_cleanup() -> Result<Option<String>, String> {
         let exe = launch_command();
-        let (task, _) = task_of(NAME)?;
-        let seen = logon::xml(&task)?.map(|xml| logon::seen(&xml));
-        match own_task(NAME, &task, seen.as_ref(), &exe) {
-            Own::Missing => Ok(None),
-            Own::Theirs => Ok(Some(format!("her logon task is not this program's; left as it is: {task}"))),
-            Own::Mine => {
-                logon::remove(&task)?;
-                Ok(Some(format!("her logon task removed: {task}")))
+        let mut said = Vec::new();
+        // Both names: a 1.x installation's task is `Wakuwaku at logon-<SID>`,
+        // 2.0.0's is `FISH Dock at logon-<SID>`; only this program's go.
+        for name in [NAME, LEGACY_NAME] {
+            let (task, _) = task_of(name)?;
+            let seen = logon::xml(&task)?.map(|xml| logon::seen(&xml));
+            match own_task(name, &task, seen.as_ref(), &exe) {
+                Own::Missing => {}
+                Own::Theirs => said.push(format!("her logon task is not this program's; left as it is: {task}")),
+                Own::Mine => {
+                    logon::remove(&task)?;
+                    said.push(format!("her logon task removed: {task}"));
+                }
             }
         }
+        Ok(if said.is_empty() { None } else { Some(said.join("; ")) })
     }
 
     #[cfg(test)]
@@ -3167,7 +3293,7 @@ mod tests {
         assert_eq!(agy_status_of(&theirs, Some(program)), "missing");
         let with = agy_install(&theirs, program);
         assert_eq!(agy_status_of(&with, Some(program)), "ok");
-        assert_eq!(with["wakuwaku"]["Stop"][0]["command"], r"D:\pet\wakuwaku.exe --wakuwaku-agy-hook Stop");
+        assert_eq!(with["wakuwaku"]["Stop"][0]["command"], r"D:\pet\wakuwaku.exe --fish-dock-agy-hook Stop");
         assert_eq!(with["wakuwaku"]["PostToolUse"][0]["matcher"], "");
         // Theirs kept, ours alone taken out.
         assert_eq!(with["my-linter-hook"], theirs["my-linter-hook"]);
@@ -3220,11 +3346,13 @@ mod tests {
     fn the_omp_extension_is_written_for_this_copy() {
         let exe = r#"C:\Program Files\Wakuwaku\it's "her".exe"#;
         let text = omp_extension(47312, exe, r"C:\waku\omp\data");
-        assert!(text.contains(r#"const PORT = Number("47312") || 47213"#), "the port filled in");
-        assert!(text.contains(&format!("const EXE = {}", json!(exe))), "the exe as a JS string");
-        assert!(text.contains(r#"const DATA = "C:\\waku\\omp\\data""#));
-        assert!(!text.contains("\"__WAKUWAKU_"), "nothing left to fill in");
-        assert!(omp_extension(47213, "", "").contains(r#"const DATA = """#));
+        // 占位符双写（#t16）：新名与旧名都要出现在写出来的文件里，且两套都被填上。
+        assert!(text.contains(r#"const PORT = Number(choose("47312", "47312")) || 47213"#), "the port filled in, in both spellings");
+        let exe_js = json!(exe).to_string();
+        assert!(text.contains(&format!("const EXE = choose({exe_js}, {exe_js})")), "the exe as a JS string, in both spellings");
+        assert!(text.contains(r#"const DATA = choose("C:\\waku\\omp\\data", "C:\\waku\\omp\\data")"#));
+        assert!(!text.contains("__FISH_DOCK_") && !text.contains("__WAKUWAKU_"), "nothing left to fill in, new name or old");
+        assert!(omp_extension(47213, "", "").contains(r#"const DATA = choose("", "")"#));
         // Every agent folder has it as this copy writes it, or not.
         let (ours, old) = (Some(text.clone()), Some(omp_extension(47213, exe, "")));
         assert_eq!(omp_status_of(&[None, None], &text), "missing");
@@ -3286,7 +3414,7 @@ mod tests {
         assert_eq!(with["hooks"]["events"]["Stop"][0], theirs["hooks"]["events"]["Stop"][0]);
         assert_eq!(
             with["hooks"]["events"]["Stop"][1],
-            json!({ "matcher": "*", "hooks": [{ "type": "process", "command": exe, "args": ["--wakuwaku-zcode-hook", "Stop"], "timeoutMs": 10000 }] })
+            json!({ "matcher": "*", "hooks": [{ "type": "process", "command": exe, "args": ["--fish-dock-zcode-hook", "Stop"], "timeoutMs": 10000 }] })
         );
         assert_eq!(with["hooks"]["events"]["PermissionRequest"][0]["hooks"][0]["timeoutMs"], 600_000);
         assert_eq!(with["hooks"]["events"].as_object().unwrap().len(), 7);
@@ -3343,12 +3471,12 @@ mod tests {
         assert_eq!(with["hooks"]["PreToolUse"][0], theirs["hooks"]["PreToolUse"][0]);
         assert_eq!(
             with["hooks"]["PreToolUse"][1],
-            json!({ "command": r#""C:\Program Files\Wakuwaku\wakuwaku.exe" --wakuwaku-reasonix-hook PreToolUse"#, "timeout": 5000, "description": REASONIX_DESCRIPTION })
+            json!({ "command": r#""C:\Program Files\Wakuwaku\wakuwaku.exe" --fish-dock-reasonix-hook PreToolUse"#, "timeout": 5000, "description": REASONIX_DESCRIPTION })
         );
         assert_eq!(with["hooks"]["PreCompact"], theirs["hooks"]["PreCompact"]);
         assert_eq!(with["hooks"].as_object().unwrap().len(), REASONIX_EVENTS.len() + 1);
         for event in REASONIX_EVENTS {
-            assert!(with["hooks"][event].as_array().unwrap().iter().any(|h| h["command"].as_str().unwrap().ends_with(&format!("--wakuwaku-reasonix-hook {event}"))), "{event}");
+            assert!(with["hooks"][event].as_array().unwrap().iter().any(|h| h["command"].as_str().unwrap().ends_with(&format!("--fish-dock-reasonix-hook {event}"))), "{event}");
         }
         // Installing twice replaces, never doubles; removing gives theirs back.
         let again = reasonix_install(&with, exe).unwrap();
@@ -3380,8 +3508,8 @@ mod tests {
     fn reasonix_commands_for_cmd() {
         if cfg!(windows) {
             // In double quotes, as cmd /d /s /c "<command>" takes it whole.
-            assert_eq!(reasonix_command(r"D:\pet\wakuwaku.exe", "Stop").as_deref(), Some(r#""D:\pet\wakuwaku.exe" --wakuwaku-reasonix-hook Stop"#));
-            assert_eq!(reasonix_command(r"C:\Program Files (x86)\W\wakuwaku.exe", "Stop").as_deref(), Some(r#""C:\Program Files (x86)\W\wakuwaku.exe" --wakuwaku-reasonix-hook Stop"#));
+            assert_eq!(reasonix_command(r"D:\pet\wakuwaku.exe", "Stop").as_deref(), Some(r#""D:\pet\wakuwaku.exe" --fish-dock-reasonix-hook Stop"#));
+            assert_eq!(reasonix_command(r"C:\Program Files (x86)\W\wakuwaku.exe", "Stop").as_deref(), Some(r#""C:\Program Files (x86)\W\wakuwaku.exe" --fish-dock-reasonix-hook Stop"#));
             // What would send it to Git Bash, or that cmd reads as its own: none.
             for odd in [r"C:\Users\O'Brien\w.exe", r"C:\$w\w.exe", r"C:\a`b\w.exe", r"C:\100%\w.exe", r"C:\hi!\w.exe", r#"C:\"\w.exe"#] {
                 assert_eq!(reasonix_command(odd, "Stop"), None, "{odd}");
@@ -3389,7 +3517,7 @@ mod tests {
             }
             assert_eq!(super::error_kind(&format!(r"C:\100%\w.exe: {REASONIX_NO_NAME}")), "pathChars");
         } else {
-            assert_eq!(reasonix_command("/opt/it's/wakuwaku", "Stop").as_deref(), Some(r"'/opt/it'\''s/wakuwaku' --wakuwaku-reasonix-hook Stop"));
+            assert_eq!(reasonix_command("/opt/it's/wakuwaku", "Stop").as_deref(), Some(r"'/opt/it'\''s/wakuwaku' --fish-dock-reasonix-hook Stop"));
         }
         assert_eq!(reasonix_command("", "Stop"), None);
         assert_eq!(super::error_kind(&format!("x: {REASONIX_OLD}")), "old");
@@ -3576,9 +3704,9 @@ mod tests {
         let exe = r"C:\Program Files\Wakuwaku\wakuwaku.exe";
         let want = dsh_hooks(exe);
         let stop = &want["hooks"]["Stop"][0]["hooks"][0];
-        assert_eq!(stop["command"], r"& 'C:\Program Files\Wakuwaku\wakuwaku.exe' --wakuwaku-dsh-hook Stop | Out-Null");
+        assert_eq!(stop["command"], r"& 'C:\Program Files\Wakuwaku\wakuwaku.exe' --fish-dock-dsh-hook Stop | Out-Null");
         assert_eq!((stop["type"].as_str(), stop["timeout"].as_u64()), (Some("command"), Some(DSH_TIMEOUT)));
-        assert_eq!(dsh_command(r"D:\pet\wakuwaku.exe", "PostToolUse"), r"D:\pet\wakuwaku.exe --wakuwaku-dsh-hook PostToolUse | Out-Null");
+        assert_eq!(dsh_command(r"D:\pet\wakuwaku.exe", "PostToolUse"), r"D:\pet\wakuwaku.exe --fish-dock-dsh-hook PostToolUse | Out-Null");
         assert_eq!(want["hooks"]["PostToolUse"][0]["matcher"], DSH_POST_TOOLS);
         assert_eq!(want["hooks"]["PreToolUse"][0]["matcher"], "ask_user_question");
         assert_eq!(want["hooks"].as_object().unwrap().len(), 5);
@@ -3821,7 +3949,7 @@ mod tests {
     #[test]
     fn codex_hooks_install_status_and_uninstall() {
         let cmd = codex_command(r"D:\pet\wakuwaku.exe");
-        assert_eq!(cmd, r"D:\pet\wakuwaku.exe --wakuwaku-codex-hook");
+        assert_eq!(cmd, r"D:\pet\wakuwaku.exe --fish-dock-codex-hook");
         let mine = json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "notify-me" }] }] }, "other": 1 });
         assert_eq!(codex_status_of(&mine, &cmd, true), "missing");
 
@@ -3907,6 +4035,36 @@ mod tests {
         assert_eq!(after, codex_install(&json!({}), &cmd, "w", true));
     }
 
+    // #t18 迁移：用户机器上现存的 hooks 写的还是旧开关。它们必须
+    // ①被认成「我们这一条」（否则去重认不出自己，会再插一条新的），
+    // ②装一次就被改写成新名，③卸载时三种写法（新名、--wakuwaku-*、更早的
+    // --claude-pets-ensure-running）一起清得掉。
+    #[test]
+    fn old_flag_hooks_are_ours_are_migrated_and_removed_in_every_spelling() {
+        let exe = r"D:\pet\wakuwaku.exe";
+        let now = codex_command(exe);
+        let older = format!("{exe} --wakuwaku-codex-hook");
+        let oldest = format!("{exe} --claude-pets-ensure-running");
+        let with = json!({"hooks":{
+            "SessionEnd":[{"hooks":[{"type":"command","command":older,"timeout":3}]}],
+            "Stop":[{"hooks":[{"type":"command","command":oldest,"timeout":3}]}],
+        }});
+        assert_eq!(codex_ours(&with).len(), 2, "旧开关的两条都要认成自己的");
+        assert_eq!(codex_status_of(&with, &now, true), "stale", "是我们的、但名字是旧的");
+        // ② 装一次：旧写法从配置里消失，换成新名。
+        let after = codex_install(&with, &now, "w", true);
+        let text = after.to_string();
+        assert!(!text.contains("--wakuwaku-codex-hook"), "旧开关要被换掉：{text}");
+        assert!(!text.contains("--claude-pets-ensure-running"), "更早的开关同样要被换掉：{text}");
+        // 写出的每一条命令都必须是新开关（比的是解析出来的值，不比 JSON 转义后的串）。
+        assert!(codex_ours(&after).iter().all(|(_, _, hook)| hook["command"].as_str() == Some(now.as_str())), "写出的必须是新开关：{text}");
+        // ③ 去重同口径：迁移后的条数 = 从空配置装一次的条数，改名不会多插一条。
+        assert_eq!(codex_ours(&after).len(), codex_ours(&codex_install(&json!({}), &now, "w", true)).len(), "改名不该让条目翻倍");
+        // ④ 卸载：新写的与仍带旧名的都清干净。
+        assert!(codex_ours(&uninstall(&after)).is_empty(), "卸载后不许留我们自己的条目");
+        assert!(codex_ours(&uninstall(&with)).is_empty(), "仍写着旧开关的条目也要被卸载删掉");
+    }
+
     // Codex's own hashes of these hooks (the ones its trust keeps).
     #[test]
     fn codex_hashes_a_hook_as_codex_does() {
@@ -3919,14 +4077,22 @@ mod tests {
             h
         };
         let none = json!({});
-        assert_eq!(codex_hook_hash("session_end", &none, &hook(json!({ "timeout": 3 }))), "sha256:16edcbf293c15c5ee4fb0676738d9120abacbe1847b436a5cb228fe4e7eab2a4");
+        // 这条钉的是「我们算出的哈希 = Codex 对同一份 hook 的哈希」。
+        //
+        // 为什么这四个 SHA 在 #t18 变了：hook 里含 `command` 字段，而 #t18 把写出名从
+        // `--wakuwaku-codex-hook` 换成 `--fish-dock-codex-hook` —— 命令串变了，被哈希的
+        // JSON 就变了。变的只有与 `cmd` 有关的那四条；`timeout` / `matcher` 的不变性
+        // （下面两条断言）与名字无关，照旧成立。旧值留着是有意义的：它证明改名前后是
+        // 两份不同的 hook（第一条 assert_ne 就是钉这一点的），别当噪声删。
+        assert_eq!(codex_hook_hash("session_end", &none, &hook(json!({ "timeout": 3 }))), "sha256:a800951c3313e569fac6da099346c26e3cc7b802b9dc55df2610768d3d6bc176");
+        assert_ne!(codex_hook_hash("session_end", &none, &hook(json!({ "timeout": 3 }))), "sha256:16edcbf293c15c5ee4fb0676738d9120abacbe1847b436a5cb228fe4e7eab2a4", "旧命令名（--wakuwaku-codex-hook）的哈希不再是这一份");
         // As Codex runs it: SessionEnd's timeout 3 at most.
         assert_eq!(codex_hook_hash("session_end", &none, &hook(json!({ "timeout": 10 }))), codex_hook_hash("session_end", &none, &hook(json!({ "timeout": 3 }))));
         let ask = hook(json!({ "timeout": 300, "statusMessage": "等她" }));
-        assert_eq!(codex_hook_hash("permission_request", &none, &ask), "sha256:6be114b27c0c0f23cf1c67e5ee6df5f203500bd1922bee8bf07ed42e87689358");
-        assert_eq!(codex_hook_hash("pre_tool_use", &none, &hook(json!({ "async": true }))), "sha256:c663281847ce4e2d721144353a7c412486f17c9c56ca6146c6d75dba1c3d4178");
+        assert_eq!(codex_hook_hash("permission_request", &none, &ask), "sha256:f2d1f1bbc0f7a1fc6a30a59f765bd9e63ca541b866a51f528c3e170de0d0dc71");
+        assert_eq!(codex_hook_hash("pre_tool_use", &none, &hook(json!({ "async": true }))), "sha256:66f15cac19098dd3df878f14db6bba165e5ddc2d40d5abd7f8c4f03033c964a4");
         let question = json!({ "matcher": "^request_user_input$" });
-        assert_eq!(codex_hook_hash("pre_tool_use", &question, &hook(json!({}))), "sha256:9924d21717040e6d0e1d416b7b63f52481e509233655651f512ff85297a788e3");
+        assert_eq!(codex_hook_hash("pre_tool_use", &question, &hook(json!({}))), "sha256:2b8f6d4c3b2df6c9a5d7fc0027bef8a1c327260764760bc680587268de16a1aa");
     }
 
     // Trusted as they are, or not (new, changed, moved, off): never the
@@ -3985,10 +4151,10 @@ mod tests {
     #[test]
     fn codex_commands_quote_what_needs_it() {
         if cfg!(windows) {
-            assert_eq!(codex_command(r"C:\Program Files\Waku\wakuwaku.exe"), r"& 'C:\Program Files\Waku\wakuwaku.exe' --wakuwaku-codex-hook");
-            assert_eq!(codex_command(r"D:\宠物\it's.exe"), r"& 'D:\宠物\it''s.exe' --wakuwaku-codex-hook");
+            assert_eq!(codex_command(r"C:\Program Files\Waku\wakuwaku.exe"), r"& 'C:\Program Files\Waku\wakuwaku.exe' --fish-dock-codex-hook");
+            assert_eq!(codex_command(r"D:\宠物\it's.exe"), r"& 'D:\宠物\it''s.exe' --fish-dock-codex-hook");
         } else {
-            assert_eq!(codex_command("/opt/my pets/wakuwaku"), "'/opt/my pets/wakuwaku' --wakuwaku-codex-hook");
+            assert_eq!(codex_command("/opt/my pets/wakuwaku"), "'/opt/my pets/wakuwaku' --fish-dock-codex-hook");
         }
     }
 
@@ -3998,7 +4164,20 @@ mod tests {
         use crate::logon::TaskSeen;
         let exe = r"D:\Program Files\Wakuwaku\wakuwaku.exe";
         let ours = run_command(exe);
-        assert_eq!(ours, r#""D:\Program Files\Wakuwaku\wakuwaku.exe" --wakuwaku-at-login run"#);
+        // ① 写进去的必须是新开关（#27 P0）。旧值 --wakuwaku-at-login 只用于「读」。
+        assert_eq!(ours, r#""D:\Program Files\Wakuwaku\wakuwaku.exe" --fish-dock-at-login run"#);
+        assert!(!ours.contains("--wakuwaku-at-login"), "写出的一律是新开关：{ours}");
+        // ② 读的时候旧开关仍要认（迁移兼容）：老机器升级后，Run 值与登录任务里
+        //    还写着 --wakuwaku-at-login，认不出就会被当成「不是她」而丢掉自启动。
+        let older = r#""D:\Program Files\Wakuwaku\wakuwaku.exe" --wakuwaku-at-login run"#;
+        let args_of = |line: &str| line.split(' ').map(String::from).collect::<Vec<_>>();
+        assert_eq!(started_by(&args_of(older)), Some("run"), "旧开关的 Run 值仍要认出是「按登录启动」");
+        assert_eq!(started_by(&args_of(&format!("wakuwaku.exe {}", LEGACY_AT_LOGIN_FLAG))), Some("run"));
+        assert_eq!(started_by(&args_of(&format!("wakuwaku.exe {LEGACY_AT_LOGIN_FLAG} task"))), Some("task"), "旧开关的登录任务同样认");
+        assert_eq!(started_by(&args_of(&format!("wakuwaku.exe {AT_LOGIN_FLAG} task"))), Some("task"), "新开关照常认");
+        // 旧版本写的那条值指向的正是她：仍算「开」；下一次启动会搬成新写法。
+        assert_eq!(login_of(Some(older), false, exe), Login::Mine);
+        assert_eq!(run_fix(Some(older), exe, false, |_: &str| true), RunFix::Rewrite("as an older version wrote it"));
         let old = r#""D:\Program Files\Wakuwaku\wakuwaku-v0.2.5-windows-x64.exe""#;
         let before = format!("\"{exe}\"");
         let (gone, there) = (|_: &str| false, |_: &str| true);

@@ -3984,7 +3984,9 @@
       tipClock()
     }
   }
-  setInterval(() => isOn() && home() === 'taskbar' && tickClock(), 5000)
+  // 任务栏模式下时钟刷新间隔（前端界面节奏，就地具名常量；与 bar.js 各自 bundle 各留一份）。
+  const CLOCK_TICK_MS = 5000
+  setInterval(() => isOn() && home() === 'taskbar' && tickClock(), CLOCK_TICK_MS)
   // Its tip as Windows' own (zhoupengjie/Wakuwaku#36, clock.rs): the date in
   // full with its weekday, in the person's own format, and Windows'
   // additional clocks; read anew each minute and as the pointer comes.
@@ -4600,41 +4602,19 @@
   // picker.js: the picker, its popover, the capsule's panel and a toast
   // with 撤销 too, editing or not, in either home (on: the layout being
   // edited, for her menu's 退出编辑; the rects whatever it is).
-  // models.js: the console's own layer (#models-host), which is not a child
-  // of hers — a fixed layer under the body, with another origin's frame in
-  // it — so neither WebView2's own enter and leave of her nor anything in the
-  // frame ever says the pointer is on it. Sent as a part of hers while it
-  // shows, and not a moment it is away, so a press or a wheel on the console
-  // stays here and the desktop under her keeps the mouse everywhere else
-  // (surfaces.js grows each part; island.rs set_editing, pointer.rs look).
+  // （本地模型控制台那套独立层已随 2.0.0 的 OFM 插件页下线，这里不再有它那一份
+  //   solid。）
   let solidSent = ''
   function sendSolid() {
     if (!isOn()) return
     const on = !!editLayout
     const settings = window.Settings?.isOpen?.() ? window.Settings.layer : null
-    const parts = [...(settings ? [settings] : []), ...(editLayout ? [editBar] : []), ...(window.Picker?.solids() || []), ...(window.Models?.solids?.() || [])]
+    const parts = [...(settings ? [settings] : []), ...(editLayout ? [editBar] : []), ...(window.Picker?.solids() || [])]
     const rects = Surfaces.solid(parts)
     const sent = JSON.stringify([on, rects, devicePixelRatio || 1])
     if (sent === solidSent) return
     solidSent = sent
     window.pet.editing(on, rects)
-  }
-  // The pointer on a layer of hers that is not in her own tree (models.js's
-  // console): told here as if it were, so she stays open and the window keeps
-  // the mouse (pointer.rs set_over). Off it, the same in reverse — and what
-  // would have happened a beat after leaving her happens then too (hoverLeft).
-  function layerHover(on) {
-    if (on === true) {
-      window.pet.hover(true)
-      return hoverEnter()
-    }
-    // Back on her own page (the console stands over the settings, inside her
-    // box): her own enter has said so already, and her own leave is hers to
-    // say, not the console's.
-    if (island.matches?.(':hover')) return
-    window.pet.hover(false)
-    dismissed = false
-    hoverLeft()
   }
   const solidWatch = new ResizeObserver(() => sendSolid())
   solidWatch.observe(editBar)
@@ -4890,6 +4870,18 @@
       hidePlate(PLATE_OUT_MS)
       setTimeout(grow, late)
     } else grow()
+
+    // 新-1（二次测量兜底）：ask 的正文（diff 摘要）在长文换行/字体就位后
+    // 才到它的最终高度，第一次量出的房间会偏小，把卡裁在路径块。等布局
+    // 稳定后再量一次：还差得远就再画一遍，让房间跟上实际高度。
+    if (view === 'ask') {
+      const remeasure = () => {
+        if (view !== 'ask' || !isAsking()) return
+        const again = sizeOf('ask')
+        if (again.height > want.height + 1) update()
+      }
+      requestAnimationFrame(() => setTimeout(remeasure, 0))
+    }
 
     // The clocks run: the turn's, the step's, the other sessions'. Their words
     // may grow (a step timed once it has run a while), so the shape follows.
@@ -5774,16 +5766,11 @@
 
   // --- The pointer ----------------------------------------------------------------
 
-  // Her leave, or the console's (models.js layerHover): what happens a beat
-  // after the pointer is off her, unless it is on the console by then.
+  // Her leave (or a layer of hers outside her tree saying so): what happens a
+  // beat after the pointer is off her.
   function hoverLeft() {
     clearTimeout(hoverTimer)
     hoverTimer = setTimeout(() => {
-      // The console is over the page's slot, not in her tree: the pointer on
-      // it reads as a leave of hers, and in the notch the settings would close
-      // and the console go from under the pointer (models.js hovered). She
-      // stays as she was while it is on the console.
-      if (window.Models?.hovered?.()) return
       // Open by itself, rested on and left: it has been seen (as Rust
       // counts it once the pointer leaves, island.rs hover), so it closes
       // now, not when its time is up. Only passed across, the hover never
@@ -5800,8 +5787,9 @@
     }, HOVER_CLOSE_MS)
   }
 
-  // Her enter, or the console's (models.js layerHover): open by itself after a
-  // moment, unless it was closed by a press under this pointer (dismiss).
+  // Her enter (or a layer of hers outside her tree saying so): open by itself
+  // after a moment, unless it was closed by a press under this pointer
+  // (dismiss).
   function hoverEnter() {
     // Open by itself until seen: seen now.
     seenNudge()
@@ -6022,7 +6010,6 @@
     newId,
     update,
     sendSolid,
-    layerHover,
     watchPresses,
     drawEditBar,
     editTaskbar,

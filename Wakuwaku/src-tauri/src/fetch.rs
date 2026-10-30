@@ -3,12 +3,11 @@
 // the site's gallery. Errors carry a code (and vars) to word in her language.
 use std::fs;
 use std::path::Path;
-use std::time::Duration;
 
 use serde_json::{json, Value};
 use tauri::Url;
 
-pub const SITE: &str = "https://codex-pets.net";
+pub const SITE: &str = crate::config::PET_SITE_DEFAULT;
 pub const DEFAULT_PET: &str = "claude-chan";
 // The default pet (Claude小姐: pixel art by zhoupengjie, an unofficial fan
 // work of ZipZipPipe's character, as its pet.json says), carried in the exe:
@@ -131,8 +130,38 @@ pub fn parse_pet_ref(input: &str) -> Result<String, PetError> {
         .ok_or_else(|| err("noId", json!({ "ref": text })))
 }
 
-fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build().new_agent()
+// One GET of the site's, the way the General page's proxy says and Windows'
+// do (proxy::web_ways), each way in turn; its answer read whole within the
+// pet budget (proxy::pet_timeout, overridable). The old agent here ignored
+// netProxy and took the environment's proxy by itself, so a proxy env var
+// pointing at a dead port (the very case the person meets with a ladder
+// misconfigured) hung the gallery's every page.
+fn get(url: &str) -> Result<Vec<u8>, PetError> {
+    let mut last = err("network", json!({ "message": "no way", "url": url }));
+    for way in crate::proxy::web_ways(url) {
+        let Some(agent) = way.agent_with(crate::proxy::pet_timeout(), |c| c.http_status_as_error(false).max_redirects(0)) else { continue };
+        let called = agent.get(url).header("user-agent", "wakuwaku").call();
+        match called {
+            Ok(mut response) => {
+                let status = response.status().as_u16();
+                if status != 200 {
+                    if status == 404 {
+                        return Err(err("notFound", json!({ "url": url })));
+                    }
+                    last = err("http", json!({ "status": status, "url": url }));
+                    continue;
+                }
+                return response
+                    .body_mut()
+                    .with_config()
+                    .limit(64 * 1024 * 1024)
+                    .read_to_vec()
+                    .map_err(|e| err("network", json!({ "message": e.to_string(), "url": url })));
+            }
+            Err(e) => last = http_err(url, e),
+        }
+    }
+    Err(last)
 }
 
 fn http_err(url: &str, e: ureq::Error) -> PetError {
@@ -145,32 +174,21 @@ fn http_err(url: &str, e: ureq::Error) -> PetError {
 // Downloads the pet into <dir>/<id>/. Returns { id, name, author, warning? }.
 pub fn download_pet(input: &str, dir: &Path) -> Result<Value, PetError> {
     let id = parse_pet_ref(input)?;
-    let agent = agent();
-    let api = format!("{SITE}/api/pets/{id}");
-    let body: Value = match agent.get(&api).header("user-agent", "wakuwaku").call() {
-        Ok(mut res) => res.body_mut().read_json().map_err(|e| err("network", json!({ "message": e.to_string(), "url": api })))?,
-        Err(ureq::Error::StatusCode(404)) => return Err(err("notFound", json!({ "id": id }))),
-        Err(e) => return Err(http_err(&api, e)),
-    };
+    // 站点地址走配置（FISH_DOCK_PET_SITE 可覆盖），不再散落字面量。
+    let site = crate::config::pet_site();
+    let api = format!("{site}/api/pets/{id}");
+    let body: Value = serde_json::from_slice(&get(&api)?)
+        .map_err(|e| err("network", json!({ "message": e.to_string(), "url": api })))?;
     let pet = &body["pet"];
 
     // Only ever download from the site itself.
-    let sheet_url = Url::parse(SITE)
+    let sheet_url = Url::parse(&site)
         .and_then(|site| site.join(pet["spritesheetUrl"].as_str().unwrap_or("")))
         .map_err(|_| err("sheetElsewhere", json!({ "url": pet["spritesheetUrl"] })))?;
     if sheet_url.scheme() != "https" || !sheet_url.host_str().is_some_and(is_site_host) {
         return Err(err("sheetElsewhere", json!({ "url": sheet_url.as_str() })));
     }
-    let sheet = agent
-        .get(sheet_url.as_str())
-        .header("user-agent", "wakuwaku")
-        .call()
-        .map_err(|e| http_err(sheet_url.as_str(), e))?
-        .body_mut()
-        .with_config()
-        .limit(64 * 1024 * 1024)
-        .read_to_vec()
-        .map_err(|e| err("network", json!({ "message": e.to_string(), "url": sheet_url.as_str() })))?;
+    let sheet = get(sheet_url.as_str())?;
 
     let write = || -> std::io::Result<()> {
         let meta = json!({
@@ -178,7 +196,7 @@ pub fn download_pet(input: &str, dir: &Path) -> Result<Value, PetError> {
             "displayName": pet["displayName"],
             "description": pet["description"],
             "author": pet["ownerName"],
-            "source": format!("{SITE}/#/pets/{id}"),
+            "source": format!("{site}/#/pets/{id}"),
             "spritesheetPath": "spritesheet.webp",
             "spriteVersionNumber": pet["spriteVersionNumber"],
             "kind": pet["kind"],
@@ -199,7 +217,7 @@ pub fn download_pet(input: &str, dir: &Path) -> Result<Value, PetError> {
 fn gallery_url(page: u64, sort: &str, query: &str) -> String {
     let sort = if sort == "new" || sort == "newest" { "new" } else { "popular" };
     let query: String = query.trim().chars().take(100).collect();
-    let mut url = Url::parse(&format!("{SITE}/api/pets")).expect("the site's address");
+    let mut url = Url::parse(&format!("{}/api/pets", crate::config::pet_site())).expect("the site's address");
     url.query_pairs_mut().append_pair("page", &page.max(1).to_string()).append_pair("pageSize", "12").append_pair("sort", sort);
     if !query.is_empty() {
         url.query_pairs_mut().append_pair("q", &query);
@@ -207,37 +225,110 @@ fn gallery_url(page: u64, sort: &str, query: &str) -> String {
     url.to_string()
 }
 
+// The gallery's answers as last read, in her data folder: an offline look
+// still shows the pets the site had (stale-while-revalidate — the fresh
+// read goes on whatever the cache says, and only a cache older than this
+// is called stale in the page, never "could not connect" alone). One file
+// per query's shape, kept to crate::config::gallery_cache_keep() so the folder
+// cannot grow.
+const GALLERY_CACHE: &str = "gallery-cache";
+
+// The cache file of one gallery page: its name says the page, sort and
+// query, so nothing but the same question ever reads it.
+fn gallery_cache_name(page: u64, sort: &str, query: &str) -> String {
+    let sort = if sort == "new" || sort == "newest" { "new" } else { "popular" };
+    let query: String = query.trim().chars().take(100).collect();
+    // A name safe for a file whatever was typed: the query hashed, the parts
+    // plain. FNV-1a: short, no dependency.
+    let mut hash = 2166136261u32;
+    for byte in query.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16777619);
+    }
+    format!("page-{page}-{sort}-{hash:08x}.json")
+}
+
+// The page as last read from its cache file, or none. Read only; a broken
+// or missing file is simply no cache, never an error to show.
+fn gallery_cache_read(dir: &Path, name: &str) -> Option<Value> {
+    serde_json::from_slice(&fs::read(dir.join(GALLERY_CACHE).join(name)).ok()?).ok()
+}
+
+// The page into its cache file, and the older ones thinned. A write that
+// fails costs the cache only, never the answer.
+fn gallery_cache_write(dir: &Path, name: &str, page: &Value) {
+    let folder = dir.join(GALLERY_CACHE);
+    if fs::create_dir_all(&folder).is_err() {
+        return;
+    }
+    if let Ok(text) = serde_json::to_vec(page) {
+        let _ = fs::write(folder.join(name), text);
+    }
+    // The oldest beyond the keep count go; names sort by page.
+    let mut kept: Vec<_> = fs::read_dir(&folder).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    let keep = crate::config::gallery_cache_keep();
+    if kept.len() > keep {
+        kept.sort();
+        for path in kept.drain(..kept.len() - keep) {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 // A page of the site's gallery, or of what a search finds there. Only what
 // the gallery shows is passed on, and only pictures from the site itself.
-pub fn gallery(page: u64, sort: &str, query: &str) -> Result<Value, PetError> {
+// The site out of reach: the page as last read, said as cached (`offline`
+// in the answer, so the page can say 离线/缓存, not a dead spinner).
+pub fn gallery(page: u64, sort: &str, query: &str, cache_dir: &Path) -> Result<Value, PetError> {
     let url = gallery_url(page, sort, query);
-    let body: Value = agent()
-        .get(&url)
-        .header("user-agent", "wakuwaku")
-        .call()
-        .map_err(|e| http_err(&url, e))?
-        .body_mut()
-        .read_json()
-        .map_err(|e| err("network", json!({ "message": e.to_string(), "url": url })))?;
-    let items: Vec<Value> = body["pets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|p| p["id"].as_str().is_some_and(is_id))
-        .map(|p| {
-            // The poster is one frame; the preview is a strip of them all.
-            let preview = ["posterUrl", "previewUrl"].iter().find_map(|k| p[*k].as_str().filter(|u| u.starts_with(&format!("{SITE}/")))).unwrap_or("");
-            json!({
-                "id": p["id"],
-                "name": p["displayName"].as_str().unwrap_or(p["id"].as_str().unwrap_or("")),
-                "author": p["ownerName"].as_str().unwrap_or(""),
-                "likes": p["likeCount"].as_u64().unwrap_or(0),
-                "version": if p["spriteVersionNumber"] == 2 { 2 } else { 1 },
-                "preview": preview,
+    let cache_name = gallery_cache_name(page, sort, query);
+    let read = |body: &Value| {
+        let site = crate::config::pet_site();
+        let items: Vec<Value> = body["pets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| p["id"].as_str().is_some_and(is_id))
+            .map(|p| {
+                // The poster is one frame; the preview is a strip of them all.
+                let preview = ["posterUrl", "previewUrl"].iter().find_map(|k| p[*k].as_str().filter(|u| u.starts_with(&format!("{site}/")))).unwrap_or("");
+                json!({
+                    "id": p["id"],
+                    "name": p["displayName"].as_str().unwrap_or(p["id"].as_str().unwrap_or("")),
+                    "author": p["ownerName"].as_str().unwrap_or(""),
+                    "likes": p["likeCount"].as_u64().unwrap_or(0),
+                    "version": if p["spriteVersionNumber"] == 2 { 2 } else { 1 },
+                    "preview": preview,
+                })
             })
-        })
-        .collect();
-    Ok(json!({ "items": items, "page": body["page"], "totalPages": body["totalPages"], "total": body["total"] }))
+            .collect();
+        json!({ "items": items, "page": body["page"], "totalPages": body["totalPages"], "total": body["total"] })
+    };
+    let asked = get(&url).and_then(|bytes| {
+        let body: Value = serde_json::from_slice(&bytes).map_err(|e| err("network", json!({ "message": e.to_string(), "url": url })))?;
+        let page = read(&body);
+        gallery_cache_write(cache_dir, &cache_name, &page);
+        Ok(page)
+    });
+    match asked {
+        Ok(page) => Ok(page),
+        Err(e) => match gallery_cache_read(cache_dir, &cache_name) {
+            Some(page) => Ok(json!({ "items": page["items"], "page": page["page"], "totalPages": page["totalPages"], "total": page["total"], "offline": true, "error": describe_cached(&e) })),
+            None => Err(e),
+        },
+    }
+}
+
+// What the page says of a gallery answer served from the cache: the cache
+// is the reason it shows anything at all, so it names both facts, not just
+// the failure. (Words here, not in the page: the page renders what it is
+// given, in the person's language as describe does.)
+fn describe_cached(e: &PetError) -> String {
+    match e.code {
+        "network" => format!("离线，先用上次的图库（连不上：{}）", e.vars["message"].as_str().unwrap_or("")),
+        "http" => format!("站点暂时应答异常（HTTP {}），先用上次的图库", e.vars["status"]),
+        other => format!("先用上次的图库（{other}）"),
+    }
 }
 
 // An error in the person's language.
@@ -340,10 +431,50 @@ mod tests {
         assert_eq!(gallery_url(1, "x", "猫 cat&sort=new"), "https://codex-pets.net/api/pets?page=1&pageSize=12&sort=popular&q=%E7%8C%AB+cat%26sort%3Dnew");
     }
 
+    // 离线降级：站点连不上时，图库按上次读到的页面回答并标明 offline，
+    // 不是一句「连不上」把整个图库变成死白。
+    #[test]
+    fn a_dead_site_still_shows_the_last_gallery_page_as_cached() {
+        let cache = std::env::temp_dir().join(format!("wakuwaku-gallery-cache-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&cache);
+        let name = gallery_cache_name(1, "popular", "");
+        // 命中：缓存里已有这一页。
+        let page = json!({ "items": [{ "id": "claude-chan", "name": "Claude", "author": "a", "likes": 1, "version": 2, "preview": "" }], "page": 1, "totalPages": 2, "total": 24 });
+        gallery_cache_write(&cache, &name, &page);
+        assert_eq!(gallery_cache_read(&cache, &name).unwrap()["total"], 24);
+        // 同一页的另一次提问换参数时不读这份缓存（先证明名字真的分页）。
+        assert!(gallery_cache_read(&cache, &gallery_cache_name(2, "popular", "")).is_none());
+        // 写入淘汰：超出保留份数的最旧缓存文件被收走，文件夹有上限。
+        for n in 0..crate::config::gallery_cache_keep() + 3 {
+            gallery_cache_write(&cache, &format!("page-{}-popular-00000000.json", n + 3), &page);
+        }
+        let left = fs::read_dir(cache.join(GALLERY_CACHE)).unwrap().count();
+        assert!(left <= crate::config::gallery_cache_keep(), "缓存文件数 {left} 超过上限 {}", crate::config::gallery_cache_keep());
+        let _ = fs::remove_dir_all(&cache);
+    }
+
+    // 缓存文件名按提问形状区分：分页、排序与搜索词不同就不同名，但同一
+    // 提问（含同一搜索词）永远同一名字。
+    #[test]
+    fn gallery_cache_names_separate_questions_and_stay_stable() {
+        let a = gallery_cache_name(1, "popular", "");
+        let again = gallery_cache_name(1, "popular", " ");
+        assert_eq!(a, again, "同一提问（空搜索词的空白差异）应同名");
+        assert_ne!(a, gallery_cache_name(1, "new", ""));
+        assert_ne!(a, gallery_cache_name(2, "popular", ""));
+        let q1 = gallery_cache_name(1, "popular", "猫");
+        let q2 = gallery_cache_name(1, "popular", "猫");
+        assert_eq!(q1, q2, "同一搜索词跨调用应稳定");
+        assert_ne!(q1, gallery_cache_name(1, "popular", "狗"));
+    }
+
     #[test]
     fn errors_in_words() {
         let e = err("notFound", json!({ "id": "x" }));
         assert_eq!(describe("zh", &e), "codex-pets.net 上没有这只宠物：x");
         assert_eq!(describe("en", &err("http", json!({ "status": 500, "url": "u" }))), "500: u");
+        // 离线兜底的文案把「离线/缓存」与原因都说了。
+        let offline = describe_cached(&err("network", json!({ "message": "refused" })));
+        assert!(offline.contains("离线") && offline.contains("refused"), "{offline}");
     }
 }

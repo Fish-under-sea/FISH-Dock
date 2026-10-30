@@ -65,12 +65,11 @@ const GITEE_RELAY: &str = "";
 const TEST_URL: &str = "WAKUWAKU_CRASH_URL";
 const TEST_CRASH: &str = "WAKUWAKU_CRASH_TEST";
 
-const TAIL_MAX: u64 = 256 * 1024;
+// 阈值/保留份数走 crate::config（FISH_DOCK_LOG_TAIL_BYTES / FISH_DOCK_CRASH_KEEP），不写死。
 // The line each run begins with in recent.log ("start: pid 1234, v0.2.2").
 const START_LINE: &str = "start: pid ";
 const TAIL_WINDOW_MS: u64 = 5 * 60 * 1000;
 const TAIL_LINES: usize = 60;
-const KEEP: usize = 20;
 const RETRY_MS: u64 = 6 * 3_600_000;
 // So many crashes within so long, and the guard asks.
 const LOOP_COUNT: usize = 3;
@@ -105,7 +104,7 @@ fn tail_now(data: &Path, whole: &str) {
 fn write_tail(tail: &mut Option<(fs::File, u64)>, data: &Path, whole: &str) {
     let line = format!("{}\n", whole.trim_end_matches(['\r', '\n']).replace("\r\n", "⏎").replace(['\r', '\n'], "⏎"));
     let path = data.join("recent.log");
-    let full = tail.as_ref().map_or_else(|| fs::metadata(&path).map_or(0, |m| m.len()), |(_, size)| *size) > TAIL_MAX;
+    let full = tail.as_ref().map_or_else(|| fs::metadata(&path).map_or(0, |m| m.len()), |(_, size)| *size) > crate::config::log_tail_bytes();
     if tail.is_none() || full {
         *tail = None;
         if full {
@@ -409,7 +408,7 @@ fn save(data: &Path, f: &Found, report: &Value) -> Option<PathBuf> {
     let path = dir.join(format!("{stamp}{secs:02}-{}-{}.json", f.kind, f.pid));
     fs::write(&path, serde_json::to_string_pretty(report).ok()?).ok()?;
     let waiting = pending(data);
-    for old in waiting.iter().take(waiting.len().saturating_sub(KEEP)) {
+    for old in waiting.iter().take(waiting.len().saturating_sub(crate::config::crash_keep())) {
         let _ = fs::remove_file(old);
     }
     Some(path)
@@ -435,7 +434,7 @@ fn keep_in(data: &Path, sub: &str, name: &str, content: &str) {
     let _ = fs::write(dir.join(name), content);
     let mut all: Vec<PathBuf> = fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
     all.sort();
-    for old in all.iter().take(all.len().saturating_sub(KEEP)) {
+    for old in all.iter().take(all.len().saturating_sub(crate::config::crash_keep())) {
         let _ = fs::remove_file(old);
     }
 }

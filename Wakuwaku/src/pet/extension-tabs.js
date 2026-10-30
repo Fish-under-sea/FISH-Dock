@@ -1,6 +1,8 @@
 // 标签顺序使用稳定 ID，停用页的历史位置保留在设置中。
 ;(function () {
-  const CORE = ['now','agents','look','widgets','mail']
+  // 默认顺序：通用 → Agent → 外观 → 邮件 → 插件（#23）。邮件在插件前，是因为
+  // 邮件是日常在用的，插件是偶尔去调一次的；用户拖过的顺序存在 tabOrder，不受影响。
+  const CORE = ['now','agents','look','mail','widgets']
   const valid = id => typeof id === 'string' && (CORE.includes(id) || /^[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9-]{1,64}$/.test(id)) && id.length <= 160
   const clean = values => [...new Set((Array.isArray(values) ? values : []).filter(valid))].slice(0,128)
   function order(saved, pages) {

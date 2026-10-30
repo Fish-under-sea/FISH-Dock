@@ -62,7 +62,7 @@ use crate::lhm::Kind;
 // The setting with the built-in source's picks (in "monitor").
 pub const PICKS: &str = "builtinSensors";
 // Her exe with this prints one whole reading as JSON and ends (main.rs).
-pub const DUMP_FLAG: &str = "--wakuwaku-hw-dump";
+pub const DUMP_FLAG: &str = "--fish-dock-hw-dump";
 
 // Where the monitor's sensors come from: the top-level setting "monitorSource".
 #[derive(Clone, Copy, Debug, PartialEq)]

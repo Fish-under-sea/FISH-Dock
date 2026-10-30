@@ -48,12 +48,15 @@ fn claude_named(tool: &str, input: &Value) -> (String, Value) {
     let file = |key: &str| json!({ "file_path": s(input, key) });
     match tool {
         "read" | "read_image" => ("Read".into(), file("file_path")),
-        "write" => ("Write".into(), file("file_path")),
-        "edit" => ("Edit".into(), file("file_path")),
+        // An edit says what it changes, not only where: the approval card's
+        // body is these texts (asks.rs edit_summary), as Claude Code's own
+        // tools give them.
+        "write" => ("Write".into(), json!({ "file_path": s(input, "file_path"), "content": s(input, "content") })),
+        "edit" => ("Edit".into(), json!({ "file_path": s(input, "file_path"), "old_string": s(input, "old_string"), "new_string": s(input, "new_string") })),
         "str_replace_editor" => match s(input, "command") {
             "view" => ("Read".into(), file("path")),
-            "create" => ("Write".into(), file("path")),
-            _ => ("Edit".into(), file("path")),
+            "create" => ("Write".into(), json!({ "file_path": s(input, "path"), "content": s(input, "content") })),
+            _ => ("Edit".into(), json!({ "file_path": s(input, "path"), "old_str": s(input, "old_str"), "new_str": s(input, "new_str") })),
         },
         "pwsh" | "bash" => ("Bash".into(), json!({ "command": s(input, "command"), "description": s(input, "description") })),
         "glob" => ("Glob".into(), input.clone()),
@@ -659,6 +662,49 @@ mod tests {
         let file = dir.join("session.v4.jsonl.zstd");
         std::fs::write(&file, bytes).unwrap();
         file
+    }
+
+    // An approval card's body reads the edit's own texts (asks.rs
+    // edit_summary): what she is asked to allow is the change, not the path.
+    #[test]
+    fn an_edit_keeps_the_texts_its_card_shows() {
+        let input = json!({ "file_path": "Z:\\nowhere\\dsh\\note.txt", "old_string": "旧 一行", "new_string": "新 一行" });
+        let (name, kept) = claude_named("edit", &input);
+        assert_eq!(name, "Edit");
+        assert_eq!((kept["file_path"].as_str(), kept["old_string"].as_str(), kept["new_string"].as_str()), (Some("Z:\\nowhere\\dsh\\note.txt"), Some("旧 一行"), Some("新 一行")));
+        // What the card says: the path, and both texts.
+        let summary = crate::asks::summarize("Edit", &kept);
+        assert!(summary.contains("Z:\\nowhere\\dsh\\note.txt"), "{summary}");
+        assert!(summary.contains("旧 一行") && summary.contains("新 一行"), "{summary}");
+        // And as a prompt passes through her plugin's words (for_ask).
+        let ask = for_ask(&json!({ "hook_event_name": "PermissionRequest", "tool_name": "edit", "tool_input": input }));
+        assert_eq!(ask["tool_name"], "Edit");
+        let summary = crate::asks::summarize("Edit", &ask["tool_input"]);
+        assert!(summary.contains("旧 一行") && summary.contains("新 一行"), "{summary}");
+    }
+
+    #[test]
+    fn a_write_keeps_its_content() {
+        let input = json!({ "file_path": "Z:\\nowhere\\dsh\\copy.txt", "content": "hi\n" });
+        let (name, kept) = claude_named("write", &input);
+        assert_eq!((name.as_str(), kept["content"].as_str()), ("Write", Some("hi\n")));
+        let summary = crate::asks::summarize("Write", &kept);
+        assert!(summary.contains("Z:\\nowhere\\dsh\\copy.txt") && summary.contains("hi"), "{summary}");
+    }
+
+    // DSH's own names for them: create is a write, str_replace an edit.
+    #[test]
+    fn a_str_replace_editor_keeps_its_texts() {
+        let (name, kept) = claude_named("str_replace_editor", &json!({ "command": "create", "path": "Z:\\nowhere\\a.rs", "content": "fn main() {}\n" }));
+        assert_eq!((name.as_str(), kept["content"].as_str()), ("Write", Some("fn main() {}\n")));
+        let (name, kept) = claude_named("str_replace_editor", &json!({ "command": "str_replace", "path": "Z:\\nowhere\\a.rs", "old_str": "旧 一行", "new_str": "新 一行" }));
+        assert_eq!(name, "Edit");
+        assert_eq!((kept["file_path"].as_str(), kept["old_str"].as_str(), kept["new_str"].as_str()), (Some("Z:\\nowhere\\a.rs"), Some("旧 一行"), Some("新 一行")));
+        let summary = crate::asks::summarize("Edit", &kept);
+        assert!(summary.contains("旧 一行") && summary.contains("新 一行"), "{summary}");
+        // A look is no edit: nothing to show but the path.
+        let (name, kept) = claude_named("str_replace_editor", &json!({ "command": "view", "path": "Z:\\nowhere\\a.rs" }));
+        assert_eq!((name.as_str(), kept.as_object().unwrap().len()), ("Read", 1));
     }
 
     #[test]

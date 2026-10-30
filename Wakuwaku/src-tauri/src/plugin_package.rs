@@ -64,7 +64,9 @@ mod tests {
             let digest = format!("{:x}", Sha256::digest(&bytes));
             let package = inspect(&bytes, &digest, &root, Source::OfficialCatalog, "windows-x86_64").unwrap();
             assert_eq!(package.manifest.id, format!("fish.{key}"));
-            assert_eq!(package.manifest.version, "1.0.0");
+            // 本批（2.0.0）四个插件与宿主同版；跟着 Cargo.toml 走，下一批换版本号时
+            // 这里不用再改一次，也不会像写死 "1.0.0" 那样在 2.0.0 资产上直接失败。
+            assert_eq!(package.manifest.version, env!("CARGO_PKG_VERSION"));
             println!("{key}: {} resources verified", package.files.len());
         }
     }

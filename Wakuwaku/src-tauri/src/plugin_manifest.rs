@@ -8,8 +8,17 @@ pub struct Manifest {
     pub schema: u32, pub id: String, pub name: String, pub version: String, pub host_api: u32,
     pub platforms: Vec<String>, pub storage: Storage, pub backend: Backend,
     #[serde(default)] pub capabilities: Vec<String>, #[serde(default)] pub pages: Vec<Page>,
+    // 行为钩子（#22）：插件声明它接受哪些宿主提供的官方开关；插件自己不必
+    // 再画一遍。旧包没有这一段，按默认（全 false）读。
+    #[serde(default)] pub behaviors: Behaviors,
     pub files: BTreeMap<String, String>,
 }
+// Behaviors 是插件声明接的宿主钩子。autostart：接受「随 Dock 启动就拉起本机
+// 服务」——宿主在它的插件卡上画那颗气泡开关，并在拉起后台时把
+// FISH_PLUGIN_AUTOSTART=1 传下去。以后再加别的行为也往这里长。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Behaviors { #[serde(default)] pub autostart: bool }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Storage { pub directory: String, pub data_schema: u32 }
@@ -75,7 +84,7 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> Manifest { Manifest { schema: 1, id: "acme.weather".into(), name: "合成天气".into(), version: "1.2.3".into(), host_api: 1, platforms: vec!["windows-x86_64".into()], storage: Storage { directory: ".plugin.acme.weather".into(), data_schema: 1 }, backend: Backend { runtime: "node".into(), entry: "backend.mjs".into(), args: vec![] }, capabilities: vec!["storage".into()], pages: vec![Page { id: "weather".into(), title: "天气".into(), entry: "page.html".into() }], files: BTreeMap::from([("backend.mjs".into(), "0".repeat(64)), ("page.html".into(), "1".repeat(64))]) } }
+    fn fixture() -> Manifest { Manifest { schema: 1, id: "acme.weather".into(), name: "合成天气".into(), version: "1.2.3".into(), host_api: 1, platforms: vec!["windows-x86_64".into()], storage: Storage { directory: ".plugin.acme.weather".into(), data_schema: 1 }, backend: Backend { runtime: "node".into(), entry: "backend.mjs".into(), args: vec![] }, capabilities: vec!["storage".into()], pages: vec![Page { id: "weather".into(), title: "天气".into(), entry: "page.html".into() }], behaviors: Behaviors::default(), files: BTreeMap::from([("backend.mjs".into(), "0".repeat(64)), ("page.html".into(), "1".repeat(64))]) } }
     #[test] fn valid_manifest_and_paths_are_portable() {
         let root = std::env::temp_dir().join("fish-manifest-contract");
         let manifest = fixture();

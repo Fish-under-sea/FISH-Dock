@@ -20,7 +20,7 @@ function make(confirm = () => true) {
   return { panel, calls }
 }
 test('备份界面说明整个配置仓及实际默认导出位置', async () => {
-  const { panel } = make(); await panel.load(); const html = panel.render()
+  const { panel } = make(); await panel.load(); const html = panel.renderBackup()
   assert.match(html, /FISH Dock 配置与备份/)
   assert.match(html, /宿主设置.*插件.*配置/)
   assert.match(html, /导出配置备份 ZIP/)
@@ -31,13 +31,35 @@ test('预览不会提交，并清楚说明旧 OFM 包保留邮件身份', async 
   const { panel, calls } = make()
   await panel.load()
   await panel.preview()
-  const html = panel.render()
+  const html = panel.renderBackup()
   assert.match(html, /用户下载/)
   assert.match(html, /2/)
   assert.match(html, /邮件.*保持|保留.*邮件/)
   assert.match(html, /缺失.*1|1.*缺失/)
   assert.equal(calls.filter(c => c.command === 'identity_import').length, 0)
 })
+test('挂载点跟着面板搬到通用页：三个按钮与输入框的事件都接上', async () => {
+  const { panel, calls } = make()
+  const made = new Map()
+  const node = name => {
+    if (!made.has(name)) made.set(name, { name, onclick: null, oninput: null, value: 'X:/下载' })
+    return made.get(name)
+  }
+  const root = { querySelector: sel => (sel === '.identity-panel' ? { querySelector: node } : node(sel)) }
+  panel.mount(root)
+  assert.equal(typeof node('[data-identity="export"]').onclick, 'function', '导出按钮接上了')
+  assert.equal(typeof node('[data-identity="preview"]').onclick, 'function', '预览按钮接上了')
+  assert.equal(typeof node('#identity-directory').oninput, 'function', '导出目录输入框接上了')
+  assert.equal(calls.filter(c => c.command === 'identity_view').length, 1, '挂载时读一次视图')
+  // 挂载只在有这块 DOM 的地方生效：插件页现在没有它，mount 必须安静返回。
+  const bare = { querySelector: () => null }
+  panel.mount(bare)
+  assert.equal(calls.filter(c => c.command === 'identity_view').length, 1, '没有面板就不重复读')
+  // 预览出来的「确认恢复」按钮：重绘后才存在，钩子按同一份选择器接。
+  await panel.preview()
+  assert.match(panel.renderBackup(), /data-identity="import"/)
+})
+
 test('拒绝明文确认不会调用原生导出或导入', async () => {
   const { panel, calls } = make(() => false)
   await panel.load()

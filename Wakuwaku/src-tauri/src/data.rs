@@ -2,7 +2,7 @@
 // found.
 //
 // Her folder: WAKUWAKU_USER_DATA (tests), else (an installed build) the data
-// folder of her home in %LOCALAPPDATA%\DSH-FISH, which an install and an
+// folder of her home in %LOCALAPPDATA%\FISH Dock, which an install and an
 // uninstall both leave alone, else data/ in the project when run from this
 // source tree, else wakuwaku-data beside the .exe (portable).
 use std::fs;
@@ -24,8 +24,8 @@ fn in_tree(up: usize, rest: &str) -> PathBuf {
 
 pub fn folder() -> PathBuf {
     if let Some(context) = crate::storage_context::current() { return context.host.path().to_path_buf(); }
-    if let Ok(dir) = std::env::var("WAKUWAKU_USER_DATA") {
-        return dir.into();
+    if let Some(dir) = crate::config::user_data_override() {
+        return dir;
     }
     #[cfg(feature = "installed")]
     {

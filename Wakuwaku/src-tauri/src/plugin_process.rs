@@ -3,8 +3,14 @@ use std::{io::{BufReader,Write},path::Path,process::{Child,Command,Stdio},sync::
 use serde_json::{json,Value};
 use crate::{plugin_install::{Installed,Manager},storage_context::Namespace};
 pub struct Process { child:Child, owner:Option<crate::plugin_job::Owner>, output:Receiver<Result<Value,String>>, input:SyncSender<Value>, next:u64, namespace:Namespace, capabilities:Vec<String> }
+// autostart_flag 是传给插件的那个环境变量值（#22）：只有 1 是「随 Dock 启动」，
+// 其余一律 0，插件据此决定要不要自己把服务拉起来。
+fn autostart_flag(autostart:bool)->&'static str { if autostart{"1"}else{"0"} }
 impl Process {
-    pub fn start(manager:&Manager<'_>,row:&Installed,node:Option<&Path>)->Result<Self,String> {
+    // autostart：这次拉起是不是「随 Dock 启动」（#22）。宿主只在开机自启时传
+// true，安装、启用、回滚都传 false——插件读这个信号自己决定要不要把本机服务
+// 拉起来，宿主不再替它猜。
+    pub fn start(manager:&Manager<'_>,row:&Installed,node:Option<&Path>,autostart:bool)->Result<Self,String> {
         manager.verify(row)?;
         let namespace=manager.namespace(row)?;
         let directory=manager.directory(row)?;
@@ -14,7 +20,7 @@ impl Process {
             "native"=>Command::new(&entry),
             _=>return Err("插件运行时不受支持".into()),
         };
-        command.args(&row.manifest.backend.args).current_dir(&directory).env_remove("NODE_OPTIONS").env_remove("NODE_PATH").env_remove("ELECTRON_RUN_AS_NODE").env("FISH_PLUGIN_ID",&row.manifest.id).env("FISH_PLUGIN_DATA",namespace.path()).env("TMP",namespace.path().join("tmp")).env("TEMP",namespace.path().join("tmp")).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(if cfg!(test){Stdio::inherit()}else{Stdio::null()});
+        command.args(&row.manifest.backend.args).current_dir(&directory).env_remove("NODE_OPTIONS").env_remove("NODE_PATH").env_remove("ELECTRON_RUN_AS_NODE").env("FISH_PLUGIN_ID",&row.manifest.id).env("FISH_PLUGIN_AUTOSTART",autostart_flag(autostart)).env("FISH_PLUGIN_DATA",namespace.path()).env("TMP",namespace.path().join("tmp")).env("TEMP",namespace.path().join("tmp")).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(if cfg!(test){Stdio::inherit()}else{Stdio::null()});
         #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
         let mut child=command.spawn().map_err(|_|"插件启动失败，请检查运行时路径及系统权限")?;
         let owner=match crate::plugin_job::Owner::attach(&child) {Ok(owner)=>owner,Err(error)=>{let _=child.kill();let _=child.wait();return Err(error)}};
@@ -25,9 +31,9 @@ impl Process {
         let (input,read)=mpsc::sync_channel::<Value>(2);
         std::thread::spawn(move||{for value in read {let Ok(mut bytes)=serde_json::to_vec(&value) else{break};bytes.push(b'\n');if stdin.write_all(&bytes).and_then(|_|stdin.flush()).is_err(){break;}}});
         let mut process=Self{child,owner:Some(owner),output,input,next:0,namespace,capabilities:row.manifest.capabilities.clone()};
-        let hello=process.request("host.hello",json!({"protocol":1,"pluginId":row.manifest.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":process.namespace.path(),"storage":process.namespace.identity(),"capabilities":row.manifest.capabilities}),Duration::from_secs(5))?;
+        let hello=process.request("host.hello",json!({"protocol":1,"pluginId":row.manifest.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":process.namespace.path(),"storage":process.namespace.identity(),"capabilities":row.manifest.capabilities}),crate::config::plugin_activate_timeout())?;
         if hello["type"]!="plugin.hello" || hello["protocol"]!=1 || hello["pluginId"]!=row.manifest.id {return Err("插件握手身份或协议不匹配".into());}
-        process.request("plugin.activate",json!({}),Duration::from_secs(5))?;
+        process.request("plugin.activate",json!({}),crate::config::plugin_activate_timeout())?;
         Ok(process)
     }
     fn send(&self,value:Value)->Result<(),String> {
@@ -57,7 +63,7 @@ impl Process {
     pub fn accepts_events(&self)->bool{self.capabilities.iter().any(|c|c=="events")}
     pub fn running(&mut self)->bool{matches!(self.child.try_wait(),Ok(None))}
     pub fn stop(&mut self){
-        if self.running(){let _=self.request("plugin.deactivate",json!({}),Duration::from_secs(5));}
+        if self.running(){let _=self.request("plugin.deactivate",json!({}),crate::config::plugin_activate_timeout());}
         // 正常停用后也回收本实例创建的残留子进程。
         self.owner.take();let _=self.child.kill();let _=self.child.wait();
     }
@@ -116,7 +122,7 @@ mod tests {
         let bytes=crate::identity_archive::zip(&files).unwrap();let digest=format!("{:x}",Sha256::digest(&bytes));
         let package=crate::plugin_package::inspect(&bytes,&digest,&root,crate::storage::Source::ThirdParty,&crate::plugin_install::platform()).unwrap();
         let row=manager.install(package,&digest,false).unwrap();
-        let mut process=Process::start(&manager,&row,Some(&node)).unwrap();assert!(process.running());
+        let mut process=Process::start(&manager,&row,Some(&node),false).unwrap();assert!(process.running());
         assert_eq!(process.request("save",json!({}),Duration::from_secs(2)).unwrap(),"synthetic");
         assert_eq!(std::fs::read(root.join(".plugin.acme.weather/keys/test.json")).unwrap(),b"synthetic");
         process.stop();assert!(!process.running());drop(process);
@@ -183,5 +189,11 @@ mod tests {
             assert!(storage_call(&ns,&caps,"host.storage.writeSecret",&json!({"category":"config","name":"no","value":"secret"})).is_err());
         }
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // #22：只有「随 Dock 启动」那一次是 1；安装、点启用、回滚都是 0。插件靠这个
+    // 值决定要不要自己把本机服务拉起来，写反了就是每次启用都顺带起服务。
+    #[test] fn autostart_flag_is_one_only_when_started_with_the_dock() {
+        assert_eq!(autostart_flag(true),"1");
+        assert_eq!(autostart_flag(false),"0");
     }
 }

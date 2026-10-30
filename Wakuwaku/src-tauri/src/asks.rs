@@ -37,6 +37,8 @@ use crate::i18n;
 
 const MAX_SUMMARY: usize = 400;
 const MAX_ANSWER: usize = 2000;
+// How much of an edit's texts the approval card shows (its .code block).
+const MAX_DIFF: usize = 400;
 // The longest a prompt can wait: under the 300 s timeout the PermissionRequest
 // hook is installed with. The settings can make it shorter.
 pub const ASK_TIMEOUT_MS: u64 = 290 * 1000;
@@ -51,6 +53,63 @@ fn clip(text: &str, max: usize) -> String {
 
 fn s<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+// An edit's old and new text as one line each, their common leading lines
+// taken off, for the approval card's body: the path alone says nothing of
+// what the edit changes.
+fn edit_pair(old: &str, new: &str) -> String {
+    let old_lines: Vec<&str> = old.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let new_lines: Vec<&str> = new.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let same = old_lines.iter().zip(&new_lines).take_while(|(a, b)| a == b).count();
+    let (old_rest, new_rest) = (&old_lines[same..], &new_lines[same..]);
+    if old_rest.is_empty() && new_rest.is_empty() {
+        return String::new();
+    }
+    let cut = |lines: &[&str]| clip(&lines.join(" | "), MAX_DIFF / 2 - 8);
+    format!("… {} → {}", cut(old_rest), cut(new_rest))
+}
+
+// An Edit/MultiEdit input's diffs, one a line: the file's path when there is
+// one, then for each edit its old and new ("… old → new"); a Write's content
+// head; only what fits (MAX_DIFF), the rest counted. None when there is
+// nothing to show (a read, an edit without its texts).
+fn edit_summary(input: &Value) -> Option<String> {
+    // Claude Code names it file_path/notebook_path; DSH's str_replace_editor path.
+    let path = ["file_path", "notebook_path", "path"].iter().find_map(|k| input.get(k).and_then(Value::as_str)).filter(|p| !p.is_empty()).unwrap_or("");
+    let mut lines: Vec<String> = (!path.is_empty()).then(|| path.to_string()).into_iter().collect();
+    let pair = |e: &Value, old: &str, new: &str| edit_pair(s(e, old), s(e, new));
+    if let Some(edits) = input.get("edits").and_then(Value::as_array) {
+        for e in edits {
+            lines.push(pair(e, "old_string", "new_string"));
+        }
+    } else if let (Some(old), Some(new)) = (input.get("old_string").and_then(Value::as_str), input.get("new_string").and_then(Value::as_str)) {
+        lines.push(edit_pair(old, new));
+    } else if let (Some(old), Some(new)) = (input.get("old_str").and_then(Value::as_str), input.get("new_str").and_then(Value::as_str)) {
+        // DSH's str_replace（Claude Code 的词之外的名字）。
+        lines.push(edit_pair(old, new));
+    } else if let Some(content) = input.get("content").and_then(Value::as_str) {
+        lines.push(clip(content, MAX_DIFF));
+    } else {
+        return (!lines.is_empty()).then(|| lines.join("\n"));
+    }
+    let all: Vec<&str> = lines.iter().filter(|l| !l.is_empty()).map(String::as_str).collect();
+    if all.is_empty() {
+        return None;
+    }
+    let mut text = String::new();
+    let mut count = 0;
+    for line in &all {
+        if text.chars().count() + line.chars().count() > MAX_DIFF {
+            count += 1;
+            continue;
+        }
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(line);
+    }
+    Some(if count > 0 { format!("{text}\n… +{count} 处修改") } else { text })
 }
 
 // A patch (Codex's apply_patch) as the files it changes, one a line.
@@ -68,6 +127,12 @@ pub fn summarize(tool: &str, input: &Value) -> String {
     if tool == "apply_patch" {
         if let Some(files) = input.get("command").and_then(Value::as_str).and_then(patch_files) {
             return clip(&files, MAX_SUMMARY);
+        }
+    }
+    // An edit says what it changes: the path with each edit's old → new.
+    if matches!(tool, "Edit" | "MultiEdit" | "Write" | "NotebookEdit") {
+        if let Some(text) = edit_summary(input) {
+            return clip(&text, MAX_SUMMARY * 2);
         }
     }
     let field = match tool {
@@ -567,6 +632,37 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_prompt_carries_its_diff() {
+        // 新-1（审批卡半开）：Edit 的摘要只到路径就断，批准卡没有正文可摆。
+        let edit = json!({
+            "hook_event_name": "PermissionRequest", "session_id": "s", "cwd": "D:\\work\\pet", "tool_name": "Edit",
+            "tool_input": { "file_path": "D:\\work\\pet\\src\\main.rs", "old_string": "fn main() {\n    println!(\"hi\");", "new_string": "fn main() {\n    println!(\"hello\");" }
+        });
+        let view = view_of(&edit).unwrap();
+        assert_eq!(view["kind"], "permission");
+        let summary = view["summary"].as_str().unwrap();
+        assert!(summary.contains("main.rs"), "摘要含路径：{summary}");
+        assert!(summary.contains("println!(\"hi\")"), "摘要含旧文本：{summary}");
+        assert!(summary.contains("println!(\"hello\")"), "摘要含新文本：{summary}");
+        // MultiEdit：每处编辑一行；超出的计数收尾。
+        let multi = json!({
+            "hook_event_name": "PermissionRequest", "session_id": "s", "cwd": "D:\\work\\pet", "tool_name": "MultiEdit",
+            "tool_input": { "file_path": "D:\\work\\pet\\src\\lib.rs", "edits": [
+                { "old_string": "let a = 1;", "new_string": "let a = 2;" },
+                { "old_string": "let b = 1;", "new_string": "let b = 3;" }
+            ] }
+        });
+        let said = view_of(&multi).unwrap()["summary"].as_str().unwrap().to_string();
+        assert!(said.contains("lib.rs") && said.contains("let a = 2;") && said.contains("let b = 3;"), "{said}");
+        // 没有正文可给（只有路径）时仍回路径，不空。
+        let bare = json!({
+            "hook_event_name": "PermissionRequest", "session_id": "s", "cwd": "D:\\work\\pet", "tool_name": "Edit",
+            "tool_input": { "file_path": "D:\\work\\pet\\note.txt" }
+        });
+        assert_eq!(view_of(&bare).unwrap()["summary"], "D:\\work\\pet\\note.txt");
+    }
+
+    #[test]
     fn a_permission_prompt_and_its_answers() {
         let view = view_of(&permission()).unwrap();
         assert_eq!(view["kind"], "permission");
@@ -736,7 +832,13 @@ mod tests {
     fn a_dsh_approval_is_allow_or_deny_with_its_reason() {
         let e = dsh_permission("9-1", "call_1");
         let view = view_of(&e).unwrap();
-        assert_eq!((view["kind"].as_str(), view["from"].as_str(), view["tool"].as_str(), view["summary"].as_str()), (Some("permission"), Some("dsh"), Some("Write"), Some("C:\\waku\\agents\\probe1.txt")));
+        assert_eq!((view["kind"].as_str(), view["from"].as_str(), view["tool"].as_str()), (Some("permission"), Some("dsh"), Some("Write")));
+        // 摘要必须同时有路径和正文：审批卡「半开」缺陷的回归——从前
+        // claude_named 把 write 的 content 丢掉，卡上只剩路径块，看不见要
+        // 写什么；数据侧补齐正文后，这里就要连正文一起断，免得再退回纯路径。
+        let summary = view["summary"].as_str().unwrap();
+        assert!(summary.starts_with("C:\\waku\\agents\\probe1.txt"), "摘要以文件路径开头：{summary}");
+        assert!(summary.contains("hi"), "摘要里有要写入的正文：{summary}");
         assert_eq!(view["always"], Value::Null);
         assert_eq!(view["reason"]["zh"], "允许本次操作使用 danger-full-access 权限：outside the workspace");
         assert_eq!(reply_for(&e, &json!({ "action": "allow" }), "en"), Some(json!({ "decision": "allow" })));

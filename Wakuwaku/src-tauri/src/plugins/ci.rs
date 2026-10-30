@@ -54,7 +54,7 @@ impl Ci {
     // A turn: the run's widget, then the pull requests'; the first that
     // fails ends it (said, as the script's warning was).
     fn look(&mut self, out: &mut dyn Out) -> Result<(), String> {
-        let base = format!("https://api.github.com/repos/{}", self.repo);
+        let base = format!("{}/repos/{}", crate::config::github_api(), self.repo);
         let key = id_part(&self.repo);
         let runs = self.get(&format!("{base}/actions/runs?branch={}&per_page=1", escape(BRANCH)))?;
         out.post(run_widget(&key, &runs, &mut self.seen));

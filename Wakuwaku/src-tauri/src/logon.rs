@@ -27,7 +27,13 @@ pub struct TaskSeen {
     pub enabled: bool,
 }
 
-const DESCRIPTION: &str = "Starts Wakuwaku as you log on: her Start at login. She keeps it to where her program is, and takes it away when Start at login is turned off. 登录时启动 Wakuwaku（她的「开机自动启动」）。";
+// #27 迁移档：任务计划程序里给人看的那两处名字（作者、说明）换成 FISH Dock。
+// 任务名（`FISH Dock at logon-<SID>`）与命令行开关（`--fish-dock-at-login`）在
+// 2.0.0 也改过来了（#27 P0/P2 收尾）：它们由 connection.rs 的 `NAME` /
+// `AT_LOGIN_FLAG` 写、由 `own_task` 与安装器按字面量比对。旧名
+// （`Wakuwaku at logon-<SID>` / `--wakuwaku-at-login`）留着识别与清理，
+// 由 connection.rs 的 LEGACY_NAME / LEGACY_AT_LOGIN_FLAG 负责。
+const DESCRIPTION: &str = "Starts FISH Dock as you log on: her Start at login. She keeps it to where her program is, and takes it away when Start at login is turned off. 登录时启动 FISH Dock（她的「开机自动启动」）。";
 
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
@@ -44,7 +50,7 @@ pub fn task_xml(user: &str, exe: &str, args: &str) -> String {
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Author>Wakuwaku</Author>
+    <Author>FISH Dock</Author>
     <Description>{DESCRIPTION}</Description>
   </RegistrationInfo>
   <Triggers>
@@ -501,6 +507,13 @@ mod tests {
         assert!(xml.contains("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"));
         assert!(xml.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
         assert!(xml.contains("<Priority>4</Priority>"));
+        // #27 迁移档：任务计划程序里给人看的名字是 FISH Dock，旧名不再出现。
+        assert!(xml.contains("<Author>FISH Dock</Author>"), "{xml}");
+        assert!(xml.contains("<Description>Starts FISH Dock as you log on"), "{xml}");
+        assert!(xml.contains("登录时启动 FISH Dock"), "{xml}");
+        assert!(!xml.contains("Starts Wakuwaku") && !xml.contains("<Author>Wakuwaku</Author>"), "{xml}");
+        // 沿用档：用来匹配的命令行开关一个字都没动（connection.rs 按它认这条任务）。
+        assert!(xml.contains("<Arguments>--wakuwaku-at-login task</Arguments>"), "{xml}");
         assert_eq!(seen(&xml), TaskSeen { program: exe.into(), args: "--wakuwaku-at-login task".into(), enabled: true });
         // As the Task Scheduler may give it back: the program quoted, the task turned off there.
         let back = xml.replace(r"<Command>D:", r"<Command>&quot;D:").replace(r"wakuwaku.exe</Command>", r"wakuwaku.exe&quot;</Command>").replace("<Enabled>true</Enabled>\n  </Settings>", "<Enabled>false</Enabled>\n  </Settings>");

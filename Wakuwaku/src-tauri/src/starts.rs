@@ -24,7 +24,7 @@
 // flag does; else it is the programs above her (explorer.exe: by hand).
 use serde_json::Value;
 
-pub const BY_FLAG: &str = "--wakuwaku-by";
+pub const BY_FLAG: &str = "--fish-dock-by";
 
 // Her hook commands that start her when she is not up (main.rs).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -87,8 +87,9 @@ pub fn ensure_who(after_flag: &[String], event: Option<&Value>, claude: Option<&
 }
 
 // What a starter said (BY_FLAG's word), if it did.
+// #t18：读取侧新旧名都认——上一个版本（旧 exe）在更新交接时传给新 exe 的还是旧开关。
 pub fn by_of(args: &[String]) -> Option<&str> {
-    let at = args.iter().position(|a| a == BY_FLAG)?;
+    let at = args.iter().position(|a| crate::flags::is_flag(a, BY_FLAG))?;
     args.get(at + 1).map(String::as_str)
 }
 
@@ -112,7 +113,8 @@ pub fn starter(args: &[String], parents: impl FnOnce() -> Vec<String>) -> String
             Some(_) => format!("a program: {}", parents.join(" ← ")),
         }
     };
-    if args.iter().any(|a| a == crate::detach::FLAG) {
+    // 读取侧新旧名都认：旧 exe 在更新/重启交接时传过来的还是旧开关（#t18）。
+    if args.iter().any(|a| crate::flags::is_flag(a, crate::detach::FLAG)) {
         who.push_str(", started again out of its job");
     }
     clean(&who)

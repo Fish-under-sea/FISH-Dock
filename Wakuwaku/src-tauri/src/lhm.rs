@@ -41,8 +41,6 @@ use serde_json::{json, Value};
 
 pub const PORT: u16 = 8085;
 const TIMEOUT: Duration = Duration::from_millis(300);
-const EVERY: Duration = Duration::from_secs(3);
-const EVERY_QUIET: Duration = Duration::from_secs(10);
 const AGAIN: Duration = Duration::from_secs(30);
 // The password's name in Windows' Credential Manager.
 const SECRET: &str = "Wakuwaku LibreHardwareMonitor";
@@ -403,8 +401,8 @@ impl Lhm {
         }
         let with = (conf.port, conf.user.clone(), conf.pass, SECRET_REV.load(Ordering::SeqCst), ASKED_AGAIN.load(Ordering::SeqCst));
         let every = match self.status {
-            Status::Found if quiet => EVERY_QUIET,
-            Status::Found => EVERY,
+            Status::Found if quiet => crate::config::lhm_every_quiet(),
+            Status::Found => crate::config::lhm_every(),
             Status::Off | Status::Unread => Duration::ZERO,
             _ => AGAIN,
         };

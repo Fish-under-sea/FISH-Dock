@@ -46,8 +46,28 @@ use sha2::{Digest, Sha256};
 use crate::Shared;
 
 const GITHUB_LATEST: &str = "https://api.github.com/repos/Fish-under-sea/FISH-Dock/releases/latest";
-const GITHUB_REPO: &str = "https://github.com/Fish-under-sea/FISH-Dock/";
+// The releases list, for the About page's 更新公告: the five newest, with
+// their bodies (the API's /releases/latest says the newest one alone, and
+// no body at all).
+const GITHUB_RELEASES: &str = "https://api.github.com/repos/Fish-under-sea/FISH-Dock/releases?per_page=5";
+// Gitee 的公告源：Gitee 没有「列表发行说明」的公开 API（它的 /api/v5/repos/<owner>/<repo>/releases
+// 需要访问令牌且返回形状与 GitHub 不同）。前置条件（配齐才启用，见 notes_sources）：
+//   1) 一个可匿名访问的 Gitee 仓库，README 或 releases 页面可作为公告来源；
+//   2) FISH_DOCK_NOTES_GITEE 指向它（如 https://gitee.com/fish-under-sea/FISH-Dock）；
+//   3) 该仓库的发行说明按 GitHub 同名约定维护（tag_name/name/body/published_at）。
+// 未配置时这一源**明确跳过并记录「未配置」**（notes_sources 返回 Skip），不伪装可用、
+// 不静默空白（t10 硬要求）。GITEE_REPO 是更新检查那一路的旧占位，仍为空串。
 const GITEE_REPO: &str = "";
+// 公告源的环境变量：与 plugin_store 的 setting 入口共用读取方式。
+const ENV_NOTES_GITHUB: &str = "FISH_DOCK_NOTES_GITHUB";
+const ENV_NOTES_GITEE: &str = "FISH_DOCK_NOTES_GITEE";
+// Gitee 侧按 GitHub 兼容形状读发行列表的 API 路径（配置了仓库才有意义）。
+const GITEE_RELEASES_API: &str = "https://gitee.com/api/v5/repos/{repo}/releases?per_page=5&direction=desc";
+// The notes as last read, in her data folder: an offline look still shows
+// the last ones read instead of nothing (NOTES_FILE).
+const NOTES_FILE: &str = "update-notes.json";
+// 公告缓存保留条数走 crate::config::notes_keep()（FISH_DOCK_NOTES_KEEP）。
+const GITHUB_REPO: &str = "https://github.com/Fish-under-sea/FISH-Dock/";
 const GITHUB_TEST: &str = "WAKUWAKU_UPDATE_URL";
 const GITEE_TEST: &str = "WAKUWAKU_UPDATE_GITEE_URL";
 pub const AFTER_UPDATE: &str = "--after-update";
@@ -330,7 +350,8 @@ enum Miss {
 }
 
 // A GET, each way in turn (proxy::web_ways: Windows' proxy first, where one
-// is set; then as is) till one is answered.
+// is set; then as is) till one is answered. The seconds are the caller's
+// whole-call budget (proxy.rs); CONNECT/HEAD clamp inside agent_with.
 fn get(url: &str, seconds: u64, accept: Option<&str>) -> Result<Answer, Miss> {
     let mut failed = Vec::new();
     for way in crate::proxy::web_ways(url) {
@@ -388,9 +409,11 @@ fn redirected(from: &str, to: &str) -> Option<String> {
     (url.starts_with("https://") || (testing() && url.starts_with("http://"))).then_some(url)
 }
 
-// A JSON from there; none if it is not there (404: no release yet).
+// A JSON from there; none if it is not there (404: no release yet). The
+// budget comes from proxy.rs (FISH_DOCK_UPDATE_TIMEOUT_MS, default 20 s):
+// one place sets every timeout (red line).
 fn get_json(url: &str, accept: &str) -> Result<Option<Value>, String> {
-    match get(url, 20, Some(accept)) {
+    match get(url, crate::proxy::update_timeout().as_secs(), Some(accept)) {
         Err(Miss::NotThere) => Ok(None),
         Err(Miss::Failed(e)) => Err(e),
         Ok(mut a) => a.res.body_mut().read_json().map(Some).map_err(|e| format!("{}, {}: {e}", a.way, a.path)),
@@ -399,7 +422,7 @@ fn get_json(url: &str, accept: &str) -> Result<Option<Value>, String> {
 
 // A text from there (at most `limit` bytes); none if it is not there (404).
 fn get_text(url: &str, limit: u64) -> Result<Option<String>, String> {
-    match get(url, 20, None) {
+    match get(url, crate::proxy::update_timeout().as_secs(), None) {
         Err(Miss::NotThere) => Ok(None),
         Err(Miss::Failed(e)) => Err(e),
         Ok(mut a) => a.res.body_mut().with_config().limit(limit).read_to_string().map(Some).map_err(|e| format!("{}, {}: {e}", a.way, a.path)),
@@ -410,7 +433,7 @@ fn get_text(url: &str, limit: u64) -> Result<Option<String>, String> {
 // both, or those a test gives.
 fn endpoints() -> Vec<(Source, String)> {
     if !testing() {
-        return vec![(Source::GitHub, GITHUB_LATEST.to_string())];
+        return vec![(Source::GitHub, crate::config::update_latest())];
     }
     [(Source::GitHub, test_url(GITHUB_TEST)), (Source::Gitee, test_url(GITEE_TEST))].into_iter().filter_map(|(source, url)| Some((source, url?))).collect()
 }
@@ -424,7 +447,7 @@ fn public_release_url(url:&str)->Option<Found>{
     Some(Found{source:Source::GitHub,version:version.into(),page:url.as_str().into(),exe:None,digest:None,size:0})
 }
 fn public_latest()->Result<Option<Found>,String>{
-    match get("https://github.com/Fish-under-sea/FISH-Dock/releases/latest",10,None){
+    match get(&format!("{}releases/latest", crate::config::update_repo()),10,None){
         Ok(answer)=>public_release_url(&answer.final_url).map(Some).ok_or_else(||"GitHub 官方发行页没有有效的正式版本重定向".into()),
         Err(Miss::NotThere)=>Ok(None),Err(Miss::Failed(error))=>Err(error),
     }
@@ -442,7 +465,7 @@ fn fetch(source: Source, url: &str) -> Result<Option<Found>, String> {
     match source {
         Source::GitHub => {
             let api=||Ok(get_json(url,"application/vnd.github+json")?.as_ref().and_then(github_release));
-            if url==GITHUB_LATEST { github_sources(api,public_latest) } else {api()}
+            if url==crate::config::update_latest().as_str() { github_sources(api,public_latest) } else {api()}
         },
         Source::Gitee => gitee_found(url),
     }
@@ -530,6 +553,14 @@ pub fn check_now(sh: &Arc<Shared>) {
         }
     }
     tell(sh);
+    // 公告一小时（或上次失败）才再读一次，不跟着每次检查都问一遍。
+    let stale = {
+        let n = NOTES.lock().unwrap();
+        n.as_ref().map(|c| c.error.is_some() || now.saturating_sub(c.at) > HOUR_MS).unwrap_or(true)
+    };
+    if stale {
+        refresh_notes(sh);
+    }
     sh.push_settings();
 }
 
@@ -565,6 +596,9 @@ fn tell(sh: &Arc<Shared>) {
 // (take_name_back): told on the island a few seconds in, once her pages
 // are up.
 pub fn start(sh: &Arc<Shared>) {
+    // 更新公告不跟「能不能装」绑定：安装版也要有；盘上缓存先顶上，读不到再说
+    // 读不到。所以放在 may_update 判断之前。
+    refresh_notes(sh);
     if cfg!(feature = "installed") {
         sh.log("update: installed release; official checks enabled, upgrades use package installers");
         schedule_checks(sh);
@@ -586,12 +620,10 @@ pub fn start(sh: &Arc<Shared>) {
             tell(&soon);
         });
     }
-    // A download cut off (she quit in the middle of it): its .part gone.
-    for entry in std::fs::read_dir(&sh.dir).into_iter().flatten().flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with("update-v") && name.ends_with(".exe.part") && std::fs::remove_file(entry.path()).is_ok() {
-            sh.log(&format!("update: {name}, left by a download cut off, removed"));
-        }
+    // A download cut off (she quit in the middle of it): its .part gone; and an
+    // installer an update has already used (#27): nobody will need it again.
+    for name in sweep_update_downloads(&sh.dir) {
+        sh.log(&format!("update: {name}, left by an update, removed"));
     }
     let tidy = sh.clone();
     std::thread::spawn(move || {
@@ -621,6 +653,315 @@ fn schedule_checks(sh:&Arc<Shared>){
     });
 }
 
+// --- 更新公告（About 页）：最近几版发行说明 -------------------------------------------
+// 从前没有这一块：view() 只给 latest（一个版本号、页面、有无 exe），前端
+// aboutHTML 却读 snap.update.notes —— 永远是 undefined，于是永远停在「正在读取
+// 更新公告…」。这里补上：读 GitHub 的 /releases（带代理、20 秒超时，get_json），
+// 取前五条，落盘缓存；view 给 { state, entries, at, offline, error }。
+//
+// state: loading（还没读过）| ok（有内容，缓存那份也算）| error（读失败且没有内容，
+// 带 error）| empty（读通了，但仓库里还没有发行）| offline（一次都没读到过，盘上也
+// 没有缓存）。次序见 notes_state；前端按这五态画「有内容 / 骨架 / 还没有 / 读不到 +
+// 重试」，另有 8 秒兜底，见 settings.js notesKind 与 aboutNotes。empty 与 offline
+// 分开，是因为仓库没有发行时不是「加载不出来」——那是「还没有」，不该让人以为网坏了；
+// 读失败但盘上有旧的，仍报 ok 并把旧公告给出去，同时 error 字段带着这次为什么没读到。
+// source：这份公告是哪条源读到的（GitHub/Gitee/缓存回填时空），前端据此标「来源」。
+#[derive(Clone, Default)]
+struct NotesCache {
+    entries: Vec<Value>,
+    at: u64,
+    error: Option<Value>,
+    offline: bool,
+    source: Option<String>,
+}
+static NOTES: Mutex<Option<NotesCache>> = Mutex::new(None);
+static NOTES_BUSY: Mutex<bool> = Mutex::new(false);
+
+// 一份 releases 列表 JSON 里的条目：草稿与预发布跳过，最多 keep 条；
+// 每条 { version, title, body, at }。body 是 Markdown，前端按纯文本显示。
+// 时间字段：GitHub 叫 published_at，Gitee 叫 created_at（实测 mindspore 仓库
+// 200 应答：tag_name/name/body 兼容、时间字段是 created_at）——两个都认。
+pub fn notes_entries(list: &Value, keep: usize) -> Vec<Value> {
+    let Some(rows) = list.as_array() else { return Vec::new() };
+    rows.iter()
+        .filter_map(|v| {
+            let version = version_of(v)?;
+            let at = v["published_at"].as_str().or_else(|| v["created_at"].as_str()).unwrap_or("");
+            Some(json!({
+                "version": version,
+                "title": v["name"].as_str().unwrap_or("").trim(),
+                "body": v["body"].as_str().unwrap_or(""),
+                "at": at,
+            }))
+        })
+        .take(keep)
+        .collect()
+}
+
+fn notes_path(dir: &Path) -> PathBuf {
+    dir.join(NOTES_FILE)
+}
+
+// 落盘的那份（上次读到的）：没有或读不懂就没有 —— 不能让它挡住新的读取。
+// source（上次哪条源读到的）一起落盘，重开还是那句话。
+fn notes_load(dir: &Path) -> Option<NotesCache> {
+    let text = std::fs::read_to_string(notes_path(dir)).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    let entries = v["entries"].as_array().cloned().unwrap_or_default();
+    let source = v["source"].as_str().map(str::to_string);
+    Some(NotesCache { entries, at: v["at"].as_u64().unwrap_or(0), error: None, offline: false, source })
+}
+
+fn notes_save(dir: &Path, c: &NotesCache) {
+    let body = json!({ "entries": c.entries, "at": c.at, "source": c.source });
+    if let Ok(text) = serde_json::to_string(&body) {
+        let _ = std::fs::write(notes_path(dir), text);
+    }
+}
+
+// ── 公告的多源读取（t10）──────────────────────────────────────────────
+// 一条公告源：读它的列表（GitHub 兼容形状），或为什么没读它。Skip 是「明确跳过」：
+// 未配置、或显式指定了别的源——记录在案但不冒充失败（失败=试了没成）。
+enum NotesSource {
+    Read { label: &'static str, url: String },
+    Skipped { label: &'static str, why: &'static str },
+}
+
+// 一次要读哪些源、按什么顺序（t10：自动 = GitHub → Gitee；显式指定就只读指定的）。
+// preferring 来自设置（updateFrom：auto/gitee/github），决定 Gitee 的位置：
+//   auto → GitHub 先、Gitee 兜底；gitee → Gitee 先、GitHub 兜底；github → 只 GitHub。
+// Gitee 未配置（FISH_DOCK_NOTES_GITEE 空）时**明确跳过**：Skip{why:"未配置"}，
+// 不伪装可用、不静默空白。测试时读 WAKUWAKU_UPDATE_URL 给的地址（原有行为）。
+// 公告源的配置（注入式：测试传值，运行时从环境读一次——读取在这里，别处不碰
+// 进程全局，红线 9）。github 是列表地址（默认 GITHUB_RELEASES）；gitee 是仓库
+// 配置（空 = 未配置）。preferring 是设置里的 updateFrom。
+#[derive(Clone, Debug, Default)]
+pub(crate) struct NotesConfig {
+    pub(crate) github: String,
+    pub(crate) gitee: String,
+    pub(crate) preferring: String,
+}
+
+impl NotesConfig {
+    // 运行时从环境与设置读（preferring 由 refresh_notes 传入：它持有 Shared）。
+    fn from_environment(preferring: &str) -> Self {
+        NotesConfig {
+            github: crate::plugin_store::setting(ENV_NOTES_GITHUB, &crate::config::update_releases()),
+            gitee: crate::plugin_store::setting(ENV_NOTES_GITEE, ""),
+            preferring: preferring.to_string(),
+        }
+    }
+}
+
+// Gitee 配置值接受两种写法：完整地址（https://gitee.com/<owner>/<repo>，主机名校验
+// 后取 owner/repo 段）或裸 <owner>/<repo>。别的形状是配置错误：Skip 且写明原因。
+fn gitee_repo_path(configured: &str) -> Result<String, &'static str> {
+    let trimmed = configured.trim().trim_end_matches('/');
+    let path = match trimmed.split_once("://") {
+        Some((scheme, rest)) => {
+            if !scheme.eq_ignore_ascii_case("https") || !rest.split('/').next().unwrap_or("").eq_ignore_ascii_case("gitee.com") {
+                return Err("配置的不是 gitee.com 的仓库地址");
+            }
+            // gitee.com/<owner>/<repo> → <owner>/<repo>
+            rest.split_once('/').map(|(_, after)| after.to_string()).unwrap_or_default()
+        }
+        None => trimmed.to_string(),
+    };
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    match parts.len() {
+        2 if parts.iter().all(|p| p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))) => Ok(parts.join("/")),
+        _ => Err("需要 <owner>/<repo> 或完整的 Gitee 仓库地址"),
+    }
+}
+
+// 一次要读哪些源、按什么顺序（t10：自动 = GitHub → Gitee；显式指定就只读指定的）。
+//   auto → GitHub 先、Gitee 兜底；gitee → Gitee 先、GitHub 兜底；github → 只 GitHub。
+// Gitee 未配置时**明确跳过**（Skip 写明原因），不伪装可用、不静默空白。
+// 测试模式下只读 WAKUWAKU_UPDATE_URL 给的地址（原有行为）。
+fn notes_sources(config: &NotesConfig) -> Vec<NotesSource> {
+    let github = |url: String| NotesSource::Read { label: "GitHub", url };
+    let gitee_url = |repo: &str| GITEE_RELEASES_API.replace("{repo}", repo);
+    let gitee = || match config.gitee.as_str() {
+        configured if configured.is_empty() => NotesSource::Skipped { label: "Gitee", why: "未配置（FISH_DOCK_NOTES_GITEE 为空）" },
+        configured => match gitee_repo_path(configured) {
+            Ok(repo) => NotesSource::Read { label: "Gitee", url: gitee_url(&repo) },
+            Err(why) => NotesSource::Skipped { label: "Gitee", why },
+        },
+    };
+    if testing() {
+        return vec![match test_url(GITHUB_TEST) {
+            Some(url) => github(url),
+            None => NotesSource::Skipped { label: "GitHub", why: "测试变量为空" },
+        }];
+    }
+    match config.preferring.as_str() {
+        "gitee" => vec![gitee(), github(config.github.clone())],
+        "github" => vec![github(config.github.clone())],
+        _ => vec![github(config.github.clone()), gitee()],
+    }
+}
+
+// 拉一次公告：按顺序试每一条源，第一条读到的就返回；每条源的结局（读到/失败/跳过）
+// 都进 `log`（一句话人话）。返回 (entries, 用的源名)；全部失败返回 Err（人话合并）。
+// 配置注入（不读进程环境），测试与运行时共用同一条逻辑。
+fn fetch_notes_once(config: &NotesConfig, log: &mut Vec<String>) -> Result<(Vec<Value>, &'static str), String> {
+    let mut failures: Vec<String> = Vec::new();
+    for source in notes_sources(config) {
+        match source {
+            NotesSource::Skipped { label, why } => {
+                log.push(format!("{label} 源跳过：{why}"));
+            }
+            NotesSource::Read { label, url } => {
+                // 只读 GitHub 自己的 API、配置过的 Gitee API（或测试给的地址），
+                // 别的一律不去（原有安全边界）。
+                let ours = testing() || url.starts_with("https://api.github.com/") || url.starts_with("https://gitee.com/api/v5/");
+                if !ours {
+                    failures.push(format!("{label}：地址不在允许列表（{url}）"));
+                    continue;
+                }
+                match get_json(&url, "application/vnd.github+json") {
+                    Ok(Some(list)) => {
+                        let entries = notes_entries(&list, crate::config::notes_keep());
+                        if entries.is_empty() {
+                            failures.push(format!("{label}：读到了列表但没有可用条目"));
+                            continue;
+                        }
+                        log.push(format!("{label} 源读到 {} 条", entries.len()));
+                        return Ok((entries, label));
+                    }
+                    Ok(None) => {
+                        failures.push(format!("{label}：仓库还没有发行（404）"));
+                    }
+                    Err(e) => {
+                        failures.push(format!("{label}：{}", notes_plain_error(&e)));
+                    }
+                }
+            }
+        }
+    }
+    Err(failures.join("；").trim_start_matches('；').to_string())
+}
+
+// 人话错误：ureq/超时/代理的原始字符串常常是英文长串或异常文字，这里换成一句
+// 用户能懂的话（细节仍带在后面，但先给结论）。供 UI「失败原因」一行用。
+fn notes_plain_error(raw: &str) -> String {
+    if raw.contains("timed out") || raw.contains("timeout") {
+        format!("连接超时（{raw}）")
+    } else if raw.contains("connect") || raw.contains("Connection") || raw.contains("proxy") {
+        format!("连不上（{raw}）")
+    } else if raw.contains("403") {
+        format!("接口限流（稍后再试；{raw}）")
+    } else if raw.contains("404") {
+        format!("接口不存在（{raw}）")
+    } else {
+        raw.to_string()
+    }
+}
+
+// 公告源顺序跟着「从哪里下载（updateFrom）」设置走（规格 6：一处选择管两件事）。
+// refresh_notes 读设置、NotesConfig::from_environment 读环境，都在刷新线程里做，
+// fetch_notes_once 只用注入值（测试不碰进程环境，红线 9）。
+fn fetch_notes(sh: &Shared, config: &NotesConfig) -> Result<Vec<Value>, String> {
+    // 顺序记录进 her 日志（每源一句），刷新失败原因进快照。
+    let mut log: Vec<String> = Vec::new();
+    let got = fetch_notes_once(config, &mut log);
+    for line in &log {
+        sh.log(&format!("update: notes {line}"));
+    }
+    *NOTES_FAILURE.lock().unwrap() = got.as_ref().err().cloned();
+    if let Ok((_, label)) = got.as_ref() {
+        *NOTES_LAST_SOURCE.lock().unwrap() = Some(label.to_string());
+    }
+    got.map(|(entries, _)| entries)
+}
+// 最近一次公告读取的人话失败原因（全部源都失败时才有值），进 notes_view 给前端。
+static NOTES_FAILURE: Mutex<Option<String>> = Mutex::new(None);
+// 最近一次读到的源名（GitHub / Gitee），进 NotesCache.source 给前端。
+static NOTES_LAST_SOURCE: Mutex<Option<String>> = Mutex::new(None);
+
+// 读一次（一次只读一次），读完落盘并推给设置页。缓存的源标记与「离线/上次同步」
+// 一起进快照（stale-while-revalidate：先给旧的，读到新的再换）。
+pub fn refresh_notes(sh: &Arc<Shared>) {
+    {
+        let mut busy = NOTES_BUSY.lock().unwrap();
+        if *busy {
+            return;
+        }
+        *busy = true;
+    }
+    let sh = sh.clone();
+    std::thread::spawn(move || {
+        // 源顺序跟着设置走；环境变量在这里读一次（测试走注入，不碰进程全局）。
+        let config = NotesConfig::from_environment(sh.setting("updateFrom").as_str().unwrap_or("auto"));
+        // 先在盘上找上次那份：第一次打开时就有东西看，离线不会永远是空。
+        if NOTES.lock().unwrap().is_none() {
+            if let Some(old) = notes_load(&sh.dir) {
+                *NOTES.lock().unwrap() = Some(old);
+                sh.push_settings();
+            }
+        }
+        let got = fetch_notes(&sh, &config);
+        let now = crate::now_ms();
+        {
+            let mut slot = NOTES.lock().unwrap();
+            let prior: Option<NotesCache> = (*slot).clone();
+            let had = prior.as_ref().map(|c| !c.entries.is_empty()).unwrap_or(false);
+            let keep_entries = prior.as_ref().map(|c| c.entries.clone()).unwrap_or_default();
+            let keep_at = prior.as_ref().map(|c| c.at).unwrap_or(0);
+            let keep_source = prior.as_ref().and_then(|c| c.source.clone());
+            let cache = match got {
+                Ok(entries) if !entries.is_empty() => NotesCache { entries, at: now, error: None, offline: false, source: NOTES_LAST_SOURCE.lock().unwrap().clone() },
+                Ok(_) => NotesCache { entries: keep_entries, at: keep_at, error: None, offline: true, source: keep_source },
+                Err(e) => {
+                    sh.log(&format!("update: release notes not read ({e})"));
+                    NotesCache { entries: keep_entries, at: keep_at, error: Some(error("notes", e)), offline: !had, source: keep_source }
+                }
+            };
+            let has = !cache.entries.is_empty();
+            *slot = Some(cache.clone());
+            if has {
+                notes_save(&sh.dir, &cache);
+            }
+        }
+        *NOTES_BUSY.lock().unwrap() = false;
+        sh.push_settings();
+    });
+}
+
+// 公告快照该报哪一态：有内容 → ok（缓存优先，读失败也先把上次那份给出去）；读失败
+// 且没有内容 → error；读通了但仓库里没有发行 → empty；一次都没读到过 → offline。
+// 前端 settings.js notesKind 按同样的次序画四态；单独一个函数是为了能直接测。
+fn notes_state(c: &NotesCache) -> &'static str {
+    if !c.entries.is_empty() {
+        "ok"
+    } else if c.error.is_some() {
+        "error"
+    } else if c.offline {
+        "empty"
+    } else {
+        "offline"
+    }
+}
+
+fn notes_view() -> Value {
+    let slot = NOTES.lock().unwrap().clone();
+    let failure = NOTES_FAILURE.lock().unwrap().clone();
+    match slot {
+        None => json!({ "state": "loading", "entries": [], "at": 0, "offline": false }),
+        Some(c) => json!({
+            "state": notes_state(&c),
+            "entries": c.entries,
+            "at": c.at,
+            "offline": c.offline,
+            "error": c.error,
+            // 这次读到用的哪条源（缓存那份也一样带着）；全部失败时没有值。
+            "source": c.source,
+            // 最近一次全部源失败的人话原因（有缓存时前端在列表下补一行）。
+            "failure": failure,
+        }),
+    }
+}
+
 // For the settings: this version, the latest (its page the preferred
 // place's), and how an update goes.
 pub fn view(sh: &Shared) -> Value {
@@ -632,7 +973,10 @@ pub fn view(sh: &Shared) -> Value {
             "version": r.version,
             "page": r.page(first),
             "newer": newer(&r.version, current()),
-            "canInstall": !mode.installed&&r.can_install(),
+            // 安装版也「能装」：装的是发行包里的安装器（Update 增量包，其次 Setup
+            // 完整包），不是把她自己换掉（install_installer）。
+            "canInstall": mode.installed || r.can_install(),
+            "installer": mode.installed,
             "places": r.from.iter().map(|f| f.source.name()).collect::<Vec<_>>(),
         })
     });
@@ -650,25 +994,120 @@ pub fn view(sh: &Shared) -> Value {
         "from": s.from.map(Source::name),
         "got": s.got,
         "total": s.total,
+        "notes": notes_view(),
     })
 }
 
-// The latest release's page, opened: the preferred place's (only GitHub's
-// or Gitee's, unless a test's).
-pub fn open_page(sh: &Shared) {
-    let first = gitee_first(sh);
-    let page = STATE.lock().unwrap().latest.as_ref().map(|r| r.page(first)).unwrap_or_default();
-    if page.is_empty() || !allowed(&page) {
-        return;
+// 安装版要的包：优先增量 Update 包，其次完整 Setup 包（两份都在同一条发行里，
+// 见 docs/release-2.0.0.md 的「双包」）。
+pub fn installer_names(version: &str) -> [String; 2] {
+    [format!("FISH-Dock-Update-{version}.exe"), format!("FISH-Dock-Setup-{version}.exe")]
+}
+
+// 下载地址按 releases/download 的固定形状拼出来（和 Gitee 那边一样，不依赖
+// API 给的资产列表），tag 是 v 开头。
+fn asset_url(repo: &str, version: &str, name: &str) -> String {
+    format!("{}/releases/download/v{version}/{name}", repo.trim_end_matches('/'))
+}
+
+// 一个 <name>.sha256（sha256sum 的形状："<hex>  <name>"，或者只有 hex），
+// 或者一份 SHA256SUMS：按名字挑那一行。
+pub fn digest_of(text: &str, name: &str) -> Option<String> {
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut it = line.split_whitespace();
+        let hex = it.next()?;
+        let only = it.next().unwrap_or("");
+        if only.is_empty() || only.trim_start_matches('*') == name {
+            if let Some(h) = sha256_hex(hex) {
+                return Some(h);
+            }
+        }
     }
-    if !crate::jump::open_url(&page) {
-        sh.log(&format!("update: could not open {page}"));
+    None
+}
+
+// 安装版的一次更新：下载发行里的安装器（优先 Update 增量包，其次 Setup 完整包），
+// 按发行给出的 SHA-256 校验，然后拉起它并退出她。全程不打开浏览器：没有
+// settings_open_site，也没有 open_page。
+fn install_installer(sh: &Arc<Shared>, r: &Release) -> Result<(), Value> {
+    if r.conflict {
+        return Err(error("mismatch", r.version.clone()));
+    }
+    // 每一处按「哪来的」配一对（不是只有页面）：下载中的进度要说真话——从哪里
+    // 下就报哪里（原来这里写死 GitHub，选 Gitee 的用户会看到错的一行）。
+    let places: Vec<(Source, String)> = r.ordered(gitee_first(sh)).iter().map(|f| (f.source, f.page.clone())).filter(|(_, p)| !p.is_empty()).collect();
+    let names = installer_names(&r.version);
+    let mut failed = error("noExe", "");
+    for (source, page) in places {
+        let Some((repo, _tag)) = page.split_once("/releases/tag/") else { continue };
+        let repo = repo.to_string();
+        for name in &names {
+            let url = asset_url(&repo, &r.version, name);
+            if !allowed(&url) {
+                failed = error("elsewhere", url);
+                continue;
+            }
+            let digest = match get_text(&format!("{url}.sha256"), 4096).ok().flatten().and_then(|t| digest_of(&t, name)) {
+                Some(d) => d,
+                None => {
+                    failed = error("noDigest", name.clone());
+                    continue;
+                }
+            };
+            let which = if name.contains("Update") { "update" } else { "setup" };
+            let part = sh.dir.join(format!("installer-v{}-{which}.exe", r.version));
+            {
+                let mut s = STATE.lock().unwrap();
+                s.stage = Some("download");
+                s.from = Some(source);
+                s.got = 0;
+                s.total = 0;
+            }
+            sh.push_settings();
+            let (got, how) = match download(sh, &url, &part) {
+                Ok(got) => got,
+                Err(e) => {
+                    let _ = std::fs::remove_file(&part);
+                    sh.log(&format!("update: {name} not downloaded: {e}"));
+                    failed = error("download", format!("{name}: {e}"));
+                    continue;
+                }
+            };
+            stage(sh, "verify");
+            if got != digest {
+                let _ = std::fs::remove_file(&part);
+                sh.log(&format!("update: {name}: SHA-256 {got}, not {digest}"));
+                failed = error("digest", format!("{name}: {got} ≠ {digest}"));
+                continue;
+            }
+            sh.log(&format!("update: {name} downloaded ({how}), its SHA-256 as given"));
+            stage(sh, "restart");
+            run_installer(&part).map_err(|e| error("start", e))?;
+            sh.log(&format!("update: installer {name} started; she quits for it"));
+            sh.quit(crate::data::Quit::ByChoice, "an update's handover");
+            return Ok(());
+        }
+    }
+    Err(failed)
+}
+
+// 拉起下载好的安装器（NSIS 的 /S 是静默；它自己会停下正在运行的副本，见
+// scripts/install-update.cjs 的「Stopping the running copy」），然后她退出。
+fn run_installer(exe: &Path) -> Result<(), String> {
+    if crate::detach::spawn(exe, &["/S"]) {
+        Ok(())
+    } else {
+        Err(format!("could not start {}", exe.display()))
     }
 }
 
-// The person said Update: off on its own thread.
+// The person said Update: off on its own thread. 安装版也走这里：装的是发行包里的
+// 安装器（见 install_installer），不是打开浏览器。
 pub fn update_now(sh: &Arc<Shared>) {
-    if cfg!(feature = "installed") { return; }
     let release = {
         let mut s = STATE.lock().unwrap();
         if s.stage.is_some() {
@@ -705,6 +1144,10 @@ fn stage(sh: &Shared, stage: &'static str) {
 }
 
 fn install(sh: &Arc<Shared>, r: &Release) -> Result<(), Value> {
+    // 安装版走「下载安装器并拉起」；便携版走「换掉自己的 exe」。
+    if current_mode().installed {
+        return install_installer(sh, r);
+    }
     if !may_update() {
         return Err(error("source", ""));
     }
@@ -1023,6 +1466,32 @@ pub fn start_again(sh: &Shared) -> Result<(), String> {
     })
 }
 
+// 软件内更新留下的下载文件（#27「清理后仍残留」）：`installer-v<ver>-<which>.exe`
+// 是更新时下下来、交给 NSIS 跑的那份安装器；跑完就再也没人用它，一份几十 MB，
+// 一次更新攒一份。`update-v<ver>.exe.part` 是下载被打断的半截文件。
+// 判据只看名字里的版本：**比当前版本新**的是还没装上的那份，留着；其余一律删。
+// 删不掉（安装器/杀软还占着句柄）就跳过，下一次启动接着收——不报错、不阻断启动。
+fn sweep_update_downloads(dir: &Path) -> Vec<String> {
+    let mut removed = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return removed };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let installed = name.strip_prefix("installer-v").and_then(|rest| rest.split('-').next());
+        let stale = match installed {
+            Some(version) => !newer(version, current()),
+            None => name.starts_with("update-v") && name.ends_with(".exe.part"),
+        };
+        if !stale {
+            continue;
+        }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            removed.push(name);
+        }
+    }
+    removed.sort();
+    removed
+}
+
 // After a minute's run, the exe an update left: gone (tried a few times:
 // the old one's taskbar guard may still have it open a moment), and the
 // update's note with it. Not while an update of hers is under way (her own
@@ -1112,7 +1581,7 @@ mod tests {
 
     use std::io::{Read, Write};
 
-    use super::{allowed, get_way, github_release, merge, newer, newest_tag, redirected, sums_of, Found, Source};
+    use super::{allowed, digest_of, error, get_way, github_release, installer_names, merge, newer, newest_tag, notes_entries, notes_load, notes_plain_error, notes_save, notes_sources, notes_state, redirected, sums_of, Found, NotesCache, NotesConfig, NotesSource, Source, NOTES_FILE};
 
     #[cfg(feature = "installed")]
     #[test]
@@ -1205,8 +1674,157 @@ mod tests {
         assert_eq!(sums_of(""), None);
     }
 
-    fn found(source: Source, version: &str, digest: Option<&str>) -> Found {
-        Found { source, version: version.into(), page: format!("{}/{version}", source.name()), exe: Some(format!("{}/{version}.exe", source.name())), digest: digest.map(str::to_string), size: 0 }
+    #[test]
+    fn release_notes_read() {
+        let list = json!([
+            { "tag_name": "v2.0.0", "name": "FISH Dock 2.0.0", "body": "首版", "published_at": "2026-10-29T10:00:00Z" },
+            { "tag_name": "v1.9.0", "name": "", "body": "", "published_at": "2026-10-01T00:00:00Z", "draft": true },
+            { "tag_name": "v1.8.0", "name": "旧", "body": "x", "published_at": "", "prerelease": true },
+            { "tag_name": "v1.7.0", "name": "更旧", "body": "y", "published_at": "2026-09-01T00:00:00Z" }
+        ]);
+        let rows = notes_entries(&list, 5);
+        // 草稿与预发布都不算。
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["version"], "2.0.0");
+        assert_eq!(rows[0]["title"], "FISH Dock 2.0.0");
+        assert_eq!(rows[0]["body"], "首版");
+        assert_eq!(rows[0]["at"], "2026-10-29T10:00:00Z");
+        assert_eq!(rows[1]["version"], "1.7.0");
+        assert_eq!(notes_entries(&list, 1).len(), 1);
+        // 不是数组（读回来的东西不对）是空，不是崩。
+        assert!(notes_entries(&json!({}), 5).is_empty());
+        // Gitee 形状（实测：tag_name/name/body 兼容，时间字段是 created_at）也认。
+        let gitee_shaped = json!([{ "tag_name": "v2.0.0", "name": "FISH Dock 2.0.0", "body": "首版", "created_at": "2026-10-29T10:00:00+08:00", "prerelease": false }]);
+        let rows = notes_entries(&gitee_shaped, 5);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["at"], "2026-10-29T10:00:00+08:00", "Gitee 的 created_at 当时间");
+    }
+
+    #[test]
+    fn release_notes_states() {
+        // 四态与前端 settings.js notesKind 一一对上（缓存优先，失败也要说清）。
+        assert_eq!(notes_state(&NotesCache::default()), "offline"); // 一次都没读到过
+        // 读通了、列表是空的：refresh_notes 把这种情况标成 offline=true。
+        let read_nothing = NotesCache { offline: true, ..Default::default() };
+        assert_eq!(notes_state(&read_nothing), "empty");
+        let failed = NotesCache { error: Some(error("notes", "boom")), ..Default::default() };
+        assert_eq!(notes_state(&failed), "error");
+        // 有内容就是 ok —— 哪怕这次读失败，上次那份照样给出去（失败的话由 error
+        // 字段带着，前端在那份列表下面补一行「最新一次没读到」+ 重试）。
+        let stale = NotesCache {
+            entries: vec![json!({ "version": "1.9.0" })],
+            error: Some(error("notes", "boom")),
+            ..Default::default()
+        };
+        assert_eq!(notes_state(&stale), "ok");
+        assert_eq!(stale.error.as_ref().unwrap()["detail"], "boom");
+    }
+
+    // ── 公告多源（t10）────────────────────────────────────────────────
+    // notes_sources 的形状只在这里直测（fetch_notes_once 的网络层用同一形状）。
+    // 配置全部注入（NotesConfig），不碰进程环境变量——并发全量跑不与任何测试串扰。
+    fn source_labels(sources: &[NotesSource]) -> Vec<(&'static str, bool, String)> {
+        sources.iter().map(|s| match s {
+            NotesSource::Read { label, url } => (*label, true, url.clone()),
+            NotesSource::Skipped { label, why } => (*label, false, why.to_string()),
+        }).collect()
+    }
+    fn notes_config(gitee: &str, github: &str, preferring: &str) -> NotesConfig {
+        NotesConfig { github: github.to_string(), gitee: gitee.to_string(), preferring: preferring.to_string() }
+    }
+    const DEFAULT_GITHUB: &str = super::GITHUB_RELEASES;
+
+    // 多源顺序：auto = GitHub 先、Gitee 兜底（未配置时明确跳过）；gitee = Gitee 先；
+    // github = 只 GitHub。配置过的 Gitee 换成它自己的 API 地址（owner/repo 归一）。
+    #[test]
+    fn notes_sources_order_follows_the_setting() {
+        let unconfigured = notes_config("", DEFAULT_GITHUB, "auto");
+        let auto = source_labels(&notes_sources(&unconfigured));
+        assert_eq!(auto.len(), 2, "auto 是两条源：GitHub + Gitee");
+        assert_eq!(auto[0].0, "GitHub");
+        assert!(auto[0].1, "GitHub 永远可读");
+        assert_eq!(auto[1].0, "Gitee");
+        assert!(!auto[1].1, "Gitee 未配置时是跳过，不是可读");
+        assert!(auto[1].2.contains("未配置"), "跳过要写明原因：{}", auto[1].2);
+        let github_only = source_labels(&notes_sources(&notes_config("", DEFAULT_GITHUB, "github")));
+        assert_eq!(github_only.len(), 1);
+        assert_eq!(github_only[0].0, "GitHub");
+        // 配置了 Gitee：gitee 顺序下它在前，且地址指向 Gitee 的 API（{repo} 已替换、
+        // 末尾斜杠已去掉、https://gitee.com/ 前缀已归一成 owner/repo）。
+        let gitee_first = source_labels(&notes_sources(&notes_config("https://gitee.com/fish-under-sea/FISH-Dock/", DEFAULT_GITHUB, "gitee")));
+        assert_eq!(gitee_first[0], ("Gitee", true, "https://gitee.com/api/v5/repos/fish-under-sea/FISH-Dock/releases?per_page=5&direction=desc".to_string()));
+        assert_eq!(gitee_first[1].0, "GitHub", "Gitee 失败还有 GitHub 兜底");
+        // auto 顺序下配置过的 Gitee 排第二，且可读。
+        let auto_configured = source_labels(&notes_sources(&notes_config("fish-under-sea/FISH-Dock", DEFAULT_GITHUB, "auto")));
+        assert_eq!(auto_configured[1], ("Gitee", true, gitee_first[0].2.clone()), "裸 owner/repo 也认");
+        // GitHub 地址可经配置覆盖；乱形状的 Gitee 配置明确跳过且写明原因。
+        let overridden = source_labels(&notes_sources(&notes_config("https://gitee.com/a/b/c", "https://api.github.com/repos/other/repo/releases?per_page=5", "github")));
+        assert_eq!(overridden[0].2, "https://api.github.com/repos/other/repo/releases?per_page=5");
+        let bad_gitee = source_labels(&notes_sources(&notes_config("not gitee", DEFAULT_GITHUB, "auto")));
+        assert_eq!(bad_gitee[1].0, "Gitee");
+        assert!(!bad_gitee[1].1);
+        assert!(bad_gitee[1].2.contains("需要"), "配置错误写明原因：{}", bad_gitee[1].2);
+    }
+
+    // 缓存命中：notes_load/notes_save 带着 source 与 at 落盘，重开还是那句话。
+    #[test]
+    fn notes_cache_round_trip_keeps_the_source_and_time() {
+        let dir = std::env::temp_dir().join(format!("wakuwaku-notes-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = NotesCache { entries: vec![json!({ "version": "2.0.0" })], at: 123_456, error: None, offline: false, source: Some("GitHub".into()) };
+        notes_save(&dir, &cache);
+        let back = notes_load(&dir).unwrap();
+        assert_eq!(back.at, 123_456);
+        assert_eq!(back.source.as_deref(), Some("GitHub"));
+        assert_eq!(back.entries.len(), 1);
+        // 旧格式（没有 source 字段）照旧读得回：source 为 None，不报错。
+        std::fs::write(dir.join(NOTES_FILE), r#"{"entries":[{"version":"1.0.0"}],"at":42}"#).unwrap();
+        let old = notes_load(&dir).unwrap();
+        assert_eq!(old.at, 42);
+        assert_eq!(old.source, None);
+        assert_eq!(old.entries.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 全失败可重试：notes_plain_error 把异常字符串换成人话（超时/连不上/限流），
+    // 未知原因原样保留——重试入口的文案永远是一句人话。
+    #[test]
+    fn notes_failures_are_said_in_plain_words() {
+        assert!(notes_plain_error("through Windows' proxy: timed out").contains("连接超时"));
+        assert!(notes_plain_error("proxy connect refused").contains("连不上"));
+        assert!(notes_plain_error("HTTP 403 rate limit").contains("接口限流"));
+        assert!(notes_plain_error("HTTP 404 missing").contains("接口不存在"));
+        assert_eq!(notes_plain_error("something else"), "something else", "没认出的原样给出，不吞");
+    }
+
+    // 超时可配：公告读取的预算来自 proxy::update_timeout 的同一解析（不再写死秒数）。
+    // 断言打到 timeout_ms_of（注入文本），不碰进程环境（红线 9）——env 变量层只做
+    // 「读一次环境」这一件事，解析规则在这里一次测全。
+    #[test]
+    fn notes_timeout_comes_from_the_shared_entry_not_a_literal() {
+        assert_eq!(crate::proxy::timeout_ms_of(None, 20_000).as_millis(), 20_000, "没设 → 默认 20 秒");
+        assert_eq!(crate::proxy::timeout_ms_of(Some("5000"), 20_000).as_millis(), 5_000, "设 5000 → 5 秒");
+        assert_eq!(crate::proxy::timeout_ms_of(Some("not-a-number"), 20_000).as_millis(), 20_000, "乱值 → 默认");
+        assert_eq!(crate::proxy::timeout_ms_of(Some("999999999"), 20_000).as_millis(), 20_000, "超上限（>600s）→ 当没设");
+        assert_eq!(crate::proxy::timeout_ms_of(Some("600000"), 20_000).as_millis(), 600_000, "恰好上限 → 生效");
+        assert_eq!(crate::proxy::timeout_ms_of(Some("0"), 20_000).as_millis(), 20_000, "0 视为没设");
+    }
+
+    #[test]
+    fn installer_packages_named_and_checked() {
+        assert_eq!(installer_names("2.0.0"), ["FISH-Dock-Update-2.0.0.exe".to_string(), "FISH-Dock-Setup-2.0.0.exe".to_string()]);
+        let hex = "cd".repeat(32);
+        // 一份 SHA256SUMS：按名字挑那一行，别的行不算。
+        let sums = format!("{}  other.exe\n{hex}  FISH-Dock-Setup-2.0.0.exe\n", "ab".repeat(32));
+        assert_eq!(digest_of(&sums, "FISH-Dock-Setup-2.0.0.exe").as_deref(), Some(hex.as_str()));
+        assert_eq!(digest_of(&sums, "FISH-Dock-Update-2.0.0.exe"), None);
+        // 只有 hex 的 <name>.sha256。
+        assert_eq!(digest_of(&hex, "whatever.exe").as_deref(), Some(hex.as_str()));
+        assert_eq!(digest_of("not a sum", "x"), None);
+    }
+
+    fn found(source: Source, version: &str, digest: Option<&str>) -> Found {        Found { source, version: version.into(), page: format!("{}/{version}", source.name()), exe: Some(format!("{}/{version}.exe", source.name())), digest: digest.map(str::to_string), size: 0 }
     }
 
     #[test]
@@ -1376,5 +1994,30 @@ mod tests {
         let gone = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let e = get_way(&straight, &format!("http://127.0.0.1:{gone}/x"), 5, None).err().flatten().unwrap();
         assert!(e.starts_with("127.0.0.1: "), "{e}");
+    }
+
+    // #27：「软件内更新」下下来的安装器跑完就没人要了，以前一直留在数据目录里，
+    // 一次更新攒一份几十 MB。这里钉住判据：名字里的版本不高于当前版本的一律删，
+    // 还没装上的新版安装器、用户自己的文件一个都不动。
+    #[test]
+    fn used_update_downloads_are_swept_and_a_pending_one_is_kept() {
+        let dir = std::env::temp_dir().join(format!("fish-update-sweep-{}-{}", std::process::id(), crate::now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let here = super::current();
+        let write = |name: &str| std::fs::write(dir.join(name), b"fixture").unwrap();
+        write(&format!("installer-v{here}-setup.exe"));
+        write(&format!("installer-v{here}-update.exe"));
+        write("installer-v0.0.1-setup.exe");
+        write("installer-v99.0.0-setup.exe");
+        write("update-v0.9.0.exe.part");
+        write("notes.txt");
+        let mut want = vec![format!("installer-v{here}-setup.exe"), format!("installer-v{here}-update.exe"), "installer-v0.0.1-setup.exe".into(), "update-v0.9.0.exe.part".into()];
+        want.sort();
+        assert_eq!(super::sweep_update_downloads(&dir), want);
+        // 留着的东西：还没装上的新版安装器 + 不是我们下的文件。
+        assert!(dir.join("installer-v99.0.0-setup.exe").exists(), "比当前版本新的安装器是还没装上的那份，不许删");
+        assert!(dir.join("notes.txt").exists(), "不是更新下下来的文件，一个都不碰");
+        assert!(!dir.join(format!("installer-v{here}-setup.exe")).exists(), "用过的安装器必须删掉");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
