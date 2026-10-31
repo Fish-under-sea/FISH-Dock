@@ -9,7 +9,7 @@
 <a href="app/docs/release-2.0.1.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.0.1"></picture></a>
 <a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
 <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
-<a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark.png"><img src="assets/readme/stat-channels-en-light.png" width="23%" alt="Four independent official plugins"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v2.png"><img src="assets/readme/stat-channels-en-light-v2.png" width="23%" alt="Four independent official plugins"></picture></a>
 </p>
 <p>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.1"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>

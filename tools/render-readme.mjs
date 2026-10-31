@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const assets = path.join(root, 'assets/readme')
 const heroVariant = process.env.README_VARIANT || ''
 const outputPrefix = process.env.README_OUTPUT_PREFIX || ''
+const assetSuffix = process.env.README_ASSET_SUFFIX || ''
 // 版本号只从 tauri.conf.json 读：README 里的 VERSION 卡片与 hero 徽标不许各写一份，
 // 否则发版时改了文档、图片还挂在旧版本上（2026-10-31 就是这样漏的）。
 const appVersion = (() => {
@@ -48,7 +49,7 @@ try {
       if(lang==='en'&&['key-zh','key-en'].includes(id))continue
       const clip=await evaluate(`(()=>{const r=document.getElementById('${id}').getBoundingClientRect();return {x:Math.max(0,r.x-4),y:Math.max(0,r.y-4),width:r.width+8,height:r.height+15,scale:1}})()`)
       const image=await call('Page.captureScreenshot',{format:'png',clip,captureBeyondViewport:true})
-      const file=`${outputPrefix}${id}-${lang}-${theme}.png`,bytes=Buffer.from(image.data,'base64')
+      const file=`${outputPrefix}${id}-${lang}-${theme}${assetSuffix}.png`,bytes=Buffer.from(image.data,'base64')
       fs.writeFileSync(path.join(assets,file),bytes)
       results.push({path:`assets/readme/${file}`,kind:'image',channel:'browser-layout-screenshot',size:bytes.length,license:'排版 MIT；用户图片许可单独保留',createdAt:new Date().toISOString(),contentHash:crypto.createHash('sha256').update(bytes).digest('hex')})
     }

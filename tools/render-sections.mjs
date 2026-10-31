@@ -27,6 +27,8 @@ const sections = process.argv.slice(2).length
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const assets = path.join(root, 'assets/readme')
+// 资源后缀用于破 GitHub 图床缓存：README_ASSET_SUFFIX=-v2 时输出 xxx-v2.png
+const suffix = process.env.README_ASSET_SUFFIX || ''
 const edge = process.env.EDGE_BINARY || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fish-section-'))
 const browser = spawn(edge, ['--headless=new','--disable-gpu','--disable-gpu-sandbox','--disable-features=CalculateNativeWinOcclusion','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'], { stdio:'ignore' })
@@ -53,7 +55,7 @@ try {
       await evaluate('document.fonts.ready.then(()=>true)')
       const clip = await evaluate(`(()=>{const r=document.getElementById('sec').getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),scale:1}})()`)
       const image = await call('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true })
-      const file = `section-${tab.toLowerCase()}-${theme}.png`
+      const file = `section-${tab.toLowerCase()}-${theme}${suffix}.png`
       const bytes = Buffer.from(image.data, 'base64')
       fs.writeFileSync(path.join(assets, file), bytes)
       results.push({ path: `assets/readme/${file}`, tab, title, theme, size: bytes.length })
