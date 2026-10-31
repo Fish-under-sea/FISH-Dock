@@ -40,6 +40,20 @@
     const switching = !!prev && raw != null && prev.peak > 0 && raw < prev.peak - 1 && item?.phase === '下载'
     return { peak, raw, switching, total: total > 0 ? total : (prev?.total ?? null) }
   }
+  // t47：粒子飞行包络（纯函数，单测用）。粒子 i 的目标列 slot=(i+0.5)/N（0..1，均匀铺满）；
+  // in：pct 到 slot 时“抵达并入”，此前 FLIGHT_WINDOW 的进度窗口里在飞；
+  // out：长条右缘 (1-pct) 越过该列（pct = 1-slot）时开始剥离向右飞。
+  // 返回 null 表示这一帧不画它（还没出发 / 已并入 / 已消散）——已填区域因此保持干净。
+  // 48 个粒子 × 0.25 窗口 ≈ 任意时刻只有 12 个在飞（对应“前沿附近 10~15 个”）。
+  const FLIGHT_WINDOW = 0.25
+  const particleFlight = (pct, index, count, mode = 'in') => {
+    const slot = (index + 0.5) / count
+    const trigger = mode === 'out' ? 1 - slot : slot
+    const start = mode === 'out' ? trigger : trigger - FLIGHT_WINDOW
+    const q = (pct - start) / FLIGHT_WINDOW
+    if (!(q > 0 && q < 1)) return null
+    return { q, slot, trigger }
+  }
   const official = id => ['fish.feishu', 'fish.clash', 'fish.magpie'].includes(id)
   // 官方目录的作者（#22-4）：2.0.0 目录里 authors 总是存在（≥1，顺序即展示顺序），
   // 「A、B」由这里拼。旧目录的 author/maintainer 由宿主 plugin_store.rs 归一成同一
@@ -158,10 +172,13 @@
       try { await job() } catch (e) { error = failureOf(e) }
       finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); redraw() }
     }
-    // t44 粒子动效：48 个小方块，DOM canvas 绘制，requestAnimationFrame 推进。
-    // 粒子位置完全由当前百分比算出（无状态、无第三方库）：
-    //   安装/更新（mode=in）：方块从左侧画布外飞入，按进度逐个并入条带；
-    //   卸载（mode=out）：方块从条带剥离，向右飞散并淡出，长条同时缩短。
+    // t47 粒子动效：48 个小方块，canvas 绘制，requestAnimationFrame 推进。
+    // 形态修正（t47，用户看 70% 截图后提的三点）：
+    //   ① 目标列按序号均匀铺满 0→100%（slot=(i+0.5)/N），不再乘 0.86 把阈值挤到 41%；
+    //   ② 只在**前沿**附近有粒子：粒子 i 在进度到达 slot 前 FLIGHT_WINDOW(25%≈12 个粒子)
+    //      的窗口里从左侧飞向自己的列，抵达即并入、不再绘制（填过的地方保持干净）；
+    //   ③ y 从条带外侧 ±10~14px 的偏移收敛到中线，读起来是“←汇聚→”。
+    //   卸载 mode=out 镜像：长条右缘越过某列时，该列粒子从边缘向右飞、渐隐，长条缩短。
     // 关闭弹窗时 stopFx() 取消 rAF，且循环发现没有 canvas 也会自行结束。
     const FX_COUNT = 48
     const reducedMotion = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -171,12 +188,9 @@
       const parts = []
       for (let i = 0; i < FX_COUNT; i++) parts.push({
         slot: (i + 0.5) / FX_COUNT,
-        startX: -0.04 - fxSeed(i, 1) * 0.5,
-        startY: fxSeed(i, 2),
-        jitter: (fxSeed(i, 3) - 0.5) * 0.5,
-        drift: (fxSeed(i, 4) - 0.5) * 1.2,
-        size: 3 + fxSeed(i, 5) * 4,
-        rate: 8 + fxSeed(i, 6) * 6,
+        // 条带外侧的纵向偏移（px，画布高 56，中线 28）：±10~14px。
+        side: ((i % 2 === 0) ? -1 : 1) * (10 + fxSeed(i, 1) * 4),
+        size: 3 + fxSeed(i, 2) * 2.5,
       })
       fxParticles.set(id, parts)
       return parts
@@ -204,20 +218,27 @@
       const color = (typeof getComputedStyle === 'function' ? getComputedStyle(cv).getPropertyValue('--ext-fx-particle').trim() : '') || (mode === 'out' ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.85)')
       ctx.fillStyle = color
       const parts = fxParts(cv.dataset.extFx || '')
-      for (const pt of parts) {
-        const q = Math.min(1, Math.max(0, (pct - pt.slot * 0.86) * pt.rate))
-        const ease = 1 - (1 - q) * (1 - q)
-        let x, y, alpha
+      const centerY = h / 2
+      for (let i = 0; i < parts.length; i++) {
+        const pt = parts[i]
+        const flight = particleFlight(pct, i, parts.length, mode)
+        if (!flight) continue   // 未出发 / 已并入 / 已消散：都不画（填过的地方必须干净）
+        const q = flight.q
+        const ease = 1 - (1 - q) * (1 - q) * (1 - q)
+        const alpha = Math.sin(Math.PI * q)   // 起飞淡入、抵达淡出
+        let x, y
         if (mode === 'in') {
-          x = (pt.startX + (pt.slot - pt.startX) * ease) * w
-          y = (pt.startY + (0.5 + pt.jitter - pt.startY) * ease) * h
-          alpha = 0.12 + 0.88 * ease
+          const targetX = flight.slot * w
+          // 从目标列左侧一段距离飞入（早段即画布左缘 x=0），读作从左边汇聚。
+          const travel = Math.max(24, w * 0.3)
+          const startX = Math.max(0, targetX - travel)
+          x = startX + (targetX - startX) * ease
+          y = centerY + pt.side * (1 - ease)
         } else {
-          const homeX = (1 - pt.slot) * w
-          const exitX = w + (0.12 + Math.abs(pt.drift) * 0.3) * w
-          x = homeX + (exitX - homeX) * ease
-          y = h / 2 + pt.jitter * h * 0.2 + pt.drift * h * 0.35 * ease
-          alpha = 0.85 * (1 - ease)
+          // 从前沿（该列此刻正好是缩到位置的右缘）向右飞散。
+          const startX = flight.slot * w
+          x = startX + (w + 48 - startX) * (q * q)
+          y = centerY + pt.side * (0.25 + 0.75 * q)
         }
         if (alpha <= 0.01) continue
         ctx.globalAlpha = alpha
@@ -454,7 +475,7 @@
         const width = pct == null ? 30 : (out ? Math.max(2, 100 - pct) : pct)
         const phaseText = known && seen.switching && !out ? text('切换来源', 'Switching source') : phaseName(p.phase)
         const amount = p.total ? `${formatBytes(p.received)} / ${formatBytes(p.total)}` : formatBytes(p.received)
-        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div><canvas class="ext-bar-fx" data-ext-fx="${esc(p.id || '')}" data-mode="${out ? 'out' : 'in'}" data-pct="${pct == null ? 0 : pct}" aria-hidden="true"></canvas></div><div class="detail">${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
+        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div><canvas class="ext-bar-fx" data-ext-fx="${esc(p.id || '')}" data-mode="${out ? 'out' : 'in'}" data-pct="${pct == null ? 0 : pct}" aria-hidden="true"></canvas></div><div class="detail">${p.local === 'out' ? `${pct == null ? 0 : pct}%` : `${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}`}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
       }
       const items = progressItems()
       const progressHTML = items.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${items.map(progressCard).join('')}</div>` : ''
@@ -483,5 +504,5 @@
     }
     return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth: () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }, pages: () => (view?.installed || []).filter(r => r.running && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, key: r.plugin.manifest.id + '/' + p.id }))) }
   }
-  window.ExtensionPanel = { create, formatBytes, mergeProgress, PHASE_WORDS }
+  window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, PHASE_WORDS, FLIGHT_WINDOW }
 })()
