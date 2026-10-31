@@ -109,6 +109,30 @@
     // 2026-11-01：进度不再弹窗——让「安装/更新」按钮自己变成进度胶囊（原生 CSS+JS，
     // 不引 GSAP）。id -> { pct, phase, mode }，由同一份 extension_progress 轮询喂。
     const inlineProgress = new Map()
+    // 2026-11-01 用户要求：安装很快也要把动画播完。记录每个 id 的开始时刻，
+    // 真实进度冲到 100% 时按时间平滑推到 100（最少 INLINE_MIN_MS），
+    // 保证「药丸收拢 → 圆环跑满 → 弹回」这三段都被看到。
+    const inlineStart = new Map()
+    const INLINE_MIN_MS = 900
+    const finishInline = () => {
+      if (!inlineProgress.size) { inlineProgress.clear(); inlineStart.clear(); return }
+      const now = Date.now()
+      let left = 0
+      for (const at of inlineStart.values()) left = Math.max(left, INLINE_MIN_MS - (now - at))
+      const tick = remaining => {
+        const stamp = Date.now()
+        for (const [id, cur] of [...inlineProgress]) {
+          const at = inlineStart.get(id) || stamp
+          const shown = Math.min(100, ((stamp - at) / INLINE_MIN_MS) * 100)
+          inlineProgress.set(id, { ...cur, pct: shown })
+        }
+        redraw()
+        const wait = Math.max(0, remaining - 60)
+        if (wait > 0) setTimeout(() => tick(wait), 60)
+        else setTimeout(() => { inlineProgress.clear(); inlineStart.clear(); redraw() }, 240)
+      }
+      tick(left)
+    }
 
       // 2026-11-01：安装/更新不再弹任何窗——按钮自己就是进度条。形态取自用户给的 pen
       // （faustdp / yXypKM）：药丸收成小圆 → 圆环跑进度 → 弹回药丸；这里用 SVG 属性
@@ -122,8 +146,8 @@
         return `<button type="button" class="pbtn sm inline${pct > 0 ? ' running' : ''}${done ? ' done' : ''}" data-inline-prog="${esc(id)}" data-extension-cancel-pill="${esc(id)}" style="--pct:${pct}" aria-label="${esc(prog.phase || '')} ${pct}%">`
           + `<svg viewBox="0 0 96 24" width="96" height="24" aria-hidden="true">`
           + `<rect class="pill" x="1" y="1" width="94" height="22" rx="11"></rect>`
-          + `<circle class="ring" cx="12" cy="12" r="8.6" style="stroke-dasharray:${INLINE_C.toFixed(2)};stroke-dashoffset:${offset}"></circle>`
-          + `<path class="arrow" d="M12 8.5 v7 M9.2 12.2 l2.8 2.8 2.8 -2.8"></path>`
+          + `<g class="core"><circle class="ring" cx="12" cy="12" r="8.6" style="stroke-dasharray:${INLINE_C.toFixed(2)};stroke-dashoffset:${offset}"></circle>`
+          + `<path class="arrow" d="M12 8.5 v7 M9.2 12.2 l2.8 2.8 2.8 -2.8"></path></g>`
           + `<text class="lbl" x="26" y="15.6">${esc(label)}</text>`
           + `</svg></button>`
       }
@@ -207,13 +231,21 @@
         for (const item of progress) progressSeen.set(item.id, mergeProgress(progressSeen.get(item.id), item))
         // 卸载没有宿主进度：本地按轮询节拍合成 0→100，驱动长条缩短与粒子消散。
         if (busyKind === 'uninstall' && uninstallTicks < 12) uninstallTicks += 1
-        for (const item of progress) inlineProgress.set(item.id, { pct: (progressSeen.get(item.id) || {}).peak ?? 0, phase: item.phase, mode: 'in' })
-        if (busyKind === 'uninstall' && busy && actionStarted) inlineProgress.set(busy, { pct: Math.min(96, uninstallTicks * 8), phase: '卸载', mode: 'out' })
+        for (const item of progress) {
+          const id = item.id
+          const peak = (progressSeen.get(id) || {}).peak ?? 0
+          if (!inlineStart.has(id)) inlineStart.set(id, Date.now())
+          const elapsed = Date.now() - inlineStart.get(id)
+          // 真实已到 100 但时间不够：按时间推到 100，动画照样播满（见 finishInline）。
+          const shown = peak >= 100 ? Math.min(100, (elapsed / INLINE_MIN_MS) * 100) : peak
+          inlineProgress.set(id, { pct: shown, phase: item.phase, mode: 'in' })
+        }
+        if (busyKind === 'uninstall' && busy && actionStarted) { if (!inlineStart.has(busy)) inlineStart.set(busy, Date.now()); inlineProgress.set(busy, { pct: Math.min(96, uninstallTicks * 8), phase: '卸载', mode: 'out' }) }
         if (busy) { redraw(); startFx(); progressTimer = setTimeout(poll, 150) }
       }).catch(() => { progress = [] })
       progressTimer = setTimeout(poll, 50)
       try { await job() } catch (e) { error = failureOf(e) }
-      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); inlineProgress.clear(); redraw() }
+      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); finishInline(); redraw() }
     }
     // t47 粒子动效：48 个小方块，canvas 绘制，requestAnimationFrame 推进。
     // 形态修正（t47，用户看 70% 截图后提的三点）：

@@ -257,14 +257,17 @@
 #island-settings .pbtn.inline svg { display: block; overflow: visible; }
 #island-settings .pbtn.inline .pill {
   fill: none;
-  stroke: var(--sys-accent, #5e9bff);
+  stroke: currentColor;      /* 白色（浅色主题走 --fg 的深色） */
   stroke-width: 1;
-  transition: width .42s cubic-bezier(.22, 1.1, .3, 1), opacity .2s;
+  /* 向右收缩：宽度与 x 同时过渡，右缘（95）不动，左缘滑到 73 → 收在右侧 */
+  transition: width .42s cubic-bezier(.22, 1.1, .3, 1), x .42s cubic-bezier(.22, 1.1, .3, 1), opacity .2s;
 }
-#island-settings .pbtn.inline.running .pill { width: 22px; }
+#island-settings .pbtn.inline.running .pill { width: 22px; x: 73px; }
+#island-settings .pbtn.inline .core { transition: transform .42s cubic-bezier(.22, 1.1, .3, 1); }
+#island-settings .pbtn.inline.running .core { transform: translateX(71px); }
 #island-settings .pbtn.inline .ring {
   fill: none;
-  stroke: var(--sys-accent, #5e9bff);
+  stroke: currentColor;      /* 与药丸同色：白色 */
   stroke-width: 2;
   stroke-linecap: round;
   transform: rotate(-90deg);
