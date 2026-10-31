@@ -123,14 +123,14 @@ fn drain_log(log: &[String]) {
 // 一次 GET：主源在前，失败（连不上、超时、非 200）按同路径改写到兜底源再试。
 // 每一源的结局都进 `log`（一句话人话，与 plugin_store 的多源日志同风格），
 // 错误返回的是「各源结局」的合并，不是只留最后一条。
-fn get(url: &str, limit: usize, log: &mut Vec<String>) -> Result<Vec<u8>, String> {
+fn get(url: &str, limit: usize, log: &mut Vec<String>, progress: Option<&str>) -> Result<Vec<u8>, String> {
     let sources = NpmSources::from_config();
-    get_via(&sources, url, limit, log)
+    get_via(&sources, url, limit, log, progress)
 }
 
 // get 的注入版（测试用）：源链由参数给出，不读 config。
-fn get_via(sources: &NpmSources, url: &str, limit: usize, log: &mut Vec<String>) -> Result<Vec<u8>, String> {
-    get_via_with(sources, url, limit, log, get_one)
+fn get_via(sources: &NpmSources, url: &str, limit: usize, log: &mut Vec<String>, progress: Option<&str>) -> Result<Vec<u8>, String> {
+    get_via_with(sources, url, limit, log, |url, limit| get_one(url, limit, progress))
 }
 
 // 日志里的「来源」按**实际发起请求的 URL 主机**标注：配置源与实际主机不同时写成
@@ -170,7 +170,7 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
 
 // 一次对单一地址的 GET：各 Way 依次试（web_ways），错误按类别报——
 // DNS 解析失败、TLS、超时、HTTP 状态、读超限分开说，不笼统「连接失败」。
-fn get_one(url: &str, limit: usize) -> Result<Vec<u8>, String> {
+fn get_one(url: &str, limit: usize, progress: Option<&str>) -> Result<Vec<u8>, String> {
     let mut failures: Vec<String> = Vec::new();
     for way in crate::proxy::web_ways(url) {
         let Some(agent) = way.agent_with(crate::config::pet_timeout(), |config| config.max_redirects(crate::config::http_redirects() as u32).http_status_as_error(false)) else { continue };
@@ -179,9 +179,9 @@ fn get_one(url: &str, limit: usize) -> Result<Vec<u8>, String> {
                 let status = response.status().as_u16();
                 if status != 200 { failures.push(http_status_words(status)); continue; }
                 let total = response.headers().get("Content-Length").and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<u64>().ok());
-                crate::plugin_progress::know_total(total);
+                if let Some(id) = progress { crate::plugin_progress::know_total(id, total); }
                 let mut reader = response.body_mut().with_config().limit(limit as u64).reader();
-                match crate::plugin_progress::read_chunked(&mut reader, limit as u64) {
+                match crate::plugin_progress::read_chunked(progress, &mut reader, limit as u64) {
                     Ok(bytes) => return Ok(bytes),
                     Err(e) if e == "已取消" || e.contains("超过大小限制") => return Err(e),
                     Err(e) => failures.push(format!("响应读取失败或超过大小限制（{e}）")),
@@ -313,7 +313,7 @@ fn spec(value: &str) -> Result<(String, Option<String>), String> {
 pub fn search(query: &str) -> Result<SearchReport, String> {
     let sources = NpmSources::from_config();
     let mut log = Vec::new();
-    let result = search_via(&sources, query, &mut log, get_one);
+    let result = search_via(&sources, query, &mut log, |url, limit| get_one(url, limit, None));
     // 精确查与 search 两段、每一源各自的结局都打进日志，不吞。
     drain_log(&log);
     result
@@ -417,7 +417,7 @@ struct Dist { tarball: String }
 fn resolve(name: &str, version: Option<&str>) -> Result<(String, String), String> {
     let sources = NpmSources::from_config();
     let mut log = Vec::new();
-    let result = resolve_via(&sources, name, version, &mut log, get_one);
+    let result = resolve_via(&sources, name, version, &mut log, |url, limit| get_one(url, limit, None));
     // 元数据这轮的每一源结局也要落到日志（以前只打 tarball 那轮，元数据源失败被吞）。
     drain_log(&log);
     result
@@ -494,12 +494,12 @@ pub fn obtain(context: &crate::storage_context::Context, value: &str) -> Result<
     let (name, version) = spec(value)?;
     let (version, tarball) = resolve(&name, version.as_deref())?;
     let mut log = Vec::new();
-    let bytes = get(&tarball, ARCHIVE_LIMIT as usize, &mut log)?;
+    let bytes = get(&tarball, ARCHIVE_LIMIT as usize, &mut log, Some(value))?;
     drain_log(&log);
     let digest = format!("{:x}", Sha256::digest(&bytes));
-    crate::plugin_progress::report("校验", bytes.len() as u64, None);
+    crate::plugin_progress::report(value,"校验", bytes.len() as u64, None)?;
     let files = unpack(&bytes)?;
-    crate::plugin_progress::report("解包", bytes.len() as u64, None);
+    crate::plugin_progress::report(value,"解包", bytes.len() as u64, None)?;
     let raw = files.get("plugin.json").cloned().ok_or("这个 npm 包不是 FISH Dock 插件：缺少 plugin.json")?;
     if !files.contains_key("README.md") { return Err("这个 npm 包缺少当前版本 README.md".into()); }
     let manifest = crate::plugin_manifest::Manifest::parse(&raw, &context.root, Source::ThirdParty, &crate::plugin_install::platform())?;

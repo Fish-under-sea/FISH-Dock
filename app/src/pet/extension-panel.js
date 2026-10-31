@@ -35,8 +35,9 @@
   }
   function create({ invoke, confirm, lang, redraw, openPage = () => {}, syncAuthFocus = async () => {}, deviceDialog = () => {} }) {
     let view = null, catalog = null, cached = false, storeError = '', error = '', busy = '', loaded = false, active = 'installed', node = '', checked = false
-    // t29：安装/更新期间的下载进度（宿主 plugin_progress），弹窗数据；progressTimer 轮询。
-    let progress = null, progressTimer = 0
+    // t29：安装/更新期间的下载进度（宿主 plugin_progress）。t38：按安装目标 id 分开，
+    // 一个弹窗只对应一个 id；别人的取消/完成不会串台。
+    let progress = [], progressTimer = 0
     let hits = [], thirdQuery = '', thirdNote = '', thirdSearched = false
     const text = (zh, en) => lang() === 'en' ? en : zh
     const fail = e => typeof e === 'string' ? e : e?.message || text('插件操作失败，请重试。', 'Extension operation failed. Please retry.')
@@ -74,16 +75,16 @@
     const acceptView = next => { view = { ...next, star: next.star || view?.star }; node = view.node || ''; scheduleAuth() }
     const run = async (name, job) => {
       if (busy) return
-      busy = name; error = ''; progress = null; redraw()
-      // 安装/更新会下载：轮询宿主的进度快照（extension_progress），把「请稍候」换成
-      // 带阶段/百分比/取消的进度弹窗（t29）。其它操作轮询到不活跃就停。
-      const poll = () => invoke('extension_progress').then(p => {
-        progress = p && p.active ? p : null
+      busy = name; error = ''; progress = []; redraw()
+      // 安装/更新会下载：轮询宿主的进度快照（extension_progress，按 id 各一条），
+      // 把「请稍候」换成带阶段/百分比/取消的进度弹窗（t29）。其它操作轮询到不活跃就停。
+      const poll = () => invoke('extension_progress').then(got => {
+        progress = Array.isArray(got?.items) ? got.items.filter(p => p && p.active) : []
         if (busy) { redraw(); progressTimer = setTimeout(poll, 150) }
-      }).catch(() => { progress = null })
+      }).catch(() => { progress = [] })
       progressTimer = setTimeout(poll, 50)
       try { await job() } catch (e) { error = fail(e) }
-      finally { busy = ''; clearTimeout(progressTimer); progress = null; redraw() }
+      finally { busy = ''; clearTimeout(progressTimer); progress = []; redraw() }
     }
     async function load(force = false) {
       if (loaded && !force) return
@@ -294,10 +295,14 @@
       const result = checked ? `<p role="status" class="note">${esc((cached ? text('按缓存目录：', 'From cached catalog: ') : '') + (updates ? text(`${updates} 个插件有更新`, `${updates} extension updates available`) : text('已安装插件已是最新版本', 'Installed extensions are up to date')))}${pendingCount ? esc(text(`；另有 ${pendingCount} 个安装未完成`, `; ${pendingCount} install(s) did not finish`)) : ''}</p>` : ''
       // t29 进度弹窗：插件名 + 阶段 + 百分比 + 已下载/总量（total 未知走不确定态）+ 取消。
       const phaseName = phase => ({ '下载': text('下载', 'Download'), '校验': text('校验', 'Verifying'), '解包': text('解包', 'Unpacking'), '提交': text('提交', 'Installing') })[phase] || phase || text('下载', 'Download')
-      const progressMeta = progress ? (installed.map(r => r.plugin.manifest).find(m => m.id === progress.id) || entries.find(p => p.id === progress.id)) : null
-      const progressName = progress ? ((progressMeta && progressMeta.name) || progress.id || '') : ''
-      const pct = progress && progress.total ? Math.min(100, Math.floor((100 * Number(progress.received || 0)) / Number(progress.total))) : null
-      const progressHTML = progress?.active ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}"><div class="ext-progress"><div class="ph"><strong>${esc(progressName)}</strong><span>${esc(phaseName(progress.phase))}</span></div><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${pct == null ? 30 : pct}%"></i></div><div class="detail">${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(String(progress.received || 0))}${progress.total ? ' / ' + esc(String(progress.total)) : ''} B</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(progress.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div></div>` : ''
+      const progressMetaOf = p => installed.map(r => r.plugin.manifest).find(m => m.id === p.id) || entries.find(entry => entry.id === p.id)
+      const progressCard = p => {
+        const meta = progressMetaOf(p)
+        const name = (meta && meta.name) || p.id || ''
+        const pct = p.total ? Math.min(100, Math.floor((100 * Number(p.received || 0)) / Number(p.total))) : null
+        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseName(p.phase))}</span></div><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${pct == null ? 30 : pct}%"></i></div><div class="detail">${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(String(p.received || 0))}${p.total ? ' / ' + esc(String(p.total)) : ''} B</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
+      }
+      const progressHTML = progress.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${progress.map(progressCard).join('')}</div>` : ''
       return `<section class="extension-panel" aria-labelledby="extension-heading" aria-busy="${!!busy}"><h3 id="extension-heading">${esc(text('可安装扩展', 'Installable extensions'))}</h3>${starNotice}<div class="extension-actions"><button type="button" class="pbtn" data-extension-view="installed" aria-pressed="${active === 'installed'}"${disabled}>${esc(text('已安装', 'Installed'))}</button><button type="button" class="pbtn" data-extension-view="store" aria-pressed="${active === 'store'}"${disabled}>${esc(text('官方插件', 'Official plugins'))}</button><button type="button" class="pbtn" data-extension-view="thirdparty" aria-pressed="${active === 'thirdparty'}"${disabled}>${esc(text('第三方插件', 'Third-party plugins'))}</button><button type="button" class="pbtn" data-extension-refresh${disabled}>${esc(text('检查更新', 'Check for updates'))}</button></div>${result}${storeError ? `<p class="bad" role="alert">${esc(storeError)}</p>` : ''}<div class="extension-list">${active === 'thirdparty' ? thirdPanel : active === 'installed' ? cards || `<p class="note">${esc(text('尚未安装扩展。可从官方商店按需选择，现有小工具仍在下方。', 'No extensions installed. Choose from the official store. Existing widgets remain below.'))}</p>` : `${cached ? `<p role="status">${esc(text('当前使用缓存目录', 'Using cached catalog'))}</p>` : ''}${storeCards || `<p class="note">${esc(busy === 'store' ? text('正在读取官方目录…', 'Loading official catalog…') : text('暂无可用目录，请检查更新重试。', 'No catalog available. Check for updates to retry.'))}</p>`}${!entries.length && cards ? `<h4>${esc(text('已安装扩展', 'Installed extensions'))}</h4>${cards}` : ''}`}</div><details><summary>${esc(text('运行依赖', 'Runtime dependencies'))}</summary>${runtimeStatus}<label for="extension-node">${esc(text('Node 可执行文件路径', 'Node executable path'))}</label><input id="extension-node" class="extension-node" type="text" value="${esc(node)}" spellcheck="false"${disabled}><button type="button" class="pbtn" data-extension-runtime${disabled}>${esc(text('保存依赖路径', 'Save runtime path'))}</button><p class="note">${esc(text('Node 插件使用已校验的宿主 Node。开发环境可指定完整路径；留空恢复宿主运行资源。', 'Extensions use the verified host Node. Development builds can specify a full path. Leave empty to restore the host runtime.'))}</p></details>${progressHTML}${busy && !progressHTML ? `<p role="status">${esc(text('正在执行，请稍候…', 'Working, please wait…'))}</p>` : ''}${error ? `<p class="bad" role="alert">${esc(error)}</p>` : ''}</section>`
     }
     function mount(root) {

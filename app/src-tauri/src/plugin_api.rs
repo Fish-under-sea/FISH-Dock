@@ -55,7 +55,7 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
         if action=="runtime"{runtime_config(context,node_path.filter(|p|!p.trim().is_empty()).map(PathBuf::from))?;return view(context);}
         let id=id.ok_or("插件操作缺少 ID")?;
         // 安装/更新全程报进度；Guard 在成功、失败、提前返回时都关掉弹窗。
-        let _progress=if action=="install"{Some(crate::plugin_progress::Guard::start(&id))}else{None};
+        let _progress=if action=="install"{Some(crate::plugin_progress::Guard::start(&id)?)}else{None};
         // 下载不占用实例锁，网络失败不阻塞已安装插件的停用。
         if action=="enabled"&&enabled==Some(true){crate::github_access::require_plugin(context,&id)?;}
         // 官方插件要 GitHub 登录与主仓 Star；第三方插件不经过这条授权，认证只约束官方。
@@ -68,7 +68,7 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
         let manager=Manager{context};let node=node(context)?;
         let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
         match action.as_str(){
-            "install"=>{let (package,digest)=package.ok_or("插件包尚未就绪")?;let official=package.manifest.id.starts_with("fish.");crate::plugin_progress::report("提交",0,None);runner.install(&manager,package,&digest,official,node.as_deref())?;},
+            "install"=>{let (package,digest)=package.ok_or("插件包尚未就绪")?;let official=package.manifest.id.starts_with("fish.");crate::plugin_progress::report(&id,"提交",0,None)?;runner.install(&manager,package,&digest,official,node.as_deref())?;},
             "enabled"=>runner.set_enabled(&manager,&id,enabled.ok_or("插件启停操作缺少目标状态")?,node.as_deref())?,
             // 自启动开关（#38）：写注册表 + Dock 运行中就立即拉起/停止该插件服务。
             "autostart"=>{runner.set_autostart(&manager,&id,enabled.ok_or("插件自启动设置缺少目标状态")?,node.as_deref())?;},
@@ -94,11 +94,11 @@ pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:Strin
     if !confirm{return Err("请确认安装第三方插件".into());}
     tauri::async_runtime::spawn_blocking(move||{
         let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
-        let _progress=crate::plugin_progress::Guard::start(&query);
+        let _progress=crate::plugin_progress::Guard::start(&query)?;
         let (package,digest)=crate::plugin_thirdparty::obtain(context,&query).map_err(|error|format!("更新失败（下载阶段）：{error}"))?;
         let manager=Manager{context};let node=node(context)?;
         let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
-        crate::plugin_progress::report("提交",0,None);
+        crate::plugin_progress::report(&query,"提交",0,None)?;
         runner.install(&manager,package,&digest,false,node.as_deref())?;
         let _=runner.view(&manager)?;drop(runner);
         view(context)
@@ -109,7 +109,7 @@ pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:Strin
 #[tauri::command]
 pub fn extension_progress()->Value{crate::plugin_progress::snapshot()}
 #[tauri::command]
-pub fn extension_cancel(_window:WebviewWindow,id:String)->Value{crate::plugin_progress::cancel(&id);crate::plugin_progress::snapshot()}
+pub fn extension_cancel(_window:WebviewWindow,id:String)->Result<Value,String>{crate::plugin_progress::cancel(&id)?;Ok(crate::plugin_progress::snapshot())}
 #[tauri::command]
 pub async fn extension_auth(window:WebviewWindow,action:String)->Result<Value,String>{
     trusted(&window)?;

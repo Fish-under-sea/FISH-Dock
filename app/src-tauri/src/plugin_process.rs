@@ -302,6 +302,40 @@ mod tests {
         }
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
+    // t38/B1：新包已落地但服务起不来 → 注册表回滚到 1.0.0 之外，packages/<id>/ 也只
+    // 留旧版本（失败的新版本目录一并删掉），旧服务仍在运行。
+    #[test]
+    #[ignore = "需 FISH_DOCK_TEST_NODE；B1 回滚目录终态"]
+    fn t38_b1_failed_start_removes_the_new_version_directory() {
+        let node=std::env::var_os("FISH_DOCK_TEST_NODE").map(std::path::PathBuf::from).expect("设置 FISH_DOCK_TEST_NODE");
+        let root=std::env::temp_dir().join(format!("fish-t38-b1-{}-{}",std::process::id(),crate::now_ms())).join(".fish-dock");
+        let host=t29_namespace(root.join("host"),"host","host","1.0.0");
+        t29_namespace(root.join(".plugin.acme.weather"),"acme.weather",".plugin.acme.weather","1.0.0");
+        let context=crate::storage_context::Context{root:root.clone(),host};
+        let manager=Manager{context:&context};
+        let mut runner=crate::plugin_runtime::Runner::default();
+        let (old,digest)=t29_package("acme.weather","Weather",".plugin.acme.weather","1.0.0",false);
+        manager.install(old,&digest,false).unwrap();
+        runner.set_enabled(&manager,"acme.weather",true,Some(&node)).unwrap();
+        assert!(runner.is_running("acme.weather"),"旧服务应先跑起来");
+        // 新版本：native 后端指向一个不存在的 exe —— manager.install 会成功落地，
+        // Process::start 立刻失败（不用等握手超时）。
+        let readme=b"# broken 2.0.0".to_vec();
+        let mut files=BTreeMap::from([("README.md".to_string(),readme)]);
+        let hashes:BTreeMap<_,_>=files.iter().map(|(key,value)|(key.clone(),format!("{:x}",Sha256::digest(value)))).collect();
+        let raw=json!({"schema":1,"id":"acme.weather","name":"Weather","version":"2.0.0","hostApi":1,"platforms":[crate::plugin_install::platform()],"storage":{"directory":".plugin.acme.weather","dataSchema":1},"backend":{"runtime":"native","entry":"README.md"},"behaviors":{"autostart":true},"files":hashes});
+        files.insert("plugin.json".into(),serde_json::to_vec(&raw).unwrap());
+        let bytes=crate::identity_archive::zip(&files).unwrap();let new_digest=format!("{:x}",Sha256::digest(&bytes));
+        let package=crate::plugin_package::inspect(&bytes,&new_digest,&root,crate::storage::Source::ThirdParty,&crate::plugin_install::platform()).unwrap();
+        assert!(runner.install(&manager,package,&new_digest,false,Some(&node)).is_err(),"新版本服务起不来应报错并回滚");
+        let rows=manager.list().unwrap();
+        assert_eq!(rows.iter().find(|row|row.manifest.id=="acme.weather").unwrap().manifest.version,"1.0.0","注册表回滚到旧版");
+        let mut dirs:Vec<String>=std::fs::read_dir(root.join("host/packages/acme.weather")).unwrap().flatten().filter(|e|e.file_type().map(|t|t.is_dir()).unwrap_or(false)).map(|e|e.file_name().to_string_lossy().to_string()).collect();
+        dirs.sort();
+        assert_eq!(dirs,vec!["1.0.0".to_string()],"回滚后只留旧版本目录，2.0.0 必须删掉");
+        assert!(runner.is_running("acme.weather"),"旧服务保持 running");
+        let _=std::fs::remove_dir_all(root.parent().unwrap());
+    }
     // #22：只有「随 Dock 启动」那一次是 1；安装、点启用、回滚都是 0。插件靠这个
     // 值决定要不要自己把本机服务拉起来，写反了就是每次启用都顺带起服务。
     #[test] fn autostart_flag_is_one_only_when_started_with_the_dock() {

@@ -99,15 +99,15 @@ pub fn npm_mirror()->String{crate::config::plugin_npm_mirror()}
 fn download_timeout()->std::time::Duration{crate::config::plugin_download_timeout()}
 // 官方目录的三个读取口（raw / api / 环境覆盖）都在 crate::config 的 url.* 键里定，别处不许再写字面量。
 fn catalog_urls()->Vec<String>{vec![crate::config::plugin_catalog_raw(),crate::config::plugin_catalog_api()]}
-fn download(url:&str,limit:u64)->Result<Vec<u8>,String>{
+fn download(url:&str,limit:u64,id:Option<&str>)->Result<Vec<u8>,String>{
     let mut last="官方商店连接失败，请检查网络后重试".to_string();
     for way in crate::proxy::web_ways(url){
         let Some(agent)=way.agent_with(download_timeout(),|config|config.max_redirects(0).http_status_as_error(false))else{continue};
-        match download_with(&agent,url,limit){Ok(bytes)=>return Ok(bytes),Err(error)=>last=error}
+        match download_with(&agent,url,limit,id){Ok(bytes)=>return Ok(bytes),Err(error)=>last=error}
     }
     Err(last)
 }
-fn download_with(agent:&ureq::Agent,url:&str,limit:u64)->Result<Vec<u8>,String>{
+fn download_with(agent:&ureq::Agent,url:&str,limit:u64,id:Option<&str>)->Result<Vec<u8>,String>{
     let mut current=secure_url(url)?;
     for _ in 0..crate::config::plugin_redirect_hops(){
         let accept=if current.host_str()==Some("api.github.com"){"application/vnd.github.raw+json"}else{"application/octet-stream"};
@@ -123,9 +123,9 @@ fn download_with(agent:&ureq::Agent,url:&str,limit:u64)->Result<Vec<u8>,String>{
         // t29：按 64 KiB 累计读取并报进度；总量取 Content-Length（未知给 null）。
         // limit 仍由 BodyWithConfig.limit + read_chunked 双重把关，不因分块放宽。
         let total=response.headers().get("Content-Length").and_then(|value|value.to_str().ok()).and_then(|value|value.parse::<u64>().ok());
-        crate::plugin_progress::know_total(total);
+        if let Some(id)=id { crate::plugin_progress::know_total(id,total); }
         let mut reader=response.body_mut().with_config().limit(limit).reader();
-        return crate::plugin_progress::read_chunked(&mut reader,limit).map_err(|error| if error=="已取消"||error.contains("超过大小限制"){error}else{"插件下载中断或超过大小限制".into()});
+        return crate::plugin_progress::read_chunked(id,&mut reader,limit).map_err(|error| if error=="已取消"||error.contains("超过大小限制"){error}else{"插件下载中断或超过大小限制".into()});
     }
     Err("插件下载跳转次数超过限制".into())
 }
@@ -140,7 +140,7 @@ fn fetch_catalog_with(mut fetch:impl FnMut(&str)->Result<Vec<u8>,String>)->Resul
     Err(format!("官方目录各来源均未就绪：{last}。可在网络设置中检查代理，已安装插件仍可使用。"))
 }
 pub fn refresh(context:&crate::storage_context::Context)->Result<serde_json::Value,String>{
-    let attempt=fetch_catalog_with(|url|download(url,crate::config::catalog_max_bytes() as u64)).and_then(|(bytes,catalog)|{context.host.write("config","official-plugin-catalog.json",&bytes)?;Ok(catalog)});
+    let attempt=fetch_catalog_with(|url|download(url,crate::config::catalog_max_bytes() as u64,None)).and_then(|(bytes,catalog)|{context.host.write("config","official-plugin-catalog.json",&bytes)?;Ok(catalog)});
     match attempt{
         Ok(catalog)=>Ok(serde_json::json!({"catalog":catalog,"cached":false})),
         Err(error)=>match context.host.read("config","official-plugin-catalog.json")?{
@@ -241,13 +241,13 @@ pub fn obtain(context:&crate::storage_context::Context,id:&str)->Result<(crate::
 pub fn obtain_traced(context:&crate::storage_context::Context,id:&str)->Result<(crate::plugin_package::Package,String,FetchRecord),String>{
     let bytes=context.host.read("config","official-plugin-catalog.json")?.ok_or("请先刷新官方插件商店")?;
     let entry=parse(&bytes)?.plugins.into_iter().find(|row|row.id==id&&row.platform==crate::plugin_install::platform()).ok_or("官方目录没有适用于当前平台的插件版本")?;
-    crate::plugin_progress::know_total(Some(entry.bytes));
-    crate::plugin_progress::report("校验",0,Some(entry.bytes));
+    crate::plugin_progress::know_total(id,Some(entry.bytes));
+    crate::plugin_progress::report(id,"校验",0,Some(entry.bytes))?;
     let sources=[(Origin::NpmRegistry,npm_tarball(&npm_registry(),&entry.id,&entry.version)?),
         (Origin::NpmMirror,npm_tarball(&npm_mirror(),&entry.id,&entry.version)?),
         (Origin::GithubRelease,entry.url.clone())];
-    let (package,digest,record)=fetch_from(&entry,&sources,&context.root,|url,limit|download(url,limit))?;
-    crate::plugin_progress::report("提交",0,Some(entry.bytes));
+    let (package,digest,record)=fetch_from(&entry,&sources,&context.root,|url,limit|download(url,limit,Some(id)))?;
+    crate::plugin_progress::report(id,"提交",0,Some(entry.bytes))?;
     if let Err(error)=save_fetch(context,&record){eprintln!("FISH Dock: 插件下载来源记录写入失败（{}）：{error}",entry.id);}
     Ok((package,digest,record))
 }
