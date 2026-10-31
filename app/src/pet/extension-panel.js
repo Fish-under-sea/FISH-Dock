@@ -54,6 +54,19 @@
     if (!(q > 0 && q < 1)) return null
     return { q, slot, trigger }
   }
+  // 参考 Oleg Frolov「Download IV」的形态（用户 2026-11-01 给的 Dribbble 链接）：
+  // 进度条本身是**一排小方块**——未填的段是一道细窄的暗格，进度越过的段变成
+  // 实心亮块并轻微“弹”一下；方块从左往右逐段点亮，就是进度在走。
+  // 飞行的方块只作为前沿的补充动势（粒子上限 5~8 个），不参与构形。
+  // segmentTarget 返回该段此刻应达到的填充度 0..1（in：左侧已填；out：右缘递减）。
+  const FX_SEGMENTS = 40
+  const segmentTarget = (pct, index, count = FX_SEGMENTS, mode = 'in') => {
+    const lo = index / count, hi = (index + 1) / count
+    const front = mode === 'out' ? 1 - pct : pct
+    if (front >= hi) return 1
+    if (front <= lo) return 0
+    return (front - lo) / (hi - lo)
+  }
   const official = id => ['fish.feishu', 'fish.clash', 'fish.magpie'].includes(id)
   // 官方目录的作者（#22-4）：2.0.0 目录里 authors 总是存在（≥1，顺序即展示顺序），
   // 「A、B」由这里拼。旧目录的 author/maintainer 由宿主 plugin_store.rs 归一成同一
@@ -91,6 +104,8 @@
     const progressSeen = new Map()
     let fxRaf = 0
     const fxParticles = new Map()
+  // 每块 canvas 的段填充度（0..1，逐帧向目标缓动，做出“方块弹一下”的手感）。
+  const fxSegs = new WeakMap()
     let hits = [], thirdQuery = '', thirdNote = '', thirdSearched = false
     const text = (zh, en) => lang() === 'en' ? en : zh
     const fail = e => typeof e === 'string' ? e : e?.message || text('插件操作失败，请重试。', 'Extension operation failed. Please retry.')
@@ -219,26 +234,49 @@
       ctx.fillStyle = color
       const parts = fxParts(cv.dataset.extFx || '')
       const centerY = h / 2
+      // ── 第一层：分段方块条本体（进度的主体形态）──────────────────────
+      // 未填：细窄暗格（高度 45%）；填过：满高实心亮块，加一点“弹”的过冲。
+      let segs = fxSegs.get(cv)
+      if (!segs) { segs = new Float32Array(FX_SEGMENTS); fxSegs.set(cv, segs) }
+      const gap = Math.max(2, Math.round(w / FX_SEGMENTS * 0.22))
+      const segW = Math.max(1, (w - gap * (FX_SEGMENTS - 1)) / FX_SEGMENTS)
+      const fullH = Math.max(6, Math.min(12, h * 0.2))
+      const radius = Math.min(2, segW / 2)
+      const box = (x, y, bw, bh) => {
+        if (typeof ctx.roundRect === 'function') { ctx.beginPath(); ctx.roundRect(x, y, bw, bh, radius); ctx.fill() }
+        else ctx.fillRect(x, y, bw, bh)
+      }
+      for (let i = 0; i < FX_SEGMENTS; i++) {
+        const target = segmentTarget(pct, i, FX_SEGMENTS, mode)
+        segs[i] += (target - segs[i]) * 0.28
+        const v = Math.min(1, segs[i])
+        const over = v > 0.999 ? 0 : (v > 0 ? 1 : 0)          // 到位的段不再过冲
+        const pop = 1 + 0.22 * Math.sin(Math.PI * v) * over   // 途中轻微放大
+        const bh = fullH * (0.45 + 0.55 * v) * pop
+        const x = i * (segW + gap)
+        ctx.globalAlpha = 0.15 + 0.85 * v
+        box(x, centerY - bh / 2, segW, bh)
+      }
+      // ── 第二层：前沿的飞行方块（只做动势，5~8 个，不参与构形）──────────
+      ctx.globalAlpha = 1
       for (let i = 0; i < parts.length; i++) {
         const pt = parts[i]
         const flight = particleFlight(pct, i, parts.length, mode)
         if (!flight) continue   // 未出发 / 已并入 / 已消散：都不画（填过的地方必须干净）
         const q = flight.q
         const ease = 1 - (1 - q) * (1 - q) * (1 - q)
-        const alpha = Math.sin(Math.PI * q)   // 起飞淡入、抵达淡出
+        const alpha = Math.sin(Math.PI * q) * 0.9   // 起飞淡入、抵达淡出
         let x, y
         if (mode === 'in') {
           const targetX = flight.slot * w
-          // 从目标列左侧一段距离飞入（早段即画布左缘 x=0），读作从左边汇聚。
-          const travel = Math.max(24, w * 0.3)
+          const travel = Math.max(18, w * 0.18)
           const startX = Math.max(0, targetX - travel)
           x = startX + (targetX - startX) * ease
-          y = centerY + pt.side * (1 - ease)
+          y = centerY + pt.side * 0.55 * (1 - ease)
         } else {
-          // 从前沿（该列此刻正好是缩到位置的右缘）向右飞散。
           const startX = flight.slot * w
-          x = startX + (w + 48 - startX) * (q * q)
-          y = centerY + pt.side * (0.25 + 0.75 * q)
+          x = startX + (w + 40 - startX) * (q * q)
+          y = centerY + pt.side * 0.55 * (0.25 + 0.75 * q)
         }
         if (alpha <= 0.01) continue
         ctx.globalAlpha = alpha
@@ -504,5 +542,5 @@
     }
     return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth: () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }, pages: () => (view?.installed || []).filter(r => r.running && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, key: r.plugin.manifest.id + '/' + p.id }))) }
   }
-  window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, PHASE_WORDS, FLIGHT_WINDOW }
+  window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, segmentTarget, PHASE_WORDS, FLIGHT_WINDOW, FX_SEGMENTS }
 })()

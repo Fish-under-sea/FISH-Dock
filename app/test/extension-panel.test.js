@@ -615,3 +615,32 @@ test('t47 particleFlight：阈值铺满 0→100%，前沿约 12 个在飞，并�
   const outEarly = Array.from({ length: N }, (_, i) => particleFlight(0.2, i, N, 'out')).filter(Boolean).length
   assert.ok(outEarly >= 10 && outEarly <= 15)
 })
+
+// t49：分段方块条（参考 Oleg Frolov「Download IV」）——进度条本体由 40 个小方块
+// 组成，进度越过的段变实心；卸载从右往左退。这条纯函数决定每段的填充度。
+test('t49 segmentTarget：进度越过的段填满、前沿那段按比例、未来段为空（卸载镜像）', () => {
+  const { segmentTarget, FX_SEGMENTS } = loadPanelModule()
+  assert.equal(FX_SEGMENTS, 40)
+  const filled = (pct, mode) => Array.from({ length: FX_SEGMENTS }, (_, i) => segmentTarget(pct, i, FX_SEGMENTS, mode))
+  // 0%：一段都不满
+  assert.equal(filled(0, 'in').filter(v => v >= 1).length, 0)
+  assert.equal(filled(0, 'in').filter(v => v > 0).length, 0)
+  // 50%：正好 20 段满，且只有边界那一段是部分填充
+  const half = filled(0.5, 'in')
+  assert.equal(half.filter(v => v >= 1).length, 20, '50% 应有 20 段填满')
+  assert.ok(half.filter(v => v > 0 && v < 1).length <= 1, '只有前沿一段是部分填充')
+  assert.equal(half[39], 0, '最后一段必须是空的')
+  // 100%：全满
+  assert.equal(filled(1, 'in').filter(v => v >= 1).length, FX_SEGMENTS)
+  // 单调：进度往前走，填充段数不减
+  let prev = -1
+  for (const pct of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
+    const n = filled(pct, 'in').filter(v => v > 0).length
+    assert.ok(n >= prev, `填充段数在 ${pct} 处不应减少`)
+    prev = n
+  }
+  // 卸载镜像：pct 越大，留下的段越少（右往左退）
+  assert.equal(filled(0, 'out').filter(v => v >= 1).length, FX_SEGMENTS, '卸载 0% 时整条还在')
+  assert.equal(filled(0.5, 'out').filter(v => v >= 1).length, 20, '卸载 50% 时剩 20 段')
+  assert.equal(filled(1, 'out').filter(v => v > 0).length, 0, '卸载 100% 时一段不剩')
+})
