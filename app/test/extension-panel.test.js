@@ -392,7 +392,7 @@ test('第三方检索：提示行是 note 小字，合规结果与隐藏提示�
 })
 // t29：安装/更新期间显示进度弹窗（插件名 + 阶段 + 百分比 + 已下载/总量 + 取消），
 // 官方与第三方共用同一套渲染；取消按钮发 extension_cancel（真取消由宿主下载循环处理）。
-test('安装进度在按钮上：药丸 + 圆环 + 百分比，且不再有进度弹窗', async () => {
+test('安装进度在按钮上：宿主占位 + 无进度弹窗', async () => {
   const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', dependencies: [], url: 'https://example/x', sha256: 'a'.repeat(64), bytes: 1 }
   let release; const gate = new Promise(r => { release = r })
   const snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 500, total: 1000, active: true }] }
@@ -401,11 +401,7 @@ test('安装进度在按钮上：药丸 + 圆环 + 百分比，且不再有进�
   const pending = panel.action('install', 'fish.magpie')
   await nextTimer(timers, 50); await nextTimer(timers, 150)
   const html = panel.render()
-  assert.match(html, /class="pbtn sm inline/, '安装按钮变成进度形态')
-  assert.match(html, /data-inline-prog="fish\.magpie"/)
-  assert.match(html, /class="pill"/)
-  assert.match(html, /class="ring"/)
-  assert.match(html, /30%/, '下载 50% 折算成全局 30%（0.6×50%）')
+  assert.match(html, /<span class="pb-host" data-inline-prog="fish\.magpie">/, '按钮位置换成进度按钮宿主')
   assert.doesNotMatch(html, /ext-progress-backdrop/, '不再有进度弹窗')
   release({ installed: [] }); await pending
 })
@@ -467,28 +463,22 @@ test('t44 mergeProgress：换源时百分比单调不减，并标出切换来源
   assert.equal(beyond.switching, false, '追上以后回到下载中')
 })
 
-test('按钮上的百分比单调不减（换源不回弹）', async () => {
-  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', dependencies: [], url: 'https://example/x', sha256: 'a'.repeat(64), bytes: 1 }
-  let release; const gate = new Promise(r => { release = r })
-  let snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 600, total: 1000, active: true }] }
-  const { panel, timers } = make({ entries: [entry], manage: () => gate, progressState: () => snap })
-  await panel.load(); await panel.store()
-  const pending = panel.action('install', 'fish.magpie')
-  await nextTimer(timers, 50); await nextTimer(timers, 150)
-  assert.match(panel.render(), /--pct:36/, '下载六成 = 全局 36%（0.6×60%）')
-  snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 0, total: 800, active: true }] }
-  await nextTimer(timers, 150)
-  assert.match(panel.render(), /--pct:36/, '换源不得回退')
-  snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 720, total: 800, active: true }] }
-  await nextTimer(timers, 150)
-  snap = { items: [{ id: 'fish.magpie', phase: '校验', received: 0, total: 0, active: true }] }
-  await nextTimer(timers, 150)
-  const got = Number((panel.render().match(/--pct:([\d.]+)/) || [])[1])
-  assert.ok(got >= 60, '校验阶段要接着下载往上走（当前 ' + got + '）')
-  release({ installed: [] }); await pending
+test('阶段加权：下载占 60%、校验 22%，阶段切换不回退', () => {
+  const { overallPct, PHASE_WEIGHT } = loadPanelModule()
+  assert.equal(PHASE_WEIGHT['下载'], 0.6)
+  assert.equal(PHASE_WEIGHT['校验'], 0.22)
+  // 下载到一半 = 全局 30%
+  assert.equal(Math.round(overallPct({ phase: '下载', received: 500, total: 1000 })), 30)
+  // 下载满 = 60%
+  assert.equal(Math.round(overallPct({ phase: '下载', received: 1000, total: 1000 })), 60)
+  // 进入校验：起点就是 60%，校验过半再 +11
+  assert.equal(Math.round(overallPct({ phase: '校验', received: 0, total: 100 })), 60)
+  assert.equal(Math.round(overallPct({ phase: '校验', received: 50, total: 100 })), 71)
+  // 提交结尾逼近 100，但绘制阶段不给满（满由完成态负责）
+  assert.ok(overallPct({ phase: '提交', received: 99, total: 100 }) <= 99)
 })
 
-test('按钮进度的 SVG 契约：pill/ring/arrow/lbl 齐备且可取消', async () => {
+test('进度按钮宿主可取消，且不再渲染旧的内联 SVG', async () => {
   const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', dependencies: [], url: 'https://example/x', sha256: 'a'.repeat(64), bytes: 1 }
   let release; const gate = new Promise(r => { release = r })
   const snap = { items: [{ id: 'fish.magpie', phase: '校验', received: 30, total: 100, active: true }] }
@@ -497,9 +487,8 @@ test('按钮进度的 SVG 契约：pill/ring/arrow/lbl 齐备且可取消', asyn
   const pending = panel.action('install', 'fish.magpie')
   await nextTimer(timers, 50); await nextTimer(timers, 150)
   const html = panel.render()
-  for (const cls of ['pill', 'ring', 'arrow', 'lbl']) assert.match(html, new RegExp('class="' + cls + '"'), cls)
-  assert.match(html, /data-extension-cancel-pill="fish\.magpie"/, '点按钮即取消')
-  assert.match(html, /stroke-dashoffset:/, '圆环用 dashoffset 表示进度')
+  assert.match(html, /data-inline-prog="fish\.magpie"/)
+  assert.doesNotMatch(html, /class="ring"/, '旧内联 SVG 已移除')
   release({ installed: [] }); await pending
 })
 

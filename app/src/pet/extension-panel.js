@@ -59,6 +59,20 @@
   // 实心亮块并轻微“弹”一下；方块从左往右逐段点亮，就是进度在走。
   // 飞行的方块只作为前沿的补充动势（粒子上限 5~8 个），不参与构形。
   // segmentTarget 返回该段此刻应达到的填充度 0..1（in：左侧已填；out：右缘递减）。
+  // 2026-11-01 用户指出：校验那一段也要算进圆环，不能每阶段从 0 重来。
+  // 把一次安装拆成四段权重，圆环显示「整件事」的完成度：
+  //   下载 60%（按字节比例）→ 校验 22% → 解包 12% → 提交 6%
+  // 宿主每次只报当前阶段与当前阶段字节量，这里折算成全局百分比。
+  const PHASE_ORDER = ['下载', '校验', '解包', '提交']
+  const PHASE_WEIGHT = { '下载': 0.6, '校验': 0.22, '解包': 0.12, '提交': 0.06 }
+  const overallPct = item => {
+  const idx = PHASE_ORDER.indexOf(item.phase)
+  if (idx < 0) return item.total ? Math.min(99, (item.received / item.total) * 100) : 0
+  let base = 0
+  for (let i = 0; i < idx; i++) base += PHASE_WEIGHT[PHASE_ORDER[i]]
+  const intra = item.total ? Math.max(0, Math.min(1, item.received / item.total)) : 0.35
+  return Math.min(99, (base + PHASE_WEIGHT[item.phase] * intra) * 100)
+  }
   const FX_SEGMENTS = 40
   const segmentTarget = (pct, index, count = FX_SEGMENTS, mode = 'in') => {
     const lo = index / count, hi = (index + 1) / count
@@ -115,20 +129,6 @@
     const inlineStart = new Map()
     let inlineRendered = ''
     const INLINE_MIN_MS = 900
-    // 2026-11-01 用户指出：校验那一段也要算进圆环，不能每阶段从 0 重来。
-    // 把一次安装拆成四段权重，圆环显示「整件事」的完成度：
-    //   下载 60%（按字节比例）→ 校验 22% → 解包 12% → 提交 6%
-    // 宿主每次只报当前阶段与当前阶段字节量，这里折算成全局百分比。
-    const PHASE_ORDER = ['下载', '校验', '解包', '提交']
-    const PHASE_WEIGHT = { '下载': 0.6, '校验': 0.22, '解包': 0.12, '提交': 0.06 }
-    const overallPct = item => {
-      const idx = PHASE_ORDER.indexOf(item.phase)
-      if (idx < 0) return item.total ? Math.min(99, (item.received / item.total) * 100) : 0
-      let base = 0
-      for (let i = 0; i < idx; i++) base += PHASE_WEIGHT[PHASE_ORDER[i]]
-      const intra = item.total ? Math.max(0, Math.min(1, item.received / item.total)) : 0.35
-      return Math.min(99, (base + PHASE_WEIGHT[item.phase] * intra) * 100)
-    }
     const finishInline = () => {
       if (!inlineProgress.size) { inlineProgress.clear(); inlineStart.clear(); inlineRendered = ''; return }
       const now = Date.now()
@@ -149,44 +149,41 @@
       tick(left)
     }
 
-      // 2026-11-01：安装/更新不再弹任何窗——按钮自己就是进度条。形态取自用户给的 pen
-      // （faustdp / yXypKM）：药丸收成小圆 → 圆环跑进度 → 弹回药丸；这里用 SVG 属性
-      // 与 CSS 过渡原生实现，不引 GSAP/Snap。真实进度写进 --pct，圆环用 dashoffset 表示。
-      const INLINE_C = 2 * (Math.PI * 8.6)
-      const inlineButton = (id, prog) => {
-        const pct = Math.max(0, Math.min(100, Math.round(prog.pct || 0)))
-        const done = pct >= 100
-        const label = done ? text('完成', 'Done') : pct + '%'
-        const offset = (INLINE_C * (1 - pct / 100)).toFixed(2)
-        return `<button type="button" class="pbtn sm inline${pct > 0 ? ' running' : ''}${done ? ' done' : ''}" data-inline-prog="${esc(id)}" data-extension-cancel-pill="${esc(id)}" style="--pct:${pct}" aria-label="${esc(prog.phase || '')} ${pct}%">`
-          + `<svg viewBox="0 0 96 24" width="96" height="24" aria-hidden="true">`
-          + `<rect class="pill" x="1" y="1" width="94" height="22" rx="11"></rect>`
-          + `<g class="core"><circle class="ring" cx="12" cy="12" r="8.6" style="stroke-dasharray:${INLINE_C.toFixed(2)};stroke-dashoffset:${offset}"></circle>`
-          + `<path class="arrow" d="M12 8.5 v7 M9.2 12.2 l2.8 2.8 2.8 -2.8"></path><circle class="dot" cx="12" cy="3.4" r="0"></circle></g>`
-          + `<text class="lbl" x="26" y="15.6">${esc(label)}</text>`
-          + `</svg></button>`
-      }
+      // 2026-11-01：安装/更新不再弹任何窗——按钮自己就是进度条。
+      // 按钮本体由 progress-button.js 原样移植 pen（faustdp / yXypKM）的 SVG 与时间轴，
+      // 这里只输出一个宿主占位，mountInline() 把实例挂上去、把进度喂进去。
+      const inlineButton = (id) => `<span class="pb-host" data-inline-prog="${esc(id)}"></span>`
 
-    const updateInline = () => {
+    // 2026-11-01：按钮本体换成 ProgressButton（原样移植 pen 的 SVG + 时间轴）。
+    // 这里只负责把实例挂到宿主上、并把进度喂进去；动画全在 progress-button.js。
+    const pbInstances = new Map()
+    const mountInline = () => {
     let hit = 0
     if (typeof document === 'undefined' || !document.querySelector) return hit
-    for (const [id, prog] of inlineProgress) {
-    const btn = document.querySelector('[data-inline-prog="' + id + '"]')
-    if (!btn) continue
-    hit += 1
-    const pct = Math.max(0, Math.min(100, prog.pct || 0))
-    const ring = btn.querySelector('.ring')
-    if (ring) ring.style.strokeDashoffset = (INLINE_C * (1 - pct / 100)).toFixed(2)
-    const dot = btn.querySelector('.dot')
-    if (dot) {
-    const th = (-90 + pct * 3.6) * Math.PI / 180
-    dot.setAttribute('cx', (12 + 8.6 * Math.cos(th)).toFixed(2))
-    dot.setAttribute('cy', (12 + 8.6 * Math.sin(th)).toFixed(2))
-    dot.setAttribute('r', (1.2 + 1.5 * (pct / 100)).toFixed(2))
+    for (const host of document.querySelectorAll('[data-inline-prog]')) {
+    const id = host.dataset.inlineProg
+    const prog = inlineProgress.get(id) || { pct: 0 }
+    let inst = pbInstances.get(id)
+    if (!inst || !host.contains(inst.svg)) {
+    inst = window.ProgressButton.create(host, {
+    label: text('安装', 'Install'),
+    doneLabel: text('完成', 'Done'),
+    onCancel: () => { invoke('extension_cancel', { id }) },
+    })
+    pbInstances.set(id, inst)
     }
-    const lbl = btn.querySelector('.lbl')
-    if (lbl) lbl.textContent = pct >= 100 ? text('完成', 'Done') : Math.round(pct) + '%'
-    btn.classList.toggle('done', pct >= 100)
+    inst.setProgress(prog.pct || 0)
+    hit += 1
+    }
+    return hit
+    }
+    const updateInline = () => {
+    let hit = 0
+    for (const [id, prog] of inlineProgress) {
+    const inst = pbInstances.get(id)
+    if (!inst) continue
+    inst.setProgress(prog.pct || 0)
+    hit += 1
     }
     return hit
     }
@@ -285,7 +282,8 @@
         if (busy) {
           const ids = [...inlineProgress.keys()].join(',')
           if (ids !== inlineRendered) { inlineRendered = ids; redraw() }
-          else if (updateInline() === 0) { redraw() }   // 节点被整页重绘换掉 → 重建
+          mountInline()
+          updateInline()
           startFx(); progressTimer = setTimeout(poll, 150)
         }
       }).catch(() => { progress = [] })
@@ -656,5 +654,5 @@
     }
     return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth: () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }, pages: () => (view?.installed || []).filter(r => r.running && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, key: r.plugin.manifest.id + '/' + p.id }))) }
   }
-  window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, segmentTarget, PHASE_WORDS, FLIGHT_WINDOW, FX_SEGMENTS }
+  window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, segmentTarget, overallPct, PHASE_WEIGHT, PHASE_ORDER, PHASE_WORDS, FLIGHT_WINDOW, FX_SEGMENTS }
 })()
