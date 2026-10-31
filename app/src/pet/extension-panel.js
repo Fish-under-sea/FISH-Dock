@@ -166,17 +166,19 @@
     const FX_COUNT = 48
     const reducedMotion = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const fxSeed = (i, salt) => { const x = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453; return x - Math.floor(x) }
+    // 每个粒子只负责自己那一列：pct 涨到 slot 时并入条带，之后不再绘制。
+    // 飞行窗口固定为 slot 之前的 FX_LEAD，所以任意时刻只有前沿附近少量粒子在飞，
+    // 已填充区域保持干净的实心条（t47）。
+    const FX_LEAD = 0.16
     function fxParts(id) {
       if (fxParticles.has(id)) return fxParticles.get(id)
       const parts = []
       for (let i = 0; i < FX_COUNT; i++) parts.push({
         slot: (i + 0.5) / FX_COUNT,
-        startX: -0.04 - fxSeed(i, 1) * 0.5,
-        startY: fxSeed(i, 2),
-        jitter: (fxSeed(i, 3) - 0.5) * 0.5,
-        drift: (fxSeed(i, 4) - 0.5) * 1.2,
-        size: 3 + fxSeed(i, 5) * 4,
-        rate: 8 + fxSeed(i, 6) * 6,
+        startX: -0.06 - fxSeed(i, 1) * 0.35,
+        spread: (fxSeed(i, 2) - 0.5) * 2,
+        drift: (fxSeed(i, 3) - 0.5) * 0.5,
+        size: 3 + fxSeed(i, 4) * 4,
       })
       fxParticles.set(id, parts)
       return parts
@@ -205,21 +207,28 @@
       ctx.fillStyle = color
       const parts = fxParts(cv.dataset.extFx || '')
       for (const pt of parts) {
-        const q = Math.min(1, Math.max(0, (pct - pt.slot * 0.86) * pt.rate))
-        const ease = 1 - (1 - q) * (1 - q)
-        let x, y, alpha
+        let t, x, y, alpha
         if (mode === 'in') {
+          // 并入点在 slot：到了就交给条形填色，粒子消失
+          if (pct >= pt.slot) continue
+          t = (pct - (pt.slot - FX_LEAD)) / FX_LEAD
+          if (t <= 0) continue
+          const ease = t * t * (3 - 2 * t)
           x = (pt.startX + (pt.slot - pt.startX) * ease) * w
-          y = (pt.startY + (0.5 + pt.jitter - pt.startY) * ease) * h
-          alpha = 0.12 + 0.88 * ease
+          y = (0.5 + pt.spread * (1 - ease) * 0.42 + pt.drift * (1 - ease) * 0.1) * h
+          alpha = Math.min(1, t * 4) * 0.95
         } else {
-          const homeX = (1 - pt.slot) * w
-          const exitX = w + (0.12 + Math.abs(pt.drift) * 0.3) * w
-          x = homeX + (exitX - homeX) * ease
-          y = h / 2 + pt.jitter * h * 0.2 + pt.drift * h * 0.35 * ease
-          alpha = 0.85 * (1 - ease)
+          // 卸载：条形缩短到该列时才剥离，向右飞散并淡出
+          const release = 1 - pt.slot
+          if (pct <= release) continue
+          t = (pct - release) / FX_LEAD
+          if (t >= 1) continue
+          const ease = t * t * (3 - 2 * t)
+          x = (release + (1.18 - release) * ease) * w
+          y = (0.5 + pt.spread * ease * 0.42 + pt.drift * ease * 0.1) * h
+          alpha = (1 - ease) * 0.95
         }
-        if (alpha <= 0.01) continue
+        if (alpha <= 0.02) continue
         ctx.globalAlpha = alpha
         ctx.fillRect(Math.round(x - pt.size / 2), Math.round(y - pt.size / 2), pt.size, pt.size)
       }
