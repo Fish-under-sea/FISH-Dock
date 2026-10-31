@@ -362,12 +362,14 @@ fn t30_acceptance_matrix() {
         let b = crate::plugin_progress::progress_of("third-B").unwrap();
         let independent = a["id"] == "official-A" && b["id"] == "third-B" && a["received"] == 100 && b["received"] == 50;
         let empty_cancel_rejected = crate::plugin_progress::cancel("").is_err();
-        let b_cancelled_after_a = crate::plugin_progress::cancelled("third-B");
+        crate::plugin_progress::cancel("third-B").unwrap();
+        let a_cancelled_after_b = crate::plugin_progress::cancelled("official-A");
+        let b_cancelled_after_b = crate::plugin_progress::cancelled("third-B");
         crate::plugin_progress::finish("official-A").unwrap();
         let b_alive_after_a_finish = crate::plugin_progress::progress_of("third-B").is_some();
-        let fixed = independent && empty_cancel_rejected && !b_cancelled_after_a && b_alive_after_a_finish;
-        say(&log, &format!("[A5] A={a} B={b} 独立={independent} 空取消报错={empty_cancel_rejected} A取消不影响B={} A完成B仍在={b_alive_after_a_finish}", !b_cancelled_after_a));
-        rows.push(json!({"scenario":"A5 进度按 id 键化：并发/空取消/完成互不串台","round":1,"failed":!fixed,"independent":independent,"empty_cancel_rejected":empty_cancel_rejected,"b_cancelled_after_a":b_cancelled_after_a,"b_alive_after_a_finish":b_alive_after_a_finish,"snapshotA":a,"snapshotB":b}));
+        let fixed = independent && empty_cancel_rejected && !a_cancelled_after_b && b_cancelled_after_b && b_alive_after_a_finish;
+        say(&log, &format!("[A5] A={a} B={b} 独立={independent} 空取消报错={empty_cancel_rejected} B取消A不受影响={} B取消命中B={b_cancelled_after_b} A完成B仍在={b_alive_after_a_finish}", !a_cancelled_after_b));
+        rows.push(json!({"scenario":"A5 进度按 id 键化：并发/空取消/完成互不串台","round":1,"failed":!fixed,"independent":independent,"empty_cancel_rejected":empty_cancel_rejected,"a_cancelled_after_b":a_cancelled_after_b,"b_cancelled_after_b":b_cancelled_after_b,"b_alive_after_a_finish":b_alive_after_a_finish,"snapshotA":a,"snapshotB":b}));
         crate::plugin_progress::finish("third-B").unwrap();
     }
 
@@ -450,8 +452,14 @@ fn t30_acceptance_matrix() {
         // t38 修复后：卸载必须报错、注册行仍在、pending 不得把它报成「安装未完成」。
         let fixed=uninstall.is_err()&&registry_has&&!pending_has;
         say(&log, &format!("[B4] uninstall={uninstall:?} registry_has={registry_has} pending_has={pending_has} pending_versions={:?}", pending.iter().map(|r| (r.manifest.id.clone(), r.manifest.version.clone())).collect::<Vec<_>>()));
-        rows.push(json!({"scenario":"B4 卸载目录删不掉：保留注册行、pending 不误报","round":1,"failed":!fixed,"uninstall_error":format!("{uninstall:?}"),"registry_has":registry_has,"pending_has":pending_has,"package_exists":package_exists,"pending_versions":pending.iter().map(|r| r.manifest.version.clone()).collect::<Vec<_>>()}));
         drop(handles);
+        let retry = manager.uninstall("acme.stuck");
+        let cleared = retry.is_ok()
+            && !manager.context.host.path().join("packages").join("acme.stuck").exists()
+            && manager.list().unwrap().iter().all(|row| row.manifest.id != "acme.stuck")
+            && manager.pending().iter().all(|row| row.manifest.id != "acme.stuck");
+        say(&log, &format!("[B4] 解锁后重试 uninstall={retry:?} 全清={cleared}"));
+        rows.push(json!({"scenario":"B4 卸载目录删不掉：保留注册行、pending 不误报、解锁后重试全清","round":1,"failed":!(fixed&&cleared),"uninstall_error":format!("{uninstall:?}"),"registry_has":registry_has,"pending_has":pending_has,"package_exists":package_exists,"pending_versions":pending.iter().map(|r| r.manifest.version.clone()).collect::<Vec<_>>(),"retry_error":format!("{retry:?}"),"retry_cleared":cleared}));
     }
 
     // ── 8. B1 Process::start 失败（新包坏了）→ 注册行/目录/进程终态 ────────
