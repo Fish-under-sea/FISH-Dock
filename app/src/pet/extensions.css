@@ -313,24 +313,53 @@
 #island-settings .pbtn.inline.done .pill { stroke: #02fc86; transition: stroke .3s ease-out; }
 #island-settings .pbtn.inline.done .ring, #island-settings .pbtn.inline.done .dot { opacity: 0; }
 
-/* 2026-11-01：安装按钮 = 原样移植的 pen 按钮（progress-button.js 渲染）。
-   基础色一律 currentColor（深色主题即白），完成时由 JS 把描边切成 #02fc86 绿。
-   viewBox 是 pen 的 0 0 100 50，这里按卡片行高缩到 88×44 显示。 */
-/* 2026-11-01：pen 的按钮原设计是 620×310 的大按钮，直接塞进 24px 的按钮行会把卡片撑高、
-   文字也会缩成 2~3px。这里改成**绝对定位覆盖在按钮位置上方**：不参与布局（卡片不变高），
-   同时给足尺寸让药丸与文字都看得清。 */
+/* 2026-11-01：安装/更新按钮 = 进度条本体。
+   progress-button.js 的坐标系是 96×24，与这里的 CSS 尺寸 1:1（不再缩放，避免图元散架）。
+   位置用绝对定位钉在操作区右上/垂直居中，不参与布局，卡片不会被撑高。
+   基础色 currentColor（深色主题即白），完成态描边转 #02fc86 绿。 */
 #island-settings .extension-card-actions { position: relative; }
 #island-settings .pb-host {
   position: absolute;
   right: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 150px;
-  height: 56px;
-  display: block;
-  z-index: 2;
+  width: 96px;
+  height: 24px;
 }
-#island-settings .pb-host .pb-svg { width: 150px; height: 75px; display: block; overflow: visible; }
+#island-settings .pb-host .pb-svg { display: block; overflow: visible; cursor: pointer; }
+#island-settings .pb-host .pb-track {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  /* SVG2 几何属性可过渡：药丸宽度与 x 一起变，右缘不动、左缘右移 → 收在右侧 */
+  transition: x .42s cubic-bezier(.22, 1.1, .3, 1), width .42s cubic-bezier(.22, 1.1, .3, 1), stroke .3s;
+}
+#island-settings .pb-host .pb-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: stroke-dashoffset .18s linear, opacity .2s, cx .42s cubic-bezier(.22, 1.1, .3, 1);
+}
+#island-settings .pb-host .pb-arrow {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: opacity .2s;
+}
+#island-settings .pb-host .pb-label {
+  fill: currentColor;
+  font-size: 11px;
+  font-family: inherit;
+  transition: opacity .2s;
+}
+#island-settings .pb-host .pb-dot { fill: currentColor; transition: r .2s, opacity .2s; }
+#island-settings .pb-host.pb-done .pb-track { stroke: #02fc86; }
 /* 颜色与线宽全部由 progress-button.js 里的 SVG 属性给出（照 pen 原样），这里不再覆盖，
    否则会盖掉 mainCircleFill 的渐变填充和 text 的 viewBox 字号。 */
 
