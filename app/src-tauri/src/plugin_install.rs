@@ -374,14 +374,11 @@ impl Manager<'_> {
         self.recover_unlocked()?;
         let mut registry=self.registry()?;
         let removed=match registry.entries.remove(id){Some(row)=>row,None=>return Err("插件未安装".into())};
-        self.save(&registry)?;
-        // 插件都卸了，它那条「哪一版没装成」的提示也不再成立；留着会在下次
-        // 重新装同一个插件时冒出来，说一件早就不成立的事。
-        let _=self.clear_notice(id);
         // 发行文件（packages/<id>/）是宿主管的，不属于用户数据：卸了就该一起走。
-        // 以前只删注册行，几十 MB 的包永远留在盘上；而且「缺了注册行、包还在」正是
-        // 插件页报「安装未完成」的判据——用户主动卸掉的东西不该长这样（#t8）。
-        // 用户数据在 .fishplugin-* / .plugin.* 命名空间里，一个字节都不碰。
+        // 顺序必须是**先删目录、成功后再删注册行**（t38/B4）：反过来的话目录删不掉
+        // （外部独占锁文件）时会留下「注册表没了、目录还在」，pending() 把它报成
+        // 「安装未完成，点重试安装」，与用户主动卸载矛盾。删不掉就保留注册行并报错，
+        // 插件仍显示为已安装，用户可再点一次卸载；目录已没了但行还在时下次重试幂等。
         let packages=self.context.host.path().join("packages");
         if !id.is_empty()&&!id.contains('/')&&!id.contains('\\')&&!id.contains("..") {
             let base=packages.join(id);
@@ -390,28 +387,29 @@ impl Manager<'_> {
                 match std::fs::remove_dir_all(&base) {
                     Ok(()) => {}
                     Err(error) if error.kind()==std::io::ErrorKind::NotFound => {}
-                    Err(_) => return Err("插件已卸载，发行文件清理待重试：请重启后再卸载一次".into()),
+                    Err(_) => return Err("插件仍在使用中：发行文件暂时删不掉（可能被外部程序占用），请关闭后重试卸载".into()),
                 }
             }
-            // 卸载要一次性收干净（#37）：别等下次启动，这次就把该插件的安装事务、
-            // 下载来源记录一起删掉——它们只对「已安装」的插件有意义。用户数据
-            // （.fishplugin-<id> / .plugin.<publisher>.<name>）一个字节都不碰。
+        }
+        self.save(&registry)?;
+        // 插件都卸了，它那条「哪一版没装成」的提示也不再成立；留着会在下次
+        // 重新装同一个插件时冒出来，说一件早就不成立的事。
+        let _=self.clear_notice(id);
             let journal=self.context.host.path().join("tmp").join(format!("plugin-install-{id}.json"));
-            let _=std::fs::remove_file(&journal);
-            let mut records=crate::plugin_store::fetch_records(self.context);
-            if records.remove(id).is_some() { let _=crate::plugin_store::save_records(self.context,&records); }
-            // t29/C：宿主生成的回滚点（before-update-*）与版本记录（version-*.json）
-            // 一并清掉，插件命名空间里的 tmp 暂存也收掉；用户自己的文件（含
-            // keys/config 等配置与备份目录里用户放的东西）一律不动。
-            let source=if removed.official{crate::storage::Source::OfficialCatalog}else{crate::storage::Source::ThirdParty};
-            if let Ok(namespace)=crate::storage::namespace(&self.context.root,id,&removed.manifest.storage.directory,source) {
-                let _=crate::storage_transaction::prune_staging(&namespace);
-                if let Ok(entries)=std::fs::read_dir(namespace.join("backups")) {
-                    for entry in entries.flatten() {
-                        let name=entry.file_name().to_string_lossy().to_string();
-                        let generated=(name.starts_with("before-update-")&&(name.ends_with(".zip")||name.ends_with(".json")))||(name.starts_with("version-")&&name.ends_with(".json"));
-                        if generated { let _=std::fs::remove_file(entry.path()); }
-                    }
+        let _=std::fs::remove_file(&journal);
+        let mut records=crate::plugin_store::fetch_records(self.context);
+        if records.remove(id).is_some() { let _=crate::plugin_store::save_records(self.context,&records); }
+        // t29/C：宿主生成的回滚点（before-update-*）与版本记录（version-*.json）
+        // 一并清掉，插件命名空间里的 tmp 暂存也收掉；用户自己的文件（含
+        // keys/config 等配置与备份目录里用户放的东西）一律不动。
+        let source=if removed.official{crate::storage::Source::OfficialCatalog}else{crate::storage::Source::ThirdParty};
+        if let Ok(namespace)=crate::storage::namespace(&self.context.root,id,&removed.manifest.storage.directory,source) {
+            let _=crate::storage_transaction::prune_staging(&namespace);
+            if let Ok(entries)=std::fs::read_dir(namespace.join("backups")) {
+                for entry in entries.flatten() {
+                    let name=entry.file_name().to_string_lossy().to_string();
+                    let generated=(name.starts_with("before-update-")&&(name.ends_with(".zip")||name.ends_with(".json")))||(name.starts_with("version-")&&name.ends_with(".json"));
+                    if generated { let _=std::fs::remove_file(entry.path()); }
                 }
             }
         }
@@ -1190,6 +1188,29 @@ mod tests {
         assert!(!ns.path().join("backups/version-abc.json").exists(),"旧版本记录卸载时清掉");
         assert!(ns.path().join("backups/mine.zip").exists(),"用户自己放进备份目录的文件不许动");
         assert!(!ns.path().join("tmp/txn-1-2-3").exists(),"插件命名空间的暂存卸载时清掉");
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // t38/B4：目录被外部独占锁住时，卸载必须先删目录、失败就保留注册行——不能出现
+    // 「注册表没了、目录还在」，否则 pending() 会把主动卸载报成「安装未完成」。
+    #[cfg(windows)]
+    #[test] fn uninstall_keeps_registry_and_avoids_pending_when_the_package_directory_is_locked() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (root,context)=installed_fixture("b4-lock","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        let (package,digest)=bundle("1.0.0",1); let active=manager.install(package,&digest,false).unwrap();
+        let locked=manager.directory(&active).unwrap().join("backend.mjs");
+        let handle=std::fs::OpenOptions::new().read(true).share_mode(0).open(&locked).unwrap();
+        let error=manager.uninstall("acme.weather").expect_err("目录被独占锁住时卸载必须报错");
+        assert!(error.contains("发行文件暂时删不掉"),"{error}");
+        // 关键：注册行还在 → 插件仍显示已安装；不会被报成「安装未完成」。
+        assert!(manager.list().unwrap().iter().any(|row|row.manifest.id=="acme.weather"),"注册行必须保留");
+        assert!(manager.pending().is_empty(),"不能把卸载失败报成安装未完成：{:?}",manager.pending());
+        assert!(root.join("host").join("packages").join("acme.weather").exists(),"包目录仍在");
+        drop(handle);
+        manager.uninstall("acme.weather").expect("解锁后重试应成功");
+        assert!(manager.list().unwrap().is_empty(),"重试后注册行清掉");
+        assert!(!root.join("host").join("packages").join("acme.weather").exists(),"重试后目录清掉");
+        assert!(manager.pending().is_empty(),"仍无 pending");
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
     // #37 回归③：回滚点按「一次更新一组（zip+json）」保留最新，旧的整组删掉；用户

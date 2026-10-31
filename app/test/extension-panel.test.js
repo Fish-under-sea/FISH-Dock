@@ -392,7 +392,7 @@ test('下载进度弹窗：阶段/百分比/取消，官方与第三方共用', 
   const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', bytes: 4096, dependencies: [] }
   let release
   const gate = new Promise(r => { release = r })
-  const { panel, timers, calls } = make({ entries: [entry], manage: () => gate, progressState: () => ({ id: 'fish.magpie', phase: '下载', received: 50, total: 100, active: true }) })
+  const { panel, timers, calls } = make({ entries: [entry], manage: () => gate, progressState: () => ({ items: [{ id: 'fish.magpie', phase: '下载', received: 50, total: 100, active: true }] }) })
   await panel.load()
   await panel.store()
   const pending = panel.action('install', 'fish.magpie')

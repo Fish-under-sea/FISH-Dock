@@ -155,6 +155,9 @@ impl Runner {
                 if let Some(previous)=old {
                     let restored=self.restore_previous(manager,&previous,backup.as_deref(),node);
                     if restored.is_err(){self.failures.insert(id,"更新失败（提交阶段）：旧版恢复尚未完成，请保留备份并重试".into());return Err("更新失败（提交阶段）：旧版恢复尚未完成，数据备份已保留".into());}
+                    // t38/B1：新版本已经落地、但服务起不来，回滚到旧版后把失败的新版本
+                    // 目录也删掉——packages/<id>/ 只留旧版本，不把 2.0.0 留在盘上冒充回滚点。
+                    let _=manager.prune_versions(&previous);
                 }
                 self.rollback_notes.remove(&id);
                 self.failures.insert(id,message.clone());Err(message)

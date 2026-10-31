@@ -191,7 +191,7 @@ fn t30_acceptance_matrix() {
         // 用仓库里的稳定目录写成本地缓存（不靠刷新网络），obtain 仍走真实 npm/GitHub 下载。
         let catalog = include_bytes!("../../../../plugins/catalog/stable.json");
         context.host.write("config", "official-plugin-catalog.json", catalog).unwrap();
-        crate::plugin_progress::begin("fish.magpie");
+        crate::plugin_progress::begin("fish.magpie").unwrap();
         let old_running = runner.is_running("fish.feishu");
         let old_dirs = dirs(&manager, "fish.feishu");
         let context_for_download = context.clone();
@@ -204,7 +204,7 @@ fn t30_acceptance_matrix() {
                 progress_samples.push((snap["received"].as_u64().unwrap_or(0), snap["total"].as_u64().unwrap_or(0)));
             }
         }
-        crate::plugin_progress::cancel("");
+        crate::plugin_progress::cancel("fish.magpie").unwrap();
         let cancelled = join.join().unwrap();
         let distinct_received: Vec<u64> = {
             let mut values: Vec<u64> = progress_samples.iter().map(|(received, _)| *received).collect();
@@ -350,22 +350,25 @@ fn t30_acceptance_matrix() {
         drop(handle);
     }
 
-    // ── 5. A5 进度单例串台 / 取消语义（直接观测单例状态）──────────────
+    // ── 5. A5 进度按 id 键化（t38 修复后）：互不覆盖、空取消报错、互不连带 ─
     {
         let log = root_base.join("progress").join("progress.log");
         std::fs::create_dir_all(log.parent().unwrap()).unwrap();
-        crate::plugin_progress::begin("official-A");
-        crate::plugin_progress::report("下载", 100, Some(1000));
-        let a = crate::plugin_progress::snapshot();
-        crate::plugin_progress::begin("third-B");
-        crate::plugin_progress::report("下载", 50, Some(500));
-        let b = crate::plugin_progress::snapshot();
-        let cross = a["id"] == "official-A" && b["id"] == "third-B";
-        crate::plugin_progress::cancel("");
-        let cancelled_b = crate::plugin_progress::cancelled();
-        say(&log, &format!("[A5] snapshotA={a} snapshotB={b} begin覆盖={cross} cancel空参后cancelled={cancelled_b}"));
-        rows.push(json!({"scenario":"A5 进度单例并发两次安装取消串台","round":1,"failed":false,"state_overwritten":cross,"cancelled_after_empty_cancel":cancelled_b,"snapshotA":a,"snapshotB":b}));
-        crate::plugin_progress::finish();
+        crate::plugin_progress::begin("official-A").unwrap();
+        crate::plugin_progress::report("official-A", "下载", 100, Some(1000)).unwrap();
+        crate::plugin_progress::begin("third-B").unwrap();
+        crate::plugin_progress::report("third-B", "下载", 50, Some(500)).unwrap();
+        let a = crate::plugin_progress::progress_of("official-A").unwrap();
+        let b = crate::plugin_progress::progress_of("third-B").unwrap();
+        let independent = a["id"] == "official-A" && b["id"] == "third-B" && a["received"] == 100 && b["received"] == 50;
+        let empty_cancel_rejected = crate::plugin_progress::cancel("").is_err();
+        let b_cancelled_after_a = crate::plugin_progress::cancelled("third-B");
+        crate::plugin_progress::finish("official-A").unwrap();
+        let b_alive_after_a_finish = crate::plugin_progress::progress_of("third-B").is_some();
+        let fixed = independent && empty_cancel_rejected && !b_cancelled_after_a && b_alive_after_a_finish;
+        say(&log, &format!("[A5] A={a} B={b} 独立={independent} 空取消报错={empty_cancel_rejected} A取消不影响B={} A完成B仍在={b_alive_after_a_finish}", !b_cancelled_after_a));
+        rows.push(json!({"scenario":"A5 进度按 id 键化：并发/空取消/完成互不串台","round":1,"failed":!fixed,"independent":independent,"empty_cancel_rejected":empty_cancel_rejected,"b_cancelled_after_a":b_cancelled_after_a,"b_alive_after_a_finish":b_alive_after_a_finish,"snapshotA":a,"snapshotB":b}));
+        crate::plugin_progress::finish("third-B").unwrap();
     }
 
     // ── 6. A3 更新失败回滚 apply 中途失败 → journal 是否卡死数据通道 ──────
@@ -443,8 +446,11 @@ fn t30_acceptance_matrix() {
         let pending = manager.pending();
         let package_exists = manager.context.host.path().join("packages").join("acme.stuck").exists();
         let pending_has = pending.iter().any(|row| row.manifest.id == "acme.stuck");
-        say(&log, &format!("[B4] uninstall={uninstall:?} package_exists={package_exists} registry_has={} pending_has={pending_has} pending_versions={:?}", listed.iter().any(|r| r.manifest.id == "acme.stuck"), pending.iter().map(|r| (r.manifest.id.clone(), r.manifest.version.clone())).collect::<Vec<_>>()));
-        rows.push(json!({"scenario":"B4 卸载目录删不掉后 pending 误报安装未完成","round":1,"failed":false,"uninstall_error":format!("{uninstall:?}"),"package_exists":package_exists,"registry_has":listed.iter().any(|r| r.manifest.id == "acme.stuck"),"pending_has":pending_has,"pending_versions":pending.iter().map(|r| r.manifest.version.clone()).collect::<Vec<_>>()}));
+        let registry_has=listed.iter().any(|r| r.manifest.id == "acme.stuck");
+        // t38 修复后：卸载必须报错、注册行仍在、pending 不得把它报成「安装未完成」。
+        let fixed=uninstall.is_err()&&registry_has&&!pending_has;
+        say(&log, &format!("[B4] uninstall={uninstall:?} registry_has={registry_has} pending_has={pending_has} pending_versions={:?}", pending.iter().map(|r| (r.manifest.id.clone(), r.manifest.version.clone())).collect::<Vec<_>>()));
+        rows.push(json!({"scenario":"B4 卸载目录删不掉：保留注册行、pending 不误报","round":1,"failed":!fixed,"uninstall_error":format!("{uninstall:?}"),"registry_has":registry_has,"pending_has":pending_has,"package_exists":package_exists,"pending_versions":pending.iter().map(|r| r.manifest.version.clone()).collect::<Vec<_>>()}));
         drop(handles);
     }
 
@@ -467,8 +473,10 @@ fn t30_acceptance_matrix() {
         let row = manager.list().unwrap().into_iter().find(|row| row.manifest.id == "acme.b1");
         let dirs_now = dirs(&manager, "acme.b1");
         let running = runner.is_running("acme.b1");
-        say(&log, &format!("[B1] update={update:?} row={:?} dirs={dirs_now:?} running={running}", row.as_ref().map(|r| r.manifest.version.clone())));
-        rows.push(json!({"scenario":"B1 新包落地成功但 Process::start 失败","round":1,"failed":false,"update_error":format!("{update:?}"),"row_version":row.map(|r| r.manifest.version),"dirs":dirs_now,"running":running}));
+        // t38 修复后：回滚只留旧版本目录（2.0.0 删掉），旧服务保持 running。
+        let fixed=update.is_err()&&row.as_ref().is_some_and(|r|r.manifest.version=="1.0.0")&&dirs_now==vec!["1.0.0".to_string()]&&running;
+        say(&log, &format!("[B1] update={update:?} row={:?} dirs={dirs_now:?} running={running} fixed={fixed}", row.as_ref().map(|r| r.manifest.version.clone())));
+        rows.push(json!({"scenario":"B1 新包落地成功但 Process::start 失败：只留旧版本","round":1,"failed":!fixed,"update_error":format!("{update:?}"),"row_version":row.map(|r| r.manifest.version),"dirs":dirs_now,"running":running}));
         runner.stop_all();
     }
 
