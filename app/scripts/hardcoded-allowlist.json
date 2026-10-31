@@ -54,6 +54,6 @@
     { "glob": "src-tauri/src/windhawk_bundle.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "开发期（非 installed 构建）资源目录回退，用 DSH_FISH_RESOURCES 指向 checkout，不是部署配置" },
     { "glob": "src-tauri/src/plugin_development.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "开发期插件目录覆盖 FISH_DOCK_DEV_PLUGINS（仅本地开发用，不是发布配置）" },
     { "glob": "src-tauri/src/plugin_dependencies.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "开发期 Node 路径覆盖 FISH_DOCK_DEV_NODE（仅 debug 构建）" },
-    { "glob": "src-tauri/src/plugin_t30_acceptance.rs", "categories": ["HTTP_URL", "TIMEOUT_MAGIC"], "reason": "t30 独立压力验收购建：真实官方 release 资产地址与外部下载等待，属测试夹具（脚本只排除 *_tests.rs / *.test.*，这个文件是 t30 的验收块）；t38 只改其中的 A5/B4/B1 断言" }
+    { "glob": "src-tauri/src/plugin_t30_acceptance.rs", "categories": ["HTTP_URL", "TIMEOUT_MAGIC", "LOOPBACK_PORT"], "reason": "t30 独立压力验收购建：真实官方 release 资产地址、外部下载等待、以及「断网」场景把 HTTP(S)_PROXY 指到 127.0.0.1:9 强制连接失败，属测试夹具（脚本只排除 *_tests.rs / *.test.*，这个文件是 t30 的验收块）" }
   ]
 }
