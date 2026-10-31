@@ -93,6 +93,16 @@ export async function resourceFiles(resources) {
   const listed = (manifest.files ?? []).map(file => file.path)
   const missing = REQUIRED.filter(name => !listed.includes(name))
   if (missing.length) throw new Error(`安装资源清单缺少必需文件：${missing.join(', ')}`)
+  // 2026-11-01：退役载荷不许再进包。OFM 已下架（商店不再列、仓库服务树已移除），
+  // 但资源目录里那份 resources/ofm 曾被「照磁盘重算」的清单带进 2.0.1，装完就永久留在
+  // 安装目录——因为它进了归属清单，后续版本按「旧清单有、新清单无」剪枝时也不会碰它。
+  // 这里按路径前缀硬拒，把不再发行的东西挡在打包入口。
+  const LEGACY_PREFIXES = ['ofm/', 'dsh-our-free-model/', 'our-free-model/']
+  const legacy = listed.filter(name => LEGACY_PREFIXES.some(p => name.toLowerCase().startsWith(p)))
+  if (legacy.length) {
+    throw new Error(`安装资源里还有已下架的载荷（${legacy.length} 个，例如 ${legacy.slice(0, 3).join(', ')}）：` +
+      '先从资源目录删掉再重算清单，否则它们会被装到用户机器上，而且以后不会再被清理')
+  }
   const files = [...listed, 'manifest.json'].sort()
   for (const name of files) {
     if (!SAFE.test(name) || name.split('/').includes('..')) throw new Error(`安装资源里有不安全的相对路径：${name}`)
