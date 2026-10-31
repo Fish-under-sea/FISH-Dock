@@ -11,18 +11,18 @@
 // 与笔者的差别只有一处：笔者的 downloadTime 是 Math.random()，这里用真实进度。
 (function () {
   const SVG = `
-<svg viewBox="0 0 100 50" class="pb-svg" aria-hidden="true">
-  <circle cx="20" cy="35" r="8.5" class="mainCircle"></circle>
-  <circle cx="20" cy="35" r="8.05" class="mainCircleFill"></circle>
-  <rect x="17.5" y="32.5" width="5" height="5" class="rect"></rect>
-  <path d="M20,39 l3.5,-3.5 l0,0 M20,39 l-3.5,-3.5 l0,0 M20,39 l0,-7.5" class="arrow"></path>
-  <text x="55" y="36.5" text-anchor="middle" font-size="5.5" letter-spacing=".2" class="text"></text>
-  <path d="M50,25 h30 a10,10 0 0,1 10,10 a10,10 0 0,1 -10,10 s-30,0 -60,0 a10,10 0 0,1 -10,-10 a10,10 0 0,1 10,-10 h30" class="btn"></path>
-  <circle cx="20" cy="35" r="7.9" class="subCircle"></circle>
-  <circle cx="50" cy="26" r="0" class="dot"></circle>
+<svg viewBox="0 0 100 50" class="pb-svg" fill="none" aria-hidden="true">
+  <circle cx="20" cy="35" r="8.5" stroke="currentColor" stroke-width="1" class="mainCircle"></circle>
+  <circle cx="20" cy="35" r="8.05" stroke="currentColor" stroke-width=".9" fill="url(#pb-gradient)" class="mainCircleFill"></circle>
+  <rect x="17.5" y="32.5" width="5" height="5" stroke="none" fill="currentColor" class="rect"></rect>
+  <path d="M20,39 l3.5,-3.5 l0,0 M20,39 l-3.5,-3.5 l0,0 M20,39 l0,-7.5" stroke="currentColor" stroke-linecap="round" stroke-width=".8" class="arrow"></path>
+  <text x="55" y="36.5" fill="currentColor" text-anchor="middle" font-size="5.5" letter-spacing=".2" class="text"></text>
+  <path d="M50,25 h30 a10,10 0 0,1 10,10 a10,10 0 0,1 -10,10 s-30,0 -60,0 a10,10 0 0,1 -10,-10 a10,10 0 0,1 10,-10 h30" stroke="currentColor" stroke-width=".7" fill="transparent" class="btn"></path>
+  <circle cx="20" cy="35" r="7.9" fill="currentColor" fill-opacity="0" stroke="currentColor" stroke-width="1.6" stroke-opacity="0" class="subCircle"></circle>
+  <circle cx="50" cy="26" r="0" fill="currentColor" class="dot"></circle>
   <linearGradient id="pb-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
     <stop offset="98%" class="gradient" stop-color="transparent"></stop>
-    <stop offset="98%" class="gradient" stop-color="#00afd3"></stop>
+    <stop offset="98%" class="gradient" stop-color="#02fc86"></stop>
   </linearGradient>
 </svg>`
 

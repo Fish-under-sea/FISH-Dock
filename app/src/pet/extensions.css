@@ -316,13 +316,21 @@
 /* 2026-11-01：安装按钮 = 原样移植的 pen 按钮（progress-button.js 渲染）。
    基础色一律 currentColor（深色主题即白），完成时由 JS 把描边切成 #02fc86 绿。
    viewBox 是 pen 的 0 0 100 50，这里按卡片行高缩到 88×44 显示。 */
-#island-settings .pb-host { display: inline-flex; align-items: center; }
-#island-settings .pb-host .pb-svg { width: 88px; height: 44px; display: block; overflow: visible; }
-#island-settings .pb-host .mainCircle,
-#island-settings .pb-host .mainCircleFill { fill: none; stroke: currentColor; stroke-width: .9; }
-#island-settings .pb-host .rect { fill: currentColor; }
-#island-settings .pb-host .arrow { fill: none; stroke: currentColor; stroke-width: .8; stroke-linecap: round; }
-#island-settings .pb-host .text { fill: currentColor; font-size: 5.5px; font-family: inherit; }
-#island-settings .pb-host .btn { fill: none; stroke: currentColor; stroke-width: .7; cursor: pointer; }
-#island-settings .pb-host .subCircle { fill: none; stroke: currentColor; stroke-width: 1.6; }
-#island-settings .pb-host .dot { fill: currentColor; }
+/* 2026-11-01：pen 的按钮原设计是 620×310 的大按钮，直接塞进 24px 的按钮行会把卡片撑高、
+   文字也会缩成 2~3px。这里改成**绝对定位覆盖在按钮位置上方**：不参与布局（卡片不变高），
+   同时给足尺寸让药丸与文字都看得清。 */
+#island-settings .extension-card-actions { position: relative; }
+#island-settings .pb-host {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 150px;
+  height: 56px;
+  display: block;
+  z-index: 2;
+}
+#island-settings .pb-host .pb-svg { width: 150px; height: 75px; display: block; overflow: visible; }
+/* 颜色与线宽全部由 progress-button.js 里的 SVG 属性给出（照 pen 原样），这里不再覆盖，
+   否则会盖掉 mainCircleFill 的渐变填充和 text 的 viewBox 字号。 */
+
