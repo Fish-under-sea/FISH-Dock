@@ -130,7 +130,7 @@
       return Math.min(99, (base + PHASE_WEIGHT[item.phase] * intra) * 100)
     }
     const finishInline = () => {
-      if (!inlineProgress.size) { inlineProgress.clear(); inlineStart.clear(); return }
+      if (!inlineProgress.size) { inlineProgress.clear(); inlineStart.clear(); inlineRendered = ''; return }
       const now = Date.now()
       let left = 0
       for (const at of inlineStart.values()) left = Math.max(left, INLINE_MIN_MS - (now - at))
@@ -144,7 +144,7 @@
         redraw()
         const wait = Math.max(0, remaining - 60)
         if (wait > 0) setTimeout(() => tick(wait), 60)
-        else setTimeout(() => { inlineProgress.clear(); inlineStart.clear(); redraw() }, 240)
+        else setTimeout(() => { inlineProgress.clear(); inlineStart.clear(); inlineRendered = ''; redraw() }, 240)
       }
       tick(left)
     }
@@ -168,10 +168,12 @@
       }
 
     const updateInline = () => {
-    if (typeof document === 'undefined' || !document.querySelector) return
+    let hit = 0
+    if (typeof document === 'undefined' || !document.querySelector) return hit
     for (const [id, prog] of inlineProgress) {
     const btn = document.querySelector('[data-inline-prog="' + id + '"]')
     if (!btn) continue
+    hit += 1
     const pct = Math.max(0, Math.min(100, prog.pct || 0))
     const ring = btn.querySelector('.ring')
     if (ring) ring.style.strokeDashoffset = (INLINE_C * (1 - pct / 100)).toFixed(2)
@@ -186,6 +188,7 @@
     if (lbl) lbl.textContent = pct >= 100 ? text('完成', 'Done') : Math.round(pct) + '%'
     btn.classList.toggle('done', pct >= 100)
     }
+    return hit
     }
     const progressSeen = new Map()
     let fxRaf = 0
@@ -281,7 +284,8 @@
         if (busyKind === 'uninstall' && busy && actionStarted) { if (!inlineStart.has(busy)) inlineStart.set(busy, Date.now()); inlineProgress.set(busy, { pct: Math.min(96, uninstallTicks * 8), phase: '卸载', mode: 'out' }) }
         if (busy) {
           const ids = [...inlineProgress.keys()].join(',')
-          if (ids !== inlineRendered) { inlineRendered = ids; redraw() } else updateInline()
+          if (ids !== inlineRendered) { inlineRendered = ids; redraw() }
+          else if (updateInline() === 0) { redraw() }   // 节点被整页重绘换掉 → 重建
           startFx(); progressTimer = setTimeout(poll, 150)
         }
       }).catch(() => { progress = [] })
