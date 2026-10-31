@@ -107,6 +107,15 @@
   color: var(--fg);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .32);
   overflow: auto;
+  /* t44：条与粒子的墨色——深色主题白色系，浅色主题深色系（下面 .tb-light 覆盖）。
+     这两个是**装饰色**（进度条填充与 canvas 粒子），不是文字色，所以不走 contrast 的
+     文字对比审计；仍按 >4.5:1 选值：白 on --g1(#1c1c1e)=17.2:1，#1b1b1b on #fff=16.9:1。 */
+  --ext-fx-bar: #ffffff;
+  --ext-fx-particle: rgba(255, 255, 255, .85);
+}
+.tb-light #island-settings .ext-progress {
+  --ext-fx-bar: #1b1b1b;
+  --ext-fx-particle: rgba(27, 27, 27, .8);
 }
 #island-settings .ext-progress .ph {
   display: flex;
@@ -117,10 +126,12 @@
 }
 #island-settings .ext-progress .ph strong { font-size: 16px; font-weight: 600; }
 #island-settings .ext-progress .ph span { color: var(--g5); font-size: 12px; }
+/* t44：条形 + 粒子层。meter 是定位容器：条本身照旧是真实百分比宽度，粒子 canvas
+   浮在条上方（高度 56px，覆盖条带上下），pointer-events:none 不挡标题/百分比/按钮。 */
+#island-settings .ext-progress .meter { position: relative; margin: 12px 0; }
 #island-settings .ext-progress .bar {
   position: relative;
   height: 8px;
-  margin: 12px 0;
   border-radius: 4px;
   background: var(--g2);
   overflow: hidden;
@@ -129,8 +140,18 @@
   display: block;
   height: 100%;
   border-radius: 4px;
-  background: var(--hook-off);
+  background: var(--ext-fx-bar);
   transition: width .18s linear;
+}
+#island-settings .ext-progress .ext-bar-fx {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 56px;
+  transform: translateY(-50%);
+  width: 100%;
+  pointer-events: none;
 }
 /* total 未知：不确定态——轨道上一段来回走的填充，不给假百分比。 */
 #island-settings .ext-progress .bar.unsure i {
@@ -145,4 +166,7 @@
 #island-settings .ext-progress .foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
   #island-settings .ext-progress .bar.unsure i { animation: none; margin-left: 0; }
+  /* t44：减弱动效时粒子层整个隐藏，退化为普通进度条（长条宽度仍是真实百分比）。 */
+  #island-settings .ext-progress .ext-bar-fx { display: none; }
+  #island-settings .ext-progress .bar i { transition: none; }
 }

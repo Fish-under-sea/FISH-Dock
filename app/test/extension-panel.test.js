@@ -403,9 +403,9 @@ test('下载进度弹窗：阶段/百分比/取消，官方与第三方共用', 
   const html = panel.render()
   assert.match(html, /ext-progress-backdrop/)
   assert.match(html, /Magpie/)
-  assert.match(html, /下载/)
+  assert.match(html, /下载中/)
   assert.match(html, /50%/)
-  assert.match(html, /50 \/ 100 B/)
+  assert.match(html, /50 B \/ 100 B/)
   assert.match(html, /data-extension-cancel="fish\.magpie"/)
   // 取消按钮：发出 extension_cancel，带当前插件 id。
   const cancelBtn = { dataset: { extensionCancel: 'fish.magpie' } }
@@ -417,4 +417,122 @@ test('下载进度弹窗：阶段/百分比/取消，官方与第三方共用', 
   // 不在下载时（无 active 进度）没有弹窗。
   assert.doesNotMatch(panel.render(), /ext-progress-backdrop/)
 })
+
+// ── t44：显示层改造（阶段文案 / 字节进位 / 进度不回弹 / 粒子层 DOM）──────────
+function loadPanelModule() {
+  const window = {}
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/pet/extension-panel.js'), 'utf8'), { window })
+  return window.ExtensionPanel
+}
+const nextTimer = async (timers, ms) => {
+  const hit = [...timers.entries()].find(([, t]) => t.ms === ms)
+  assert.ok(hit, `应有 ${ms}ms 的定时器`)
+  timers.delete(hit[0])
+  await hit[1].fn()
+}
+
+test('t44 formatBytes：1024 进制自动进位，B 整数，KB/MB 两位小数', () => {
+  const { formatBytes } = loadPanelModule()
+  assert.equal(formatBytes(0), '0 B')
+  assert.equal(formatBytes(1023), '1023 B')
+  assert.equal(formatBytes(1024), '1.00 KB')
+  assert.equal(formatBytes(1048576), '1.00 MB')
+  assert.equal(formatBytes(1073741824), '1.00 GB')
+  // 宿主 Content-Length 的真实量级（自己核算：30859277/1024/1024=29.43，30957961=29.52）。
+  assert.equal(formatBytes(30859277), '29.43 MB')
+  assert.equal(formatBytes(30957961), '29.52 MB')
+})
+
+test('t44 阶段文案是「动词+中」，不是裸名词', async () => {
+  const { PHASE_WORDS } = loadPanelModule()
+  // vm 里造出来的数组是另一个 realm 的原型，用字符串比较避免跨 realm 差异。
+  assert.equal(PHASE_WORDS['下载'].join('|'), '下载中|Downloading')
+  assert.equal(PHASE_WORDS['校验'].join('|'), '校验中|Verifying')
+  assert.equal(PHASE_WORDS['解包'].join('|'), '解包中|Unpacking')
+  assert.equal(PHASE_WORDS['提交'].join('|'), '提交中|Committing')
+  assert.equal(PHASE_WORDS['卸载'].join('|'), '卸载中|Uninstalling')
+  assert.equal(PHASE_WORDS['切换来源'].join('|'), '切换来源|Switching source')
+})
+
+test('t44 mergeProgress：换源时百分比单调不减，并标出切换来源', () => {
+  const { mergeProgress } = loadPanelModule()
+  // 源 1 到 60%
+  const first = mergeProgress(undefined, { phase: '下载', received: 600, total: 1000 })
+  assert.equal(first.peak, 60)
+  assert.equal(first.switching, false)
+  // 源 2 从头开始：原始 0%，但显示仍是 60%，阶段切换来源
+  const switched = mergeProgress(first, { phase: '下载', received: 0, total: 800 })
+  assert.equal(switched.peak, 60, '不得回退到 0')
+  assert.equal(switched.raw, 0)
+  assert.equal(switched.switching, true)
+  // 源 2 涨到 50%：仍低于峰值，继续显示 60%
+  const caughtUp = mergeProgress(switched, { phase: '下载', received: 400, total: 800 })
+  assert.equal(caughtUp.peak, 60)
+  assert.equal(caughtUp.switching, true)
+  // 源 2 涨到 75%：超过旧峰值，继续往上走
+  const beyond = mergeProgress(caughtUp, { phase: '下载', received: 600, total: 800 })
+  assert.equal(beyond.peak, 75)
+  assert.equal(beyond.switching, false, '追上以后回到下载中')
+})
+
+test('t44 进度不回弹：轮询换源后 DOM 的百分比与阶段不倒退', async () => {
+  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', bytes: 4096, dependencies: [] }
+  let snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 600, total: 1000, active: true }] }
+  let release; const gate = new Promise(r => { release = r })
+  const { panel, timers } = make({ entries: [entry], manage: () => gate, progressState: () => snap })
+  await panel.load(); await panel.store()
+  const pending = panel.action('install', 'fish.magpie')
+  await nextTimer(timers, 50)
+  let html = panel.render()
+  assert.match(html, /aria-valuenow="60"/)
+  assert.match(html, /60% · 600 B \/ 1000 B/)
+  assert.match(html, /下载中/)
+  // 换源：新源从 0 开始、总量也变了
+  snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 0, total: 800, active: true }] }
+  await nextTimer(timers, 150)
+  html = panel.render()
+  assert.match(html, /aria-valuenow="60"/, '换源不得把进度打回 0')
+  assert.match(html, /60%/)
+  assert.match(html, /切换来源/)
+  // 新源涨过旧峰值
+  snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 720, total: 800, active: true }] }
+  await nextTimer(timers, 150)
+  html = panel.render()
+  assert.match(html, /aria-valuenow="90"/)
+  assert.match(html, /90% · 720 B \/ 800 B/)
+  assert.doesNotMatch(html, /切换来源/)
+  release({ installed: [] })
+  await pending
+})
+
+test('t44 粒子层：进度卡带 canvas、模式为 in，且 pointer-events 不挡内容（DOM 契约）', async () => {
+  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', bytes: 4096, dependencies: [] }
+  let release; const gate = new Promise(r => { release = r })
+  const { panel, timers } = make({ entries: [entry], manage: () => gate, progressState: () => ({ items: [{ id: 'fish.magpie', phase: '下载', received: 300, total: 1000, active: true }] }) })
+  await panel.load(); await panel.store()
+  const pending = panel.action('install', 'fish.magpie')
+  await nextTimer(timers, 50)
+  const html = panel.render()
+  assert.match(html, /<canvas class="ext-bar-fx" data-ext-fx="fish\.magpie" data-mode="in" data-pct="30"/)
+  // 粒子层在 .meter 内、条之外；标题/百分比/按钮都不受它影响。
+  assert.match(html, /<div class="meter"><div class="bar"/)
+  assert.match(html, /<\/div><div class="detail">30% · 300 B \/ 1000 B<\/div>/)
+  release({ installed: [] })
+  await pending
+})
+
+test('t44 卸载：没有宿主进度时显示「卸载中」并给出本地合成的消散进度', async () => {
+  const row = { plugin: { manifest: { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', pages: [], storage: { directory: '.plugin.fish.magpie' } }, digest: 'd'.repeat(64), enabled: true, autostart: false, running: true, pending: false, official: true }, running: true }
+  let release; const gate = new Promise(r => { release = r })
+  const { panel, timers } = make({ installed: [row], manage: () => gate, progressState: () => ({ items: [] }) })
+  await panel.load()
+  const pending = panel.action('uninstall', 'fish.magpie')
+  await nextTimer(timers, 50)
+  const html = panel.render()
+  assert.match(html, /卸载中/)
+  assert.match(html, /data-mode="out"/)
+  release({ installed: [] })
+  await pending
+})
+
 

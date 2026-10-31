@@ -7,6 +7,39 @@
     while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++ }
     return `${Number(value.toFixed(unit ? 1 : 0))} ${units[unit]}`
   }
+  // t44：下载量的显示格式。1024 进制自动进位（B→KB→MB→GB），B 不带小数，
+  // 其余保留两位（如 512 B / 984.61 KB / 29.43 MB）。目录里的 `size` 用 1000
+  // 那是「磁盘厂标」口径，这里是「用户看到的传输量」，二者不混用。
+  const formatBytes = bytes => {
+    let value = Math.max(0, Number(bytes) || 0)
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    let unit = 0
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ }
+    return unit === 0 ? `${Math.round(value)} B` : `${value.toFixed(2)} ${units[unit]}`
+  }
+  // t44：阶段显示文案——宿主 plugin_progress 的 phase 字符串（下载/校验/解包/提交）
+  // 是协议，保持不变；这里只把它翻成「动词 + 中」。卸载没有宿主进度，由面板本地
+  // 合成（phase '卸载'），文案同样落在这张表里。
+  const PHASE_WORDS = {
+    '下载': ['下载中', 'Downloading'],
+    '校验': ['校验中', 'Verifying'],
+    '解包': ['解包中', 'Unpacking'],
+    '提交': ['提交中', 'Committing'],
+    '卸载': ['卸载中', 'Uninstalling'],
+    '切换来源': ['切换来源', 'Switching source'],
+  }
+  // t44：进度单调不减（不回弹）。换源（npm 官方 → 镜像 → GitHub）时宿主会从
+  // 0 重新报 received，百分比就掉回去了；这里记住该 id 见过的峰值 peak，显示
+  // 永远用 peak。新源的原始百分比 raw 还没追上峰值时，阶段显示「切换来源」，
+  // 追上以后自然回到「下载中」。
+  const mergeProgress = (prev, item) => {
+    const total = Number(item?.total)
+    const received = Number(item?.received) || 0
+    const raw = total > 0 ? Math.min(100, Math.max(0, Math.floor((100 * received) / total))) : null
+    const peak = Math.max(prev ? prev.peak : 0, raw ?? 0)
+    const switching = !!prev && raw != null && prev.peak > 0 && raw < prev.peak - 1 && item?.phase === '下载'
+    return { peak, raw, switching, total: total > 0 ? total : (prev?.total ?? null) }
+  }
   const official = id => ['fish.feishu', 'fish.clash', 'fish.magpie'].includes(id)
   // 官方目录的作者（#22-4）：2.0.0 目录里 authors 总是存在（≥1，顺序即展示顺序），
   // 「A、B」由这里拼。旧目录的 author/maintainer 由宿主 plugin_store.rs 归一成同一
@@ -38,6 +71,12 @@
     // t29：安装/更新期间的下载进度（宿主 plugin_progress）。t38：按安装目标 id 分开，
     // 一个弹窗只对应一个 id；别人的取消/完成不会串台。
     let progress = [], progressTimer = 0
+    // t44：进度弹窗的显示层状态——当前操作种类（install/uninstall/…）、每个 id
+    // 见过的进度峰值（换源不回弹）、卸载没有宿主进度时的本地合成节拍、粒子动效。
+    let busyKind = '', uninstallTicks = 0
+    const progressSeen = new Map()
+    let fxRaf = 0
+    const fxParticles = new Map()
     let hits = [], thirdQuery = '', thirdNote = '', thirdSearched = false
     const text = (zh, en) => lang() === 'en' ? en : zh
     const fail = e => typeof e === 'string' ? e : e?.message || text('插件操作失败，请重试。', 'Extension operation failed. Please retry.')
@@ -73,18 +112,89 @@
       }, Math.min(remaining, Math.max(5, Number(pending.interval) || 5) * 1000))
     }
     const acceptView = next => { view = { ...next, star: next.star || view?.star }; node = view.node || ''; scheduleAuth() }
-    const run = async (name, job) => {
+    const run = async (name, job, kind = '') => {
       if (busy) return
-      busy = name; error = ''; progress = []; redraw()
+      busy = name; busyKind = kind; error = ''; progress = []; progressSeen.clear(); uninstallTicks = 0; redraw()
       // 安装/更新会下载：轮询宿主的进度快照（extension_progress，按 id 各一条），
       // 把「请稍候」换成带阶段/百分比/取消的进度弹窗（t29）。其它操作轮询到不活跃就停。
       const poll = () => invoke('extension_progress').then(got => {
         progress = Array.isArray(got?.items) ? got.items.filter(p => p && p.active) : []
-        if (busy) { redraw(); progressTimer = setTimeout(poll, 150) }
+        // t44：记住每个 id 的峰值（换源时宿主会从 0 重报，这里不回退）。
+        for (const item of progress) progressSeen.set(item.id, mergeProgress(progressSeen.get(item.id), item))
+        // 卸载没有宿主进度：本地按轮询节拍合成 0→100，驱动长条缩短与粒子消散。
+        if (busyKind === 'uninstall' && uninstallTicks < 12) uninstallTicks += 1
+        if (busy) { redraw(); startFx(); progressTimer = setTimeout(poll, 150) }
       }).catch(() => { progress = [] })
       progressTimer = setTimeout(poll, 50)
       try { await job() } catch (e) { error = fail(e) }
-      finally { busy = ''; clearTimeout(progressTimer); progress = []; redraw() }
+      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); redraw() }
+    }
+    // t44 粒子动效：48 个小方块，DOM canvas 绘制，requestAnimationFrame 推进。
+    // 粒子位置完全由当前百分比算出（无状态、无第三方库）：
+    //   安装/更新（mode=in）：方块从左侧画布外飞入，按进度逐个并入条带；
+    //   卸载（mode=out）：方块从条带剥离，向右飞散并淡出，长条同时缩短。
+    // 关闭弹窗时 stopFx() 取消 rAF，且循环发现没有 canvas 也会自行结束。
+    const FX_COUNT = 48
+    const reducedMotion = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const fxSeed = (i, salt) => { const x = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453; return x - Math.floor(x) }
+    function fxParts(id) {
+      if (fxParticles.has(id)) return fxParticles.get(id)
+      const parts = []
+      for (let i = 0; i < FX_COUNT; i++) parts.push({
+        slot: (i + 0.5) / FX_COUNT,
+        startX: -0.04 - fxSeed(i, 1) * 0.5,
+        startY: fxSeed(i, 2),
+        jitter: (fxSeed(i, 3) - 0.5) * 0.5,
+        drift: (fxSeed(i, 4) - 0.5) * 1.2,
+        size: 3 + fxSeed(i, 5) * 4,
+        rate: 8 + fxSeed(i, 6) * 6,
+      })
+      fxParticles.set(id, parts)
+      return parts
+    }
+    function startFx() {
+      if (typeof requestAnimationFrame !== 'function' || typeof document === 'undefined' || reducedMotion()) return
+      if (fxRaf) return
+      const step = () => {
+        let alive = 0
+        for (const cv of document.querySelectorAll('canvas[data-ext-fx]')) { alive += 1; drawFx(cv) }
+        fxRaf = alive ? requestAnimationFrame(step) : 0
+      }
+      fxRaf = requestAnimationFrame(step)
+    }
+    function stopFx() { if (fxRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(fxRaf); fxRaf = 0 }
+    function drawFx(cv) {
+      const rect = cv.getBoundingClientRect ? cv.getBoundingClientRect() : { width: 0, height: 0 }
+      const w = Math.max(1, Math.round(rect.width)), h = Math.max(1, Math.round(rect.height))
+      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
+      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr) }
+      const ctx = cv.getContext && cv.getContext('2d'); if (!ctx) return
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h)
+      const pct = Math.min(1, Math.max(0, Number(cv.dataset.pct || 0) / 100))
+      const mode = cv.dataset.mode === 'out' ? 'out' : 'in'
+      const color = (typeof getComputedStyle === 'function' ? getComputedStyle(cv).getPropertyValue('--ext-fx-particle').trim() : '') || (mode === 'out' ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.85)')
+      ctx.fillStyle = color
+      const parts = fxParts(cv.dataset.extFx || '')
+      for (const pt of parts) {
+        const q = Math.min(1, Math.max(0, (pct - pt.slot * 0.86) * pt.rate))
+        const ease = 1 - (1 - q) * (1 - q)
+        let x, y, alpha
+        if (mode === 'in') {
+          x = (pt.startX + (pt.slot - pt.startX) * ease) * w
+          y = (pt.startY + (0.5 + pt.jitter - pt.startY) * ease) * h
+          alpha = 0.12 + 0.88 * ease
+        } else {
+          const homeX = (1 - pt.slot) * w
+          const exitX = w + (0.12 + Math.abs(pt.drift) * 0.3) * w
+          x = homeX + (exitX - homeX) * ease
+          y = h / 2 + pt.jitter * h * 0.2 + pt.drift * h * 0.35 * ease
+          alpha = 0.85 * (1 - ease)
+        }
+        if (alpha <= 0.01) continue
+        ctx.globalAlpha = alpha
+        ctx.fillRect(Math.round(x - pt.size / 2), Math.round(y - pt.size / 2), pt.size, pt.size)
+      }
+      ctx.globalAlpha = 1
     }
     async function load(force = false) {
       if (loaded && !force) return
@@ -176,7 +286,7 @@
         if (action === 'install' && !(await confirm(text(`安装 ${entry.name} ${entry.version}？\n依赖：${entry.dependencies.join('、') || '无'}\n插件为独立进程，可使用声明的网络、服务及本地存储能力。`, `Install ${entry.name} ${entry.version}?\nDependencies: ${entry.dependencies.join(', ') || 'None'}\nThis extension runs as a separate local process.`)))) return
         if (action === 'uninstall' && !(await confirm(text(`卸载 ${row.plugin.manifest.name}？将停止插件并保留凭据和配置。`, `Uninstall ${row.plugin.manifest.name}? Credentials and settings will be kept.`)))) return
         acceptView(await invoke('extension_manage', { action, id, enabled: action === 'install' ? true : action === 'enabled' ? !row.running : action === 'autostart' ? !autostartOn(row) : null, nodePath: null, confirm: true }))
-      })
+      }, action)
     }
     async function runtime(value) {
       return run('runtime', async () => acceptView(await invoke('extension_manage', { action: 'runtime', id: null, enabled: null, nodePath: value.trim(), confirm: true })))
@@ -293,16 +403,32 @@
       const updates = installed.filter(r => r.plugin.pending !== true && entries.some(p => p.id === r.plugin.manifest.id && outdated(p, r.plugin))).length
       const pendingCount = installed.filter(r => r.plugin.pending === true).length
       const result = checked ? `<p role="status" class="note">${esc((cached ? text('按缓存目录：', 'From cached catalog: ') : '') + (updates ? text(`${updates} 个插件有更新`, `${updates} extension updates available`) : text('已安装插件已是最新版本', 'Installed extensions are up to date')))}${pendingCount ? esc(text(`；另有 ${pendingCount} 个安装未完成`, `; ${pendingCount} install(s) did not finish`)) : ''}</p>` : ''
-      // t29 进度弹窗：插件名 + 阶段 + 百分比 + 已下载/总量（total 未知走不确定态）+ 取消。
-      const phaseName = phase => ({ '下载': text('下载', 'Download'), '校验': text('校验', 'Verifying'), '解包': text('解包', 'Unpacking'), '提交': text('提交', 'Installing') })[phase] || phase || text('下载', 'Download')
+      // t44 进度弹窗：插件名 + 阶段（动词+中）+ 百分比 + 字节（1024 自动进位）+ 取消；
+      // 条形上还叠一层粒子 canvas（安装从左飞入汇聚、卸载向右剥离消散）。
+      const phaseName = phase => { const word = PHASE_WORDS[phase]; return word ? text(word[0], word[1]) : (phase || text('下载中', 'Downloading')) }
       const progressMetaOf = p => installed.map(r => r.plugin.manifest).find(m => m.id === p.id) || entries.find(entry => entry.id === p.id)
+      const progressItems = () => {
+        const items = progress.slice()
+        // 卸载没有宿主进度：面板本地合成一张卡（phase 卸载，0→96%），节拍来自同一轮询。
+        if (busyKind === 'uninstall' && busy && !items.some(item => item.id === busy)) {
+          items.push({ id: busy, phase: '卸载', received: Math.min(96, uninstallTicks * 8), total: 100, active: true, local: 'out' })
+        }
+        return items
+      }
       const progressCard = p => {
         const meta = progressMetaOf(p)
         const name = (meta && meta.name) || p.id || ''
-        const pct = p.total ? Math.min(100, Math.floor((100 * Number(p.received || 0)) / Number(p.total))) : null
-        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseName(p.phase))}</span></div><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${pct == null ? 30 : pct}%"></i></div><div class="detail">${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(String(p.received || 0))}${p.total ? ' / ' + esc(String(p.total)) : ''} B</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
+        const seen = progressSeen.get(p.id) || mergeProgress(null, p)
+        const known = Number(p.total) > 0 || seen.raw != null
+        const pct = known ? seen.peak : null
+        const out = p.local === 'out' || p.phase === '卸载'
+        const width = pct == null ? 30 : (out ? Math.max(2, 100 - pct) : pct)
+        const phaseText = known && seen.switching && !out ? text('切换来源', 'Switching source') : phaseName(p.phase)
+        const amount = p.total ? `${formatBytes(p.received)} / ${formatBytes(p.total)}` : formatBytes(p.received)
+        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div><canvas class="ext-bar-fx" data-ext-fx="${esc(p.id || '')}" data-mode="${out ? 'out' : 'in'}" data-pct="${pct == null ? 0 : pct}" aria-hidden="true"></canvas></div><div class="detail">${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
       }
-      const progressHTML = progress.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${progress.map(progressCard).join('')}</div>` : ''
+      const items = progressItems()
+      const progressHTML = items.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${items.map(progressCard).join('')}</div>` : ''
       return `<section class="extension-panel" aria-labelledby="extension-heading" aria-busy="${!!busy}"><h3 id="extension-heading">${esc(text('可安装扩展', 'Installable extensions'))}</h3>${starNotice}<div class="extension-actions"><button type="button" class="pbtn" data-extension-view="installed" aria-pressed="${active === 'installed'}"${disabled}>${esc(text('已安装', 'Installed'))}</button><button type="button" class="pbtn" data-extension-view="store" aria-pressed="${active === 'store'}"${disabled}>${esc(text('官方插件', 'Official plugins'))}</button><button type="button" class="pbtn" data-extension-view="thirdparty" aria-pressed="${active === 'thirdparty'}"${disabled}>${esc(text('第三方插件', 'Third-party plugins'))}</button><button type="button" class="pbtn" data-extension-refresh${disabled}>${esc(text('检查更新', 'Check for updates'))}</button></div>${result}${storeError ? `<p class="bad" role="alert">${esc(storeError)}</p>` : ''}<div class="extension-list">${active === 'thirdparty' ? thirdPanel : active === 'installed' ? cards || `<p class="note">${esc(text('尚未安装扩展。可从官方商店按需选择，现有小工具仍在下方。', 'No extensions installed. Choose from the official store. Existing widgets remain below.'))}</p>` : `${cached ? `<p role="status">${esc(text('当前使用缓存目录', 'Using cached catalog'))}</p>` : ''}${storeCards || `<p class="note">${esc(busy === 'store' ? text('正在读取官方目录…', 'Loading official catalog…') : text('暂无可用目录，请检查更新重试。', 'No catalog available. Check for updates to retry.'))}</p>`}${!entries.length && cards ? `<h4>${esc(text('已安装扩展', 'Installed extensions'))}</h4>${cards}` : ''}`}</div><details><summary>${esc(text('运行依赖', 'Runtime dependencies'))}</summary>${runtimeStatus}<label for="extension-node">${esc(text('Node 可执行文件路径', 'Node executable path'))}</label><input id="extension-node" class="extension-node" type="text" value="${esc(node)}" spellcheck="false"${disabled}><button type="button" class="pbtn" data-extension-runtime${disabled}>${esc(text('保存依赖路径', 'Save runtime path'))}</button><p class="note">${esc(text('Node 插件使用已校验的宿主 Node。开发环境可指定完整路径；留空恢复宿主运行资源。', 'Extensions use the verified host Node. Development builds can specify a full path. Leave empty to restore the host runtime.'))}</p></details>${progressHTML}${busy && !progressHTML ? `<p role="status">${esc(text('正在执行，请稍候…', 'Working, please wait…'))}</p>` : ''}${error ? `<p class="bad" role="alert">${esc(error)}</p>` : ''}</section>`
     }
     function mount(root) {
@@ -322,9 +448,11 @@
         thirdBox.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); void thirdparty() } }
       }
       panel.querySelectorAll('[data-extension-third]').forEach(b => { b.onclick = () => b.dataset.extensionThird === 'search' ? thirdparty() : installThird(b.dataset.third) })
+      // t44：挂载时若进度弹窗已经在（例如切回本页），重新点燃粒子循环；轮询也会再点。
+      if (panel.querySelector('.ext-progress-backdrop')) startFx()
       void load()
     }
-    return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth: () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); return view?.star?.pending ? auth('cancel') : Promise.resolve() }, pages: () => (view?.installed || []).filter(r => r.running && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, key: r.plugin.manifest.id + '/' + p.id }))) }
+    return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth: () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }, pages: () => (view?.installed || []).filter(r => r.running && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, key: r.plugin.manifest.id + '/' + p.id }))) }
   }
-  window.ExtensionPanel = { create }
+  window.ExtensionPanel = { create, formatBytes, mergeProgress, PHASE_WORDS }
 })()
