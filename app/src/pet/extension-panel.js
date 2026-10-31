@@ -54,33 +54,6 @@
     if (!(q > 0 && q < 1)) return null
     return { q, slot, trigger }
   }
-  // 参考 Oleg Frolov「Download IV」的形态（用户 2026-11-01 给的 Dribbble 链接）：
-  // 进度条本身是**一排小方块**——未填的段是一道细窄的暗格，进度越过的段变成
-  // 实心亮块并轻微“弹”一下；方块从左往右逐段点亮，就是进度在走。
-  // 飞行的方块只作为前沿的补充动势（粒子上限 5~8 个），不参与构形。
-  // segmentTarget 返回该段此刻应达到的填充度 0..1（in：左侧已填；out：右缘递减）。
-  // 2026-11-01 用户指出：校验那一段也要算进圆环，不能每阶段从 0 重来。
-  // 把一次安装拆成四段权重，圆环显示「整件事」的完成度：
-  //   下载 60%（按字节比例）→ 校验 22% → 解包 12% → 提交 6%
-  // 宿主每次只报当前阶段与当前阶段字节量，这里折算成全局百分比。
-  const PHASE_ORDER = ['下载', '校验', '解包', '提交']
-  const PHASE_WEIGHT = { '下载': 0.6, '校验': 0.22, '解包': 0.12, '提交': 0.06 }
-  const overallPct = item => {
-  const idx = PHASE_ORDER.indexOf(item.phase)
-  if (idx < 0) return item.total ? Math.min(99, (item.received / item.total) * 100) : 0
-  let base = 0
-  for (let i = 0; i < idx; i++) base += PHASE_WEIGHT[PHASE_ORDER[i]]
-  const intra = item.total ? Math.max(0, Math.min(1, item.received / item.total)) : 0.35
-  return Math.min(99, (base + PHASE_WEIGHT[item.phase] * intra) * 100)
-  }
-  const FX_SEGMENTS = 40
-  const segmentTarget = (pct, index, count = FX_SEGMENTS, mode = 'in') => {
-    const lo = index / count, hi = (index + 1) / count
-    const front = mode === 'out' ? 1 - pct : pct
-    if (front >= hi) return 1
-    if (front <= lo) return 0
-    return (front - lo) / (hi - lo)
-  }
   const official = id => ['fish.feishu', 'fish.clash', 'fish.magpie'].includes(id)
   // 官方目录的作者（#22-4）：2.0.0 目录里 authors 总是存在（≥1，顺序即展示顺序），
   // 「A、B」由这里拼。旧目录的 author/maintainer 由宿主 plugin_store.rs 归一成同一
@@ -115,83 +88,9 @@
     // t44：进度弹窗的显示层状态——当前操作种类（install/uninstall/…）、每个 id
     // 见过的进度峰值（换源不回弹）、卸载没有宿主进度时的本地合成节拍、粒子动效。
     let busyKind = '', uninstallTicks = 0
-    // 用户实测 2026-11-01：确认弹窗还没点，进度弹窗已经在它背后冒出来了。原因是
-    // run() 一开始就置了 busy/busyKind，而 job() 的第一步是 await confirm()；这段
-    // 等待里 progressItems() 已经把「本地合成的卸载进度卡」算进去了。再加一道闸：
-    // 只有确认通过（真正开始干活）之后才允许显示进度卡。
-    let actionStarted = false
-    // 2026-11-01：进度不再弹窗——让「安装/更新」按钮自己变成进度胶囊（原生 CSS+JS，
-    // 不引 GSAP）。id -> { pct, phase, mode }，由同一份 extension_progress 轮询喂。
-    const inlineProgress = new Map()
-    // 2026-11-01 用户要求：安装很快也要把动画播完。记录每个 id 的开始时刻，
-    // 真实进度冲到 100% 时按时间平滑推到 100（最少 INLINE_MIN_MS），
-    // 保证「药丸收拢 → 圆环跑满 → 弹回」这三段都被看到。
-    const inlineStart = new Map()
-    let inlineRendered = ''
-    const INLINE_MIN_MS = 900
-    const finishInline = () => {
-      if (!inlineProgress.size) { inlineProgress.clear(); inlineStart.clear(); inlineRendered = ''; return }
-      const now = Date.now()
-      let left = 0
-      for (const at of inlineStart.values()) left = Math.max(left, INLINE_MIN_MS - (now - at))
-      const tick = remaining => {
-        const stamp = Date.now()
-        for (const [id, cur] of [...inlineProgress]) {
-          const at = inlineStart.get(id) || stamp
-          const shown = Math.min(100, ((stamp - at) / INLINE_MIN_MS) * 100)
-          inlineProgress.set(id, { ...cur, pct: shown })
-        }
-        redraw()
-        const wait = Math.max(0, remaining - 60)
-        if (wait > 0) setTimeout(() => tick(wait), 60)
-        else setTimeout(() => { inlineProgress.clear(); inlineStart.clear(); inlineRendered = ''; redraw() }, 240)
-      }
-      tick(left)
-    }
-
-      // 2026-11-01：安装/更新不再弹任何窗——按钮自己就是进度条。
-      // 按钮本体由 progress-button.js 原样移植 pen（faustdp / yXypKM）的 SVG 与时间轴，
-      // 这里只输出一个宿主占位，mountInline() 把实例挂上去、把进度喂进去。
-      const inlineButton = (id) => `<span class="pb-host" data-inline-prog="${esc(id)}"></span>`
-
-    // 2026-11-01：按钮本体换成 ProgressButton（原样移植 pen 的 SVG + 时间轴）。
-    // 这里只负责把实例挂到宿主上、并把进度喂进去；动画全在 progress-button.js。
-    const pbInstances = new Map()
-    const mountInline = () => {
-    let hit = 0
-    if (typeof document === 'undefined' || !document.querySelector) return hit
-    for (const host of document.querySelectorAll('[data-inline-prog]')) {
-    const id = host.dataset.inlineProg
-    const prog = inlineProgress.get(id) || { pct: 0 }
-    let inst = pbInstances.get(id)
-    if (!inst || !host.contains(inst.svg)) {
-    inst = window.ProgressButton.create(host, {
-    label: text('安装', 'Install'),
-    doneLabel: text('完成', 'Done'),
-    onCancel: () => { invoke('extension_cancel', { id }) },
-    })
-    pbInstances.set(id, inst)
-    }
-    inst.setProgress(prog.pct || 0)
-    hit += 1
-    }
-    return hit
-    }
-    const updateInline = () => {
-    let hit = 0
-    for (const [id, prog] of inlineProgress) {
-    const inst = pbInstances.get(id)
-    if (!inst) continue
-    inst.setProgress(prog.pct || 0)
-    hit += 1
-    }
-    return hit
-    }
     const progressSeen = new Map()
     let fxRaf = 0
     const fxParticles = new Map()
-  // 每块 canvas 的段填充度（0..1，逐帧向目标缓动，做出“方块弹一下”的手感）。
-  const fxElastic = new WeakMap()
     let hits = [], thirdQuery = '', thirdNote = '', thirdSearched = false
     const text = (zh, en) => lang() === 'en' ? en : zh
     const fail = e => typeof e === 'string' ? e : e?.message || text('插件操作失败，请重试。', 'Extension operation failed. Please retry.')
@@ -258,7 +157,7 @@
     const acceptView = next => { view = { ...next, star: next.star || view?.star }; node = view.node || ''; scheduleAuth() }
     const run = async (name, job, kind = '') => {
       if (busy) return
-      busy = name; busyKind = kind; error = ''; progress = []; progressSeen.clear(); uninstallTicks = 0; actionStarted = false; redraw()
+      busy = name; busyKind = kind; error = ''; progress = []; progressSeen.clear(); uninstallTicks = 0; redraw()
       // 安装/更新会下载：轮询宿主的进度快照（extension_progress，按 id 各一条），
       // 把「请稍候」换成带阶段/百分比/取消的进度弹窗（t29）。其它操作轮询到不活跃就停。
       const poll = () => invoke('extension_progress').then(got => {
@@ -267,29 +166,11 @@
         for (const item of progress) progressSeen.set(item.id, mergeProgress(progressSeen.get(item.id), item))
         // 卸载没有宿主进度：本地按轮询节拍合成 0→100，驱动长条缩短与粒子消散。
         if (busyKind === 'uninstall' && uninstallTicks < 12) uninstallTicks += 1
-        for (const item of progress) {
-          const id = item.id
-          if (!inlineStart.has(id)) inlineStart.set(id, Date.now())
-          const elapsed = Date.now() - inlineStart.get(id)
-          // 全局百分比：下载 60% → 校验 22% → 解包 12% → 提交 6%，阶段切换不回退。
-          const prev = inlineProgress.get(id)
-          let shown = Math.max(prev ? prev.pct : 0, overallPct(item))
-          // 真到 100 但时间不够：按时间推到 100，动画照样播满（见 finishInline）。
-          if (prev && prev.pct >= 99.5) shown = Math.min(100, (elapsed / INLINE_MIN_MS) * 100)
-          inlineProgress.set(id, { pct: shown, phase: item.phase, mode: 'in' })
-        }
-        if (busyKind === 'uninstall' && busy && actionStarted) { if (!inlineStart.has(busy)) inlineStart.set(busy, Date.now()); inlineProgress.set(busy, { pct: Math.min(96, uninstallTicks * 8), phase: '卸载', mode: 'out' }) }
-        if (busy) {
-          const ids = [...inlineProgress.keys()].join(',')
-          if (ids !== inlineRendered) { inlineRendered = ids; redraw() }
-          mountInline()
-          updateInline()
-          startFx(); progressTimer = setTimeout(poll, 150)
-        }
+        if (busy) { redraw(); startFx(); progressTimer = setTimeout(poll, 150) }
       }).catch(() => { progress = [] })
       progressTimer = setTimeout(poll, 50)
       try { await job() } catch (e) { error = failureOf(e) }
-      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); finishInline(); redraw() }
+      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); redraw() }
     }
     // t47 粒子动效：48 个小方块，canvas 绘制，requestAnimationFrame 推进。
     // 形态修正（t47，用户看 70% 截图后提的三点）：
@@ -308,8 +189,8 @@
       for (let i = 0; i < FX_COUNT; i++) parts.push({
         slot: (i + 0.5) / FX_COUNT,
         // 条带外侧的纵向偏移（px，画布高 56，中线 28）：±10~14px。
-        side: ((i % 2 === 0) ? -1 : 1) * (4 + fxSeed(i, 1) * 3),
-        size: 2 + fxSeed(i, 2) * 1.5,
+        side: ((i % 2 === 0) ? -1 : 1) * (10 + fxSeed(i, 1) * 4),
+        size: 3 + fxSeed(i, 2) * 2.5,
       })
       fxParticles.set(id, parts)
       return parts
@@ -334,62 +215,34 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h)
       const pct = Math.min(1, Math.max(0, Number(cv.dataset.pct || 0) / 100))
       const mode = cv.dataset.mode === 'out' ? 'out' : 'in'
-      const vars = typeof getComputedStyle === 'function' ? getComputedStyle(cv) : null
-      const pick = (name, fallback) => { const v = vars ? vars.getPropertyValue(name).trim() : ''; return v || fallback }
-      const body = pick('--ext-fx-body', '#b4bad2')
-      const fill = pick('--ext-fx-fill', '#686e85')
-      const highlight = pick('--ext-fx-highlight', '#ffab91')
+      const color = (typeof getComputedStyle === 'function' ? getComputedStyle(cv).getPropertyValue('--ext-fx-particle').trim() : '') || (mode === 'out' ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.85)')
+      ctx.fillStyle = color
+      const parts = fxParts(cv.dataset.extFx || '')
       const centerY = h / 2
-      // t50：内化 codrops ElasticProgress 的「形」——闭合时是一枚圆形按钮（向上箭头），
-      // 开始下载/卸载后它弹性地拉长成一条进度条：主体 #4e80dd、填充 #77c2ff，
-      // 箭头随形变倾斜 70° 并淡出。弹簧用一阶速度积分（0.22 / 0.72），给出一次可见回弹。
-      let st = fxElastic.get(cv)
-      if (!st) { st = { open: 0, vel: 0 }; fxElastic.set(cv, st) }
-      st.vel += (1 - st.open) * 0.09
-      st.vel *= 0.82   // barElasticPeriod ≈ 0.6s，一次可见过冲
-      st.open = Math.max(0, Math.min(1.12, st.open + st.vel))
-      const open = Math.min(1, st.open)
-      const over = Math.max(0, st.open - 1)
-      const circleD = Math.min(60, Math.max(28, h - 4))   // buttonSize 60
-      const barH = 10   // barHeight 10
-      const bh = circleD + (barH - circleD) * open
-      const full = w + over * 26
-      const bw = circleD + (full - circleD) * open
-      const x = (w - bw) / 2
-      const roundRect = (px, py, pw, ph, r) => {
-        if (typeof ctx.roundRect === 'function') { ctx.beginPath(); ctx.roundRect(px, py, pw, ph, Math.max(0, Math.min(r, ph / 2))); ctx.fill() }
-        else ctx.fillRect(px, py, pw, ph)
-      }
-      // 主体：未填部分（圆的整块 → 条的低矮轨道）
-      ctx.globalAlpha = 0.55
-      ctx.fillStyle = body
-      roundRect(x, centerY - bh / 2, bw, bh, bh / 2)
-      // 填充：随进度从左往右长，内缩 2px 形成一圈“描边”感
-      if (open > 0.35) {
-        const inner = Math.max(2, bh - 4)
-        const fillW = Math.max(0, (bw - 8) * pct)   // barInset 4 两侧
-        if (fillW > 0.5) {
-          ctx.globalAlpha = 1
-          ctx.fillStyle = fill
-          roundRect(x + 4, centerY - inner / 2, fillW, inner, Math.min(3, inner / 2))
+      for (let i = 0; i < parts.length; i++) {
+        const pt = parts[i]
+        const flight = particleFlight(pct, i, parts.length, mode)
+        if (!flight) continue   // 未出发 / 已并入 / 已消散：都不画（填过的地方必须干净）
+        const q = flight.q
+        const ease = 1 - (1 - q) * (1 - q) * (1 - q)
+        const alpha = Math.sin(Math.PI * q)   // 起飞淡入、抵达淡出
+        let x, y
+        if (mode === 'in') {
+          const targetX = flight.slot * w
+          // 从目标列左侧一段距离飞入（早段即画布左缘 x=0），读作从左边汇聚。
+          const travel = Math.max(24, w * 0.3)
+          const startX = Math.max(0, targetX - travel)
+          x = startX + (targetX - startX) * ease
+          y = centerY + pt.side * (1 - ease)
+        } else {
+          // 从前沿（该列此刻正好是缩到位置的右缘）向右飞散。
+          const startX = flight.slot * w
+          x = startX + (w + 48 - startX) * (q * q)
+          y = centerY + pt.side * (0.25 + 0.75 * q)
         }
-      }
-      // 箭头：只在闭合/半开时出现，随形变倾斜并淡出（对应 labelTilt = 70）
-      if (open < 0.9) {
-        const s = Math.max(5, Math.min(9, bh * 0.18))
-        ctx.save()
-        ctx.globalAlpha = 1 - open / 0.9
-        ctx.strokeStyle = highlight   // 箭头用 highlightColor
-        ctx.lineWidth = 2.4
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-        ctx.translate(w / 2, centerY)
-        ctx.rotate(-(open * 70) * Math.PI / 180)
-        ctx.beginPath()
-        ctx.moveTo(0, s); ctx.lineTo(0, -s)
-        ctx.moveTo(-s * 0.7, -s * 0.35); ctx.lineTo(0, -s); ctx.lineTo(s * 0.7, -s * 0.35)
-        ctx.stroke()
-        ctx.restore()
+        if (alpha <= 0.01) continue
+        ctx.globalAlpha = alpha
+        ctx.fillRect(Math.round(x - pt.size / 2), Math.round(y - pt.size / 2), pt.size, pt.size)
       }
       ctx.globalAlpha = 1
     }
@@ -480,10 +333,10 @@
         redraw(); return
       }
       return run(id, async () => {
-        // 2026-11-01 用户要求：安装/下载不再弹确认——点按钮直接在按钮上跑动画。
-        if (false && action === 'install' && !(await confirm(text(`安装 ${entry.name} ${entry.version}？\n依赖：${entry.dependencies.join('、') || '无'}\n插件为独立进程，可使用声明的网络、服务及本地存储能力。`, `Install ${entry.name} ${entry.version}?\nDependencies: ${entry.dependencies.join(', ') || 'None'}\nThis extension runs as a separate local process.`)))) return
+        // 2026-11-01：安装直接开始，不再弹确认（用户要求）；卸载仍然确认。
+        // if (action === 'install' && !(await confirm(text(`安装 ${entry.name} ${entry.version}？\n依赖：${entry.dependencies.join('、') || '无'}\n插件为独立进程，可使用声明的网络、服务及本地存储能力。`, `Install ${entry.name} ${entry.version}?\nDependencies: ${entry.dependencies.join(', ') || 'None'}\nThis extension runs as a separate local process.`)))) return
         if (action === 'uninstall' && !(await confirm(text(`卸载 ${row.plugin.manifest.name}？将停止插件并保留凭据和配置。`, `Uninstall ${row.plugin.manifest.name}? Credentials and settings will be kept.`)))) return
-        actionStarted = true; acceptView(await invoke('extension_manage', { action, id, enabled: action === 'install' ? true : action === 'enabled' ? !row.running : action === 'autostart' ? !autostartOn(row) : null, nodePath: null, confirm: true }))
+        acceptView(await invoke('extension_manage', { action, id, enabled: action === 'install' ? true : action === 'enabled' ? !row.running : action === 'autostart' ? !autostartOn(row) : null, nodePath: null, confirm: true }))
       }, action)
     }
     async function runtime(value) {
@@ -586,8 +439,7 @@
       }).join('')
       const storeCards = entries.map(p => {
         const existing = installed.find(r => r.plugin.manifest.id === p.id && r.plugin.pending !== true), update = existing && outdated(p, existing.plugin)
-        const prog = inlineProgress.get(p.id)
-        const actions = prog ? inlineButton(p.id, prog) : !unlocked(p.id) ? `<span class="note">${esc(text('登录并验证 Star 后解锁', 'Sign in and verify your star to unlock'))}</span>` : existing && !update && !existing.packageMissing ? `<span class="d">${esc(text('已安装', 'Installed'))}</span>` : button('install', p.id, existing?.packageMissing ? text('重新安装', 'Reinstall') : existing ? text('更新', 'Update') : text('安装', 'Install'))
+        const actions = !unlocked(p.id) ? `<span class="note">${esc(text('登录并验证 Star 后解锁', 'Sign in and verify your star to unlock'))}</span>` : existing && !update && !existing.packageMissing ? `<span class="d">${esc(text('已安装', 'Installed'))}</span>` : button('install', p.id, existing?.packageMissing ? text('重新安装', 'Reinstall') : existing ? text('更新', 'Update') : text('安装', 'Install'))
         // 作者按数组渲染（「A、B」）；维护者字段 2.0.0 起整体去掉，卡上不再有这一行
         //（#22-4）。旧目录已被宿主归一成同一结构，这里不再读 author/maintainer。
         const authors = esc(authorsOf(p).join(text('、', ', ')) || '—')
@@ -609,7 +461,7 @@
       const progressItems = () => {
         const items = progress.slice()
         // 卸载没有宿主进度：面板本地合成一张卡（phase 卸载，0→96%），节拍来自同一轮询。
-        if (busyKind === 'uninstall' && busy && actionStarted && !items.some(item => item.id === busy)) {
+        if (busyKind === 'uninstall' && busy && !items.some(item => item.id === busy)) {
           items.push({ id: busy, phase: '卸载', received: Math.min(96, uninstallTicks * 8), total: 100, active: true, local: 'out' })
         }
         return items
@@ -627,7 +479,7 @@
         return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div><canvas class="ext-bar-fx" data-ext-fx="${esc(p.id || '')}" data-mode="${out ? 'out' : 'in'}" data-pct="${pct == null ? 0 : pct}" aria-hidden="true"></canvas></div><div class="detail">${p.local === 'out' ? `${pct == null ? 0 : pct}%` : `${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}`}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
       }
       const items = progressItems()
-      const progressHTML = false && items.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${items.map(progressCard).join('')}</div>` : ''
+      const progressHTML = items.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${items.map(progressCard).join('')}</div>` : ''
       return `<section class="extension-panel" aria-labelledby="extension-heading" aria-busy="${!!busy}"><h3 id="extension-heading">${esc(text('可安装扩展', 'Installable extensions'))}</h3>${starNotice}<div class="extension-actions"><button type="button" class="pbtn" data-extension-view="installed" aria-pressed="${active === 'installed'}"${disabled}>${esc(text('已安装', 'Installed'))}</button><button type="button" class="pbtn" data-extension-view="store" aria-pressed="${active === 'store'}"${disabled}>${esc(text('官方插件', 'Official plugins'))}</button><button type="button" class="pbtn" data-extension-view="thirdparty" aria-pressed="${active === 'thirdparty'}"${disabled}>${esc(text('第三方插件', 'Third-party plugins'))}</button><button type="button" class="pbtn" data-extension-refresh${disabled}>${esc(text('检查更新', 'Check for updates'))}</button></div>${result}${storeError ? `<p class="bad" role="alert">${esc(storeError)}</p>` : ''}<div class="extension-list">${active === 'thirdparty' ? thirdPanel : active === 'installed' ? cards || `<p class="note">${esc(text('尚未安装扩展。可从官方商店按需选择，现有小工具仍在下方。', 'No extensions installed. Choose from the official store. Existing widgets remain below.'))}</p>` : `${cached ? `<p role="status">${esc(text('当前使用缓存目录', 'Using cached catalog'))}</p>` : ''}${storeCards || `<p class="note">${esc(busy === 'store' ? text('正在读取官方目录…', 'Loading official catalog…') : text('暂无可用目录，请检查更新重试。', 'No catalog available. Check for updates to retry.'))}</p>`}${!entries.length && cards ? `<h4>${esc(text('已安装扩展', 'Installed extensions'))}</h4>${cards}` : ''}`}</div><details><summary>${esc(text('运行依赖', 'Runtime dependencies'))}</summary>${runtimeStatus}<label for="extension-node">${esc(text('Node 可执行文件路径', 'Node executable path'))}</label><input id="extension-node" class="extension-node" type="text" value="${esc(node)}" spellcheck="false"${disabled}><button type="button" class="pbtn" data-extension-runtime${disabled}>${esc(text('保存依赖路径', 'Save runtime path'))}</button><p class="note">${esc(text('Node 插件使用已校验的宿主 Node。开发环境可指定完整路径；留空恢复宿主运行资源。', 'Extensions use the verified host Node. Development builds can specify a full path. Leave empty to restore the host runtime.'))}</p></details>${progressHTML}${busy && !progressHTML ? `<p role="status">${esc(text('正在执行，请稍候…', 'Working, please wait…'))}</p>` : ''}${failureHtml(error)}</section>`
     }
     function mount(root) {
@@ -638,8 +490,7 @@
       panel.querySelector('[data-extension-refresh]').onclick = () => checkUpdates()
       panel.querySelectorAll('[data-extension-action]').forEach(b => { b.onclick = () => action(b.dataset.extensionAction, b.dataset.extensionId) })
       // t29：进度弹窗的取消——真取消（宿主在下一个块返回「已取消」）。
-      panel.querySelectorAll('[data-extension-cancel-pill]').forEach(b => { b.onclick = () => { invoke('extension_cancel', { id: b.dataset.extensionCancelPill }) } })
-    panel.querySelectorAll('[data-extension-cancel]').forEach(b => { b.onclick = () => { invoke('extension_cancel', { id: b.dataset.extensionCancel }); } })
+      panel.querySelectorAll('[data-extension-cancel]').forEach(b => { b.onclick = () => { invoke('extension_cancel', { id: b.dataset.extensionCancel }); } })
       panel.querySelectorAll('[data-extension-page]').forEach(b => { b.onclick = () => { const id = b.dataset.extensionPage.split('/')[0]; if (unlocked(id)) openPage(b.dataset.extensionPage) } })
       panel.querySelector('[data-extension-runtime]').onclick = () => runtime(panel.querySelector('#extension-node').value)
       const thirdBox = panel.querySelector('#extension-third-query')
@@ -654,5 +505,5 @@
     }
     return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth: () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }, pages: () => (view?.installed || []).filter(r => r.running && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, key: r.plugin.manifest.id + '/' + p.id }))) }
   }
-  window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, segmentTarget, overallPct, PHASE_WEIGHT, PHASE_ORDER, PHASE_WORDS, FLIGHT_WINDOW, FX_SEGMENTS }
+  window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, PHASE_WORDS, FLIGHT_WINDOW }
 })()

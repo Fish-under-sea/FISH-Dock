@@ -98,11 +98,11 @@
 }
 #island-settings .ext-progress {
   box-sizing: border-box;
-  width: min(260px, calc(100vw - 40px));
+  width: min(360px, calc(100vw - 40px));
   max-height: min(70vh, calc(100vh - 40px));
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--g3);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--g1);
   color: var(--fg);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .32);
@@ -112,12 +112,6 @@
      文字对比审计；仍按 >4.5:1 选值：白 on --g1(#1c1c1e)=17.2:1，#1b1b1b on #fff=16.9:1。 */
   --ext-fx-bar: #ffffff;
   --ext-fx-particle: rgba(255, 255, 255, .85);
-  /* t50：弹性进度（内化 codrops ElasticProgress 的形）——按钮色 #4e80dd、填充 #77c2ff */
-  /* 2026-11-01 用户要求：动效配色跟随 Windows 强调色（设置里「跟随系统」那档），
-     不再写死示例的灰紫/蓝。--sys-accent 由 settings.js 发布，读不到时退回浅蓝。 */
-  --ext-fx-body: var(--sys-accent, #5e9bff);
-  --ext-fx-fill: var(--sys-accent, #5e9bff);
-  --ext-fx-highlight: var(--sys-accent, #5e9bff);
 }
 .tb-light #island-settings .ext-progress {
   --ext-fx-bar: #1b1b1b;
@@ -130,27 +124,33 @@
   gap: 8px;
   margin: 0 0 8px;
 }
-#island-settings .ext-progress .ph strong { font-size: 15px; font-weight: 600; }
+#island-settings .ext-progress .ph strong { font-size: 16px; font-weight: 600; }
 #island-settings .ext-progress .ph span { color: var(--g5); font-size: 12px; }
 /* t44：条形 + 粒子层。meter 是定位容器：条本身照旧是真实百分比宽度，粒子 canvas
    浮在条上方（高度 56px，覆盖条带上下），pointer-events:none 不挡标题/百分比/按钮。 */
-/* t49：条形不再画连续填充，由 canvas 画「一排名小刻度」——未填暗格、填过实心，
-   形态取自 Oleg Frolov「Download IV」的单色刻度条（#0D121C/#fff/#84868B 那套）。
-   DOM 里的 .bar 保留 aria 语义与 inline width，不再显示自己的填充。 */
-#island-settings .ext-progress .meter { position: relative; margin: 6px 0 6px; height: 64px; }
+#island-settings .ext-progress .meter { position: relative; margin: 12px 0; }
 #island-settings .ext-progress .bar {
-  position: absolute;
-  inset: 0;
-  height: auto;
-  background: transparent;
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--g2);
   overflow: hidden;
 }
-#island-settings .ext-progress .bar i { display: none; }
+#island-settings .ext-progress .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--ext-fx-bar);
+  transition: width .18s linear;
+}
 #island-settings .ext-progress .ext-bar-fx {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 56px;
+  transform: translateY(-50%);
   width: 100%;
-  height: 100%;
   pointer-events: none;
 }
 /* total 未知：不确定态——轨道上一段来回走的填充，不给假百分比。 */
@@ -166,11 +166,9 @@
 #island-settings .ext-progress .foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
   #island-settings .ext-progress .bar.unsure i { animation: none; margin-left: 0; }
-  /* t44/t49：减弱动效时 canvas（刻度与粒子）整个隐藏，退化为普通连续进度条——
-     所以这里必须把 .bar i 恢复显示，否则一条进度都看不见。 */
+  /* t44：减弱动效时粒子层整个隐藏，退化为普通进度条（长条宽度仍是真实百分比）。 */
   #island-settings .ext-progress .ext-bar-fx { display: none; }
-  #island-settings .ext-progress .bar i { display: block; transition: none; }
-  #island-settings .ext-progress .bar { background: var(--g2); }
+  #island-settings .ext-progress .bar i { transition: none; }
 }
 
 /* 失败提示（t45）：一句人话 + 可展开详情（逐源一行），原始技术串留在 title/折叠区。
@@ -226,140 +224,3 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-
-/* 2026-11-01：安装/更新改成「按钮自己变成进度胶囊」——不再弹进度窗。
-   点一下安装按钮就在原位跑填充（原生 CSS，不引 GSAP），宽度跟着真实进度，
-   点胶囊等于取消。配色跟随 Windows 强调色（--sys-accent）。 */
-#island-settings .pbtn.prog {
-  position: relative;
-  overflow: hidden;
-  min-width: 72px;
-  background: var(--g2);
-  border: 1px solid var(--g3);
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-#island-settings .pbtn.prog .prog-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: var(--sys-accent, #5e9bff);
-  opacity: .38;
-  transition: width .16s linear;
-  pointer-events: none;
-}
-#island-settings .pbtn.prog .prog-label { position: relative; z-index: 1; }
-
-/* 2026-11-01：安装/更新按钮 = 进度条本体（原生实现 faustdp/yXypKM 的形态）。
-   药丸（.pill）→ 收成小圆（.running 时 width 22）→ 圆环（.ring，dashoffset 表示进度）
-   → 完成后再弹回药丸并显示标签。全程只用 SVG 属性 + CSS 过渡，不引 GSAP/Snap。
-   颜色一律取 --sys-accent（设置里「跟随系统」的强调色）。 */
-#island-settings .pbtn.inline { padding: 0; border: 0; background: transparent; line-height: 0; }
-#island-settings .pbtn.inline svg { display: block; overflow: visible; }
-#island-settings .pbtn.inline .pill {
-  fill: none;
-  stroke: currentColor;      /* 白色（浅色主题走 --fg 的深色） */
-  stroke-width: 1;
-  /* 向右收缩：宽度与 x 同时过渡，右缘（95）不动，左缘滑到 73 → 收在右侧 */
-  transition: width .42s cubic-bezier(.22, 1.1, .3, 1), x .42s cubic-bezier(.22, 1.1, .3, 1), opacity .2s;
-}
-#island-settings .pbtn.inline.running .pill { width: 22px; x: 73px; }
-#island-settings .pbtn.inline .core { transition: transform .42s cubic-bezier(.22, 1.1, .3, 1); }
-#island-settings .pbtn.inline.running .core { transform: translateX(71px); }
-#island-settings .pbtn.inline .ring {
-  fill: none;
-  stroke: currentColor;      /* 与药丸同色：白色 */
-  stroke-width: 2;
-  stroke-linecap: round;
-  transform: rotate(-90deg);
-  transform-origin: 12px 12px;
-  transition: stroke-dashoffset .18s linear, opacity .2s;
-}
-#island-settings .pbtn.inline .arrow {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: opacity .2s;
-}
-#island-settings .pbtn.inline.running .arrow { opacity: 0; }
-#island-settings .pbtn.inline .lbl {
-  fill: currentColor;
-  font-size: 10.5px;
-  font-family: inherit;
-  transition: opacity .2s;
-}
-#island-settings .pbtn.inline.running .lbl { opacity: 0; }
-#island-settings .pbtn.inline.done .pill { stroke: var(--sys-accent, #5e9bff); }
-
-/* 2026-11-01：把 pen 的完整时间轴落到 CSS——
-   箭头下沉 → 标签缩小淡出 → 药丸右收 → 小点绕圈跑进度 → 完成变绿 → 弹回 + 标签弹入。
-   全部靠 class 切换与过渡，不用 GSAP。 */
-#island-settings .pbtn.inline .arrow { transition: transform .35s cubic-bezier(.22, 1.1, .3, 1), opacity .2s; }
-#island-settings .pbtn.inline.running .arrow { transform: translateY(2.5px); }
-#island-settings .pbtn.inline .lbl {
-  transform-origin: 26px 12px;
-  transition: transform .3s cubic-bezier(.22, 1.1, .3, 1), opacity .25s;
-}
-#island-settings .pbtn.inline.running .lbl { transform: scale(.77); opacity: 0; }
-#island-settings .pbtn.inline.done .lbl { transform: scale(1); opacity: 1; transition: transform .45s cubic-bezier(.34, 1.56, .64, 1), opacity .3s; }
-#island-settings .pbtn.inline .dot {
-  fill: currentColor;
-  opacity: 0;
-  transition: opacity .2s, r .2s;
-}
-#island-settings .pbtn.inline.running .dot { opacity: 1; }
-/* 完成：描边转绿（pen 里是 #02fc86），并给一次「弹回」的回弹曲线 */
-#island-settings .pbtn.inline.done .pill { stroke: #02fc86; transition: stroke .3s ease-out; }
-#island-settings .pbtn.inline.done .ring, #island-settings .pbtn.inline.done .dot { opacity: 0; }
-
-/* 2026-11-01：安装/更新按钮 = 进度条本体。
-   progress-button.js 的坐标系是 96×24，与这里的 CSS 尺寸 1:1（不再缩放，避免图元散架）。
-   位置用绝对定位钉在操作区右上/垂直居中，不参与布局，卡片不会被撑高。
-   基础色 currentColor（深色主题即白），完成态描边转 #02fc86 绿。 */
-#island-settings .extension-card-actions { position: relative; }
-#island-settings .pb-host {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 96px;
-  height: 24px;
-}
-#island-settings .pb-host .pb-svg { display: block; overflow: visible; cursor: pointer; }
-#island-settings .pb-host .pb-track {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1;
-  /* SVG2 几何属性可过渡：药丸宽度与 x 一起变，右缘不动、左缘右移 → 收在右侧 */
-  transition: x .42s cubic-bezier(.22, 1.1, .3, 1), width .42s cubic-bezier(.22, 1.1, .3, 1), stroke .3s;
-}
-#island-settings .pb-host .pb-ring {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  transform: rotate(-90deg);
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: stroke-dashoffset .18s linear, opacity .2s, cx .42s cubic-bezier(.22, 1.1, .3, 1);
-}
-#island-settings .pb-host .pb-arrow {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: opacity .2s;
-}
-#island-settings .pb-host .pb-label {
-  fill: currentColor;
-  font-size: 11px;
-  font-family: inherit;
-  transition: opacity .2s;
-}
-#island-settings .pb-host .pb-dot { fill: currentColor; transition: r .2s, opacity .2s; }
-#island-settings .pb-host.pb-done .pb-track { stroke: #02fc86; }
-/* 颜色与线宽全部由 progress-button.js 里的 SVG 属性给出（照 pen 原样），这里不再覆盖，
-   否则会盖掉 mainCircleFill 的渐变填充和 text 的 viewBox 字号。 */
-
