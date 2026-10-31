@@ -204,8 +204,8 @@
       for (let i = 0; i < FX_COUNT; i++) parts.push({
         slot: (i + 0.5) / FX_COUNT,
         // 条带外侧的纵向偏移（px，画布高 56，中线 28）：±10~14px。
-        side: ((i % 2 === 0) ? -1 : 1) * (10 + fxSeed(i, 1) * 4),
-        size: 3 + fxSeed(i, 2) * 2.5,
+        side: ((i % 2 === 0) ? -1 : 1) * (4 + fxSeed(i, 1) * 3),
+        size: 2 + fxSeed(i, 2) * 1.5,
       })
       fxParticles.set(id, parts)
       return parts
@@ -238,10 +238,12 @@
       // 未填：细窄暗格（高度 45%）；填过：满高实心亮块，加一点“弹”的过冲。
       let segs = fxSegs.get(cv)
       if (!segs) { segs = new Float32Array(FX_SEGMENTS); fxSegs.set(cv, segs) }
-      const gap = Math.max(2, Math.round(w / FX_SEGMENTS * 0.22))
-      const segW = Math.max(1, (w - gap * (FX_SEGMENTS - 1)) / FX_SEGMENTS)
-      const fullH = Math.max(6, Math.min(12, h * 0.2))
-      const radius = Math.min(2, segW / 2)
+      // 刻度条：40 个 4px 高的小格子，缝宽约为格宽的 45%——细密克制，
+      // 不是上一版又粗又大的方块（用户 2026-11-01：太大、更丑）。
+      const segW = Math.max(1, w / (FX_SEGMENTS + (FX_SEGMENTS - 1) * 0.45))
+      const gap = segW * 0.45
+      const fullH = 4
+      const radius = Math.min(1, segW / 2)
       const box = (x, y, bw, bh) => {
         if (typeof ctx.roundRect === 'function') { ctx.beginPath(); ctx.roundRect(x, y, bw, bh, radius); ctx.fill() }
         else ctx.fillRect(x, y, bw, bh)
@@ -251,10 +253,10 @@
         segs[i] += (target - segs[i]) * 0.28
         const v = Math.min(1, segs[i])
         const over = v > 0.999 ? 0 : (v > 0 ? 1 : 0)          // 到位的段不再过冲
-        const pop = 1 + 0.22 * Math.sin(Math.PI * v) * over   // 途中轻微放大
-        const bh = fullH * (0.45 + 0.55 * v) * pop
+        const pop = 1 + 0.12 * Math.sin(Math.PI * v) * over   // 前沿极轻地弹一下
+        const bh = fullH * pop
         const x = i * (segW + gap)
-        ctx.globalAlpha = 0.15 + 0.85 * v
+        ctx.globalAlpha = 0.3 + 0.7 * v
         box(x, centerY - bh / 2, segW, bh)
       }
       // ── 第二层：前沿的飞行方块（只做动势，5~8 个，不参与构形）──────────

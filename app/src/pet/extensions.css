@@ -98,11 +98,11 @@
 }
 #island-settings .ext-progress {
   box-sizing: border-box;
-  width: min(360px, calc(100vw - 40px));
+  width: min(300px, calc(100vw - 40px));
   max-height: min(70vh, calc(100vh - 40px));
-  padding: 16px;
+  padding: 14px;
   border: 1px solid var(--g3);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--g1);
   color: var(--fg);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .32);
@@ -124,25 +124,22 @@
   gap: 8px;
   margin: 0 0 8px;
 }
-#island-settings .ext-progress .ph strong { font-size: 16px; font-weight: 600; }
+#island-settings .ext-progress .ph strong { font-size: 15px; font-weight: 600; }
 #island-settings .ext-progress .ph span { color: var(--g5); font-size: 12px; }
 /* t44：条形 + 粒子层。meter 是定位容器：条本身照旧是真实百分比宽度，粒子 canvas
    浮在条上方（高度 56px，覆盖条带上下），pointer-events:none 不挡标题/百分比/按钮。 */
-#island-settings .ext-progress .meter { position: relative; margin: 12px 0; }
+/* t49：条形不再画连续填充，由 canvas 画「一排名小刻度」——未填暗格、填过实心，
+   形态取自 Oleg Frolov「Download IV」的单色刻度条（#0D121C/#fff/#84868B 那套）。
+   DOM 里的 .bar 保留 aria 语义与 inline width，不再显示自己的填充。 */
+#island-settings .ext-progress .meter { position: relative; margin: 10px 0 8px; height: 18px; overflow: hidden; }
 #island-settings .ext-progress .bar {
-  position: relative;
-  height: 8px;
-  border-radius: 4px;
-  background: var(--g2);
-  overflow: hidden;
+  position: absolute;
+  inset: 0;
+  height: auto;
+  background: transparent;
+  overflow: visible;
 }
-#island-settings .ext-progress .bar i {
-  display: block;
-  height: 100%;
-  border-radius: 4px;
-  background: var(--ext-fx-bar);
-  transition: width .18s linear;
-}
+#island-settings .ext-progress .bar i { display: none; }
 #island-settings .ext-progress .ext-bar-fx {
   position: absolute;
   left: 0;
@@ -166,9 +163,11 @@
 #island-settings .ext-progress .foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
   #island-settings .ext-progress .bar.unsure i { animation: none; margin-left: 0; }
-  /* t44：减弱动效时粒子层整个隐藏，退化为普通进度条（长条宽度仍是真实百分比）。 */
+  /* t44/t49：减弱动效时 canvas（刻度与粒子）整个隐藏，退化为普通连续进度条——
+     所以这里必须把 .bar i 恢复显示，否则一条进度都看不见。 */
   #island-settings .ext-progress .ext-bar-fx { display: none; }
-  #island-settings .ext-progress .bar i { transition: none; }
+  #island-settings .ext-progress .bar i { display: block; transition: none; }
+  #island-settings .ext-progress .bar { background: var(--g2); }
 }
 
 /* 失败提示（t45）：一句人话 + 可展开详情（逐源一行），原始技术串留在 title/折叠区。
