@@ -93,6 +93,7 @@ mod plugin_events;
 mod plugin_runtime;
 mod plugin_development;
 mod plugin_store;
+mod plugin_failure;
 mod plugin_progress;
 mod plugin_thirdparty;
 mod plugin_api;

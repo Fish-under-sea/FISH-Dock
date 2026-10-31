@@ -41,6 +41,35 @@
     let hits = [], thirdQuery = '', thirdNote = '', thirdSearched = false
     const text = (zh, en) => lang() === 'en' ? en : zh
     const fail = e => typeof e === 'string' ? e : e?.message || text('插件操作失败，请重试。', 'Extension operation failed. Please retry.')
+    // t45：把宿主的「一句人话 + 逐源详情」JSON 解析出来；不是结构化错误就退回纯文本。
+    const parseFailure = e => {
+      const raw = typeof e === 'string' ? e : (e && e.message) || ''
+      const trimmed = String(raw).trim()
+      if (!trimmed.startsWith('{') || !trimmed.includes('"fishFailure"')) return null
+      try { const obj = JSON.parse(trimmed); return obj && obj.fishFailure ? obj : null } catch { return null }
+    }
+    const failureOf = e => parseFailure(e) || fail(e)
+    const stageText = stage => ({ download: text('下载失败', 'Download failed'), verify: text('校验失败', 'Verification failed'), uninstall: text('卸载失败', 'Uninstall failed') })[stage] || text('操作失败', 'Operation failed')
+    const defaultHint = stage => ({ download: text('检查网络或代理后重试。', 'Check your network or proxy, then retry.'), verify: text('包可能损坏，请重试。', 'The package may be damaged; please retry.'), uninstall: text('请稍后重试。', 'Please retry later.') })[stage] || text('请稍后重试。', 'Please retry later.')
+    const countText = n => n === 3 ? text('三个来源都没成功', 'All three sources failed') : text(`${n} 个来源都没成功`, `${n} sources failed`)
+    // 失败块：一句人话 + 可展开详情（逐源一行，详情在 title / 再展开里），最高 40vh 滚动。
+    const failureHtml = f => {
+      if (!f) return ''
+      if (typeof f === 'string') return `<p class="bad" role="alert">${esc(f)}</p>`
+      const stage = f.stage || 'other'
+      const sentence = f.hint || f.message || defaultHint(stage)
+      const sources = Array.isArray(f.sources) ? f.sources : []
+      const detail = f.detail || ''
+      const head = `<p class="extension-failure-main" role="alert"><strong>${esc(stageText(stage))}</strong>${esc(sentence)}</p>`
+      let more = ''
+      if (sources.length) {
+        const rows = sources.map(s => `<li><span class="extension-failure-origin">${esc(s.origin || '')}</span> · <span class="extension-failure-short">${esc(s.short || '')}</span>${s.error ? `<span class="extension-failure-raw" title="${esc(s.error)}"></span>` : ''}</li>`).join('')
+        more = `<details class="extension-failure-more"><summary><span class="extension-failure-count">${esc(countText(sources.length))}</span><span class="extension-failure-toggle">${esc(text('详情', 'Details'))}</span></summary><ul class="extension-failure-sources">${rows}</ul></details>`
+      } else if (detail) {
+        more = `<details class="extension-failure-more"><summary><span class="extension-failure-count">${esc(text('技术细节', 'Technical details'))}</span><span class="extension-failure-toggle">${esc(text('详情', 'Details'))}</span></summary><p class="extension-failure-detail">${esc(detail)}</p></details>`
+      }
+      return `<div class="extension-failure" role="group" data-stage="${esc(stage)}">${head}${more}</div>`
+    }
     const unlocked = id => !official(id) || (view?.star?.authenticated === true && view?.star?.verified === true)
     let authTimer, deviceCodeCopied = false, authGeneration = 0, authRetryAt = 0, authNotice = '', maintenancePaused = false
     function scheduleAuth() {
@@ -83,7 +112,7 @@
         if (busy) { redraw(); progressTimer = setTimeout(poll, 150) }
       }).catch(() => { progress = [] })
       progressTimer = setTimeout(poll, 50)
-      try { await job() } catch (e) { error = fail(e) }
+      try { await job() } catch (e) { error = failureOf(e) }
       finally { busy = ''; clearTimeout(progressTimer); progress = []; redraw() }
     }
     async function load(force = false) {
@@ -303,7 +332,7 @@
         return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseName(p.phase))}</span></div><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${pct == null ? 30 : pct}%"></i></div><div class="detail">${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(String(p.received || 0))}${p.total ? ' / ' + esc(String(p.total)) : ''} B</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
       }
       const progressHTML = progress.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${progress.map(progressCard).join('')}</div>` : ''
-      return `<section class="extension-panel" aria-labelledby="extension-heading" aria-busy="${!!busy}"><h3 id="extension-heading">${esc(text('可安装扩展', 'Installable extensions'))}</h3>${starNotice}<div class="extension-actions"><button type="button" class="pbtn" data-extension-view="installed" aria-pressed="${active === 'installed'}"${disabled}>${esc(text('已安装', 'Installed'))}</button><button type="button" class="pbtn" data-extension-view="store" aria-pressed="${active === 'store'}"${disabled}>${esc(text('官方插件', 'Official plugins'))}</button><button type="button" class="pbtn" data-extension-view="thirdparty" aria-pressed="${active === 'thirdparty'}"${disabled}>${esc(text('第三方插件', 'Third-party plugins'))}</button><button type="button" class="pbtn" data-extension-refresh${disabled}>${esc(text('检查更新', 'Check for updates'))}</button></div>${result}${storeError ? `<p class="bad" role="alert">${esc(storeError)}</p>` : ''}<div class="extension-list">${active === 'thirdparty' ? thirdPanel : active === 'installed' ? cards || `<p class="note">${esc(text('尚未安装扩展。可从官方商店按需选择，现有小工具仍在下方。', 'No extensions installed. Choose from the official store. Existing widgets remain below.'))}</p>` : `${cached ? `<p role="status">${esc(text('当前使用缓存目录', 'Using cached catalog'))}</p>` : ''}${storeCards || `<p class="note">${esc(busy === 'store' ? text('正在读取官方目录…', 'Loading official catalog…') : text('暂无可用目录，请检查更新重试。', 'No catalog available. Check for updates to retry.'))}</p>`}${!entries.length && cards ? `<h4>${esc(text('已安装扩展', 'Installed extensions'))}</h4>${cards}` : ''}`}</div><details><summary>${esc(text('运行依赖', 'Runtime dependencies'))}</summary>${runtimeStatus}<label for="extension-node">${esc(text('Node 可执行文件路径', 'Node executable path'))}</label><input id="extension-node" class="extension-node" type="text" value="${esc(node)}" spellcheck="false"${disabled}><button type="button" class="pbtn" data-extension-runtime${disabled}>${esc(text('保存依赖路径', 'Save runtime path'))}</button><p class="note">${esc(text('Node 插件使用已校验的宿主 Node。开发环境可指定完整路径；留空恢复宿主运行资源。', 'Extensions use the verified host Node. Development builds can specify a full path. Leave empty to restore the host runtime.'))}</p></details>${progressHTML}${busy && !progressHTML ? `<p role="status">${esc(text('正在执行，请稍候…', 'Working, please wait…'))}</p>` : ''}${error ? `<p class="bad" role="alert">${esc(error)}</p>` : ''}</section>`
+      return `<section class="extension-panel" aria-labelledby="extension-heading" aria-busy="${!!busy}"><h3 id="extension-heading">${esc(text('可安装扩展', 'Installable extensions'))}</h3>${starNotice}<div class="extension-actions"><button type="button" class="pbtn" data-extension-view="installed" aria-pressed="${active === 'installed'}"${disabled}>${esc(text('已安装', 'Installed'))}</button><button type="button" class="pbtn" data-extension-view="store" aria-pressed="${active === 'store'}"${disabled}>${esc(text('官方插件', 'Official plugins'))}</button><button type="button" class="pbtn" data-extension-view="thirdparty" aria-pressed="${active === 'thirdparty'}"${disabled}>${esc(text('第三方插件', 'Third-party plugins'))}</button><button type="button" class="pbtn" data-extension-refresh${disabled}>${esc(text('检查更新', 'Check for updates'))}</button></div>${result}${storeError ? `<p class="bad" role="alert">${esc(storeError)}</p>` : ''}<div class="extension-list">${active === 'thirdparty' ? thirdPanel : active === 'installed' ? cards || `<p class="note">${esc(text('尚未安装扩展。可从官方商店按需选择，现有小工具仍在下方。', 'No extensions installed. Choose from the official store. Existing widgets remain below.'))}</p>` : `${cached ? `<p role="status">${esc(text('当前使用缓存目录', 'Using cached catalog'))}</p>` : ''}${storeCards || `<p class="note">${esc(busy === 'store' ? text('正在读取官方目录…', 'Loading official catalog…') : text('暂无可用目录，请检查更新重试。', 'No catalog available. Check for updates to retry.'))}</p>`}${!entries.length && cards ? `<h4>${esc(text('已安装扩展', 'Installed extensions'))}</h4>${cards}` : ''}`}</div><details><summary>${esc(text('运行依赖', 'Runtime dependencies'))}</summary>${runtimeStatus}<label for="extension-node">${esc(text('Node 可执行文件路径', 'Node executable path'))}</label><input id="extension-node" class="extension-node" type="text" value="${esc(node)}" spellcheck="false"${disabled}><button type="button" class="pbtn" data-extension-runtime${disabled}>${esc(text('保存依赖路径', 'Save runtime path'))}</button><p class="note">${esc(text('Node 插件使用已校验的宿主 Node。开发环境可指定完整路径；留空恢复宿主运行资源。', 'Extensions use the verified host Node. Development builds can specify a full path. Leave empty to restore the host runtime.'))}</p></details>${progressHTML}${busy && !progressHTML ? `<p role="status">${esc(text('正在执行，请稍候…', 'Working, please wait…'))}</p>` : ''}${failureHtml(error)}</section>`
     }
     function mount(root) {
       const panel = root.querySelector('.extension-panel'); if (!panel) return

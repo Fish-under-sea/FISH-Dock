@@ -146,3 +146,57 @@
 @media (prefers-reduced-motion: reduce) {
   #island-settings .ext-progress .bar.unsure i { animation: none; margin-left: 0; }
 }
+
+/* 失败提示（t45）：一句人话 + 可展开详情（逐源一行），原始技术串留在 title/折叠区。
+   整个失败块最高 40vh、超出滚动——不许占满弹窗。颜色只走 settings.css 的主题变量：
+   --fg 用于正文与来源名（与 --g1 卡片底是既有对比对），--g5 用于小字与细节。 */
+#island-settings .extension-failure {
+  display: grid;
+  gap: 6px;
+  box-sizing: border-box;
+  max-height: 40vh;
+  overflow: auto;
+  margin-block-start: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--g3);
+  border-radius: 10px;
+  background: var(--g1);
+}
+#island-settings .extension-failure-main { margin: 0; font-size: 13px; line-height: 1.45; color: var(--fg); }
+#island-settings .extension-failure-main strong { margin-inline-end: 6px; font-weight: 600; }
+#island-settings .extension-failure-more { margin: 0; padding: 0; }
+#island-settings .extension-failure-more summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--g5);
+  font-size: 12px;
+}
+#island-settings .extension-failure-more summary::-webkit-details-marker { display: none; }
+#island-settings .extension-failure-toggle { color: var(--fg); text-decoration: underline; }
+#island-settings .extension-failure-sources {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg);
+}
+#island-settings .extension-failure-sources li { overflow-wrap: anywhere; }
+#island-settings .extension-failure-origin { font-weight: 600; }
+#island-settings .extension-failure-short { color: var(--g5); }
+#island-settings .extension-failure-raw { display: none; }
+#island-settings .extension-failure-detail {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--g5);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

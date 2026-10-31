@@ -181,8 +181,9 @@ fn package_from_npm(bytes:&[u8],entry:&Entry,root:&Path)->Result<(crate::plugin_
 fn fetch_from(entry:&Entry,sources:&[(Origin,String)],root:&Path,mut fetch:impl FnMut(&str,u64)->Result<Vec<u8>,String>)->Result<(crate::plugin_package::Package,String,FetchRecord),String>{
     let mut attempts=Vec::new();
     // 三条来源的失败原因都留着：只报最后一条会让用户以为是 GitHub 的问题，
-    // 而真正卡住的常常是第一条（公司网挡 npm、镜像没同步）。
-    let mut failures:Vec<String>=Vec::new();
+    // 而真正卡住的常常是第一条（公司网挡 npm、镜像没同步）。但**不再拼成一堵墙**：
+    // 人读的只有一句结论，逐源短原因进 sources（t45 / plugin_failure）。
+    let mut failures:Vec<(String,String)>=Vec::new();
     for (origin,url) in sources {
         let began=std::time::Instant::now();
         let outcome=match origin {
@@ -208,11 +209,11 @@ fn fetch_from(entry:&Entry,sources:&[(Origin,String)],root:&Path,mut fetch:impl 
             Err(error)=>{
                 eprintln!("FISH Dock: 官方插件下载来源失败（{} {}）：{error}",origin.slug(),url);
                 attempts.push(Attempt{origin:*origin,url:url.clone(),ok:false,elapsed_ms,error:Some(error.clone())});
-                failures.push(format!("{}：{error}",origin.label()));
+                failures.push((origin.label().to_string(),error));
             }
         }
     }
-    Err(format!("官方插件各下载来源均未成功：{}。请检查网络或代理后重试",failures.join("；")))
+    Err(crate::plugin_failure::download_failed(&failures))
 }
 // save_fetch 记下这次「从哪条源装的」给插件卡显示；记不下来不该让已经到手的
 // 包白丢，所以调用方把它当尽力而为。
@@ -398,8 +399,14 @@ pub fn obtain_traced(context:&crate::storage_context::Context,id:&str)->Result<(
         let wrong=npm_package_of(b"not the cataloged archive");
         let root=fixture_root("wrong");
         let error=match fetch_from(&entry,&sources(&entry),&root,|url,_limit|{if url.contains("github.com"){Err("fixture: GitHub 也断了".into())}else{Ok(wrong.clone())}}){Ok(_)=>panic!("摘要对不上就不许装成官方插件"),Err(error)=>error};
-        assert!(error.contains("各下载来源均未成功"),"{error}");
-        assert!(error.contains("大小与官方目录不一致")||error.contains("摘要与官方目录不一致"),"{error}");
+        // t45：错误改结构化——一句人话 + 三源逐行短原因，原始串留 sources[].error。
+        assert!(crate::plugin_failure::is_structured(&error),"{error}");
+        let value: serde_json::Value=serde_json::from_str(&error).unwrap();
+        assert!(!value["message"].as_str().unwrap().contains('；'),"message 不许拼三源：{error}");
+        let rows=value["sources"].as_array().unwrap();
+        assert_eq!(rows.len(),3,"三条来源各一行");
+        let joined: String=rows.iter().map(|r|r["error"].as_str().unwrap_or("")).collect::<Vec<_>>().join(" | ");
+        assert!(joined.contains("大小与官方目录不一致")||joined.contains("摘要与官方目录不一致"),"{joined}");
         let _=std::fs::remove_dir_all(root);
     }
     // 地址与超时不许写死：环境变量优先，空串视为没设；npm 包名/下载路径按约定拼。
