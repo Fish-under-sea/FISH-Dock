@@ -405,7 +405,7 @@ test('安装进度在按钮上：药丸 + 圆环 + 百分比，且不再有进�
   assert.match(html, /data-inline-prog="fish\.magpie"/)
   assert.match(html, /class="pill"/)
   assert.match(html, /class="ring"/)
-  assert.match(html, /50%/, '百分比显示在按钮上')
+  assert.match(html, /30%/, '下载 50% 折算成全局 30%（0.6×50%）')
   assert.doesNotMatch(html, /ext-progress-backdrop/, '不再有进度弹窗')
   release({ installed: [] }); await pending
 })
@@ -475,13 +475,16 @@ test('按钮上的百分比单调不减（换源不回弹）', async () => {
   await panel.load(); await panel.store()
   const pending = panel.action('install', 'fish.magpie')
   await nextTimer(timers, 50); await nextTimer(timers, 150)
-  assert.match(panel.render(), /--pct:60/, '先到 60%')
+  assert.match(panel.render(), /--pct:36/, '下载六成 = 全局 36%（0.6×60%）')
   snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 0, total: 800, active: true }] }
   await nextTimer(timers, 150)
-  assert.match(panel.render(), /--pct:60/, '换源不得回退')
+  assert.match(panel.render(), /--pct:36/, '换源不得回退')
   snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 720, total: 800, active: true }] }
   await nextTimer(timers, 150)
-  assert.match(panel.render(), /--pct:90/)
+  snap = { items: [{ id: 'fish.magpie', phase: '校验', received: 0, total: 0, active: true }] }
+  await nextTimer(timers, 150)
+  const got = Number((panel.render().match(/--pct:([\d.]+)/) || [])[1])
+  assert.ok(got >= 60, '校验阶段要接着下载往上走（当前 ' + got + '）')
   release({ installed: [] }); await pending
 })
 

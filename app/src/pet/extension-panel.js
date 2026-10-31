@@ -113,7 +113,22 @@
     // 真实进度冲到 100% 时按时间平滑推到 100（最少 INLINE_MIN_MS），
     // 保证「药丸收拢 → 圆环跑满 → 弹回」这三段都被看到。
     const inlineStart = new Map()
+    let inlineRendered = ''
     const INLINE_MIN_MS = 900
+    // 2026-11-01 用户指出：校验那一段也要算进圆环，不能每阶段从 0 重来。
+    // 把一次安装拆成四段权重，圆环显示「整件事」的完成度：
+    //   下载 60%（按字节比例）→ 校验 22% → 解包 12% → 提交 6%
+    // 宿主每次只报当前阶段与当前阶段字节量，这里折算成全局百分比。
+    const PHASE_ORDER = ['下载', '校验', '解包', '提交']
+    const PHASE_WEIGHT = { '下载': 0.6, '校验': 0.22, '解包': 0.12, '提交': 0.06 }
+    const overallPct = item => {
+      const idx = PHASE_ORDER.indexOf(item.phase)
+      if (idx < 0) return item.total ? Math.min(99, (item.received / item.total) * 100) : 0
+      let base = 0
+      for (let i = 0; i < idx; i++) base += PHASE_WEIGHT[PHASE_ORDER[i]]
+      const intra = item.total ? Math.max(0, Math.min(1, item.received / item.total)) : 0.35
+      return Math.min(99, (base + PHASE_WEIGHT[item.phase] * intra) * 100)
+    }
     const finishInline = () => {
       if (!inlineProgress.size) { inlineProgress.clear(); inlineStart.clear(); return }
       const now = Date.now()
@@ -147,10 +162,31 @@
           + `<svg viewBox="0 0 96 24" width="96" height="24" aria-hidden="true">`
           + `<rect class="pill" x="1" y="1" width="94" height="22" rx="11"></rect>`
           + `<g class="core"><circle class="ring" cx="12" cy="12" r="8.6" style="stroke-dasharray:${INLINE_C.toFixed(2)};stroke-dashoffset:${offset}"></circle>`
-          + `<path class="arrow" d="M12 8.5 v7 M9.2 12.2 l2.8 2.8 2.8 -2.8"></path></g>`
+          + `<path class="arrow" d="M12 8.5 v7 M9.2 12.2 l2.8 2.8 2.8 -2.8"></path><circle class="dot" cx="12" cy="3.4" r="0"></circle></g>`
           + `<text class="lbl" x="26" y="15.6">${esc(label)}</text>`
           + `</svg></button>`
       }
+
+    const updateInline = () => {
+    if (typeof document === 'undefined' || !document.querySelector) return
+    for (const [id, prog] of inlineProgress) {
+    const btn = document.querySelector('[data-inline-prog="' + id + '"]')
+    if (!btn) continue
+    const pct = Math.max(0, Math.min(100, prog.pct || 0))
+    const ring = btn.querySelector('.ring')
+    if (ring) ring.style.strokeDashoffset = (INLINE_C * (1 - pct / 100)).toFixed(2)
+    const dot = btn.querySelector('.dot')
+    if (dot) {
+    const th = (-90 + pct * 3.6) * Math.PI / 180
+    dot.setAttribute('cx', (12 + 8.6 * Math.cos(th)).toFixed(2))
+    dot.setAttribute('cy', (12 + 8.6 * Math.sin(th)).toFixed(2))
+    dot.setAttribute('r', (1.2 + 1.5 * (pct / 100)).toFixed(2))
+    }
+    const lbl = btn.querySelector('.lbl')
+    if (lbl) lbl.textContent = pct >= 100 ? text('完成', 'Done') : Math.round(pct) + '%'
+    btn.classList.toggle('done', pct >= 100)
+    }
+    }
     const progressSeen = new Map()
     let fxRaf = 0
     const fxParticles = new Map()
@@ -233,15 +269,21 @@
         if (busyKind === 'uninstall' && uninstallTicks < 12) uninstallTicks += 1
         for (const item of progress) {
           const id = item.id
-          const peak = (progressSeen.get(id) || {}).peak ?? 0
           if (!inlineStart.has(id)) inlineStart.set(id, Date.now())
           const elapsed = Date.now() - inlineStart.get(id)
-          // 真实已到 100 但时间不够：按时间推到 100，动画照样播满（见 finishInline）。
-          const shown = peak >= 100 ? Math.min(100, (elapsed / INLINE_MIN_MS) * 100) : peak
+          // 全局百分比：下载 60% → 校验 22% → 解包 12% → 提交 6%，阶段切换不回退。
+          const prev = inlineProgress.get(id)
+          let shown = Math.max(prev ? prev.pct : 0, overallPct(item))
+          // 真到 100 但时间不够：按时间推到 100，动画照样播满（见 finishInline）。
+          if (prev && prev.pct >= 99.5) shown = Math.min(100, (elapsed / INLINE_MIN_MS) * 100)
           inlineProgress.set(id, { pct: shown, phase: item.phase, mode: 'in' })
         }
         if (busyKind === 'uninstall' && busy && actionStarted) { if (!inlineStart.has(busy)) inlineStart.set(busy, Date.now()); inlineProgress.set(busy, { pct: Math.min(96, uninstallTicks * 8), phase: '卸载', mode: 'out' }) }
-        if (busy) { redraw(); startFx(); progressTimer = setTimeout(poll, 150) }
+        if (busy) {
+          const ids = [...inlineProgress.keys()].join(',')
+          if (ids !== inlineRendered) { inlineRendered = ids; redraw() } else updateInline()
+          startFx(); progressTimer = setTimeout(poll, 150)
+        }
       }).catch(() => { progress = [] })
       progressTimer = setTimeout(poll, 50)
       try { await job() } catch (e) { error = failureOf(e) }
