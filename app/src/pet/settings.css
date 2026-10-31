@@ -2810,7 +2810,7 @@
 
 /* 确认弹窗留在 Dock 内（settings.js seatDialog / DialogAnchor 把它贴在岛的锚点上）；
    原生 dialog 限定键盘焦点。宽度按岛的最窄口径来，不用视口的一半。 */
-#island-settings .s-confirm-dialog { box-sizing: border-box; width: min(360px, calc(100vw - 40px)); max-height: min(70vh, calc(100vh - 32px)); max-height: min(70dvh, calc(100dvh - 32px)); padding: 16px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); color: var(--fg); box-shadow: none; overflow: auto; }
+#island-settings .s-confirm-dialog { box-sizing: border-box; width: min(300px, calc(100vw - 40px)); max-height: min(70vh, calc(100vh - 32px)); max-height: min(70dvh, calc(100dvh - 32px)); padding: 14px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); color: var(--fg); box-shadow: none; overflow: auto; }
 #island-settings .s-confirm-dialog:not([open]) { display: none; }
 #island-settings .s-confirm-dialog::backdrop { background: transparent; }
 #island-settings .s-confirm-dialog h2 { margin: 0 0 8px; font-size: 16px; }

@@ -20,12 +20,12 @@
   // 弹窗与岛边之间留的内衬（与弹窗自身 16px padding 同量级）。
   const INSET = 12
   // 弹窗宽度上限：桌面端读起来舒适的那一档（settings.css 的 360 同值）。
-  const MAX_WIDTH = 360
+  const MAX_WIDTH = 300
   // 高度上限占视口的比例（settings.css 的 70vh 同值），再被岛高夹一次。
   const MAX_HEIGHT_RATIO = 0.7
   // 岛太矮时（设置还没长开）允许弹窗至少这么高：此时它从岛顶向下延伸，
   // 仍与岛同一侧对齐，但不缩到读不出字。
-  const MIN_HEIGHT = 220
+  const MIN_HEIGHT = 84
 
   // 弹窗在岛内的宽高上限：岛比上限窄/矮时以岛为准，再被视口夹一次。
   function limits(island, viewport, inset = INSET) {

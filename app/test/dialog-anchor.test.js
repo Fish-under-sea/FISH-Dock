@@ -103,11 +103,11 @@ test('岛在窗口里的哪一侧，由 island.js 的锚点类给出', () => {
 test('上限：宽度取 min(360, 岛宽-2内衬, 视口-2内衬)，高度再夹 70vh', () => {
   const vp = viewport(1920, 740)
   assert.deepEqual(D.limits(island(8, 8, 520, 700), vp), { width: D.MAX_WIDTH, height: 518 })
-  // 岛比 360 窄：以岛为准。
+  // 岛比上限窄：以岛为准。
   assert.equal(D.limits(island(8, 8, 300, 700), vp).width, 300 - 2 * D.INSET)
-  // 视口比 360+2内衬 还窄：以视口为准（400 宽给 376，仍大于 360，故换 340）。
-  assert.equal(D.limits(island(0, 0, 2000, 700), viewport(340, 740)).width, 340 - 2 * D.INSET)
-  assert.equal(D.MAX_WIDTH, 360)
+  // 视口比「上限+2内衬」还窄时以视口为准；视口够宽则被 MAX_WIDTH 夹住。
+  assert.equal(D.limits(island(0, 0, 2000, 700), viewport(340, 740)).width, Math.min(D.MAX_WIDTH, 340 - 2 * D.INSET))
+  assert.equal(D.MAX_WIDTH, 300)   // 2026-11-01 收紧：360→300（用户说弹窗太宽）
   assert.equal(D.INSET, 12)
-  assert.equal(D.MIN_HEIGHT, 220)
+  assert.equal(D.MIN_HEIGHT, 84)   // 2026-11-01 收紧：220→84（两行字被撑成一整块留白）
 })

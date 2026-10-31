@@ -105,7 +105,7 @@
     let fxRaf = 0
     const fxParticles = new Map()
   // 每块 canvas 的段填充度（0..1，逐帧向目标缓动，做出“方块弹一下”的手感）。
-  const fxSegs = new WeakMap()
+  const fxElastic = new WeakMap()
     let hits = [], thirdQuery = '', thirdNote = '', thirdSearched = false
     const text = (zh, en) => lang() === 'en' ? en : zh
     const fail = e => typeof e === 'string' ? e : e?.message || text('插件操作失败，请重试。', 'Extension operation failed. Please retry.')
@@ -230,59 +230,61 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h)
       const pct = Math.min(1, Math.max(0, Number(cv.dataset.pct || 0) / 100))
       const mode = cv.dataset.mode === 'out' ? 'out' : 'in'
-      const color = (typeof getComputedStyle === 'function' ? getComputedStyle(cv).getPropertyValue('--ext-fx-particle').trim() : '') || (mode === 'out' ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.85)')
-      ctx.fillStyle = color
-      const parts = fxParts(cv.dataset.extFx || '')
+      const vars = typeof getComputedStyle === 'function' ? getComputedStyle(cv) : null
+      const pick = (name, fallback) => { const v = vars ? vars.getPropertyValue(name).trim() : ''; return v || fallback }
+      const body = pick('--ext-fx-body', '#4e80dd')
+      const fill = pick('--ext-fx-fill', '#77c2ff')
       const centerY = h / 2
-      // ── 第一层：分段方块条本体（进度的主体形态）──────────────────────
-      // 未填：细窄暗格（高度 45%）；填过：满高实心亮块，加一点“弹”的过冲。
-      let segs = fxSegs.get(cv)
-      if (!segs) { segs = new Float32Array(FX_SEGMENTS); fxSegs.set(cv, segs) }
-      // 刻度条：40 个 4px 高的小格子，缝宽约为格宽的 45%——细密克制，
-      // 不是上一版又粗又大的方块（用户 2026-11-01：太大、更丑）。
-      const segW = Math.max(1, w / (FX_SEGMENTS + (FX_SEGMENTS - 1) * 0.45))
-      const gap = segW * 0.45
-      const fullH = 4
-      const radius = Math.min(1, segW / 2)
-      const box = (x, y, bw, bh) => {
-        if (typeof ctx.roundRect === 'function') { ctx.beginPath(); ctx.roundRect(x, y, bw, bh, radius); ctx.fill() }
-        else ctx.fillRect(x, y, bw, bh)
+      // t50：内化 codrops ElasticProgress 的「形」——闭合时是一枚圆形按钮（向上箭头），
+      // 开始下载/卸载后它弹性地拉长成一条进度条：主体 #4e80dd、填充 #77c2ff，
+      // 箭头随形变倾斜 70° 并淡出。弹簧用一阶速度积分（0.22 / 0.72），给出一次可见回弹。
+      let st = fxElastic.get(cv)
+      if (!st) { st = { open: 0, vel: 0 }; fxElastic.set(cv, st) }
+      st.vel += (1 - st.open) * 0.22
+      st.vel *= 0.72
+      st.open = Math.max(0, Math.min(1.12, st.open + st.vel))
+      const open = Math.min(1, st.open)
+      const over = Math.max(0, st.open - 1)
+      const circleD = Math.min(52, Math.max(28, h - 4))
+      const barH = 8
+      const bh = circleD + (barH - circleD) * open
+      const full = w + over * 26
+      const bw = circleD + (full - circleD) * open
+      const x = (w - bw) / 2
+      const roundRect = (px, py, pw, ph, r) => {
+        if (typeof ctx.roundRect === 'function') { ctx.beginPath(); ctx.roundRect(px, py, pw, ph, Math.max(0, Math.min(r, ph / 2))); ctx.fill() }
+        else ctx.fillRect(px, py, pw, ph)
       }
-      for (let i = 0; i < FX_SEGMENTS; i++) {
-        const target = segmentTarget(pct, i, FX_SEGMENTS, mode)
-        segs[i] += (target - segs[i]) * 0.28
-        const v = Math.min(1, segs[i])
-        const over = v > 0.999 ? 0 : (v > 0 ? 1 : 0)          // 到位的段不再过冲
-        const pop = 1 + 0.12 * Math.sin(Math.PI * v) * over   // 前沿极轻地弹一下
-        const bh = fullH * pop
-        const x = i * (segW + gap)
-        ctx.globalAlpha = 0.3 + 0.7 * v
-        box(x, centerY - bh / 2, segW, bh)
-      }
-      // ── 第二层：前沿的飞行方块（只做动势，5~8 个，不参与构形）──────────
-      ctx.globalAlpha = 1
-      for (let i = 0; i < parts.length; i++) {
-        const pt = parts[i]
-        const flight = particleFlight(pct, i, parts.length, mode)
-        if (!flight) continue   // 未出发 / 已并入 / 已消散：都不画（填过的地方必须干净）
-        const q = flight.q
-        const ease = 1 - (1 - q) * (1 - q) * (1 - q)
-        const alpha = Math.sin(Math.PI * q) * 0.9   // 起飞淡入、抵达淡出
-        let x, y
-        if (mode === 'in') {
-          const targetX = flight.slot * w
-          const travel = Math.max(18, w * 0.18)
-          const startX = Math.max(0, targetX - travel)
-          x = startX + (targetX - startX) * ease
-          y = centerY + pt.side * 0.55 * (1 - ease)
-        } else {
-          const startX = flight.slot * w
-          x = startX + (w + 40 - startX) * (q * q)
-          y = centerY + pt.side * 0.55 * (0.25 + 0.75 * q)
+      // 主体：未填部分（圆的整块 → 条的低矮轨道）
+      ctx.globalAlpha = 0.55
+      ctx.fillStyle = body
+      roundRect(x, centerY - bh / 2, bw, bh, bh / 2)
+      // 填充：随进度从左往右长，内缩 2px 形成一圈“描边”感
+      if (open > 0.35) {
+        const inner = Math.max(2, bh - 4)
+        const fillW = Math.max(0, (bw - 4) * pct)
+        if (fillW > 0.5) {
+          ctx.globalAlpha = 1
+          ctx.fillStyle = fill
+          roundRect(x + 2, centerY - inner / 2, fillW, inner, inner / 2)
         }
-        if (alpha <= 0.01) continue
-        ctx.globalAlpha = alpha
-        ctx.fillRect(Math.round(x - pt.size / 2), Math.round(y - pt.size / 2), pt.size, pt.size)
+      }
+      // 箭头：只在闭合/半开时出现，随形变倾斜并淡出（对应 labelTilt = 70）
+      if (open < 0.9) {
+        const s = Math.max(5, Math.min(9, bh * 0.18))
+        ctx.save()
+        ctx.globalAlpha = 1 - open / 0.9
+        ctx.strokeStyle = fill
+        ctx.lineWidth = 2.4
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        ctx.translate(w / 2, centerY)
+        ctx.rotate(-(open * 70) * Math.PI / 180)
+        ctx.beginPath()
+        ctx.moveTo(0, s); ctx.lineTo(0, -s)
+        ctx.moveTo(-s * 0.7, -s * 0.35); ctx.lineTo(0, -s); ctx.lineTo(s * 0.7, -s * 0.35)
+        ctx.stroke()
+        ctx.restore()
       }
       ctx.globalAlpha = 1
     }
