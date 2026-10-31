@@ -193,6 +193,11 @@ body {
   border: 0;
   background: none;
   cursor: pointer;
+  /* A button takes its own ink (Windows' buttontext, near black) rather than
+     the strip's white: the glyph was there and invisible (2026-10-31, the
+     shots of the strip on another display). Inherit from the strip, which
+     turns with Windows' light mode (body #fff, .b-light #1b1b1b). */
+  color: inherit;
   font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
   font-size: 16px;
   font-style: normal;
