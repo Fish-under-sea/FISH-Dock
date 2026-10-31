@@ -37,27 +37,31 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 <h2 id="features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-features-dark.png"><img src="assets/readme/section-features-light.png" alt="FEATURES · 能做什么" width="100%"></picture></h2>
 
-| 模块 | 说明 |
+宿主自身提供的能力，业务侧内容（邮件、模型、通知、代理）以插件装载，入口与操作见下一节「工作区」。
+
+| 能力 | 说明 |
 | --- | --- |
-| 桌面岛 | 展示会话状态、任务进度、通知和资源信息。 |
 | 设置页 | 按规格重排为 5 页（通用 / Agent / 外观 / 邮件 / 插件），各页分节顺序固定；回归测试直接读规格文件比对。 |
-| 模型工作台 | 承载模型插件的原生管理页，按插件配置渠道、账号与 API。 |
-| 插件中心 | 校验来源、平台与资源摘要；官方插件优先 npm（`@fish-under-sea/fish-dock-plugin-*`）→ npmmirror 镜像 → GitHub Release；安装/更新为带 journal 的事务（中断可续做、不可验证则回滚），更新后只保留当前版本。插件卡上统一三态自启动按钮：已开=红「关闭自启动」、已关=蓝「随 Dock 启动」、无自启动能力=绿「无需自启动」（纯展示）。 |
+| 插件安装与更新 | 校验来源、平台与资源摘要；官方插件优先 npm（`@fish-under-sea/fish-dock-plugin-*`）→ npmmirror 镜像 → GitHub Release；安装/更新为带 journal 的事务（中断可续做、不可验证则回滚），更新后只保留当前版本。插件卡上统一三态自启动按钮：已开=红「关闭自启动」、已关=蓝「随 Dock 启动」、无自启动能力=绿「无需自启动」（纯展示）。 |
 | 关于与公告 | 关于页品牌图首位居中、可点击进官网（地址在 `url.official_site` 可覆盖）；更新公告只显示最新版本与新特性要点，完整说明折叠；公告源 GitHub → Gitee → 本地缓存，未配置 Gitee 时明确跳过；内置更新全程在应用内完成。 |
+| 全局快捷键 | 设置页可录制组合键；被其他程序占用时给出提示，30 秒内未录到可用组合就放弃。 |
 | 外观工具链 | 随包提供 Windhawk 引擎和编译器，可在外观页导入模组、编译、启停与恢复。 |
 | 主题与可读性 | 暗色白字、浅色黑字；对比度审计（`scripts/check-contrast.mjs`）违规 0。 |
 | 网络与缓存 | 图库/下载走统一出口（尊重代理设置，失败回落直连）；超时分层可配；图库 LRU 缓存离线可用；邮件重连为指数退避 + 熔断 + 状态持久化。 |
 | 内存 | 隐藏即休（页面隐藏则 `IsVisible=false` 并把内存目标降到 Low）；`check_quiet` 不再把隐藏页抬回 normal；插件页 iframe park 后 5 分钟整页退场。预算表按 A/B/C 三档见 `红线-禁止屎山十条.md`（含未结清项，见 issue #29 / #30）。 |
-| 工作区 | 通过插件接入飞书通知、Clash 代理、Magpie 网关与本地模型。 |
 
 <h2 id="workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-workspace-dark.png"><img src="assets/readme/section-workspace-light.png" alt="WORKSPACE · 工作区" width="100%"></picture></h2>
 
-| 工作区 | 作用 |
-| --- | --- |
-| 桌面岛 | 查看会话状态、任务进度、通知和资源信息。 |
-| 邮件管理 | 聚合收件、筛选、快捷操作和单双栏布局。 |
-| 模型工作台 | 在独立插件页面管理渠道账号、模型目录和 API 配置。 |
-| 插件中心 | 安装官方插件、查看运行状态；安装/更新失败按事务回滚。 |
+这一节只讲入口与操作，能力细节见上一节。
+
+| 页面 | 从哪进 | 能做什么 |
+| --- | --- | --- |
+| 桌面岛 | 任务栏家或悬浮岛家；右键菜单切换停靠方式 | 看会话与审批状态、点开最近任务、拖到别处停靠、收起回托盘 |
+| 邮件 | 工作台左侧「邮件」页 | 聚合收件、筛选、快捷操作、单双栏布局切换 |
+| 模型工作台 | 装好模型插件后出现的独立页 | 在插件自己的界面里配渠道账号、模型目录与 API |
+| 插件中心 | 设置 → 插件页 | 登录 GitHub 并核对 Star 后安装/启用/停用/卸载，卡上拨三态自启动 |
+
+<h2 id="changelog"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-changelog-dark.png"><img src="assets/readme/section-changelog-light.png" alt="CHANGELOG · 更新记录" width="100%"></picture></h2>
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器、插件管理与 Windhawk。
 
@@ -98,7 +102,7 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 每个命名空间继续按 `credentials`、`roster`、`keys`、`config`、`exports`、`backups`、`tmp` 分类。「通用 → FISH Dock 配置与备份」可导出宿主设置、布局、插件注册及各插件的持久配置与凭据，默认保存在 `host/exports`。导入先预览并保留恢复前副本，失败按事务回滚；缓存、临时文件、程序包及历史备份不重复打包。普通 ZIP 含明文凭据，请妥善保存。
 
-<h2 id="development"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-develop-dark.png"><img src="assets/readme/section-develop-light.png" alt="DEVELOP · 开发与贡献" width="100%"></picture></h2>
+<h2 id="development"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-develop-dark.png"><img src="assets/readme/section-develop-light.png" alt="DEVELOP · 开发构建" width="100%"></picture></h2>
 
 需要 Rust MSVC 工具链、Windows SDK 和 Node.js 24。开发版可以通过 `FISH_DOCK_DEV_NODE`、`FISH_DOCK_DEV_PLUGINS` 指定运行时，发行版使用安装资源与插件目录。所有目录/端口/URL/超时/间隔集中在单一入口 `app/src-tauri/src/config.rs`（49 键 / 9 类，全部支持 `FISH_DOCK_*` 覆盖，旧 `WAKUWAKU_*` 仍可读）；硬编码与对比度自查脚本为 `app/scripts/check-hardcoded.mjs`、`app/scripts/check-contrast.mjs`，均已接入测试。
 
@@ -108,10 +112,16 @@ node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js'
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
 
-插件源码、插件包和目录维护在 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。
+构建输入固定在 `app/scripts/runtime-sources.json`；资源目录由 `prepare-installer.mjs` 准备，再用 `build-installer.ps1` 与 NSIS 打包。
+
+<h2 id="contributors"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-contributors-dark.png"><img src="assets/readme/section-contributors-light.png" alt="CONTRIBUTORS · 贡献者" width="100%"></picture></h2>
+
+**如何贡献**：桌面宿主、SDK、安装器与 Windhawk 相关的问题和改动提到本仓 [GitHub Issues](https://github.com/Fish-under-sea/FISH-Dock/issues) 与 PR；插件、插件包与商店目录的改动提到 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)，插件相关改动提在插件仓，不要提到宿主仓。
+
+**贡献者**：桌面宿主基于 **Pengjie Zhou（zhoupengjie）** 的 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku)；插件、插件包与商店目录由 **[FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 的贡献者**维护；FISH Dock 由 **Fish-under-sea** 维护。
 
 <h2 id="source"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-acknowledgements-dark.png"><img src="assets/readme/section-acknowledgements-light.png" alt="致谢 · ACKNOWLEDGEMENTS" width="100%"></picture></h2>
 
-FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 演进，保留原作者版权与 MIT 许可；模型能力由 Magpie 插件提供，插件、插件包与商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。原始品牌素材见 [素材记录](assets/readme/SOURCES.md)。Windhawk、Node.js、WebView2 和编译器的原文许可随运行资源交付。
+上游代码的版权与 [MIT 许可](LICENSE) 保留（Wakuwaku，Copyright 2026 Pengjie Zhou）；模型能力由 Magpie 插件提供。Windhawk、Node.js、WebView2 与编译器的原文许可随运行资源交付。原始品牌素材的来源与授权边界见 [素材记录](assets/readme/SOURCES.md)：宠物精灵图与应用图标遵循各自素材授权，不因代码开源而自动获得再分发许可。人员与仓库归属见上一节「贡献者」。
 
 <p align="center"><sub>FISH Dock · Desktop + Model Workspace · Windows x64</sub></p>
