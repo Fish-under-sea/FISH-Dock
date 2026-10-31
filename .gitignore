@@ -19,7 +19,7 @@
 *.msi
 *.7z
 *.zip
-!Wakuwaku/test/fixtures/**/*.zip
+!app/test/fixtures/**/*.zip
 
 # 用户数据、凭据与本地缓存
 **/.env
@@ -40,3 +40,4 @@
 **/.pr-screenshots/
 .DS_Store
 Thumbs.db
+/build/

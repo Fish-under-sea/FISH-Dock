@@ -13,7 +13,7 @@ const outputPrefix = process.env.README_OUTPUT_PREFIX || ''
 // 否则发版时改了文档、图片还挂在旧版本上（2026-10-31 就是这样漏的）。
 const appVersion = (() => {
   try {
-    const conf = JSON.parse(fs.readFileSync(path.join(root, 'Wakuwaku/src-tauri/tauri.conf.json'), 'utf8'))
+    const conf = JSON.parse(fs.readFileSync(path.join(root, 'app/src-tauri/tauri.conf.json'), 'utf8'))
     return String(conf.version || '')
   } catch { return '' }
 })()

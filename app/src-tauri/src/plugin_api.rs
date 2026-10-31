@@ -1,0 +1,165 @@
+//! 仅设置窗口可调用的外部插件管理入口；网络与进程操作在阻塞工作线程执行。
+use std::path::PathBuf;
+use serde_json::{json,Value};
+use tauri::{WebviewWindow,Manager as _};
+use crate::{plugin_install::Manager,storage_context::Context};
+fn trusted(window:&WebviewWindow)->Result<(),String>{
+    let url=window.url().map_err(|_|"设置窗口来源读取失败")?;
+    if !local_source(window.label(),&url){return Err("插件管理仅允许本机设置窗口调用".into());}Ok(())
+}
+fn local_source(label:&str,url:&tauri::Url)->bool{
+    label=="island"&&match url.scheme(){
+        "tauri"=>url.host_str()==Some("localhost"),
+        "http"=>match url.host_str(){Some("tauri.localhost")=>url.port().is_none(),Some("localhost"|"127.0.0.1")=>cfg!(debug_assertions),_=>false},
+        _=>false,
+    }
+}
+#[derive(Default,serde::Serialize,serde::Deserialize)]
+#[serde(deny_unknown_fields,rename_all="camelCase")]
+struct Dependencies {node:Option<PathBuf>}
+fn dependencies(context:&Context)->Result<Dependencies,String>{
+    context.host.read("config","plugin-dependencies.json")?.map(|bytes|serde_json::from_slice(&bytes).map_err(|_|"插件依赖设置损坏".into())).unwrap_or_else(||Ok(Dependencies::default()))
+}
+fn discovery(context:&Context)->Result<crate::plugin_dependencies::Discovery,String>{Ok(crate::plugin_dependencies::discover(dependencies(context)?.node))}
+pub fn node(context:&Context)->Result<Option<PathBuf>,String>{Ok(discovery(context)?.path)}
+fn runtime_config(context:&Context,path:Option<PathBuf>)->Result<(),String>{
+    if let Some(path)=&path {let version=crate::plugin_dependencies::probe(path)?;let selected=crate::plugin_dependencies::select(false,vec![("saved",path.clone())], |_|Ok(version.clone()));if selected.path.is_none(){return Err(selected.candidates.first().and_then(|c|c.error.clone()).unwrap_or_else(||"Node 版本不兼容".into()));}}
+    context.host.write("config","plugin-dependencies.json",&serde_json::to_vec(&Dependencies{node:path}).map_err(|_|"插件依赖编码失败")?)
+}
+fn view(context:&Context)->Result<Value,String>{
+    let star=crate::github_access::view(context)?;
+    let manager=Manager{context};
+    let runtime=discovery(context)?;
+    let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
+    // fetch 是每个插件最近一次安装用的是哪条下载源（npm / 镜像 / GitHub）与耗时：
+    // 用户要求「UI 上能看到当前用的是哪条源」，所以跟着视图一起给前端。
+    Ok(json!({"installed":runner.view(&manager)?,"node":runtime.path,"runtime":runtime,"root":context.root,"star":star,"fetch":crate::plugin_store::fetch_records(context)}))
+}
+#[tauri::command]
+pub async fn extension_view(window:WebviewWindow)->Result<Value,String>{
+    trusted(&window)?;
+    tauri::async_runtime::spawn_blocking(||{view(crate::storage_context::current().ok_or("存储上下文未就绪")?)}).await.map_err(|_|"插件列表任务意外结束")?
+}
+#[tauri::command]
+pub async fn extension_catalog(window:WebviewWindow)->Result<Value,String>{
+    trusted(&window)?;
+    tauri::async_runtime::spawn_blocking(||{crate::plugin_store::refresh(crate::storage_context::current().ok_or("存储上下文未就绪")?)}).await.map_err(|_|"插件商店任务意外结束")?
+}
+#[tauri::command]
+pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<String>,enabled:Option<bool>,node_path:Option<String>,confirm:bool)->Result<Value,String>{
+    trusted(&window)?;
+    crate::plugin_progress::set_app(&window.app_handle());
+    if !confirm{return Err("请确认插件安装或管理操作".into());}
+    tauri::async_runtime::spawn_blocking(move||{
+        let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
+        if action=="runtime"{runtime_config(context,node_path.filter(|p|!p.trim().is_empty()).map(PathBuf::from))?;return view(context);}
+        let id=id.ok_or("插件操作缺少 ID")?;
+        // 安装/更新全程报进度；Guard 在成功、失败、提前返回时都关掉弹窗。
+        let _progress=if action=="install"{Some(crate::plugin_progress::Guard::start(&id))}else{None};
+        // 下载不占用实例锁，网络失败不阻塞已安装插件的停用。
+        if action=="enabled"&&enabled==Some(true){crate::github_access::require_plugin(context,&id)?;}
+        // 官方插件要 GitHub 登录与主仓 Star；第三方插件不经过这条授权，认证只约束官方。
+        let package=if action=="install"{
+            if !id.starts_with("fish."){return Err("第三方插件请从「第三方插件」页按包名安装".into());}
+            crate::github_access::require_plugin(context,&id)?;
+            // 文案分级（#37）：下载失败要能在面板上说清卡在「下载」这一步，而不是一句笼统报错。
+            Some(crate::plugin_store::obtain(context,&id).map_err(|error|format!("更新失败（下载阶段）：{error}"))?)
+        }else{None};
+        let manager=Manager{context};let node=node(context)?;
+        let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
+        match action.as_str(){
+            "install"=>{let (package,digest)=package.ok_or("插件包尚未就绪")?;let official=package.manifest.id.starts_with("fish.");crate::plugin_progress::report("提交",0,None);runner.install(&manager,package,&digest,official,node.as_deref())?;},
+            "enabled"=>runner.set_enabled(&manager,&id,enabled.ok_or("插件启停操作缺少目标状态")?,node.as_deref())?,
+            // 自启动开关（#38）：写注册表 + Dock 运行中就立即拉起/停止该插件服务。
+            "autostart"=>{runner.set_autostart(&manager,&id,enabled.ok_or("插件自启动设置缺少目标状态")?,node.as_deref())?;},
+            "uninstall"=>runner.uninstall(&manager,&id)?,
+            _=>return Err("插件管理操作无效".into()),
+        }
+        let _=runner.view(&manager)?;drop(runner);
+        view(context)
+    }).await.map_err(|_|"插件管理任务意外结束")?
+}
+// 第三方插件：按 npm 包名检索与安装。来源是公开 registry，身份按第三方命名空间登记。
+#[tauri::command]
+pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:String,confirm:bool)->Result<Value,String>{
+    trusted(&window)?;
+    crate::plugin_progress::set_app(&window.app_handle());
+    if action=="search"{
+        return tauri::async_runtime::spawn_blocking(move||{
+            let report=crate::plugin_thirdparty::search(&query)?;
+            Ok(json!({"hits":report.hits,"hidden":report.hidden}))
+        }).await.map_err(|_|"npm 检索任务意外结束")?;
+    }
+    if action!="install"{return Err("第三方插件操作无效".into());}
+    if !confirm{return Err("请确认安装第三方插件".into());}
+    tauri::async_runtime::spawn_blocking(move||{
+        let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
+        let _progress=crate::plugin_progress::Guard::start(&query);
+        let (package,digest)=crate::plugin_thirdparty::obtain(context,&query).map_err(|error|format!("更新失败（下载阶段）：{error}"))?;
+        let manager=Manager{context};let node=node(context)?;
+        let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
+        crate::plugin_progress::report("提交",0,None);
+        runner.install(&manager,package,&digest,false,node.as_deref())?;
+        let _=runner.view(&manager)?;drop(runner);
+        view(context)
+    }).await.map_err(|_|"第三方插件安装任务意外结束")?
+}
+// 进度弹窗的数据与取消（t29）：前端在安装/更新期间轮询 extension_progress，
+// 取消按钮调 extension_cancel；下载循环每个块检查一次取消标志。
+#[tauri::command]
+pub fn extension_progress()->Value{crate::plugin_progress::snapshot()}
+#[tauri::command]
+pub fn extension_cancel(_window:WebviewWindow,id:String)->Value{crate::plugin_progress::cancel(&id);crate::plugin_progress::snapshot()}
+#[tauri::command]
+pub async fn extension_auth(window:WebviewWindow,action:String)->Result<Value,String>{
+    trusted(&window)?;
+    let sh = crate::shared(window.app_handle());
+    if action=="release" { sh.auth_focus(0); return Ok(json!({"released":true})); }
+    if matches!(action.as_str(), "cancel" | "logout") { sh.auth_focus(0); }
+    tauri::async_runtime::spawn_blocking(move||{
+        let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
+        let result = match action.as_str(){"login"=>crate::github_access::begin(context),"check"=>crate::github_access::check(context),"logout"=>crate::github_access::logout(context),"cancel"=>crate::github_access::cancel(context),_=>Err("GitHub 登录操作无效".into())};
+        if action == "login" && result.is_ok() {
+            let until = result.as_ref().ok().and_then(|v| v["pending"]["expiresAt"].as_u64()).unwrap_or(0);
+            sh.auth_focus(until);
+        } else if action == "logout" || action == "cancel" || action == "check" {
+            // Star 尚未点亮也可能已经完成设备登录，此时同样释放临时状态。
+            if action == "logout" || action == "cancel" || crate::github_access::view(context).is_ok_and(|v| v["pending"].is_null()) { sh.auth_focus(0); }
+        }
+        result
+    }).await.map_err(|_|"GitHub 登录任务意外结束")?
+}
+#[tauri::command]
+pub async fn extension_call(window:WebviewWindow,id:String,method:String,params:Value)->Result<Value,String>{
+    trusted(&window)?;
+    tauri::async_runtime::spawn_blocking(move||{let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;crate::github_access::require_plugin(context,&id)?;crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?.call(&id,&method,params)}).await.map_err(|_|"插件请求任务意外结束")?
+}
+#[tauri::command]
+pub async fn extension_page(window:WebviewWindow,key:String)->Result<Value,String>{trusted(&window)?;tauri::async_runtime::spawn_blocking(move||crate::plugin_page::open(&key)).await.map_err(|_|"插件页面任务意外结束")?}
+#[tauri::command]
+pub fn extension_page_close(window:WebviewWindow,ticket:String)->Result<(),String>{trusted(&window)?;crate::plugin_page::close(&ticket);Ok(())}
+#[tauri::command]
+pub async fn extension_page_call(window:WebviewWindow,ticket:String,method:String,params:Value)->Result<Value,String>{trusted(&window)?;tauri::async_runtime::spawn_blocking(move||crate::plugin_page::call(&ticket,&method,params)).await.map_err(|_|"插件页面请求意外结束")?}
+
+pub fn resume(){
+    std::thread::spawn(||{
+        let Some(context)=crate::storage_context::current()else{return};
+        let mut runner=match crate::plugin_runtime::CURRENT.lock(){Ok(runner)=>runner,Err(_)=>{eprintln!("FISH Dock: 插件运行锁不可用，跳过自启动恢复");return;}};
+        // 逐插件容错（#38）：以前 node 探测 / prepare / resume 任一失败就把整批自启动
+        // 跳过。现在运行时探测失败只记一行，仍逐个插件走 resume —— 需要 Node 的插件
+        // 各自失败并在卡片上显示原因，原生插件照常拉起。开发预览装载失败同理。
+        let discovered=node(context);
+        let node=match &discovered{Ok(path)=>path.as_deref(),Err(error)=>{eprintln!("FISH Dock: 插件 Node 运行时探测失败，将逐个插件报告：{error}");None}};
+        if let Err(error)=crate::plugin_development::prepare(context,&mut runner,node){eprintln!("FISH Dock: 插件开发预览装载失败（不影响已装插件）：{error}");}
+        if let Err(error)=runner.resume(&Manager{context},node){eprintln!("FISH Dock: 插件恢复失败：{error}");}
+    });
+}
+pub fn shutdown(){if let Ok(mut runner)=crate::plugin_runtime::CURRENT.lock(){runner.stop_all();}}
+#[cfg(test)]mod tests{
+    use super::*;
+    #[test]fn management_is_bound_to_local_settings_window(){
+        for (label,url) in [("plugin-fish-ofm","http://tauri.localhost/"),("island","https://example.test/"),("island","http://tauri.localhost:5000/"),("island","http://127.0.0.1.example.test/")] {assert!(!local_source(label,&tauri::Url::parse(url).unwrap()));}
+        assert!(local_source("island",&tauri::Url::parse("http://tauri.localhost/").unwrap()));
+        assert!(local_source("island",&tauri::Url::parse("tauri://localhost/").unwrap()));
+    }
+}

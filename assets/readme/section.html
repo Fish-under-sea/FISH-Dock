@@ -1,0 +1,36 @@
+<!doctype html>
+<html data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>FISH Dock section banner</title>
+<style>
+@font-face { font-family: 'Jersey'; src: url('Jersey20-Regular.ttf'); }
+html, body { margin: 0; padding: 0; background: transparent; }
+#sec {
+  width: 1432px; height: 83px; box-sizing: border-box; display: flex; align-items: stretch; position: relative;
+  background: var(--bg); border-top: 2px solid var(--edge); border-bottom: 2px solid var(--edge);
+}
+#sec .tab {
+  background: var(--tab); color: var(--tabfg); font-family: 'Jersey', monospace; font-size: 30px; letter-spacing: 1.5px;
+  display: flex; align-items: center; padding: 0 28px; white-space: nowrap;
+}
+#sec .title {
+  color: var(--fg); font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; font-weight: 700; font-size: 40px;
+  display: flex; align-items: center; padding: 0 22px; white-space: nowrap;
+}
+#sec .ticks { flex: 1; margin: 12px 14px; background: repeating-linear-gradient(90deg, var(--tick) 0 2px, transparent 2px 9px); }
+#sec .dot { width: 18px; height: 18px; background: #8fd6a0; align-self: center; margin-right: 16px; }
+html[data-theme="light"] { --bg: #cdbba1; --edge: #3a352c; --tab: #3f3a30; --tabfg: #efe7d8; --fg: #1b1b1b; --tick: #5a5346; }
+html[data-theme="dark"]  { --bg: #2b2b28; --edge: #111111; --tab: #b9a98f; --tabfg: #2b2b28; --fg: #f2efe6; --tick: #6a665c; }
+</style>
+</head>
+<body>
+<div id="sec"><span class="tab" id="tab">ACKNOWLEDGEMENTS</span><span class="title" id="title">致谢</span><span class="ticks"></span><span class="dot"></span></div>
+<script>
+  const q = new URLSearchParams(location.search)
+  document.documentElement.dataset.theme = q.get('theme') || 'light'
+  document.getElementById('tab').textContent = q.get('tab') || 'ACKNOWLEDGEMENTS'
+  document.getElementById('title').textContent = q.get('title') || '致谢'
+</script>
+</body>
+</html>

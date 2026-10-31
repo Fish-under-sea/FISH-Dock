@@ -1,21 +1,30 @@
 {
   "format": "fish-dock/source-snapshot",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "projects": [
     {
-      "path": "Wakuwaku",
+      "path": "app",
       "repository": "https://github.com/zhoupengjie/Wakuwaku",
       "baseCommit": "f1441cbbcf6801d18c27a1d241fd4e5475086e3b",
-      "selectedUpstreamThrough": "79c95cb3c02b74511cf88bd180fa789665a1c046",
-      "license": "Wakuwaku/LICENSE",
+      "selectedUpstreamThrough": "27104eab",
+      "license": "app/LICENSE",
       "selectedChanges": [
         "Settings WebView DPI/hit testing and clipping",
-        "Explorer startup/restart taskbar handoff"
+        "Explorer startup/restart taskbar handoff",
+        "Hang stack capture (upstream #96, 744cc065)",
+        "WebView2 ended externally is not reported as a crash (upstream #93, 340e231a)",
+        "Wi-Fi with no egress: a transient null instead of a crash (upstream #95, fabbc60a)",
+        "Workspace self-heal after a display is moved or scaled (upstream #92, f698cb66)",
+        "110% text with display scaling: taskbar parts and cards no longer misalign (upstream #90, 0162f8f5)",
+        "Shortcut recording pauses itself, handshake extended to 30 s (upstream #86, a9f19173 + d0843cf8)",
+        "agy approvals read globalPermissionGrants from config.json (upstream #91, 5a0fee56)",
+        "Codex: a failed command counts as failure, Approve for me returns to Codex (upstream #89/#90, 2ca4d955 + 7a91375a)"
       ],
       "excludedChanges": [
         "Upstream web-file plugin store and auto-update protocol",
         "Wi-Fi/tray-clock appearance changes and Codex wrapper discovery",
-        "DeepSeek Harness token accounting"
+        "DeepSeek Harness token accounting",
+        "Upstream P2 product-semantics items that conflict with our own implementation (evaluated in issue #48)"
       ]
     },
     {
@@ -38,7 +47,7 @@
   "notes": [
     "Host SDK, runtime, storage, installer and independent-plugin management are published here.",
     "OFM business source and distribution are maintained separately; the old snapshot and staging scripts are removed.",
-    "Selected Wakuwaku v0.3.6 fixes preserve FISH Dock plugin protocols and storage isolation.",
+    "Selected Wakuwaku v0.3.7–v0.3.8 fixes preserve FISH Dock plugin protocols and storage isolation.",
     "Original author copyright notices are retained. No user credentials or runtime state are published."
   ]
 }
