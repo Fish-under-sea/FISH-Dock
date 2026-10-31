@@ -1,66 +1,65 @@
 <!doctype html>
-<html data-theme="light">
+<html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>FISH Dock section banner</title>
+<title>section</title>
 <style>
-/* 分栏横幅模板——**以插件仓 FISH-DOCK-Plugins 的 assets/readme/header.html 为准**。
-   组件直接用它那套：.frame（3px 描边 + 双向 inset）、.vent（3px 竖线 / 10px 周期）、
-   .lamp（23×23、2px 描边）。token 角色按插件仓实际出图取：
-     外框底   var(--frame)
-     色块     background var(--paper)，文字 var(--line)   ← 比外框更深，字是金色
-     标题     color var(--line)（金色，不是白）
-     刻度     var(--vent)，只占中间 30px
-     指示灯   var(--lamp)
-   不要用「浅色块 + 白标题 + 2px 边线 + 2px/9px 刻度」那套旧参数。 */
-@font-face { font-family: Jersey; src: url('Jersey20-Regular.ttf') format('truetype'); font-display: block; }
-:root {
-  color-scheme: light;
-  --frame: #ddd4bf; --paper: #f6f3e9; --line: #5a544a; --bright: #f6f1e3; --low: #bdb39c;
-  --shadow: #9c927b; --ink: #25241e; --muted: #6f695c; --vent: #a89e87; --green: #8fd6a0; --lamp: #4ed381;
-}
-:root[data-theme=dark] {
-  color-scheme: dark;
-  --frame: #393930; --paper: #252722; --line: #a69e87; --bright: #686957; --low: #171a17;
-  --shadow: #111510; --ink: #f0ecdf; --muted: #bbb69e; --vent: #777b66; --green: #7bc78c; --lamp: #72e394;
-}
-* { box-sizing: border-box; letter-spacing: 0; }
-html, body { margin: 0; padding: 0; background: transparent; }
-body { color: var(--ink); font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif; }
-
-#sec {
-  width: 1432px; height: 83px; display: flex; align-items: center;
-  border: 3px solid var(--line);
-  background: var(--frame);
-  box-shadow: inset 3px 3px var(--bright), inset -3px -3px var(--low);
-}
-#sec .tab {
-  display: flex; align-items: center; align-self: stretch; flex: none;
-  padding: 0 26px; white-space: nowrap;
-  background: var(--paper); color: var(--line);
-  border-right: 3px solid var(--line);
-  font-family: Jersey, monospace; font-weight: 400; font-size: 30px; letter-spacing: 2px;
-}
-#sec .title {
-  display: flex; align-items: center; flex: none;
-  padding: 0 22px; white-space: nowrap;
-  color: var(--line); font-weight: 700; font-size: 40px;
-}
-#sec .vent { flex: 1; height: 30px; margin: 0 10px; background: repeating-linear-gradient(90deg, var(--vent) 0 3px, transparent 3px 10px); }
-#sec .lamp {
-  display: block; flex: none; width: 23px; height: 23px; margin-right: 16px;
-  border: 2px solid var(--line); background: var(--lamp);
-}
+  /* 尺寸与配色全按仓库里原有的 section-*.png 量出来的：
+     1432×83；上下 3px 描边、内侧 3px 高光 / 3px 内阴影、条体 64px、底部 7px 投影；
+     tag 块固定 163px（含左边框），竖纹周期 10px、线宽 3px。 */
+  @font-face { font-family: Jersey; src: url("Jersey20-Regular.ttf") format("truetype"); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body { width: 1432px; height: 83px; }
+  .bar {
+    width: 1432px; height: 76px;
+    display: flex; align-items: stretch;
+    border: 3px solid var(--edge);
+    background: var(--body);
+    box-shadow: inset 0 3px 0 var(--hi), inset 0 -3px 0 var(--lo), 0 7px 0 var(--shadow);
+  }
+  .tag {
+    width: 160px; flex: none;
+    display: grid; place-items: center;
+    background: var(--tagbg); color: var(--tagfg);
+    font: 400 30px/1 Jersey, monospace; letter-spacing: 1px;
+  }
+  .name {
+    display: flex; align-items: center;
+    padding: 0 20px 0 18px;
+    color: var(--fg);
+    font: 700 26px/1 "Microsoft YaHei", "Segoe UI", sans-serif; letter-spacing: 1px;
+    white-space: nowrap;
+  }
+  .ticks {
+    flex: 1; align-self: center; height: 44px;
+    margin: 0 16px 0 6px;
+    background: repeating-linear-gradient(90deg, var(--tick) 0 3px, transparent 3px 10px);
+  }
+  .dot { width: 15px; height: 15px; align-self: center; margin-right: 20px; background: var(--dot); }
+  body.light {
+    --edge: #5a544a; --hi: #f6f1e3; --lo: #bdb39c; --body: #ddd4bf; --shadow: #9c927b;
+    --tagbg: #5a544a; --tagfg: #f6f3e9; --fg: #55503f; --tick: #a89e87; --dot: #7bd88f;
+  }
+  body.dark {
+    --edge: #a69e87; --hi: #686957; --lo: #171a17; --body: #393930; --shadow: #111510;
+    --tagbg: #a69e87; --tagfg: #23221c; --fg: #e8e2d2; --tick: #777b66; --dot: #7bd88f;
+  }
 </style>
 </head>
-<body>
-<div id="sec"><span class="tab" id="tab">INSTALL</span><span class="title" id="title">安装</span><span class="vent"></span><span class="lamp"></span></div>
+<body class="light">
+  <div class="bar">
+    <span class="tag" id="tag">DEVELOP</span>
+    <span class="name" id="name">插件开发</span>
+    <span class="ticks"></span>
+    <span class="dot"></span>
+  </div>
 <script>
-  // 参数化：?theme=light|dark&tab=INSTALL&title=安装
-  const q = new URLSearchParams(location.search)
-  document.documentElement.dataset.theme = q.get('theme') || 'light'
-  document.getElementById('tab').textContent = q.get('tab') || 'INSTALL'
-  document.getElementById('title').textContent = q.get('title') || '安装'
+  const q = new URLSearchParams(location.search);
+  document.body.className = q.get("theme") || "light";
+  const tag = q.get("tag") || q.get("tab"), name = q.get("name") || q.get("title");
+  if (tag) document.getElementById("tag").textContent = tag;
+  if (name) document.getElementById("name").textContent = name;
 </script>
 </body>
 </html>
