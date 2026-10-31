@@ -85,6 +85,7 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 3. 打开「插件」页，点击「GitHub 登录」。Dock 内弹窗显示验证码及实际复制结果；在系统浏览器中粘贴并确认，Dock 自动检查授权。等待期间可单独解除临时锁定／置顶，也可取消验证。旧版账号若未保存续期凭据，升级后需重新登录一次；新授权随后自动续期。
 4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
 5. 点击「检查更新」读取官方目录，按需安装 [FISH Dock Official Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。新插件安装成功即启用；凭据和服务参数仍需各自配置。
+6. 官方商店目前只有**三个插件**：**飞书**、**Clash**、**Magpie**（同为插件 2.1.0，Magpie 另有 2.1.1 修图标顺序，要求宿主 ≥ 2.0.0）。OFM 自 2025-10-25 起暂停维护，已从商店下架——已安装的用户仍可在「已安装」里启用或卸载。
 
 安装包包含 Node.js 24.14.0、固定版 WebView2 155.0.4283.62、Windhawk 1.7.3 及 LLVM-MinGW 编译器，供对应插件按需调用；无需另外安装 Windhawk。安装包当前未做 Authenticode 签名。
 
