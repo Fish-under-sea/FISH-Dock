@@ -589,3 +589,29 @@ test('失败块样式：最高 40vh、超出滚动（t45 验收 ④）', () => {
   assert.match(block[0], /overflow:\s*auto/)
   assert.match(block[0], /box-sizing:\s*border-box/)
 })
+
+// ── t47：粒子只在“前沿”汇聚，并入即消失 ────────────────────────────────────
+test('t47 particleFlight：阈值铺满 0→100%，前沿约 12 个在飞，并入即不可见', () => {
+  const { particleFlight, FLIGHT_WINDOW } = loadPanelModule()
+  const N = 48
+  for (const pct of [0.3, 0.5, 0.7]) {
+    const flying = []
+    for (let i = 0; i < N; i++) { const f = particleFlight(pct, i, N, 'in'); if (f) flying.push({ i, ...f }) }
+    assert.ok(flying.length >= 10 && flying.length <= 15, `pct=${pct} 前沿应有 10~15 个粒子，实际 ${flying.length}`)
+    for (const f of flying) assert.ok(f.slot > pct + 1e-9 && f.slot <= pct + FLIGHT_WINDOW + 1e-9, `pct=${pct} 粒子 ${f.i} 的列 ${f.slot.toFixed(3)} 不在前沿附近`)
+  }
+  // 70%：所有列 <= 70% 的粒子必须已并入（返回 null → 不绘制，已填区域干净）
+  for (let i = 0; i < N; i++) { const f = particleFlight(0.7, i, N, 'in'); if (f) assert.ok(f.slot > 0.7) }
+  // 41% 不再“全部并入”：仍有前沿粒子，且最后一个（slot≈0.99）还没出发
+  const at41 = Array.from({ length: N }, (_, i) => particleFlight(0.41, i, N, 'in')).filter(Boolean).length
+  assert.ok(at41 >= 10 && at41 <= 15, `41% 应有前沿粒子，实际 ${at41}`)
+  assert.equal(particleFlight(0.41, 47, N, 'in'), null, '41% 时最后一个粒子还没出发')
+  // 90%：只剩尾部少数还在飞，绝不再是整条散点
+  const at90 = Array.from({ length: N }, (_, i) => particleFlight(0.9, i, N, 'in')).filter(Boolean).length
+  assert.ok(at90 >= 1 && at90 <= 15, `90% 只剩尾部粒子，实际 ${at90}`)
+  // 卸载镜像：50% / 20% 时同样约 12 个从前沿剥离，不是整条散点
+  const outFlying = Array.from({ length: N }, (_, i) => particleFlight(0.5, i, N, 'out')).filter(Boolean).length
+  assert.ok(outFlying >= 10 && outFlying <= 15, `卸载 50% 前沿应有 10~15 个，实际 ${outFlying}`)
+  const outEarly = Array.from({ length: N }, (_, i) => particleFlight(0.2, i, N, 'out')).filter(Boolean).length
+  assert.ok(outEarly >= 10 && outEarly <= 15)
+})
