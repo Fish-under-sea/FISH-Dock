@@ -67,13 +67,19 @@
     let closed = false
 
     // 初始态：与 pen 的 HTML 一致（小方块先转 45°）
-    nodes.rect.style.transformOrigin = '50% 50%'
+    // SVG 元素用 CSS transform 时必须显式给 transform-box，否则按 view-box 原点旋转，
+    // 方块会飘到圆外（用户 2026-11-01 截图里那颗独立的小方块）。
+    for (const el of [nodes.rect, nodes.main, nodes.mainFill, nodes.sub, nodes.arrow]) {
+      el.style.transformBox = 'fill-box'
+      el.style.transformOrigin = 'center'
+    }
     nodes.rect.style.transform = 'rotate(45deg)'
     nodes.sub.style.strokeDasharray = `${CIRC.toFixed(2)} ${CIRC.toFixed(2)}`
     nodes.sub.style.strokeDashoffset = CIRC.toFixed(2)
     nodes.text.textContent = opts.label || 'install'
 
-    const group = [nodes.main, nodes.mainFill, nodes.rect, nodes.arrow]
+    // pen 第 27 行与第 32 行：主圆、填充、方块、箭头 **以及 subCircle** 都右移 30
+    const group = [nodes.main, nodes.mainFill, nodes.rect, nodes.arrow, nodes.sub]
 
     function squeeze() {
       if (opened) return
@@ -93,6 +99,7 @@
       nodes.rect.animate([{ transform: 'rotate(45deg)', fillOpacity: 1 }, { transform: 'rotate(270deg)', fillOpacity: 1 }],
         { duration: 700, easing: EASE_OUT, fill: 'forwards' })
       // 收成小圆后把圆环交给进度驱动
+      nodes.sub.setAttribute('r', '9.07')   // pen 第 32 行：套在圆外面的那一圈
       nodes.sub.style.opacity = '1'
     }
 
@@ -105,7 +112,7 @@
         // 小点绕圈：角度从 -90° 起，随进度转一圈；r 从 1.2 长到 2.7
         const spin = () => {
           const ang = (-90 + p * 3.6) * Math.PI / 180
-          nodes.dot.setAttribute('cx', (20 + 9.07 * Math.cos(ang)).toFixed(2))
+          nodes.dot.setAttribute('cx', (50 + 9.07 * Math.cos(ang)).toFixed(2))
           nodes.dot.setAttribute('cy', (35 + 9.07 * Math.sin(ang)).toFixed(2))
           nodes.dot.setAttribute('r', (1.2 + 1.5 * (p / 100)).toFixed(2))
           nodes.dot.style.opacity = p > 0 ? '1' : '0'
