@@ -99,13 +99,6 @@
   } })
   let confirmActive = null
   const confirmQueue = []
-  // 弹窗是在点击事件里同步 showModal 的，指针往往正好落在「确认」上：同一次
-  // 点击的后续事件会把刚出现的弹窗点掉，用户视角就是「没确认就卸载了」。
-  // 开窗后 CONFIRM_ARM_MS 内的点击/回车一律忽略，给手一次真正选择的机会。
-  // 用户实测 2026-11-01：点「卸载」立刻开始卸载，没看到确认弹窗。
-  const CONFIRM_ARM_MS = 350
-  let confirmArmedAt = 0
-  const confirmTooSoon = () => Date.now() < confirmArmedAt
   const extensionPanel = window.ExtensionPanel.create({ deviceDialog: showDeviceDialog, syncAuthFocus: async () => { const revision = openRevision; const got = await window.pet.settings.get(); if (isOpen && revision === openRevision) { snap = got; draw() } }, invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw(), openPage: key => open(key) })
   const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw() })
   // The crash report shown, as it would be sent (pageCrash).
@@ -247,6 +240,14 @@
   const confirmMessage = confirmDialog.querySelector('#s-confirm-message')
   const confirmOk = confirmDialog.querySelector('[data-confirm-ok]')
   const confirmCancel = confirmDialog.querySelector('[data-confirm-cancel]')
+  // 弹窗是在点击事件里同步 showModal 的，指针往往正好落在「确认」上：同一次
+  // 点击的后续事件会把刚出现的弹窗点掉，用户视角就是「没确认就卸载了」。
+  // 开窗后 CONFIRM_ARM_MS 内的点击/回车一律忽略，给手一次真正选择的机会。
+  // 用户实测 2026-11-01：点「卸载」立刻开始卸载，没看到确认弹窗。
+  // 注意：这几个声明必须紧贴 pumpConfirm（浏览器测试只切这一段代码运行）。
+  const CONFIRM_ARM_MS = 350
+  let confirmArmedAt = 0
+  const confirmTooSoon = () => Date.now() < confirmArmedAt
   function pumpConfirm() {
     if (confirmActive || !confirmQueue.length || !isOpen) return
     confirmActive = confirmQueue.shift()
