@@ -88,6 +88,10 @@
     // t44：进度弹窗的显示层状态——当前操作种类（install/uninstall/…）、每个 id
     // 见过的进度峰值（换源不回弹）、卸载没有宿主进度时的本地合成节拍、粒子动效。
     let busyKind = '', uninstallTicks = 0
+    // 2026-11-01 用户要求：卸载的确认弹窗没点「确认」之前，一律不准提前渲染卸载进度。
+    // run() 一开始就置 busy/busyKind，而 job() 第一步是 await confirm()，这段等待里
+    // progressItems() 已经会合成卸载进度卡 —— 所以再加一道 actionStarted 闸。
+    let actionStarted = false
     const progressSeen = new Map()
     let fxRaf = 0
     const fxParticles = new Map()
@@ -157,7 +161,7 @@
     const acceptView = next => { view = { ...next, star: next.star || view?.star }; node = view.node || ''; scheduleAuth() }
     const run = async (name, job, kind = '') => {
       if (busy) return
-      busy = name; busyKind = kind; error = ''; progress = []; progressSeen.clear(); uninstallTicks = 0; redraw()
+      busy = name; busyKind = kind; error = ''; progress = []; progressSeen.clear(); uninstallTicks = 0; actionStarted = false; redraw()
       // 安装/更新会下载：轮询宿主的进度快照（extension_progress，按 id 各一条），
       // 把「请稍候」换成带阶段/百分比/取消的进度弹窗（t29）。其它操作轮询到不活跃就停。
       const poll = () => invoke('extension_progress').then(got => {
@@ -228,12 +232,14 @@
         const alpha = Math.sin(Math.PI * q)   // 起飞淡入、抵达淡出
         let x, y
         if (mode === 'in') {
+          // 2026-11-01 用户要求：下载 = 卸载动画反向播放。
+          // 卸载是「从该列剥离 → 向右飞散 → 淡出」；反向即
+          // 「从右侧画布外飞来 → 落到该列 → 亮起」，alpha 同样用 sin(πq) 两端淡。
           const targetX = flight.slot * w
-          // 从目标列左侧一段距离飞入（早段即画布左缘 x=0），读作从左边汇聚。
-          const travel = Math.max(24, w * 0.3)
-          const startX = Math.max(0, targetX - travel)
-          x = startX + (targetX - startX) * ease
-          y = centerY + pt.side * (1 - ease)
+          const fromX = w + 48
+          const t = 1 - q
+          x = targetX + (fromX - targetX) * (t * t)
+          y = centerY + pt.side * (0.25 + 0.75 * t)
         } else {
           // 从前沿（该列此刻正好是缩到位置的右缘）向右飞散。
           const startX = flight.slot * w
@@ -336,6 +342,7 @@
         // 2026-11-01：安装直接开始，不再弹确认（用户要求）；卸载仍然确认。
         // if (action === 'install' && !(await confirm(text(`安装 ${entry.name} ${entry.version}？\n依赖：${entry.dependencies.join('、') || '无'}\n插件为独立进程，可使用声明的网络、服务及本地存储能力。`, `Install ${entry.name} ${entry.version}?\nDependencies: ${entry.dependencies.join(', ') || 'None'}\nThis extension runs as a separate local process.`)))) return
         if (action === 'uninstall' && !(await confirm(text(`卸载 ${row.plugin.manifest.name}？将停止插件并保留凭据和配置。`, `Uninstall ${row.plugin.manifest.name}? Credentials and settings will be kept.`)))) return
+        actionStarted = true   // 确认都过了，从这一刻起才允许出现进度
         acceptView(await invoke('extension_manage', { action, id, enabled: action === 'install' ? true : action === 'enabled' ? !row.running : action === 'autostart' ? !autostartOn(row) : null, nodePath: null, confirm: true }))
       }, action)
     }
@@ -461,7 +468,7 @@
       const progressItems = () => {
         const items = progress.slice()
         // 卸载没有宿主进度：面板本地合成一张卡（phase 卸载，0→96%），节拍来自同一轮询。
-        if (busyKind === 'uninstall' && busy && !items.some(item => item.id === busy)) {
+        if (busyKind === 'uninstall' && busy && actionStarted && !items.some(item => item.id === busy)) {
           items.push({ id: busy, phase: '卸载', received: Math.min(96, uninstallTicks * 8), total: 100, active: true, local: 'out' })
         }
         return items
