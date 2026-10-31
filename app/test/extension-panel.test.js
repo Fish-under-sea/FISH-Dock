@@ -536,3 +536,56 @@ test('t44 卸载：没有宿主进度时显示「卸载中」并给出本地合�
 })
 
 
+
+// t45：下载失败改成「一句人话 + 可展开详情」，不再把三源诊断拼成一堵墙。
+test('下载失败：一句人话 + 三个来源逐行，原始诊断留在折叠区', async () => {
+  const raw = {
+    fishFailure: true, stage: 'download',
+    message: '三个下载来源都没成功，插件没能更新。', hint: '检查网络或代理后重试。',
+    sources: [
+      { origin: 'npm 官方源', short: '版本与目录不一致', error: 'npm 包里的插件归档大小与官方目录不一致（30859277 ≠ 30957961）' },
+      { origin: 'npm 镜像', short: '跳转被拒绝', error: '插件下载跳转不属于官方发行资源服务' },
+      { origin: 'GitHub 发行包', short: '连接超时', error: '插件下载中断或超过大小限制' },
+    ],
+  }
+  const { panel } = make({ manage: async () => { throw JSON.stringify(raw) } })
+  await panel.load(); await panel.store()
+  await panel.action('install', 'fish.magpie')
+  const html = panel.render()
+  assert.match(html, /class="extension-failure"/)
+  assert.match(html, /<strong>下载失败<\/strong>/)
+  assert.match(html, /检查网络或代理后重试/)
+  const main = html.match(/<p class="extension-failure-main"[^>]*>([\s\S]*?)<\/p>/)[1]
+  assert.ok(!main.includes('；'), '主文案不许拼三源')
+  assert.ok(!main.includes('npm 官方源'), '主文案不逐源')
+  assert.ok(main.replace(/<[^>]+>/g, '').length <= 40, '主文案一句人话')
+  const list = html.match(/<ul class="extension-failure-sources">([\s\S]*?)<\/ul>/)[1]
+  assert.equal([...list.matchAll(/<li>/g)].length, 3, '折叠区三行')
+  assert.match(list, /npm 官方源<\/span> · <span class="extension-failure-short">版本与目录不一致/)
+  assert.match(list, /npm 镜像<\/span> · <span class="extension-failure-short">跳转被拒绝/)
+  assert.match(list, /GitHub 发行包<\/span> · <span class="extension-failure-short">连接超时/)
+  assert.match(list, /title="npm 包里的插件归档大小与官方目录不一致（30859277 ≠ 30957961）"/, '原始串在 title')
+  assert.match(html, /三个来源都没成功/)
+})
+test('校验失败/卸载失败按阶段给各自的人话，长技术串进折叠区', async () => {
+  for (const [stage, title] of [['verify', '校验失败'], ['uninstall', '卸载失败']]) {
+    const raw = { fishFailure: true, stage, kind: 'verify', message: '包可能损坏，请重试。', detail: '插件资源校验失败：backend.mjs 与清单摘要不符（很长很长的原始诊断）', sources: [] }
+    const { panel } = make({ installed: [row], manage: async () => { throw JSON.stringify(raw) } })
+    await panel.load(); await panel.store()
+    await panel.action(stage === 'uninstall' ? 'uninstall' : 'install', 'fish.magpie')
+    const html = panel.render()
+    assert.match(html, new RegExp(`<strong>${title}</strong>`), `${stage} 用「${title}」`)
+    assert.match(html, /技术细节/, '无逐源时折叠区给「技术细节」')
+    assert.match(html, /插件资源校验失败：backend\.mjs/, '原始串在折叠区')
+  }
+})
+
+// t45 验收 ④（静态兜底）：失败块样式必须最高 40vh、超出滚动、含内衬用 border-box。
+test('失败块样式：最高 40vh、超出滚动（t45 验收 ④）', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../src/pet/extensions.css'), 'utf8')
+  const block = css.match(/#island-settings \.extension-failure \{[^}]*\}/)
+  assert.ok(block, '有 .extension-failure 样式块')
+  assert.match(block[0], /max-height:\s*40vh/)
+  assert.match(block[0], /overflow:\s*auto/)
+  assert.match(block[0], /box-sizing:\s*border-box/)
+})

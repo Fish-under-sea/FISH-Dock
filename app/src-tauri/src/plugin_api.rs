@@ -62,17 +62,19 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
         let package=if action=="install"{
             if !id.starts_with("fish."){return Err("第三方插件请从「第三方插件」页按包名安装".into());}
             crate::github_access::require_plugin(context,&id)?;
-            // 文案分级（#37）：下载失败要能在面板上说清卡在「下载」这一步，而不是一句笼统报错。
-            Some(crate::plugin_store::obtain(context,&id).map_err(|error|format!("更新失败（下载阶段）：{error}"))?)
+            // 文案分级（#37 / t45）：下载失败要能在面板上说清卡在「下载」这一步，而不是一句笼统报错。
+            // fetch_from 已经返回结构化 JSON（一句人话 + 逐源短原因）；其余错误统一走 wrap 分级。
+            let data=crate::data::folder();
+            Some(crate::plugin_store::obtain(context,&id).map_err(|error|crate::plugin_failure::wrap("download",error,&data))?)
         }else{None};
         let manager=Manager{context};let node=node(context)?;
         let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
         match action.as_str(){
-            "install"=>{let (package,digest)=package.ok_or("插件包尚未就绪")?;let official=package.manifest.id.starts_with("fish.");crate::plugin_progress::report(&id,"提交",0,None)?;runner.install(&manager,package,&digest,official,node.as_deref())?;},
+            "install"=>{let (package,digest)=package.ok_or("插件包尚未就绪")?;let official=package.manifest.id.starts_with("fish.");crate::plugin_progress::report(&id,"提交",0,None)?;runner.install(&manager,package,&digest,official,node.as_deref()).map_err(|error|crate::plugin_failure::wrap("verify",error,&crate::data::folder()))?;},
             "enabled"=>runner.set_enabled(&manager,&id,enabled.ok_or("插件启停操作缺少目标状态")?,node.as_deref())?,
             // 自启动开关（#38）：写注册表 + Dock 运行中就立即拉起/停止该插件服务。
             "autostart"=>{runner.set_autostart(&manager,&id,enabled.ok_or("插件自启动设置缺少目标状态")?,node.as_deref())?;},
-            "uninstall"=>runner.uninstall(&manager,&id)?,
+            "uninstall"=>runner.uninstall(&manager,&id).map_err(|error|crate::plugin_failure::wrap("uninstall",error,&crate::data::folder()))?,
             _=>return Err("插件管理操作无效".into()),
         }
         let _=runner.view(&manager)?;drop(runner);
@@ -95,7 +97,8 @@ pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:Strin
     tauri::async_runtime::spawn_blocking(move||{
         let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
         let _progress=crate::plugin_progress::Guard::start(&query)?;
-        let (package,digest)=crate::plugin_thirdparty::obtain(context,&query).map_err(|error|format!("更新失败（下载阶段）：{error}"))?;
+        let data=crate::data::folder();
+        let (package,digest)=crate::plugin_thirdparty::obtain(context,&query).map_err(|error|crate::plugin_failure::wrap("download",error,&data))?;
         let manager=Manager{context};let node=node(context)?;
         let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
         crate::plugin_progress::report(&query,"提交",0,None)?;
