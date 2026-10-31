@@ -33,6 +33,17 @@ fn source(row: &Installed) -> Source { if row.official { Source::OfficialCatalog
 #[derive(Default)]
 pub struct RollbackPoint { pub archive: Option<Vec<u8>>, pub skipped: Vec<crate::storage_archive::SkippedFile>, pub warning: Option<String> }
 pub struct Manager<'a> { pub context: &'a Context }
+// EDIT_REGISTRY 是插件安装注册表的写串行锁。全仓锁序（t37 摸底，一处声明）：
+//
+//   plugin_runtime::CURRENT → EDIT_REGISTRY（本文件） → storage_context::EDIT
+//
+// 单向，无环：持 EDIT 的代码（storage_context/storage_version/
+// storage_transaction/storage_archive/config_backup 等存储层）从不回调 plugin
+// 层，全仓没有任何「持 EDIT 再拿 EDIT_REGISTRY」或「持 EDIT 再拿 CURRENT」的
+// 路径（grep 佐证，t37）。新代码必须维持这个方向：**在 EDIT 区块内禁止回调
+// plugin_install / plugin_runtime 的任何函数**；plugin 层要动存储，永远先拿
+// 上层的锁再进存储。嵌套（本文件 install 等持 EDIT_REGISTRY 时经 namespace/
+// save/notices 进 EDIT）是这个方向的一部分，不算违规。
 static EDIT_REGISTRY:std::sync::Mutex<()>=std::sync::Mutex::new(());
 impl Manager<'_> {
     fn registry(&self) -> Result<Registry,String> {
@@ -124,6 +135,10 @@ impl Manager<'_> {
         if let Err(error)=self.save(&registry) {
             // 注册表没写成：这一版不能留在盘上冒充「已安装」，旧命名空间也要还回去。
             // 以前这里既不删目录也不记提示，用户看到的是「装完了，列表里却没有」。
+            // 这段回滚在 EDIT_REGISTRY 锁内做（t37 评估过拆出锁外）：journal 按
+            // plugin-install-<id>.json 命名，延迟回滚会与并发 install 的 journal
+            // 互相删除——锁内的 save 失败时注册表仍指旧版，锁外的并发 install
+            // 看到的就是这个旧态，各自完整，互不踩 journal。
             let mut reason=error;
             if let Some(old)=&previous { if let Err(rollback)=self.namespace(old) { reason=format!("{reason}；旧版目录恢复待重试：{rollback}"); } }
             let journal_path=self.context.host.file("tmp",&journal_name)?;
@@ -814,6 +829,93 @@ mod tests {
         assert!(base.join("1.3.0").exists(),"当前版本目录不许被删");
         // 当前版本自身的清单与资源仍可用：只删邻居，没伤到激活版本。
         manager.verify(&active).unwrap();
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // t37 并发护栏：两线程对同一插件各做 50 次 install/uninstall。
+    // 锁序现状是单向链 CURRENT → EDIT_REGISTRY → EDIT（见文件头声明），无环——
+    // 这个测试**不是**在复现一个死锁（t37 摸底没找到能成环的路径），它防的是
+    // 将来有人在 EDIT 区块内回调 plugin 层引入环：一旦出现，两线程会在锁的
+    // 互相等待上卡死，30 秒哨兵先结束本测试并报失败。
+    #[test] fn concurrent_install_uninstall_never_deadlocks() {
+        let root=std::env::temp_dir().join(format!("fish-concurrent-{}-{}",std::process::id(),crate::now_ms())).join(".fish-dock");
+        fn namespace(root:PathBuf,id:&str,directory:&str)->Namespace {
+            crate::storage::initialize(&root,id,"1.0.0",1).unwrap();
+            let identity=crate::storage_context::Identity{plugin_id:id.into(),directory:directory.into(),plugin_version:"1.0.0".into(),data_schema:1};
+            std::fs::write(root.join("storage.json"),serde_json::to_vec(&identity).unwrap()).unwrap();
+            Namespace::existing(&root).unwrap().unwrap()
+        }
+        let host=namespace(root.join("host"),"host","host");
+        namespace(root.join(".plugin.acme.weather"),"acme.weather",".plugin.acme.weather");
+        let context=std::sync::Arc::new(Context{root:root.clone(),host});
+        let rounds=50u32;
+        let (done_a,a_rx)=std::sync::mpsc::channel::<Result<(),String>>();
+        let (done_b,b_rx)=std::sync::mpsc::channel::<Result<(),String>>();
+        // 线程 A：装 1.0.0 再卸载，50 次。线程 B：装 1.1.0 再卸载，50 次。同一 id，
+        // 全程走 EDIT_REGISTRY 串行；任何一侧卡住，主线程 recv_timeout 先超时。
+        // 两线程互踩是预期的（A 的 install 可能被 B 的 uninstall 拆掉）：install
+        // 失败重试一次、uninstall 遇「未安装」算已达成——这里只盯**卡死**与**终态**，
+        // 不盯每轮成败（那是串行测试的事）。
+        let tolerant=|error:&str| error.contains("插件未安装");
+        let context_a=std::sync::Arc::clone(&context);
+        let a=std::thread::Builder::new().name("t37-install-a".into()).spawn(move||{
+            let manager=Manager{context:&context_a};
+            for round in 0..rounds {
+                let (package,digest)=package_of("acme.weather","1.0.0",1);
+                match manager.install(package,&digest,false) {
+                    Ok(_)=>{},
+                    Err(error) if tolerant(&error)=>{},
+                    Err(error)=>{ let _=done_a.send(Err(format!("A 第 {round} 轮 install：{error}"))); return; }
+                }
+                if let Err(error)=manager.uninstall("acme.weather") {
+                    if !tolerant(&error) { let _=done_a.send(Err(format!("A 第 {round} 轮 uninstall：{error}"))); return; }
+                }
+            }
+            let _=done_a.send(Ok(()));
+        }).unwrap();
+        let context_b=std::sync::Arc::clone(&context);
+        let b=std::thread::Builder::new().name("t37-install-b".into()).spawn(move||{
+            let manager=Manager{context:&context_b};
+            for round in 0..rounds {
+                let (package,digest)=package_of("acme.weather","1.1.0",1);
+                match manager.install(package,&digest,false) {
+                    Ok(_)=>{},
+                    Err(error) if tolerant(&error)=>{},
+                    Err(error)=>{ let _=done_b.send(Err(format!("B 第 {round} 轮 install：{error}"))); return; }
+                }
+                if let Err(error)=manager.uninstall("acme.weather") {
+                    if !tolerant(&error) { let _=done_b.send(Err(format!("B 第 {round} 轮 uninstall：{error}"))); return; }
+                }
+            }
+            let _=done_b.send(Ok(()));
+        }).unwrap();
+        // 哨兵：任何一侧 30 秒没有完成一轮回报就算卡死。recv_timeout 对两个
+        // 通道轮流等，先到的先收；总窗口 30 秒硬上限。
+        let wait=|rx:std::sync::mpsc::Receiver<Result<(),String>>,who:&str| {
+            let began=std::time::Instant::now();
+            loop {
+                match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                    Ok(result)=>return result,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)=>if began.elapsed()>std::time::Duration::from_secs(30) {
+                        return Err(format!("{who} 30 秒未完成：并发卡死（锁序成环）"));
+                    },
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected)=>return Err(format!("{who} 线程提前结束")),
+                }
+            }
+        };
+        let ra=wait(a_rx,"A"); let rb=wait(b_rx,"B");
+        // 两线程都要收尾（join 卡住同样说明有环）。
+        let ja=a.join(); let jb=b.join();
+        let failures=match (ra,rb) {
+            (Ok(()),Ok(()))=>Vec::new(),
+            (ra,rb)=>[ra.err().map(|e|e.to_string()),rb.err().map(|e|e.to_string())].into_iter().flatten().collect::<Vec<_>>(),
+        };
+        assert!(ja.is_ok()&&jb.is_ok(),"线程 join 卡住：并发有环（{:?}）",(ja.err(),jb.err()));
+        assert!(failures.is_empty(),"并发 50×2 轮有失败：{failures:?}");
+        // 终态一致：注册表空、包目录没了、没有留安装事务。
+        let manager=Manager{context:&context};
+        assert!(manager.list().unwrap().is_empty(),"50 轮后注册表应为空");
+        assert!(!root.join("host").join("packages").join("acme.weather").exists(),"50 轮后 packages/acme.weather 应不存在");
+        assert!(manager.pending().is_empty(),"不许残留「安装未完成」");
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
     // 真实发行包回归（#f3「安装插件依然会直接安装更新不上」）。
