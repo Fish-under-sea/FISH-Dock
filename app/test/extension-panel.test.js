@@ -507,18 +507,17 @@ test('t44 进度不回弹：轮询换源后 DOM 的百分比与阶段不倒退',
   await pending
 })
 
-test('t44 粒子层：进度卡带 canvas、模式为 in，且 pointer-events 不挡内容（DOM 契约）', async () => {
-  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', bytes: 4096, dependencies: [] }
+test('进度卡只有基本条：没有 canvas 粒子层，条与文字仍在（2026-11-01 用户要求）', async () => {
+  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', dependencies: [], url: 'https://example/x', sha256: 'a'.repeat(64), bytes: 1 }
   let release; const gate = new Promise(r => { release = r })
   const { panel, timers } = make({ entries: [entry], manage: () => gate, progressState: () => ({ items: [{ id: 'fish.magpie', phase: '下载', received: 300, total: 1000, active: true }] }) })
   await panel.load(); await panel.store()
   const pending = panel.action('install', 'fish.magpie')
   await nextTimer(timers, 50)
   const html = panel.render()
-  assert.match(html, /<canvas class="ext-bar-fx" data-ext-fx="fish\.magpie" data-mode="in" data-pct="30"/)
-  // 粒子层在 .meter 内、条之外；标题/百分比/按钮都不受它影响。
-  assert.match(html, /<div class="meter"><div class="bar"/)
-  assert.match(html, /<\/div><div class="detail">30% · 300 B \/ 1000 B<\/div>/)
+  assert.doesNotMatch(html, /ext-bar-fx|canvas/, '粒子层已删除')
+  assert.match(html, /<div class="meter"><div class="bar"/, '基本进度条还在')
+  assert.match(html, /30% · 300 B \/ 1000 B/, '百分比与字节仍在')
   release({ installed: [] })
   await pending
 })
@@ -532,7 +531,8 @@ test('t44 卸载：没有宿主进度时显示「卸载中」并给出本地合�
   await nextTimer(timers, 50)
   const html = panel.render()
   assert.match(html, /卸载中/)
-  assert.match(html, /data-mode="out"/)
+  // 2026-11-01：粒子层已删除，不再有 data-mode 的 canvas
+  assert.doesNotMatch(html, /data-mode="out"/)
   release({ installed: [] })
   await pending
 })

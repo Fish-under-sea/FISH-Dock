@@ -170,11 +170,11 @@
         for (const item of progress) progressSeen.set(item.id, mergeProgress(progressSeen.get(item.id), item))
         // 卸载没有宿主进度：本地按轮询节拍合成 0→100，驱动长条缩短与粒子消散。
         if (busyKind === 'uninstall' && uninstallTicks < 12) uninstallTicks += 1
-        if (busy) { redraw(); startFx(); progressTimer = setTimeout(poll, 150) }
+        if (busy) { redraw(); progressTimer = setTimeout(poll, 150) }
       }).catch(() => { progress = [] })
       progressTimer = setTimeout(poll, 50)
       try { await job() } catch (e) { error = failureOf(e) }
-      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); redraw() }
+      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; redraw() }
     }
     // t47 粒子动效：48 个小方块，canvas 绘制，requestAnimationFrame 推进。
     // 形态修正（t47，用户看 70% 截图后提的三点）：
@@ -483,7 +483,7 @@
         const width = pct == null ? 30 : (out ? Math.max(2, 100 - pct) : pct)
         const phaseText = known && seen.switching && !out ? text('切换来源', 'Switching source') : phaseName(p.phase)
         const amount = p.total ? `${formatBytes(p.received)} / ${formatBytes(p.total)}` : formatBytes(p.received)
-        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div><canvas class="ext-bar-fx" data-ext-fx="${esc(p.id || '')}" data-mode="${out ? 'out' : 'in'}" data-pct="${pct == null ? 0 : pct}" aria-hidden="true"></canvas></div><div class="detail">${p.local === 'out' ? `${pct == null ? 0 : pct}%` : `${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}`}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
+        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div></div><div class="detail">${p.local === 'out' ? `${pct == null ? 0 : pct}%` : `${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}`}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
       }
       const items = progressItems()
       const progressHTML = items.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${items.map(progressCard).join('')}</div>` : ''
@@ -507,7 +507,7 @@
       }
       panel.querySelectorAll('[data-extension-third]').forEach(b => { b.onclick = () => b.dataset.extensionThird === 'search' ? thirdparty() : installThird(b.dataset.third) })
       // t44：挂载时若进度弹窗已经在（例如切回本页），重新点燃粒子循环；轮询也会再点。
-      if (panel.querySelector('.ext-progress-backdrop')) startFx()
+      // 2026-11-01 用户要求：去掉粒子动效，只保留最基本的进度条（不再启动 rAF）
       void load()
     }
     return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth: () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }, pages: () => (view?.installed || []).filter(r => r.running && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, key: r.plugin.manifest.id + '/' + p.id }))) }
