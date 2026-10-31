@@ -77,3 +77,72 @@
 #island-settings .extension-card-actions .pbtn.hook[data-hook='none']:hover { filter: none; }
 /* 目录条目的一行说明（OFM 的「此插件于 10 月 25 日暂停维护」）。 */
 #island-settings .extension-card .extension-note { color: var(--g4); font-size: 12px; }
+
+/* 插件下载进度弹窗（t29 的 DOM / t42 的样式）。与 settings.css 的确认弹窗
+   （#island-settings .s-confirm-dialog）同一套语言：16px 内衬、1px --g3 边框、
+   12px 圆角、--g1 底、--fg 字；标题 16px、按钮区右对齐 gap 8px。
+   颜色一律走 settings.css 的主题变量（--g1/--g2/--g3/--g5/--fg/--hook-off），
+   不写死 hex；浅色主题由 .tb-light #island-settings 的变量覆盖自动跟随。
+   遮罩点击不关闭：进度要等宿主返回（取消走弹窗里的按钮，发 extension_cancel）。 */
+#island-settings .ext-progress-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  background: rgba(0, 0, 0, .45);
+}
+#island-settings .ext-progress {
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 40px));
+  max-height: min(70vh, calc(100vh - 40px));
+  padding: 16px;
+  border: 1px solid var(--g3);
+  border-radius: 12px;
+  background: var(--g1);
+  color: var(--fg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .32);
+  overflow: auto;
+}
+#island-settings .ext-progress .ph {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+#island-settings .ext-progress .ph strong { font-size: 16px; font-weight: 600; }
+#island-settings .ext-progress .ph span { color: var(--g5); font-size: 12px; }
+#island-settings .ext-progress .bar {
+  position: relative;
+  height: 8px;
+  margin: 12px 0;
+  border-radius: 4px;
+  background: var(--g2);
+  overflow: hidden;
+}
+#island-settings .ext-progress .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--hook-off);
+  transition: width .18s linear;
+}
+/* total 未知：不确定态——轨道上一段来回走的填充，不给假百分比。 */
+#island-settings .ext-progress .bar.unsure i {
+  width: 30%;
+  animation: ext-progress-unsure 1.4s ease-in-out infinite;
+}
+@keyframes ext-progress-unsure {
+  0% { margin-left: -30%; }
+  100% { margin-left: 100%; }
+}
+#island-settings .ext-progress .detail { margin: 0 0 12px; color: var(--g5); font-size: 12px; }
+#island-settings .ext-progress .foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  #island-settings .ext-progress .bar.unsure i { animation: none; margin-left: 0; }
+}
