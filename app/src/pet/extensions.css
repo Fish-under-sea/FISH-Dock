@@ -113,8 +113,11 @@
   --ext-fx-bar: #ffffff;
   --ext-fx-particle: rgba(255, 255, 255, .85);
   /* t50：弹性进度（内化 codrops ElasticProgress 的形）——按钮色 #4e80dd、填充 #77c2ff */
-  --ext-fx-body: #4e80dd;
-  --ext-fx-fill: #77c2ff;
+  /* 2026-11-01 用户要求：动效配色跟随 Windows 强调色（设置里「跟随系统」那档），
+     不再写死示例的灰紫/蓝。--sys-accent 由 settings.js 发布，读不到时退回浅蓝。 */
+  --ext-fx-body: var(--sys-accent, #5e9bff);
+  --ext-fx-fill: var(--sys-accent, #5e9bff);
+  --ext-fx-highlight: var(--sys-accent, #5e9bff);
 }
 .tb-light #island-settings .ext-progress {
   --ext-fx-bar: #1b1b1b;
@@ -134,7 +137,7 @@
 /* t49：条形不再画连续填充，由 canvas 画「一排名小刻度」——未填暗格、填过实心，
    形态取自 Oleg Frolov「Download IV」的单色刻度条（#0D121C/#fff/#84868B 那套）。
    DOM 里的 .bar 保留 aria 语义与 inline width，不再显示自己的填充。 */
-#island-settings .ext-progress .meter { position: relative; margin: 6px 0 6px; height: 56px; }
+#island-settings .ext-progress .meter { position: relative; margin: 6px 0 6px; height: 64px; }
 #island-settings .ext-progress .bar {
   position: absolute;
   inset: 0;

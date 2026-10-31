@@ -266,7 +266,7 @@
     // 并跟着岛继续变形（长高、换侧）。
     seatDialog(confirmDialog)
     window.DialogAnchor?.watch(confirmDialog, document.getElementById('island'), viewportNow, anchorNow)
-    confirmOk.focus()
+    confirmOk.focus({ preventScroll: true })   // 焦点别把长文案顶出可视区（用户 2026-11-01 截图：首行被切）
     // 从这一刻起再等 CONFIRM_ARM_MS，才接受点击/回车（见 confirmTooSoon）。
     confirmArmedAt = Date.now() + CONFIRM_ARM_MS
   }
@@ -3423,6 +3423,12 @@
     layer.classList.toggle('extension-compact', extension && !servicePage && !wide)
     const width = servicePage ? SERVICE_W : wide ? WIDE_W : extension ? 620 : 0
     layer.style.width = width ? `${Math.min(width, screen.availWidth - 40)}px` : ''
+    // 2026-11-01：把「跟随系统」的强调色发布成 CSS 变量，供插件进度弹窗的弹性动效取值
+    // （用户要求动效配色跟随 Windows 主题色，而不是写死一套示例色）。
+    {
+      const want = String(snap?.winLook?.accent || '').toLowerCase()
+      layer.style.setProperty('--sys-accent', /^#[0-9a-f]{6}$/.test(want) ? want : '#5e9bff')
+    }
     // 关于页的公告：还在读就排一次「八秒后改成超时」的重绘（见 aboutHTML）。
     noteNotesLoading(tab === 'now' ? snap.update?.notes?.state || 'loading' : 'ok')
     // 打开关于页且缓存超过 5 分钟：问一次宿主（#39；同一份缓存只问一次）。

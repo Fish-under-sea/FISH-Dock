@@ -101,6 +101,11 @@
     // t44：进度弹窗的显示层状态——当前操作种类（install/uninstall/…）、每个 id
     // 见过的进度峰值（换源不回弹）、卸载没有宿主进度时的本地合成节拍、粒子动效。
     let busyKind = '', uninstallTicks = 0
+    // 用户实测 2026-11-01：确认弹窗还没点，进度弹窗已经在它背后冒出来了。原因是
+    // run() 一开始就置了 busy/busyKind，而 job() 的第一步是 await confirm()；这段
+    // 等待里 progressItems() 已经把「本地合成的卸载进度卡」算进去了。再加一道闸：
+    // 只有确认通过（真正开始干活）之后才允许显示进度卡。
+    let actionStarted = false
     const progressSeen = new Map()
     let fxRaf = 0
     const fxParticles = new Map()
@@ -172,7 +177,7 @@
     const acceptView = next => { view = { ...next, star: next.star || view?.star }; node = view.node || ''; scheduleAuth() }
     const run = async (name, job, kind = '') => {
       if (busy) return
-      busy = name; busyKind = kind; error = ''; progress = []; progressSeen.clear(); uninstallTicks = 0; redraw()
+      busy = name; busyKind = kind; error = ''; progress = []; progressSeen.clear(); uninstallTicks = 0; actionStarted = false; redraw()
       // 安装/更新会下载：轮询宿主的进度快照（extension_progress，按 id 各一条），
       // 把「请稍候」换成带阶段/百分比/取消的进度弹窗（t29）。其它操作轮询到不活跃就停。
       const poll = () => invoke('extension_progress').then(got => {
@@ -232,21 +237,22 @@
       const mode = cv.dataset.mode === 'out' ? 'out' : 'in'
       const vars = typeof getComputedStyle === 'function' ? getComputedStyle(cv) : null
       const pick = (name, fallback) => { const v = vars ? vars.getPropertyValue(name).trim() : ''; return v || fallback }
-      const body = pick('--ext-fx-body', '#4e80dd')
-      const fill = pick('--ext-fx-fill', '#77c2ff')
+      const body = pick('--ext-fx-body', '#b4bad2')
+      const fill = pick('--ext-fx-fill', '#686e85')
+      const highlight = pick('--ext-fx-highlight', '#ffab91')
       const centerY = h / 2
       // t50：内化 codrops ElasticProgress 的「形」——闭合时是一枚圆形按钮（向上箭头），
       // 开始下载/卸载后它弹性地拉长成一条进度条：主体 #4e80dd、填充 #77c2ff，
       // 箭头随形变倾斜 70° 并淡出。弹簧用一阶速度积分（0.22 / 0.72），给出一次可见回弹。
       let st = fxElastic.get(cv)
       if (!st) { st = { open: 0, vel: 0 }; fxElastic.set(cv, st) }
-      st.vel += (1 - st.open) * 0.22
-      st.vel *= 0.72
+      st.vel += (1 - st.open) * 0.09
+      st.vel *= 0.82   // barElasticPeriod ≈ 0.6s，一次可见过冲
       st.open = Math.max(0, Math.min(1.12, st.open + st.vel))
       const open = Math.min(1, st.open)
       const over = Math.max(0, st.open - 1)
-      const circleD = Math.min(52, Math.max(28, h - 4))
-      const barH = 8
+      const circleD = Math.min(60, Math.max(28, h - 4))   // buttonSize 60
+      const barH = 10   // barHeight 10
       const bh = circleD + (barH - circleD) * open
       const full = w + over * 26
       const bw = circleD + (full - circleD) * open
@@ -262,11 +268,11 @@
       // 填充：随进度从左往右长，内缩 2px 形成一圈“描边”感
       if (open > 0.35) {
         const inner = Math.max(2, bh - 4)
-        const fillW = Math.max(0, (bw - 4) * pct)
+        const fillW = Math.max(0, (bw - 8) * pct)   // barInset 4 两侧
         if (fillW > 0.5) {
           ctx.globalAlpha = 1
           ctx.fillStyle = fill
-          roundRect(x + 2, centerY - inner / 2, fillW, inner, inner / 2)
+          roundRect(x + 4, centerY - inner / 2, fillW, inner, Math.min(3, inner / 2))
         }
       }
       // 箭头：只在闭合/半开时出现，随形变倾斜并淡出（对应 labelTilt = 70）
@@ -274,7 +280,7 @@
         const s = Math.max(5, Math.min(9, bh * 0.18))
         ctx.save()
         ctx.globalAlpha = 1 - open / 0.9
-        ctx.strokeStyle = fill
+        ctx.strokeStyle = highlight   // 箭头用 highlightColor
         ctx.lineWidth = 2.4
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
@@ -377,7 +383,7 @@
       return run(id, async () => {
         if (action === 'install' && !(await confirm(text(`安装 ${entry.name} ${entry.version}？\n依赖：${entry.dependencies.join('、') || '无'}\n插件为独立进程，可使用声明的网络、服务及本地存储能力。`, `Install ${entry.name} ${entry.version}?\nDependencies: ${entry.dependencies.join(', ') || 'None'}\nThis extension runs as a separate local process.`)))) return
         if (action === 'uninstall' && !(await confirm(text(`卸载 ${row.plugin.manifest.name}？将停止插件并保留凭据和配置。`, `Uninstall ${row.plugin.manifest.name}? Credentials and settings will be kept.`)))) return
-        acceptView(await invoke('extension_manage', { action, id, enabled: action === 'install' ? true : action === 'enabled' ? !row.running : action === 'autostart' ? !autostartOn(row) : null, nodePath: null, confirm: true }))
+        actionStarted = true; acceptView(await invoke('extension_manage', { action, id, enabled: action === 'install' ? true : action === 'enabled' ? !row.running : action === 'autostart' ? !autostartOn(row) : null, nodePath: null, confirm: true }))
       }, action)
     }
     async function runtime(value) {
@@ -502,7 +508,7 @@
       const progressItems = () => {
         const items = progress.slice()
         // 卸载没有宿主进度：面板本地合成一张卡（phase 卸载，0→96%），节拍来自同一轮询。
-        if (busyKind === 'uninstall' && busy && !items.some(item => item.id === busy)) {
+        if (busyKind === 'uninstall' && busy && actionStarted && !items.some(item => item.id === busy)) {
           items.push({ id: busy, phase: '卸载', received: Math.min(96, uninstallTicks * 8), total: 100, active: true, local: 'out' })
         }
         return items
