@@ -106,6 +106,27 @@
     // 等待里 progressItems() 已经把「本地合成的卸载进度卡」算进去了。再加一道闸：
     // 只有确认通过（真正开始干活）之后才允许显示进度卡。
     let actionStarted = false
+    // 2026-11-01：进度不再弹窗——让「安装/更新」按钮自己变成进度胶囊（原生 CSS+JS，
+    // 不引 GSAP）。id -> { pct, phase, mode }，由同一份 extension_progress 轮询喂。
+    const inlineProgress = new Map()
+
+      // 2026-11-01：安装/更新不再弹任何窗——按钮自己就是进度条。形态取自用户给的 pen
+      // （faustdp / yXypKM）：药丸收成小圆 → 圆环跑进度 → 弹回药丸；这里用 SVG 属性
+      // 与 CSS 过渡原生实现，不引 GSAP/Snap。真实进度写进 --pct，圆环用 dashoffset 表示。
+      const INLINE_C = 2 * (Math.PI * 8.6)
+      const inlineButton = (id, prog) => {
+        const pct = Math.max(0, Math.min(100, Math.round(prog.pct || 0)))
+        const done = pct >= 100
+        const label = done ? text('完成', 'Done') : pct + '%'
+        const offset = (INLINE_C * (1 - pct / 100)).toFixed(2)
+        return `<button type="button" class="pbtn sm inline${pct > 0 ? ' running' : ''}${done ? ' done' : ''}" data-inline-prog="${esc(id)}" data-extension-cancel-pill="${esc(id)}" style="--pct:${pct}" aria-label="${esc(prog.phase || '')} ${pct}%">`
+          + `<svg viewBox="0 0 96 24" width="96" height="24" aria-hidden="true">`
+          + `<rect class="pill" x="1" y="1" width="94" height="22" rx="11"></rect>`
+          + `<circle class="ring" cx="12" cy="12" r="8.6" style="stroke-dasharray:${INLINE_C.toFixed(2)};stroke-dashoffset:${offset}"></circle>`
+          + `<path class="arrow" d="M12 8.5 v7 M9.2 12.2 l2.8 2.8 2.8 -2.8"></path>`
+          + `<text class="lbl" x="26" y="15.6">${esc(label)}</text>`
+          + `</svg></button>`
+      }
     const progressSeen = new Map()
     let fxRaf = 0
     const fxParticles = new Map()
@@ -186,11 +207,13 @@
         for (const item of progress) progressSeen.set(item.id, mergeProgress(progressSeen.get(item.id), item))
         // 卸载没有宿主进度：本地按轮询节拍合成 0→100，驱动长条缩短与粒子消散。
         if (busyKind === 'uninstall' && uninstallTicks < 12) uninstallTicks += 1
+        for (const item of progress) inlineProgress.set(item.id, { pct: (progressSeen.get(item.id) || {}).peak ?? 0, phase: item.phase, mode: 'in' })
+        if (busyKind === 'uninstall' && busy && actionStarted) inlineProgress.set(busy, { pct: Math.min(96, uninstallTicks * 8), phase: '卸载', mode: 'out' })
         if (busy) { redraw(); startFx(); progressTimer = setTimeout(poll, 150) }
       }).catch(() => { progress = [] })
       progressTimer = setTimeout(poll, 50)
       try { await job() } catch (e) { error = failureOf(e) }
-      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); redraw() }
+      finally { busy = ''; busyKind = ''; clearTimeout(progressTimer); progress = []; progressSeen.clear(); uninstallTicks = 0; stopFx(); inlineProgress.clear(); redraw() }
     }
     // t47 粒子动效：48 个小方块，canvas 绘制，requestAnimationFrame 推进。
     // 形态修正（t47，用户看 70% 截图后提的三点）：
@@ -381,7 +404,8 @@
         redraw(); return
       }
       return run(id, async () => {
-        if (action === 'install' && !(await confirm(text(`安装 ${entry.name} ${entry.version}？\n依赖：${entry.dependencies.join('、') || '无'}\n插件为独立进程，可使用声明的网络、服务及本地存储能力。`, `Install ${entry.name} ${entry.version}?\nDependencies: ${entry.dependencies.join(', ') || 'None'}\nThis extension runs as a separate local process.`)))) return
+        // 2026-11-01 用户要求：安装/下载不再弹确认——点按钮直接在按钮上跑动画。
+        if (false && action === 'install' && !(await confirm(text(`安装 ${entry.name} ${entry.version}？\n依赖：${entry.dependencies.join('、') || '无'}\n插件为独立进程，可使用声明的网络、服务及本地存储能力。`, `Install ${entry.name} ${entry.version}?\nDependencies: ${entry.dependencies.join(', ') || 'None'}\nThis extension runs as a separate local process.`)))) return
         if (action === 'uninstall' && !(await confirm(text(`卸载 ${row.plugin.manifest.name}？将停止插件并保留凭据和配置。`, `Uninstall ${row.plugin.manifest.name}? Credentials and settings will be kept.`)))) return
         actionStarted = true; acceptView(await invoke('extension_manage', { action, id, enabled: action === 'install' ? true : action === 'enabled' ? !row.running : action === 'autostart' ? !autostartOn(row) : null, nodePath: null, confirm: true }))
       }, action)
@@ -486,7 +510,8 @@
       }).join('')
       const storeCards = entries.map(p => {
         const existing = installed.find(r => r.plugin.manifest.id === p.id && r.plugin.pending !== true), update = existing && outdated(p, existing.plugin)
-        const actions = !unlocked(p.id) ? `<span class="note">${esc(text('登录并验证 Star 后解锁', 'Sign in and verify your star to unlock'))}</span>` : existing && !update && !existing.packageMissing ? `<span class="d">${esc(text('已安装', 'Installed'))}</span>` : button('install', p.id, existing?.packageMissing ? text('重新安装', 'Reinstall') : existing ? text('更新', 'Update') : text('安装', 'Install'))
+        const prog = inlineProgress.get(p.id)
+        const actions = prog ? inlineButton(p.id, prog) : !unlocked(p.id) ? `<span class="note">${esc(text('登录并验证 Star 后解锁', 'Sign in and verify your star to unlock'))}</span>` : existing && !update && !existing.packageMissing ? `<span class="d">${esc(text('已安装', 'Installed'))}</span>` : button('install', p.id, existing?.packageMissing ? text('重新安装', 'Reinstall') : existing ? text('更新', 'Update') : text('安装', 'Install'))
         // 作者按数组渲染（「A、B」）；维护者字段 2.0.0 起整体去掉，卡上不再有这一行
         //（#22-4）。旧目录已被宿主归一成同一结构，这里不再读 author/maintainer。
         const authors = esc(authorsOf(p).join(text('、', ', ')) || '—')
@@ -526,7 +551,7 @@
         return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div><canvas class="ext-bar-fx" data-ext-fx="${esc(p.id || '')}" data-mode="${out ? 'out' : 'in'}" data-pct="${pct == null ? 0 : pct}" aria-hidden="true"></canvas></div><div class="detail">${p.local === 'out' ? `${pct == null ? 0 : pct}%` : `${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}`}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
       }
       const items = progressItems()
-      const progressHTML = items.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${items.map(progressCard).join('')}</div>` : ''
+      const progressHTML = false && items.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${items.map(progressCard).join('')}</div>` : ''
       return `<section class="extension-panel" aria-labelledby="extension-heading" aria-busy="${!!busy}"><h3 id="extension-heading">${esc(text('可安装扩展', 'Installable extensions'))}</h3>${starNotice}<div class="extension-actions"><button type="button" class="pbtn" data-extension-view="installed" aria-pressed="${active === 'installed'}"${disabled}>${esc(text('已安装', 'Installed'))}</button><button type="button" class="pbtn" data-extension-view="store" aria-pressed="${active === 'store'}"${disabled}>${esc(text('官方插件', 'Official plugins'))}</button><button type="button" class="pbtn" data-extension-view="thirdparty" aria-pressed="${active === 'thirdparty'}"${disabled}>${esc(text('第三方插件', 'Third-party plugins'))}</button><button type="button" class="pbtn" data-extension-refresh${disabled}>${esc(text('检查更新', 'Check for updates'))}</button></div>${result}${storeError ? `<p class="bad" role="alert">${esc(storeError)}</p>` : ''}<div class="extension-list">${active === 'thirdparty' ? thirdPanel : active === 'installed' ? cards || `<p class="note">${esc(text('尚未安装扩展。可从官方商店按需选择，现有小工具仍在下方。', 'No extensions installed. Choose from the official store. Existing widgets remain below.'))}</p>` : `${cached ? `<p role="status">${esc(text('当前使用缓存目录', 'Using cached catalog'))}</p>` : ''}${storeCards || `<p class="note">${esc(busy === 'store' ? text('正在读取官方目录…', 'Loading official catalog…') : text('暂无可用目录，请检查更新重试。', 'No catalog available. Check for updates to retry.'))}</p>`}${!entries.length && cards ? `<h4>${esc(text('已安装扩展', 'Installed extensions'))}</h4>${cards}` : ''}`}</div><details><summary>${esc(text('运行依赖', 'Runtime dependencies'))}</summary>${runtimeStatus}<label for="extension-node">${esc(text('Node 可执行文件路径', 'Node executable path'))}</label><input id="extension-node" class="extension-node" type="text" value="${esc(node)}" spellcheck="false"${disabled}><button type="button" class="pbtn" data-extension-runtime${disabled}>${esc(text('保存依赖路径', 'Save runtime path'))}</button><p class="note">${esc(text('Node 插件使用已校验的宿主 Node。开发环境可指定完整路径；留空恢复宿主运行资源。', 'Extensions use the verified host Node. Development builds can specify a full path. Leave empty to restore the host runtime.'))}</p></details>${progressHTML}${busy && !progressHTML ? `<p role="status">${esc(text('正在执行，请稍候…', 'Working, please wait…'))}</p>` : ''}${failureHtml(error)}</section>`
     }
     function mount(root) {
@@ -537,7 +562,8 @@
       panel.querySelector('[data-extension-refresh]').onclick = () => checkUpdates()
       panel.querySelectorAll('[data-extension-action]').forEach(b => { b.onclick = () => action(b.dataset.extensionAction, b.dataset.extensionId) })
       // t29：进度弹窗的取消——真取消（宿主在下一个块返回「已取消」）。
-      panel.querySelectorAll('[data-extension-cancel]').forEach(b => { b.onclick = () => { invoke('extension_cancel', { id: b.dataset.extensionCancel }); } })
+      panel.querySelectorAll('[data-extension-cancel-pill]').forEach(b => { b.onclick = () => { invoke('extension_cancel', { id: b.dataset.extensionCancelPill }) } })
+    panel.querySelectorAll('[data-extension-cancel]').forEach(b => { b.onclick = () => { invoke('extension_cancel', { id: b.dataset.extensionCancel }); } })
       panel.querySelectorAll('[data-extension-page]').forEach(b => { b.onclick = () => { const id = b.dataset.extensionPage.split('/')[0]; if (unlocked(id)) openPage(b.dataset.extensionPage) } })
       panel.querySelector('[data-extension-runtime]').onclick = () => runtime(panel.querySelector('#extension-node').value)
       const thirdBox = panel.querySelector('#extension-third-query')

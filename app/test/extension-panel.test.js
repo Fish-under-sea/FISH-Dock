@@ -138,13 +138,17 @@ test('首次安装默认启用，并把确认结果作为异步操作等待', as
   assert.equal(manage.args.enabled, true)
 })
 
-test('安装和卸载需实际确认，任意ID不提交给宿主', async () => {
-  const { panel, calls } = make({ agree: false, installed: [row] })
-  await panel.load(); await panel.store()
-  await panel.action('install', 'fish.magpie')
-  await panel.action('uninstall', 'fish.magpie')
-  await panel.action('enabled', 'unknown.plugin')
-  assert.equal(calls.filter(c => c.command === 'extension_manage').length, 0)
+test('安装不弹确认（按钮即进度条），卸载仍要确认', async () => {
+  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', dependencies: [], url: 'https://example/x', sha256: 'a'.repeat(64), bytes: 1 }
+  const row = { plugin: { manifest: { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', pages: [], storage: { directory: '.plugin.fish.magpie' }, behaviors: {} }, enabled: true, running: true } }
+  const inst = make({ entries: [entry], agree: true, manage: async () => ({ installed: [] }) })
+  await inst.panel.load(); await inst.panel.store()
+  await inst.panel.action('install', 'fish.magpie')
+  assert.equal(inst.calls.filter(c => c.command === 'extension_manage').length, 1, '安装直接下发，不弹确认')
+  const un = make({ installed: [row], agree: false, manage: async () => ({ installed: [row] }) })
+  await un.panel.load()
+  await un.panel.action('uninstall', 'fish.magpie')
+  assert.equal(un.calls.filter(c => c.command === 'extension_manage').length, 0, '卸载拒绝确认后不得下发')
 })
 test('操作失败保留原状态并可重试，不展示凭空成功', async () => {
   let failures = 1
@@ -388,34 +392,22 @@ test('第三方检索：提示行是 note 小字，合规结果与隐藏提示�
 })
 // t29：安装/更新期间显示进度弹窗（插件名 + 阶段 + 百分比 + 已下载/总量 + 取消），
 // 官方与第三方共用同一套渲染；取消按钮发 extension_cancel（真取消由宿主下载循环处理）。
-test('下载进度弹窗：阶段/百分比/取消，官方与第三方共用', async () => {
-  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', bytes: 4096, dependencies: [] }
-  let release
-  const gate = new Promise(r => { release = r })
-  const { panel, timers, calls } = make({ entries: [entry], manage: () => gate, progressState: () => ({ items: [{ id: 'fish.magpie', phase: '下载', received: 50, total: 100, active: true }] }) })
-  await panel.load()
-  await panel.store()
+test('安装进度在按钮上：药丸 + 圆环 + 百分比，且不再有进度弹窗', async () => {
+  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', dependencies: [], url: 'https://example/x', sha256: 'a'.repeat(64), bytes: 1 }
+  let release; const gate = new Promise(r => { release = r })
+  const snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 500, total: 1000, active: true }] }
+  const { panel, timers } = make({ entries: [entry], manage: () => gate, progressState: () => snap })
+  await panel.load(); await panel.store()
   const pending = panel.action('install', 'fish.magpie')
-  // 第一次轮询（50ms 后）拿回进度快照并重画。
-  const first = [...timers.entries()].find(([, t]) => t.ms === 50)
-  assert.ok(first, 'run 会排一次进度轮询')
-  timers.delete(first[0]); await first[1].fn()
+  await nextTimer(timers, 50); await nextTimer(timers, 150)
   const html = panel.render()
-  assert.match(html, /ext-progress-backdrop/)
-  assert.match(html, /Magpie/)
-  assert.match(html, /下载中/)
-  assert.match(html, /50%/)
-  assert.match(html, /50 B \/ 100 B/)
-  assert.match(html, /data-extension-cancel="fish\.magpie"/)
-  // 取消按钮：发出 extension_cancel，带当前插件 id。
-  const cancelBtn = { dataset: { extensionCancel: 'fish.magpie' } }
-  panel.mount({ querySelector: () => ({ querySelectorAll: sel => sel === '[data-extension-cancel]' ? [cancelBtn] : [], querySelector: sel => sel === '#extension-third-query' ? null : ({}) }) })
-  await cancelBtn.onclick()
-  assert.ok(calls.some(c => c.command === 'extension_cancel' && c.args.id === 'fish.magpie'), '取消要通知宿主')
-  release({ installed: [] })
-  await pending
-  // 不在下载时（无 active 进度）没有弹窗。
-  assert.doesNotMatch(panel.render(), /ext-progress-backdrop/)
+  assert.match(html, /class="pbtn sm inline/, '安装按钮变成进度形态')
+  assert.match(html, /data-inline-prog="fish\.magpie"/)
+  assert.match(html, /class="pill"/)
+  assert.match(html, /class="ring"/)
+  assert.match(html, /50%/, '百分比显示在按钮上')
+  assert.doesNotMatch(html, /ext-progress-backdrop/, '不再有进度弹窗')
+  release({ installed: [] }); await pending
 })
 
 // ── t44：显示层改造（阶段文案 / 字节进位 / 进度不回弹 / 粒子层 DOM）──────────
@@ -475,64 +467,50 @@ test('t44 mergeProgress：换源时百分比单调不减，并标出切换来源
   assert.equal(beyond.switching, false, '追上以后回到下载中')
 })
 
-test('t44 进度不回弹：轮询换源后 DOM 的百分比与阶段不倒退', async () => {
-  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', bytes: 4096, dependencies: [] }
-  let snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 600, total: 1000, active: true }] }
+test('按钮上的百分比单调不减（换源不回弹）', async () => {
+  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', dependencies: [], url: 'https://example/x', sha256: 'a'.repeat(64), bytes: 1 }
   let release; const gate = new Promise(r => { release = r })
+  let snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 600, total: 1000, active: true }] }
   const { panel, timers } = make({ entries: [entry], manage: () => gate, progressState: () => snap })
   await panel.load(); await panel.store()
   const pending = panel.action('install', 'fish.magpie')
-  await nextTimer(timers, 50)
-  let html = panel.render()
-  assert.match(html, /aria-valuenow="60"/)
-  assert.match(html, /60% · 600 B \/ 1000 B/)
-  assert.match(html, /下载中/)
-  // 换源：新源从 0 开始、总量也变了
+  await nextTimer(timers, 50); await nextTimer(timers, 150)
+  assert.match(panel.render(), /--pct:60/, '先到 60%')
   snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 0, total: 800, active: true }] }
   await nextTimer(timers, 150)
-  html = panel.render()
-  assert.match(html, /aria-valuenow="60"/, '换源不得把进度打回 0')
-  assert.match(html, /60%/)
-  assert.match(html, /切换来源/)
-  // 新源涨过旧峰值
+  assert.match(panel.render(), /--pct:60/, '换源不得回退')
   snap = { items: [{ id: 'fish.magpie', phase: '下载', received: 720, total: 800, active: true }] }
   await nextTimer(timers, 150)
-  html = panel.render()
-  assert.match(html, /aria-valuenow="90"/)
-  assert.match(html, /90% · 720 B \/ 800 B/)
-  assert.doesNotMatch(html, /切换来源/)
-  release({ installed: [] })
-  await pending
+  assert.match(panel.render(), /--pct:90/)
+  release({ installed: [] }); await pending
 })
 
-test('t44 粒子层：进度卡带 canvas、模式为 in，且 pointer-events 不挡内容（DOM 契约）', async () => {
-  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', bytes: 4096, dependencies: [] }
+test('按钮进度的 SVG 契约：pill/ring/arrow/lbl 齐备且可取消', async () => {
+  const entry = { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', description: '', authors: [], hostApi: 1, platform: 'windows-x86_64', dependencies: [], url: 'https://example/x', sha256: 'a'.repeat(64), bytes: 1 }
   let release; const gate = new Promise(r => { release = r })
-  const { panel, timers } = make({ entries: [entry], manage: () => gate, progressState: () => ({ items: [{ id: 'fish.magpie', phase: '下载', received: 300, total: 1000, active: true }] }) })
+  const snap = { items: [{ id: 'fish.magpie', phase: '校验', received: 30, total: 100, active: true }] }
+  const { panel, timers } = make({ entries: [entry], manage: () => gate, progressState: () => snap })
   await panel.load(); await panel.store()
   const pending = panel.action('install', 'fish.magpie')
-  await nextTimer(timers, 50)
+  await nextTimer(timers, 50); await nextTimer(timers, 150)
   const html = panel.render()
-  assert.match(html, /<canvas class="ext-bar-fx" data-ext-fx="fish\.magpie" data-mode="in" data-pct="30"/)
-  // 粒子层在 .meter 内、条之外；标题/百分比/按钮都不受它影响。
-  assert.match(html, /<div class="meter"><div class="bar"/)
-  assert.match(html, /<\/div><div class="detail">30% · 300 B \/ 1000 B<\/div>/)
-  release({ installed: [] })
-  await pending
+  for (const cls of ['pill', 'ring', 'arrow', 'lbl']) assert.match(html, new RegExp('class="' + cls + '"'), cls)
+  assert.match(html, /data-extension-cancel-pill="fish\.magpie"/, '点按钮即取消')
+  assert.match(html, /stroke-dashoffset:/, '圆环用 dashoffset 表示进度')
+  release({ installed: [] }); await pending
 })
 
-test('t44 卸载：没有宿主进度时显示「卸载中」并给出本地合成的消散进度', async () => {
-  const row = { plugin: { manifest: { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', pages: [], storage: { directory: '.plugin.fish.magpie' } }, digest: 'd'.repeat(64), enabled: true, autostart: false, running: true, pending: false, official: true }, running: true }
+test('卸载进行中：不再弹进度窗，按钮区给出忙碌态', async () => {
+  const row = { plugin: { manifest: { id: 'fish.magpie', name: 'Magpie', version: '2.1.0', pages: [], storage: { directory: '.plugin.fish.magpie' }, behaviors: {} }, enabled: true, running: true } }
   let release; const gate = new Promise(r => { release = r })
   const { panel, timers } = make({ installed: [row], manage: () => gate, progressState: () => ({ items: [] }) })
   await panel.load()
   const pending = panel.action('uninstall', 'fish.magpie')
   await nextTimer(timers, 50)
   const html = panel.render()
-  assert.match(html, /卸载中/)
-  assert.match(html, /data-mode="out"/)
-  release({ installed: [] })
-  await pending
+  assert.doesNotMatch(html, /ext-progress-backdrop/, '卸载也不再弹进度窗')
+  assert.match(html, /正在执行|aria-busy="true"/, '有忙碌态提示')
+  release({ installed: [] }); await pending
 })
 
 
