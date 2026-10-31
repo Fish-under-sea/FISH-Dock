@@ -2,10 +2,16 @@
 **/node_modules/
 **/target/
 **/gen/
-/dist/
+/dist/*
 /.test-results/
 **/.runtime/
 **/src-tauri/resources/ofm/
+
+# 预览版启动脚本是可复核的交付件，从 dist 里单独放行（其余构建产物仍不进库）
+!/dist/portable-2.0.1/
+/dist/portable-2.0.1/*
+!/dist/portable-2.0.1/preview-start.ps1
+!/dist/portable-2.0.1/启动-2.0.1-预览.cmd
 
 # 本机工具链、预览版与安装产物：只在这台机器上，绝不进库
 /.tools/
@@ -40,4 +46,8 @@
 **/.pr-screenshots/
 .DS_Store
 Thumbs.db
-/build/
+/build/*
+# 人工审核用的说明文档放行（构建产物与预览数据仍不进库）
+!/build/review/
+/build/review/*
+!/build/review/*.md
