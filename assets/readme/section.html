@@ -5,11 +5,14 @@
 <title>FISH Dock section banner</title>
 <style>
 /* 分栏横幅模板——**以插件仓 FISH-DOCK-Plugins 的 assets/readme/header.html 为准**。
-   那套设计系统的 token 原样搬过来：--frame/--paper/--line/--bright/--low/--shadow/
-   --ink/--vent/--lamp；组件用 .frame（3px 描边 + 双向 inset 高光）、
-   .vent（3px 竖线 / 10px 周期）、.lamp（23×23，2px 描边）。
-   注意：不要用「新版」参数（2px 边线、2px/9px 刻度、18px 绿点）去渲染，
-   那会把风格带偏——历史上就是混批次导致栏目样式不一致。 */
+   组件直接用它那套：.frame（3px 描边 + 双向 inset）、.vent（3px 竖线 / 10px 周期）、
+   .lamp（23×23、2px 描边）。token 角色按插件仓实际出图取：
+     外框底   var(--frame)
+     色块     background var(--paper)，文字 var(--line)   ← 比外框更深，字是金色
+     标题     color var(--line)（金色，不是白）
+     刻度     var(--vent)，只占中间 30px
+     指示灯   var(--lamp)
+   不要用「浅色块 + 白标题 + 2px 边线 + 2px/9px 刻度」那套旧参数。 */
 @font-face { font-family: Jersey; src: url('Jersey20-Regular.ttf') format('truetype'); font-display: block; }
 :root {
   color-scheme: light;
@@ -32,18 +35,20 @@ body { color: var(--ink); font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', 
   box-shadow: inset 3px 3px var(--bright), inset -3px -3px var(--low);
 }
 #sec .tab {
-  display: flex; align-items: center; align-self: stretch; padding: 0 26px; white-space: nowrap;
-  background: var(--line); color: var(--paper);
+  display: flex; align-items: center; align-self: stretch; flex: none;
+  padding: 0 26px; white-space: nowrap;
+  background: var(--paper); color: var(--line);
+  border-right: 3px solid var(--line);
   font-family: Jersey, monospace; font-weight: 400; font-size: 30px; letter-spacing: 2px;
 }
 #sec .title {
-  display: flex; align-items: center; padding: 0 24px; white-space: nowrap;
-  color: var(--ink); font-weight: 700; font-size: 40px;
+  display: flex; align-items: center; flex: none;
+  padding: 0 22px; white-space: nowrap;
+  color: var(--line); font-weight: 700; font-size: 40px;
 }
 #sec .vent { flex: 1; height: 30px; margin: 0 10px; background: repeating-linear-gradient(90deg, var(--vent) 0 3px, transparent 3px 10px); }
 #sec .lamp {
-  display: block; flex: none;
-  width: 23px; height: 23px; margin-right: 16px;
+  display: block; flex: none; width: 23px; height: 23px; margin-right: 16px;
   border: 2px solid var(--line); background: var(--lamp);
 }
 </style>
