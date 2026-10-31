@@ -1,8 +1,24 @@
 # 壁纸 / Wallpapers
 
-随 Wakuwaku 附带的 5 张桌面壁纸，3072×1728 的 PNG 原图，每张 6.5–7.4 MB（一共约 33 MB）。软件里不会下载或设置它们；想用的话直接下载这里的文件，在 Windows 的「设置 → 个性化 → 背景」里选它。
+5 张桌面壁纸，3072×1728 的 PNG 原图，每张 6.2–7.1 MB（一共约 32.6 MB）。
+软件既不会下载也不设置它们——想用就点下面的链接下载，然后在 Windows 的
+「设置 → 个性化 → 背景」里选它。
 
-Five desktop wallpapers that come with Wakuwaku: the original PNGs, 3072×1728, 6.5–7.4 MB each (about 33 MB in all). The app does not download or set them; to use one, download it from here and pick it in Windows' Settings → Personalization → Background.
+**从 2.0.1 起这些原图不再放在仓库里**（占已跟踪总量的 63%，每次 `git clone` 都要多拉 32 MB），
+改随发行版附件发布：
+
+- https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.1/claude-cheek-rest.png
+- https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.1/deepseek-maid-car.png
+- https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.1/gpt-cloud-terrace.png
+- https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.1/grok-terrace.png
+- https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.1/grok-fireplace.png
+
+Five desktop wallpapers, original PNGs at 3072×1728, 6.2–7.1 MB each (about 32.6 MB in all).
+The app never downloads or sets them — grab one from the links above and pick it in
+Windows Settings → Personalisation → Background.
+
+Since 2.0.1 the originals are no longer tracked in this repository (they were 63% of all
+tracked bytes, i.e. 32 MB on every clone); they ship as release assets instead.
 
 | 文件 / File | 画面 / Picture |
 | --- | --- |

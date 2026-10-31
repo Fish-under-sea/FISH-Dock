@@ -51,3 +51,6 @@ Thumbs.db
 !/build/review/
 /build/review/*
 !/build/review/*.md
+
+# 壁纸原图改随 Release 附件发布（32.6 MB，占已跟踪量 63%），仓库不再跟踪
+app/wallpapers/*.png
