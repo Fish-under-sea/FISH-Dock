@@ -99,6 +99,13 @@
   } })
   let confirmActive = null
   const confirmQueue = []
+  // 弹窗是在点击事件里同步 showModal 的，指针往往正好落在「确认」上：同一次
+  // 点击的后续事件会把刚出现的弹窗点掉，用户视角就是「没确认就卸载了」。
+  // 开窗后 CONFIRM_ARM_MS 内的点击/回车一律忽略，给手一次真正选择的机会。
+  // 用户实测 2026-11-01：点「卸载」立刻开始卸载，没看到确认弹窗。
+  const CONFIRM_ARM_MS = 350
+  let confirmArmedAt = 0
+  const confirmTooSoon = () => Date.now() < confirmArmedAt
   const extensionPanel = window.ExtensionPanel.create({ deviceDialog: showDeviceDialog, syncAuthFocus: async () => { const revision = openRevision; const got = await window.pet.settings.get(); if (isOpen && revision === openRevision) { snap = got; draw() } }, invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw(), openPage: key => open(key) })
   const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw() })
   // The crash report shown, as it would be sent (pageCrash).
@@ -259,6 +266,8 @@
     seatDialog(confirmDialog)
     window.DialogAnchor?.watch(confirmDialog, document.getElementById('island'), viewportNow, anchorNow)
     confirmOk.focus()
+    // 从这一刻起再等 CONFIRM_ARM_MS，才接受点击/回车（见 confirmTooSoon）。
+    confirmArmedAt = Date.now() + CONFIRM_ARM_MS
   }
   // 把弹窗摆进岛里：岛的矩形与视口都是 CSS px（DIP 缩放与多显示器随岛窗口
   // 走，不用另算）；岛的哪一侧由 island.js 放在 body 上的锚点类给出。
@@ -330,10 +339,10 @@
   confirmDialog.querySelector('[data-device-open]').onclick = () => deviceAction('open')
   confirmDialog.querySelector('[data-device-release]').onclick = () => deviceAction('release')
   confirmDialog.querySelector('[data-device-cancel]').onclick = () => deviceAction('cancel')
-  confirmOk.onclick = () => finishConfirm(true)
-  confirmCancel.onclick = () => finishConfirm(false)
+  confirmOk.onclick = () => { if (confirmTooSoon()) return; finishConfirm(true) }
+  confirmCancel.onclick = () => { if (confirmTooSoon()) return; finishConfirm(false) }
   confirmDialog.addEventListener('cancel', event => { event.preventDefault(); finishConfirm(false) })
-  confirmDialog.addEventListener('click', event => { if (event.target === confirmDialog) finishConfirm(false) })
+  confirmDialog.addEventListener('click', event => { if (event.target === confirmDialog && !confirmTooSoon()) finishConfirm(false) })
   const body = layer.querySelector('.s-body')
   const foot = layer.querySelector('.s-foot')
   // The new markup, changed in place: only what differs is touched, so a
