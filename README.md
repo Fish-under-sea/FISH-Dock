@@ -15,10 +15,10 @@
   <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.1"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.0.1" width="23%"></picture></a>
   <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
   <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
-  <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：四个官方插件" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
 </p>
 
-<p><img src="https://img.shields.io/badge/Windows-10%2F11%20x64-8fd6a0?style=flat-square&logo=windows&logoColor=white&labelColor=5a544a" alt="Windows x64"> <img src="https://img.shields.io/badge/Rust-Tauri-8fd6a0?style=flat-square&logo=rust&logoColor=white&labelColor=5a544a" alt="Rust Tauri"> <img src="https://img.shields.io/badge/Node.js-24.14%2B-8fd6a0?style=flat-square&logo=nodedotjs&logoColor=white&labelColor=5a544a" alt="Node.js"> <img src="https://img.shields.io/badge/License-MIT-8fd6a0?style=flat-square&labelColor=5a544a" alt="MIT License"> <img src="https://img.shields.io/badge/Official%20Plugins-4-ffd84a?style=flat-square&labelColor=5a544a" alt="Four official plugins"></p>
+<p><img src="https://img.shields.io/badge/Windows-10%2F11%20x64-8fd6a0?style=flat-square&logo=windows&logoColor=white&labelColor=5a544a" alt="Windows x64"> <img src="https://img.shields.io/badge/Rust-Tauri-8fd6a0?style=flat-square&logo=rust&logoColor=white&labelColor=5a544a" alt="Rust Tauri"> <img src="https://img.shields.io/badge/Node.js-24.14%2B-8fd6a0?style=flat-square&logo=nodedotjs&logoColor=white&labelColor=5a544a" alt="Node.js"> <img src="https://img.shields.io/badge/License-MIT-8fd6a0?style=flat-square&labelColor=5a544a" alt="MIT License"> <img src="https://img.shields.io/badge/Official%20Plugins-3-ffd84a?style=flat-square&labelColor=5a544a" alt="Three official plugins"></p>
 <p><strong>Everything is a Plugin · 一切皆插件</strong><br>一个安静的桌面宿主，把会话、模型和工具收进同一个工作台。</p>
 
 <p>
@@ -65,7 +65,7 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器、插件管理与 Windhawk。
 
-2.0.1 维护版：宿主 2.0.1，兼容插件 2.1.x（插件已到 2.1.0）。设置页公告区有内容时也有「刷新」，打开关于页超 5 分钟自动重取，公告标题不再重复版本号；新增全局快捷键与设置页录制节（被占用有提示、30 秒重试后放弃）；插件更新/卸载走事务（旧版目录清零、卸载彻底但保留用户数据）、自启动运行中即时生效；无标题窗口也有任务栏按钮、托盘图标点击可用、右键菜单精简；换显示器或改缩放后工作区自愈、文字 110% 下任务栏不再上浮；卡死抓栈、WebView2 被外部结束不再误报。商店里 OFM 本地模型已下架（已装用户仍可启用/卸载），模型能力由 Magpie 插件提供；agy 岛上审批与内存账转 2.1.0。完整说明见 [2.0.1 更新记录](app/docs/release-2.0.1.md)。
+2.0.1 维护版：宿主 2.0.1，兼容插件 2.1.x（Magpie 已到 2.1.1）。设置页公告区有内容时也有「刷新」，打开关于页超 5 分钟自动重取，公告标题不再重复版本号；新增全局快捷键与设置页录制节（被占用有提示、30 秒重试后放弃）；插件更新/卸载走事务（旧版目录清零、卸载彻底但保留用户数据）、自启动运行中即时生效；无标题窗口也有任务栏按钮、托盘图标点击可用、右键菜单精简；换显示器或改缩放后工作区自愈、文字 110% 下任务栏不再上浮；卡死抓栈、WebView2 被外部结束不再误报。商店里 OFM 本地模型已下架（已装用户仍可启用/卸载），模型能力由 Magpie 插件提供；agy 岛上审批与内存账转 2.1.0。完整说明见 [2.0.1 更新记录](app/docs/release-2.0.1.md)。
 
 `2.0.0` 收口批：宿主把所有版本位统一为 `2.0.0`（`tauri.conf.json`、`Cargo.toml`、Claude Code 插件清单、安装器与 README），旧版 exe 不再留作回滚副本。设置页按规格重排为 5 页固定分节（回归测试读规格文件比对）；插件卡的自启动改为三态气泡按钮（红「关闭自启动」/ 蓝「随 Dock 启动」/ 绿「无需自启动」）；关于页品牌图首位居中可点进官网，公告只显示最新版本与新特性要点、完整说明折叠，源为 GitHub → Gitee → 本地缓存且应用内更新。配置收敛到单一入口 `app/src-tauri/src/config.rs`（49 键 / 9 类，全部支持 `FISH_DOCK_*` 环境变量覆盖，旧 `WAKUWAKU_*` 仍可读），并新增 `scripts/check-hardcoded.mjs`（硬编码）与 `scripts/check-contrast.mjs`（对比度）两个自查脚本、均接入测试。
 
@@ -85,7 +85,7 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 3. 打开「插件」页，点击「GitHub 登录」。Dock 内弹窗显示验证码及实际复制结果；在系统浏览器中粘贴并确认，Dock 自动检查授权。等待期间可单独解除临时锁定／置顶，也可取消验证。旧版账号若未保存续期凭据，升级后需重新登录一次；新授权随后自动续期。
 4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
 5. 点击「检查更新」读取官方目录，按需安装 [FISH Dock Official Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。新插件安装成功即启用；凭据和服务参数仍需各自配置。
-6. 官方商店目前只有**三个插件**：**飞书**、**Clash**、**Magpie**（同为插件 2.1.0，Magpie 另有 2.1.1 修图标顺序，要求宿主 ≥ 2.0.0）。OFM 自 2025-10-25 起暂停维护，已从商店下架——已安装的用户仍可在「已安装」里启用或卸载。
+6. 官方商店目前只有**三个插件**：**飞书**、**Clash**、**Magpie**（飞书与 Clash 2.1.0，Magpie 2.1.1；要求宿主 ≥ 2.0.0）。OFM 自 2026-10-25 起暂停维护，已从商店下架——已安装的用户仍可在「已安装」里启用或卸载。
 
 安装包包含 Node.js 24.14.0、固定版 WebView2 155.0.4283.62、Windhawk 1.7.3 及 LLVM-MinGW 编译器，供对应插件按需调用；无需另外安装 Windhawk。安装包当前未做 Authenticode 签名。
 
