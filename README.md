@@ -78,7 +78,7 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 | 安装包 | 使用场景 |
 | --- | --- |
 | `FISH-Dock-Setup-2.0.1.exe` | 首次安装、基础资源缺失或修复安装，包含完整离线运行时。 |
-| `FISH-Dock-Update-2.0.1.exe` | 已有版本且基础资源完整时使用，只下载本次变更；缺失或损坏时提示改用完整包。 |
+| `FISH-Dock-Update-2.0.1.exe` | 已有版本且基础资源完整时使用，只下载本次变更（约 31 MB）；缺失或损坏时提示改用完整包。 |
 
 1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.1) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源并展示运行时条款。
