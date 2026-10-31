@@ -55,8 +55,24 @@ fn package_with(id: &str, name: &str, directory: &str, version: &str, schema: u3
 }
 
 fn feishu_package(version: &str) -> (Package, String) {
-    let url = format!("https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v{version}/feishu.fish-plugin");
-    let bytes = fetch(&url).unwrap_or_else(|error| panic!("真实官方包 {version} 下载失败：{error}"));
+    // 真实 GitHub release 资产：优先用 gh release download 预取的同一份字节
+    // （build/t30-assets，仍由官方插件仓发布）；没有缓存时才现场走网络。
+    let cached = std::env::var_os("FISH_DOCK_T30_ASSETS").map(PathBuf::from).map(|dir| dir.join(format!("feishu-{version}.fish-plugin"))).filter(|path| path.is_file());
+    let bytes = if let Some(path) = cached {
+        std::fs::read(path).expect("读取预取的官方插件包")
+    } else {
+        let url = format!("https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v{version}/feishu.fish-plugin");
+        let mut last = String::new();
+        let mut bytes = Vec::new();
+        for attempt in 0..3 {
+            match fetch(&url) {
+                Ok(value) => { bytes = value; break; }
+                Err(error) => { last = error; std::thread::sleep(Duration::from_millis(500 * (attempt + 1))); }
+            }
+        }
+        assert!(!bytes.is_empty(), "真实官方包 {version} 下载失败（3 次）：{last}");
+        bytes
+    };
     let digest = format!("{:x}", Sha256::digest(&bytes));
     let package = crate::plugin_package::inspect(&bytes, &digest, &std::env::temp_dir(), crate::storage::Source::OfficialCatalog, &crate::plugin_install::platform()).unwrap();
     (package, digest)
@@ -73,6 +89,10 @@ fn fetch(url: &str) -> Result<Vec<u8>, String> {
         match reader.read_to_end(&mut bytes) { Ok(_) => return Ok(bytes), Err(error) => last = format!("{error}") }
     }
     Err(last)
+}
+
+fn port_open(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(300)).is_ok()
 }
 
 fn dirs(manager: &Manager<'_>, id: &str) -> Vec<String> {
@@ -120,6 +140,17 @@ fn lock_exclusive(path: &Path) -> LockedFile {
     LockedFile(handle)
 }
 
+// 允许别的进程读，但拒绝写/删除（MoveFileEx 替换会失败，remove_dir_all 也失败）：
+// 用来模拟「文件被外部程序独占」而不影响 verify 的只读校验。
+#[cfg(windows)]
+fn lock_deny_write(path: &Path) -> LockedFile {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let handle = unsafe { CreateFileW(wide.as_ptr(), 0x8000_0000, 0x1, std::ptr::null_mut(), 3, 0x80, 0) };
+    assert!(handle != -1, "锁定文件失败：{}", path.display());
+    LockedFile(handle)
+}
+
 fn read_text(path: &Path) -> String { std::fs::read_to_string(path).unwrap_or_default() }
 
 #[test]
@@ -156,20 +187,50 @@ fn t30_acceptance_matrix() {
             say(&log, &format!("[1] 轮{round} target={version} {} dirs={dirs_now:?} running={running} ms={} err={:?}", snapshot, began.elapsed().as_millis(), outcome.err()));
             rows.push(json!({"scenario":"官方×更新×运行中×正常（真实 registry）","round":round,"failed":!okay,"dirs":dirs_now,"running":running,"ms":began.elapsed().as_millis()}));
         }
-        // 真实下载中途取消：官方大包 magpie，取消不动已装 feishu
+        // 真实下载中途取消：官方大包 magpie，取消不动已装 feishu。
+        // 用仓库里的稳定目录写成本地缓存（不靠刷新网络），obtain 仍走真实 npm/GitHub 下载。
+        let catalog = include_bytes!("../../../../plugins/catalog/stable.json");
+        context.host.write("config", "official-plugin-catalog.json", catalog).unwrap();
         crate::plugin_progress::begin("fish.magpie");
         let old_running = runner.is_running("fish.feishu");
+        let old_dirs = dirs(&manager, "fish.feishu");
         let context_for_download = context.clone();
         let join = std::thread::spawn(move || crate::plugin_store::obtain(&context_for_download, "fish.magpie"));
-        std::thread::sleep(Duration::from_millis(80));
+        let mut progress_samples = Vec::new();
+        for _ in 0..30 {
+            std::thread::sleep(Duration::from_millis(50));
+            let snap = crate::plugin_progress::snapshot();
+            if snap["active"].as_bool() == Some(true) {
+                progress_samples.push((snap["received"].as_u64().unwrap_or(0), snap["total"].as_u64().unwrap_or(0)));
+            }
+        }
         crate::plugin_progress::cancel("");
         let cancelled = join.join().unwrap();
+        let distinct_received: Vec<u64> = {
+            let mut values: Vec<u64> = progress_samples.iter().map(|(received, _)| *received).collect();
+            values.sort_unstable(); values.dedup(); values
+        };
         let cancel_err = cancelled.as_ref().err().cloned().unwrap_or_default();
         let still_running = runner.is_running("fish.feishu");
-        let cancel_ok = cancelled.is_err() && old_running && still_running && dirs(&manager, "fish.feishu") == vec!["2.0.0".to_string()];
+        let cancel_ok = cancelled.is_err() && old_running && still_running && dirs(&manager, "fish.feishu") == old_dirs;
         if !cancel_ok { failures += 1; }
-        say(&log, &format!("[1] 下载中途取消 err={cancel_err} old_running={old_running} still_running={still_running}"));
-        rows.push(json!({"scenario":"官方×更新×运行中×下载中途取消","round":1,"failed":!cancel_ok,"err":cancel_err}));
+        say(&log, &format!("[1] 下载中途取消 err={cancel_err} old_running={old_running} still_running={still_running} progress_samples={progress_samples:?} distinct={distinct_received:?}"));
+        rows.push(json!({"scenario":"官方×更新×运行中×下载中途取消","round":1,"failed":!cancel_ok,"err":cancel_err,"progress_samples":progress_samples,"distinct_received":distinct_received}));
+        // 安装 × 断网：把代理指向一个没有监听的端口，obtain 必须在下载阶段失败，
+        // 且不新增注册行/目录；恢复环境后同一函数可重试。
+        let old_https = std::env::var_os("HTTPS_PROXY");
+        let old_http = std::env::var_os("HTTP_PROXY");
+        std::env::set_var("HTTPS_PROXY", "http://127.0.0.1:9");
+        std::env::set_var("HTTP_PROXY", "http://127.0.0.1:9");
+        let offline = crate::plugin_store::obtain(&context, "fish.magpie");
+        match old_https { Some(value) => std::env::set_var("HTTPS_PROXY", value), None => std::env::remove_var("HTTPS_PROXY") }
+        match old_http { Some(value) => std::env::set_var("HTTP_PROXY", value), None => std::env::remove_var("HTTP_PROXY") }
+        let offline_dirs = dirs(&manager, "fish.feishu");
+        let offline_err = offline.as_ref().err().cloned().unwrap_or_default();
+        let offline_ok = offline.is_err() && offline_dirs == old_dirs && runner.is_running("fish.feishu");
+        if !offline_ok { failures += 1; }
+        say(&log, &format!("[7] 断网安装 err={offline_err} dirs={offline_dirs:?} old_running={}", runner.is_running("fish.feishu")));
+        rows.push(json!({"scenario":"安装×断网（代理端口 9）","round":1,"failed":!offline_ok,"err":offline_err,"dirs":offline_dirs}));
         runner.stop_all();
         say(&log, &format!("[1] 真实 registry 总失败={failures}"));
     }
@@ -197,7 +258,8 @@ fn t30_acceptance_matrix() {
             let out = runner.install(&manager, p, &d, false, Some(&node));
             let new_pid = runner.call("acme.tree", "childPid", json!({})).ok().and_then(|value| value.as_str().and_then(|s| s.parse::<u32>().ok()));
             let alive_old = before_children.iter().any(|pid| *pid != new_pid.unwrap_or(0));
-            let okay = out.is_ok() && runner.is_running("acme.tree") && dirs(&manager, "acme.tree") == vec![version.clone()] && !alive_old;
+            let port_up = port_open(43130);
+            let okay = out.is_ok() && runner.is_running("acme.tree") && dirs(&manager, "acme.tree") == vec![version.clone()] && !alive_old && port_up;
             if !okay { failures += 1; }
             say(&log, &format!("[2] 轮{round} version={version} old_pid={old_pid:?} before={before_children:?} new_pid={new_pid:?} old_alive={alive_old} dirs={:?} ok={okay}", dirs(&manager, "acme.tree")));
             rows.push(json!({"scenario":"第三方×更新×服务运行中×正常（真实 Node 子进程/端口）","round":round,"failed":!okay,"old_pid":old_pid,"before_children":before_children,"new_pid":new_pid}));
@@ -210,7 +272,9 @@ fn t30_acceptance_matrix() {
             let out = runner.uninstall(&manager, "acme.tree");
             let package_exists = manager.context.host.path().join("packages").join("acme.tree").exists();
             let after = child_pids(&manager, "acme.tree", &node);
-            let okay = out.is_ok() && !package_exists && after.is_empty();
+            std::thread::sleep(Duration::from_millis(200));
+            let port_down = !port_open(43130);
+            let okay = out.is_ok() && !package_exists && after.is_empty() && port_down;
             if !okay { failures += 1; }
             say(&log, &format!("[5] 卸载轮{round} before={before:?} after={after:?} package_exists={package_exists} err={:?}", out.err()));
             rows.push(json!({"scenario":"第三方×卸载×服务运行中（真实进程树）","round":round,"failed":!okay,"before":before,"after":after,"package_exists":package_exists}));
@@ -273,6 +337,11 @@ fn t30_acceptance_matrix() {
         let lock_target = manager.directory(&row).unwrap().join("backend.mjs");
         let handle = lock_exclusive(&lock_target);
         let (p2, d2) = package_with("acme.lock", "Lock", ".plugin.acme.lock", "2.0.0", 1, false, backend);
+        // 锁住新版将要写入的 backend.mjs：允许只读校验，拒绝写/替换。
+        let target = manager.context.host.path().join("packages").join("acme.lock").join("2.0.0").join(d2.to_ascii_lowercase()).join("backend.mjs");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"held").unwrap();
+        let handle = lock_deny_write(&target);
         let failed = manager.install(p2, &d2, false);
         let listed = manager.list().unwrap();
         let dirty = listed.iter().any(|row| row.manifest.id == "acme.lock" && row.manifest.version == "2.0.0");
@@ -314,26 +383,36 @@ fn t30_acceptance_matrix() {
         manager.install(p, &d, false).unwrap();
         let row = manager.list().unwrap().remove(0);
         let ns = manager.namespace(&row).unwrap();
-        ns.write("config", "keep.json", b"old-config").unwrap();
+        std::fs::write(ns.path().join("config/keep.json"), b"old-config").unwrap();
+        assert_eq!(std::fs::read(ns.path().join("config/keep.json")).unwrap(), b"old-config");
         runner.set_enabled(&manager, "acme.journal", true, Some(&node)).unwrap();
+        // 先按真实回滚点导出（此时文件可读），再把旧的 keep.json 锁住；
+        // 更新失败后的 restore_previous 会用这份 archive 做 apply。
+        // 直接造一份要覆盖 config/keep.json 的 changes，再锁文件执行 apply：
+        // 这样能精确撞 A3 的「apply 中途失败留 journal」路径。
+        let mut changes: std::collections::BTreeMap<String, Option<Vec<u8>>> = std::collections::BTreeMap::new();
+        changes.insert("config/keep.json".into(), Some(b"new-config".to_vec()));
         let lock_target = ns.path().join("config/keep.json");
-        let handle = lock_exclusive(&lock_target);
+        let handle = lock_deny_write(&lock_target);
+        let applied = crate::storage_transaction::apply(&ns, changes);
         // schema 跳版 2 触发 manager.install 的 namespace 失败；restore_previous 的 apply 会撞上文件锁。
         let (p2, d2) = package_with("acme.journal", "Journal", ".plugin.acme.journal", "2.0.0", 2, false, ok);
         let update = runner.install(&manager, p2, &d2, false, Some(&node));
-        drop(handle);
         let journal = ns.path().join("tmp/storage-transaction.json");
         let journal_exists = journal.exists();
         let mut errors = 0;
         for i in 0..10 {
             match ns.read("config", "keep.json") {
                 Ok(_) => {}
-                Err(error) => { errors += 1; if i == 0 { say(&log, &format!("[A3] 第1次读错误：{error}")); } }
+                Err(error) => { errors += 1; if i == 0 { say(&log, &format!("[A3] 锁仍在时第1次读错误：{error}")); } }
             }
         }
+        drop(handle);
+        let after_unlock = ns.read("config", "keep.json");
         let row_after = manager.list().unwrap().into_iter().find(|row| row.manifest.id == "acme.journal");
-        say(&log, &format!("[A3] update={update:?} journal_exists={journal_exists} 10次读错误={errors} row={:?}", row_after.as_ref().map(|r| r.manifest.version.clone())));
-        rows.push(json!({"scenario":"A3 更新失败回滚 apply 中途失败 / journal 永久污染","round":10,"failed":journal_exists&&errors==10,"journal_exists":journal_exists,"read_errors":errors,"update_error":format!("{update:?}"),"row_version":row_after.map(|r| r.manifest.version)}));
+        say(&log, &format!("[A3] update={update:?} backup_apply={applied:?} journal_exists={journal_exists} 锁在时10次读错误={errors} 解锁后读={after_unlock:?} row={:?}", row_after.as_ref().map(|r| r.manifest.version.clone())));
+        let permanent = journal_exists && errors == 10 && after_unlock.is_err();
+        rows.push(json!({"scenario":"A3 更新失败回滚 apply 中途失败 / journal 永久污染","round":10,"failed":permanent,"journal_exists":journal_exists,"read_errors_while_locked":errors,"after_unlock_error":format!("{after_unlock:?}"),"update_error":format!("{update:?}"),"backup_apply":format!("{applied:?}"),"row_version":row_after.map(|r| r.manifest.version),"permanent_channel_error":permanent}));
         runner.stop_all();
     }
 
@@ -350,15 +429,23 @@ fn t30_acceptance_matrix() {
         let (p, d) = package_with("acme.stuck", "Stuck", ".plugin.acme.stuck", "1.0.0", 1, false, backend);
         manager.install(p, &d, false).unwrap();
         let row = manager.list().unwrap().remove(0);
-        let lock_target = manager.directory(&row).unwrap().join("backend.mjs");
-        let handle = lock_exclusive(&lock_target);
+        let package_dir = manager.directory(&row).unwrap();
+        // 把这一版目录里的每个文件都独占锁住：remove_dir_all 一个都删不掉，
+        // manifest 与全部资源都还在，pending() 才能走到 verify→误报分支。
+        let mut handles = Vec::new();
+        for entry in std::fs::read_dir(&package_dir).unwrap().flatten() {
+            if entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+                handles.push(lock_deny_write(&entry.path()));
+            }
+        }
         let uninstall = manager.uninstall("acme.stuck");
         let listed = manager.list().unwrap();
         let pending = manager.pending();
+        let package_exists = manager.context.host.path().join("packages").join("acme.stuck").exists();
         let pending_has = pending.iter().any(|row| row.manifest.id == "acme.stuck");
-        say(&log, &format!("[B4] uninstall={uninstall:?} registry_has={} pending_has={pending_has} pending_versions={:?}", listed.iter().any(|r| r.manifest.id == "acme.stuck"), pending.iter().map(|r| (r.manifest.id.clone(), r.manifest.version.clone())).collect::<Vec<_>>()));
-        rows.push(json!({"scenario":"B4 卸载目录删不掉后 pending 误报安装未完成","round":1,"failed":false,"uninstall_error":format!("{uninstall:?}"),"registry_has":listed.iter().any(|r| r.manifest.id == "acme.stuck"),"pending_has":pending_has,"pending_versions":pending.iter().map(|r| r.manifest.version.clone()).collect::<Vec<_>>()}));
-        drop(handle);
+        say(&log, &format!("[B4] uninstall={uninstall:?} package_exists={package_exists} registry_has={} pending_has={pending_has} pending_versions={:?}", listed.iter().any(|r| r.manifest.id == "acme.stuck"), pending.iter().map(|r| (r.manifest.id.clone(), r.manifest.version.clone())).collect::<Vec<_>>()));
+        rows.push(json!({"scenario":"B4 卸载目录删不掉后 pending 误报安装未完成","round":1,"failed":false,"uninstall_error":format!("{uninstall:?}"),"package_exists":package_exists,"registry_has":listed.iter().any(|r| r.manifest.id == "acme.stuck"),"pending_has":pending_has,"pending_versions":pending.iter().map(|r| r.manifest.version.clone()).collect::<Vec<_>>()}));
+        drop(handles);
     }
 
     // ── 8. B1 Process::start 失败（新包坏了）→ 注册行/目录/进程终态 ────────
@@ -389,4 +476,62 @@ fn t30_acceptance_matrix() {
     let matrix = root_base.join("t30-matrix.json");
     std::fs::write(&matrix, serde_json::to_vec_pretty(&rows).unwrap()).unwrap();
     say(&root_base.join("t30-summary.log"), &format!("[T30] rows={} json={}", rows.len(), matrix.display()));
+}
+
+#[test]
+#[ignore = "t30 A1 并发锁序：基线 6724889（t37 已合入）；双线程 install/uninstall 同 id 50 轮"]
+fn t30_a1_lock_order_50() {
+    let root_base = base();
+    let scenario = root_base.join("a1-concurrency");
+    let _ = std::fs::remove_dir_all(&scenario);
+    let root = scenario.join(".fish-dock");
+    let context = context(&root, "acme.a1", ".plugin.acme.a1", "1.0.0");
+    let manager = Manager { context: &context };
+    let backend = "import {createPlugin} from './sdk.mjs';createPlugin({id:'acme.a1',version:process.env.FISH_PLUGIN_VERSION||'1.0.0',commands:{ping:()=> 'pong'}});";
+    let (p, d) = package_with("acme.a1", "A1", ".plugin.acme.a1", "1.0.0", 1, false, backend);
+    manager.install(p, &d, false).unwrap();
+    let log = scenario.join("rounds.log");
+    let started = Instant::now();
+    std::thread::scope(|scope| {
+        let a = &manager;
+        scope.spawn(move || {
+            for i in 0..50 {
+                let (p, d) = package_with("acme.a1", "A1", ".plugin.acme.a1", &format!("2.{}.0", i), 1, false, backend);
+                let _ = a.install(p, &d, false);
+            }
+        });
+        let b = &manager;
+        scope.spawn(move || {
+            for _ in 0..50 {
+                let _ = b.uninstall("acme.a1");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+    });
+    let elapsed = started.elapsed().as_millis();
+    say(&log, &format!("[A1] 双线程 install/uninstall 同 id 50 轮完成，耗时 {elapsed}ms（基线 6724889 / t37 已合入；未卡死）"));
+    assert!(elapsed < 30_000, "A1 并发 50 轮疑似卡死：{elapsed}ms");
+}
+
+#[test]
+#[ignore = "t30 真重启准备：在 build/crash-win/t30-apphome/restart-home 安装 acme.restart（enabled+autostart）"]
+fn t30_prepare_restart_state() {
+    let root_base = base();
+    let scenario = root_base.join("restart-home");
+    let _ = std::fs::remove_dir_all(&scenario);
+    let root = scenario.join(".fish-dock");
+    let context = context(&root, "acme.restart", ".plugin.acme.restart", "1.0.0");
+    let manager = Manager { context: &context };
+    let backend = "import {spawn} from 'node:child_process';import {createPlugin} from './sdk.mjs';const child=spawn(process.execPath,['-e','setTimeout(()=>{},3600000)'],{stdio:'ignore'});createPlugin({id:'acme.restart',version:'1.0.0',commands:{childPid:()=>String(child.pid)}});";
+    let (p, d) = package_with("acme.restart", "Restart", ".plugin.acme.restart", "1.0.0", 1, false, backend);
+    manager.install(p, &d, false).unwrap();
+    manager.set_enabled("acme.restart", true).unwrap();
+    manager.set_autostart("acme.restart", true).unwrap();
+    let mut runner = Runner::default();
+    runner.stop_all();
+    context.host.write("config", "plugin-dependencies.json", br#"{"node":"C:\\Program Files\\nodejs\\node.exe"}"#).unwrap();
+    context.host.write("config", "config.json", br#"{"display":"island","onboarded":true,"shortcutsEnabled":false}"#).unwrap();
+    let expected = scenario.join("expected.json");
+    std::fs::write(&expected, serde_json::to_vec_pretty(&json!({"id":"acme.restart","version":"1.0.0","enabled":true,"autostart":true,"root":root})).unwrap()).unwrap();
+    println!("[t30-restart] prepared {} -> {}", root.display(), expected.display());
 }
