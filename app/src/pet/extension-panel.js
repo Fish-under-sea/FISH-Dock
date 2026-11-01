@@ -330,9 +330,24 @@
       })
     }
     async function action(action, id) {
-      if (busy || !view || !['install', 'enabled', 'uninstall', 'autostart'].includes(action)) return
+      if (busy || !view || !['install', 'enabled', 'uninstall', 'autostart', 'logs'].includes(action)) return
       const row = view.installed.find(r => r.plugin.manifest.id === id)
       const entry = catalog?.plugins.find(r => r.id === id)
+      // 「打开插件日志」（#53-4 / T03）：不安装也不启动，只把 plugin-logs/ 打开。
+      // 首选宿主 extension_manage 的 logs 动作（宿主侧用它自己的 open-directory，即
+      // tasks::launch 的 ShellExecute「open」）；宿主还没接线时退回同一条能力的
+      // taskbar_app「launch」——路径直接交给系统打开，落在同一个 Explorer 上。
+      if (action === 'logs' && row) {
+        return run('logs', async () => {
+          const directory = String(row.logPath || '').replace(/[\\/][^\\/]*$/, '')
+          try { return acceptView(await invoke('extension_manage', { action: 'logs', id, enabled: null, nodePath: null, confirm: true })) }
+          catch (failure) {
+            if (!directory) throw failure
+            if (!(await invoke('taskbar_app', { path: directory, what: 'launch', id: null }))) throw failure
+            return view
+          }
+        })
+      }
       if (action === 'install' ? !entry : !row) return
       if (action === 'install' && !unlocked(id)) {
         error = text('请先完成 GitHub 登录与主仓 Star 验证，再安装官方插件。', 'Sign in to GitHub and verify your star before installing official extensions.')
@@ -440,8 +455,10 @@
           ? ' aria-disabled="true"'
           : ` data-extension-action="autostart" data-extension-id="${esc(m.id)}" aria-pressed="${hookState === 'on'}"`
         const hook = `<button type="button" class="pbtn sm hook" data-hook="${hookState}"${hookAction}${disabled} title="${esc(hookTitle)}">${esc(hookLabel)}</button>`
-        const actions = `${update && unlocked(m.id) ? button('install', m.id, text('更新', 'Update')) : ''}${hook}${r.running || unlocked(m.id) ? button('enabled', m.id, r.running ? text('停用', 'Disable') : r.error ? text('重试启用', 'Retry') : text('启用', 'Enable')) : ''}${button('uninstall', m.id, text('卸载', 'Uninstall'))}`
-        const pages = unlocked(m.id) ? m.pages.map(p => `<button type="button" class="pbtn sm" data-extension-page="${esc(m.id + '/' + p.id)}"${r.running ? disabled : ' disabled'}>${esc(p.title)}</button>`).join('') : `<span class="note">${esc(text('主仓 Star 验证后解锁功能页', 'Verify your repository star to unlock pages'))}</span>`
+        const actions = `${update && unlocked(m.id) ? button('install', m.id, text('更新', 'Update')) : ''}${hook}${r.running || unlocked(m.id) ? button('enabled', m.id, r.running ? text('停用', 'Disable') : r.error ? text('重试启用', 'Retry') : text('启用', 'Enable')) : ''}${button('uninstall', m.id, text('卸载', 'Uninstall'))}${button('logs', m.id, text('打开插件日志', 'Open logs'))}`
+        // 功能页按钮不再按运行态禁用（#14-7）：插件没运行时点进去，页面自己显示
+        // 「插件未运行」的错误态与「启动」按钮——标签页在、入口就在，不再忽隐忽现。
+        const pages = unlocked(m.id) ? m.pages.map(p => `<button type="button" class="pbtn sm" data-extension-page="${esc(m.id + '/' + p.id)}"${disabled}${r.running ? '' : ` title="${esc(text('插件未运行：打开后会显示错误态与「启动」按钮', 'Extension not running: open it to see the error state and Start'))}"`}>${esc(p.title)}</button>`).join('') : `<span class="note">${esc(text('主仓 Star 验证后解锁功能页', 'Verify your repository star to unlock pages'))}</span>`
         return `<article class="extension-card"><header class="extension-card-header"><div class="extension-card-title"><strong>${esc(m.name)}</strong><span class="extension-version">${esc(m.version)}</span><span class="extension-state">${esc(state)}</span>${update ? `<span class="extension-update">${esc(text('有更新 v', 'Update available v') + update.version)}</span>` : ''}</div><div class="extension-card-actions">${actions}</div></header><p class="extension-location mono">${esc(m.storage.directory)}</p>${origin}${r.error ? `<p class="extension-card-error bad" role="alert">${esc(r.error)}</p>` : ''}${notice}${m.pages.length ? `<div class="extension-pages">${pages}</div>` : ''}</article>`
       }).join('')
       const storeCards = entries.map(p => {
@@ -510,7 +527,13 @@
       // 2026-11-01 用户要求：去掉粒子动效，只保留最基本的进度条（不再启动 rAF）
       void load()
     }
-    return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth: () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }, pages: () => (view?.installed || []).filter(r => r.running && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, key: r.plugin.manifest.id + '/' + p.id }))) }
+    const closeAuth = () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }
+    // 标签页与运行态解耦（#14-7 / T05）：以前的过滤条件是 `r.running`，插件进程一退出
+    // 标签页就跟着消失——Dock 重开设置面板时忽隐忽现的正是这么来的。现在只看「已安装
+    // + 已启用 + 已解锁」；没运行也留着标签页，由页面自己显示错误态与「启动」按钮。
+    // running/error 一起带出去，页面才知道该不该走「未运行」那条路。
+    const pages = () => (view?.installed || []).filter(r => r.plugin.pending !== true && r.plugin.enabled !== false && Array.isArray(r.plugin.manifest.pages) && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, running: !!r.running, error: r.error || '', key: r.plugin.manifest.id + '/' + p.id })))
+    return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth, pages }
   }
   window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, PHASE_WORDS, FLIGHT_WINDOW }
 })()

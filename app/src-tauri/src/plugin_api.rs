@@ -75,6 +75,9 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
             // 自启动开关（#38）：写注册表 + Dock 运行中就立即拉起/停止该插件服务。
             "autostart"=>{runner.set_autostart(&manager,&id,enabled.ok_or("插件自启动设置缺少目标状态")?,node.as_deref())?;},
             "uninstall"=>runner.uninstall(&manager,&id).map_err(|error|crate::plugin_failure::wrap("uninstall",error,&crate::data::folder()))?,
+            // 「打开插件日志」（#53-4 / T03）：只把 host/plugin-logs/ 用系统方式打开，不动插件。
+            // 打开完继续走末尾的 view(context)，前端 acceptView 拿到的仍是完整插件列表。
+            "logs"=>{let directory=crate::plugin_runtime::log_directory(&context);std::fs::create_dir_all(&directory).map_err(|_|"插件日志目录创建失败")?;if !crate::tasks::launch(directory.to_string_lossy().as_ref()){return Err("插件日志目录打开失败".into());}},
             _=>return Err("插件管理操作无效".into()),
         }
         let _=runner.view(&manager)?;drop(runner);

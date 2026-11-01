@@ -1,8 +1,19 @@
 //! 插件后台 JSON 行会话；读写管道在专属线程中，业务请求和停用有期限。
-use std::{io::{BufReader,Write},path::Path,process::{Child,Command,Stdio},sync::mpsc::{self,Receiver,SyncSender},time::{Duration,Instant}};
+use std::{fs,io::{BufRead,BufReader,Write},path::{Path,PathBuf},process::{Child,ChildStderr,Command,Stdio},sync::mpsc::{self,Receiver,SyncSender},time::{Duration,Instant}};
 use serde_json::{json,Value};
 use crate::{plugin_install::{Installed,Manager},storage_context::Namespace};
-pub struct Process { child:Child, owner:Option<crate::plugin_job::Owner>, output:Receiver<Result<Value,String>>, input:SyncSender<Value>, next:u64, namespace:Namespace, capabilities:Vec<String> }
+// stderr 落盘（#53-1/2）：插件进程的错误输出接管成管道，由宿主线程写进
+// `<data>/host/plugin-logs/<plugin-id>.log`；单文件 1 MB 滚动保留 2 份
+// （`<id>.log` 与 `<id>.log.1`），每行先过 crash/redact.rs 脱敏、再单行截断。
+pub const LOG_LIMIT:u64=1024*1024;
+pub const LOG_KEEP:usize=2;
+// 一次读取的上限：插件一行写多长都不让宿主无限吃内存。
+const STDERR_CHUNK:u64=8192;
+// 运行态判据（#14-4）里「握手可应答」的时窗：一次探针最多等这么久，答过之后
+// 缓存这么久不再重复探——设置页每次重绘都探一遍会把界面拖慢。
+const PROBE_TIMEOUT:Duration=Duration::from_secs(2);
+const PROBE_TTL:Duration=Duration::from_secs(2);
+pub struct Process { child:Child, owner:Option<crate::plugin_job::Owner>, output:Receiver<Result<Value,String>>, input:SyncSender<Value>, next:u64, namespace:Namespace, capabilities:Vec<String>, id:String, probe:Option<Instant> }
 // autostart_flag 是传给插件的那个环境变量值（#22）：只有 1 是「随 Dock 启动」，
 // 其余一律 0，插件据此决定要不要自己把服务拉起来。
 fn autostart_flag(autostart:bool)->&'static str { if autostart{"1"}else{"0"} }
@@ -20,17 +31,19 @@ impl Process {
             "native"=>Command::new(&entry),
             _=>return Err("插件运行时不受支持".into()),
         };
-        command.args(&row.manifest.backend.args).current_dir(&directory).env_remove("NODE_OPTIONS").env_remove("NODE_PATH").env_remove("ELECTRON_RUN_AS_NODE").env("FISH_PLUGIN_ID",&row.manifest.id).env("FISH_PLUGIN_AUTOSTART",autostart_flag(autostart)).env("FISH_PLUGIN_DATA",namespace.path()).env("TMP",namespace.path().join("tmp")).env("TEMP",namespace.path().join("tmp")).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(if cfg!(test){Stdio::inherit()}else{Stdio::null()});
+        command.args(&row.manifest.backend.args).current_dir(&directory).env_remove("NODE_OPTIONS").env_remove("NODE_PATH").env_remove("ELECTRON_RUN_AS_NODE").env("FISH_PLUGIN_ID",&row.manifest.id).env("FISH_PLUGIN_AUTOSTART",autostart_flag(autostart)).env("FISH_PLUGIN_DATA",namespace.path()).env("TMP",namespace.path().join("tmp")).env("TEMP",namespace.path().join("tmp")).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
         let mut child=command.spawn().map_err(|_|"插件启动失败，请检查运行时路径及系统权限")?;
         let owner=match crate::plugin_job::Owner::attach(&child) {Ok(owner)=>owner,Err(error)=>{let _=child.kill();let _=child.wait();return Err(error)}};
         let Some(stdout)=child.stdout.take() else{let _=child.kill();return Err("插件缺少输出管道".into())};
         let Some(mut stdin)=child.stdin.take() else{let _=child.kill();return Err("插件缺少输入管道".into())};
+        let Some(stderr)=child.stderr.take() else{let _=child.kill();return Err("插件缺少错误输出管道".into())};
+        watch_stderr(row.manifest.id.clone(),stderr,manager.context.root.clone(),crate::plugin_runtime::log_file(manager.context,&row.manifest.id));
         let (tell,output)=mpsc::sync_channel(4);
         std::thread::spawn(move||{let mut reader=BufReader::new(stdout);loop{match crate::plugin_protocol::line(&mut reader){Ok(Some(value))=>{if tell.send(Ok(value)).is_err(){break}},Ok(None)=>break,Err(error)=>{let _=tell.send(Err(error));break}}}});
         let (input,read)=mpsc::sync_channel::<Value>(2);
         std::thread::spawn(move||{for value in read {let Ok(mut bytes)=serde_json::to_vec(&value) else{break};bytes.push(b'\n');if stdin.write_all(&bytes).and_then(|_|stdin.flush()).is_err(){break;}}});
-        let mut process=Self{child,owner:Some(owner),output,input,next:0,namespace,capabilities:row.manifest.capabilities.clone()};
+        let mut process=Self{child,owner:Some(owner),output,input,next:0,namespace,capabilities:row.manifest.capabilities.clone(),id:row.manifest.id.clone(),probe:None};
         let hello=process.request("host.hello",json!({"protocol":1,"pluginId":row.manifest.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":process.namespace.path(),"storage":process.namespace.identity(),"capabilities":row.manifest.capabilities}),crate::config::plugin_activate_timeout())?;
         if hello["type"]!="plugin.hello" || hello["protocol"]!=1 || hello["pluginId"]!=row.manifest.id {return Err("插件握手身份或协议不匹配".into());}
         process.request("plugin.activate",json!({}),crate::config::plugin_activate_timeout())?;
@@ -61,7 +74,39 @@ impl Process {
         }
     }
     pub fn accepts_events(&self)->bool{self.capabilities.iter().any(|c|c=="events")}
-    pub fn running(&mut self)->bool{matches!(self.child.try_wait(),Ok(None))}
+    // 进程退出码（#53-3）：还活着是 None；已经退出就是它带走的那个码
+    // （被强杀时是 Windows 的码，Task Manager 杀进程是 1）。
+    pub fn exit_code(&mut self)->Option<i32>{match self.child.try_wait(){Ok(Some(status))=>status.code(),_=>None}}
+    // 运行态判据（#14-4 宿主侧）：「进程存活 + 握手可应答」双条件。
+    // 只看 try_wait 会把「进程还在、事件循环卡死」的假活当成运行中——那正是 #14
+    // 现象 C 里「内核已停止 + 代理有效」的另一半根因。探针走 host.hello：SDK 对
+    // 重复握手回 BAD_HANDSHAKE，那也是一条应答，所以只要编号对得上就说明它还听得
+    // 见；探过之后缓存 PROBE_TTL，设置页每次重绘不会各探一轮。
+    pub fn running(&mut self)->bool{
+        if !matches!(self.child.try_wait(),Ok(None)) { self.probe=None; return false; }
+        if self.probe.is_some_and(|at|at.elapsed()<PROBE_TTL) { return true; }
+        if self.handshake() { self.probe=Some(Instant::now()); true } else { self.probe=None; false }
+    }
+    // 一次探针：发一条请求，等这个编号上的**任何**应答（result 或 error 都算——
+    // 我们要的是「它还听得见」，不是那条方法本身的结果）。
+    fn handshake(&mut self)->bool{
+        let Some(id)=self.next.checked_add(1) else{return false};
+        self.next=id;
+        if self.send(json!({"id":id,"method":"host.hello","params":{"protocol":1,"pluginId":self.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":self.namespace.path(),"storage":self.namespace.identity(),"capabilities":self.capabilities}})).is_err(){return false}
+        let deadline=Instant::now()+PROBE_TIMEOUT;
+        loop {
+            let left=deadline.saturating_duration_since(Instant::now());if left.is_zero(){return false}
+            let value=match self.output.recv_timeout(left){Ok(Ok(value))=>value,_=>return false};
+            if let Some(method)=value.get("method").and_then(Value::as_str) {
+                // 探针期间插件回叫宿主：照常答，别把它堵在等宿主上。
+                let result=storage_call(&self.namespace,&self.capabilities,method,&value["params"]);
+                let response=match result{Ok(result)=>json!({"id":value["id"],"result":result}),Err(_)=>json!({"id":value["id"],"error":{"code":"HOST_OPERATION_FAILED","message":"宿主操作失败，请检查存储类别与声明能力"}})};
+                if self.send(response).is_err(){return false}
+                continue;
+            }
+            if value.get("id").and_then(Value::as_u64)==Some(id) { return true }
+        }
+    }
     pub fn stop(&mut self){
         if self.running(){let _=self.request("plugin.deactivate",json!({}),crate::config::plugin_activate_timeout());}
         // 正常停用后也回收本实例创建的残留子进程。
@@ -69,6 +114,98 @@ impl Process {
     }
 }
 impl Drop for Process {fn drop(&mut self){self.owner.take();let _=self.child.kill();let _=self.child.wait();}}
+// 插件 stderr 的落盘线程（#53-1/2）：读到一行就脱敏、截断、写一行。插件退出把
+// 管道关掉，循环随之结束；写不了就把 sink 丢掉，绝不因此拖住插件本体。
+fn watch_stderr(id:String,stderr:ChildStderr,data:PathBuf,log:PathBuf){
+    std::thread::spawn(move||{
+        let redactor=crate::crash::Redactor::here(&data,&[]);
+        let mut sink=Log::open(&log,LOG_LIMIT,LOG_KEEP);
+        let mut reader=BufReader::new(stderr);
+        loop {
+            let mut bytes=Vec::new();
+            // 读到行尾为止，单次最多 STDERR_CHUNK 字节：插件写超长一行时分段读，
+            // 每段各成一条日志（反正每条都会被截断），宿主内存不会被它撑爆。
+            match std::io::Read::take(&mut reader,STDERR_CHUNK).read_until(b'\n',&mut bytes){Ok(0)=>break,Ok(_)=>{},Err(_)=>break}
+            let text=String::from_utf8_lossy(&bytes);
+            let line=stderr_line(&redactor,&id,&text);
+            match sink.as_mut(){Some(file)=>file.line(&line),None=>break}
+        }
+    });
+}
+// 一行日志的形状：`<ms> [plugin] <id>: <脱敏后的原文>`。前缀是 ASCII、好 grep；
+// G1 报告要按插件 id 过滤，所以 id 单独放在固定位置上。
+fn stderr_line(redactor:&crate::crash::Redactor,id:&str,raw:&str)->String{
+    let text=raw.trim_end_matches(['\r','\n']);
+    let (shielded,held)=shield(text);
+    // crash/redact.rs 的 Redactor 负责令牌、路径、邮箱、IP、主机名与单行截断。
+    let redacted=redactor.text(&shielded);
+    format!("{} [plugin] {id}: {}",crate::now_ms(),restore(&redacted,&held))
+}
+// Redactor 是写给公开崩溃报告的：双引号里的整段会变 ‹…›，非 ASCII 词也会变 ‹…›。
+// 插件日志是本机诊断用，中文报错与 JSON 里的 msg 必须读得出来，所以先把引号换成
+// 控制字符、把非 ASCII 词段换成占位，过完 Redactor 再原样还原——令牌、路径、邮箱、
+// IP、主机名全在 ASCII 段里，照旧被脱敏（这一层不改 Redactor，只是给它让路）。
+// 原文里本来就有的这两个控制字符先剔掉，免得插件的输出伪造占位。
+const QUOTE_HOLD:char='\u{1}';
+const TEXT_HOLD:char='\u{2}';
+fn shield(text:&str)->(String,Vec<String>){
+    let mut out=String::with_capacity(text.len());
+    let mut held:Vec<String>=Vec::new();
+    let mut run=String::new();
+    let flush=|out:&mut String,held:&mut Vec<String>,run:&mut String|{if run.is_empty(){return}held.push(std::mem::take(run));out.push(TEXT_HOLD);out.push_str(&(held.len()-1).to_string());out.push(TEXT_HOLD);};
+    for c in text.chars(){
+        if c==QUOTE_HOLD||c==TEXT_HOLD {continue}
+        if c=='"'{flush(&mut out,&mut held,&mut run);out.push(QUOTE_HOLD);}
+        else if c.is_ascii(){flush(&mut out,&mut held,&mut run);out.push(c);}
+        else {run.push(c);}
+    }
+    flush(&mut out,&mut held,&mut run);
+    (out,held)
+}
+fn restore(text:&str,held:&[String])->String{
+    let mut out=String::with_capacity(text.len());
+    let mut chars=text.chars().peekable();
+    while let Some(c)=chars.next(){
+        if c==QUOTE_HOLD {out.push('"');continue}
+        if c==TEXT_HOLD {
+            let mut digits=String::new();
+            while chars.peek().is_some_and(|d|d.is_ascii_digit()) {if let Some(d)=chars.next(){digits.push(d)}}
+            if chars.peek()==Some(&TEXT_HOLD){chars.next();}
+            match digits.parse::<usize>().ok().and_then(|index|held.get(index)){Some(text)=>out.push_str(text),None=>out.push_str(&digits)}
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+// 单文件 1 MB、保留 2 份的滚动写（#53-1）。`<id>.log` 正在写，`<id>.log.1` 是上一份；
+// 写满就删最旧的那份、把当前这份改名成 .1、开一份新的。失败就放弃 sink，不重试、
+// 不影响插件运行。
+struct Log { file:fs::File, size:u64, path:PathBuf, limit:u64, keep:usize }
+impl Log {
+    fn open(path:&Path,limit:u64,keep:usize)->Option<Self>{
+        if let Some(parent)=path.parent(){fs::create_dir_all(parent).ok()?;}
+        let file=fs::OpenOptions::new().create(true).append(true).open(path).ok()?;
+        let size=file.metadata().map(|meta|meta.len()).unwrap_or(0);
+        Some(Self{file,size,path:path.to_path_buf(),limit,keep:keep.max(2)})
+    }
+    fn line(&mut self,line:&str){
+        let mut bytes=line.as_bytes().to_vec();if !bytes.ends_with(b"\n"){bytes.push(b'\n');}
+        if self.size>0&&self.size+bytes.len() as u64>self.limit&&!self.rotate() {
+            // 滚动失败（被占用、没权限）：就地把当前这份继续写，别丢这一行。
+            if let Ok(file)=fs::OpenOptions::new().create(true).append(true).open(&self.path){self.file=file;self.size=0;}
+        }
+        if self.file.write_all(&bytes).and_then(|_|self.file.flush()).is_ok(){self.size+=bytes.len() as u64;}
+    }
+    fn rotate(&mut self)->bool{
+        let _=self.file.flush();
+        let roll=|index:usize|PathBuf::from(format!("{}.{index}",self.path.to_string_lossy()));
+        let _=fs::remove_file(roll(self.keep-1));
+        for index in (1..self.keep.saturating_sub(1)).rev(){let _=fs::rename(roll(index),roll(index+1));}
+        if fs::rename(&self.path,roll(1)).is_err(){return false}
+        match fs::OpenOptions::new().create(true).append(true).open(&self.path){Ok(file)=>{self.file=file;self.size=0;true},Err(_)=>false}
+    }
+}
 fn storage_call(ns:&Namespace,capabilities:&[String],method:&str,params:&Value)->Result<Value,String>{
     if !capabilities.iter().any(|c|c=="storage"){return Err("插件未声明存储能力".into());}
     let category=params["category"].as_str().ok_or("存储调用缺少类别")?;
@@ -341,5 +478,46 @@ mod tests {
     #[test] fn autostart_flag_is_one_only_when_started_with_the_dock() {
         assert_eq!(autostart_flag(true),"1");
         assert_eq!(autostart_flag(false),"0");
+    }
+    // #53-1/2：stderr 落盘。脱敏照旧（令牌不落明文），但中文报错与 JSON 的 msg 必须
+    // 留得住——Redactor 的公开报告口径会把它们换成 ‹…›，所以 shield/restore 先给
+    // 引号与非 ASCII 词让路。单行截断，1 MB 只留 2 份。
+    #[test] fn plugin_stderr_is_redacted_clipped_and_rolled_in_two_files() {
+        let root=std::env::temp_dir().join(format!("fish-stderr-{}-{}",std::process::id(),crate::now_ms()));
+        let log=root.join("host/plugin-logs/fish.clash.log");
+        let redactor=crate::crash::Redactor::here(&root,&[]);
+        let line=stderr_line(&redactor,"fish.clash","console.error: 内核启动失败 token=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n");
+        assert!(line.contains("console.error"),"console.error 要查得到：{line}");
+        assert!(line.contains("fish.clash"),"每行带插件 id：{line}");
+        assert!(line.contains("内核启动失败"),"中文报错不许被整段抹掉：{line}");
+        assert!(!line.contains("ghp_abcdefghijklmnopqrstuvwxyz0123456789"),"令牌不许落明文：{line}");
+        assert!(line.contains("<token>"),"{line}");
+        // 未捕获异常（node 打到 stderr 的原样文本）也要能查到栈位置。
+        let thrown=stderr_line(&redactor,"fish.clash","Uncaught Error: synthetic failure at backend.mjs:12:5");
+        assert!(thrown.contains("Uncaught Error")&&thrown.contains("backend.mjs:12:5"),"{thrown}");
+        // JSON 日志行（引擎侧常见）：引号与 msg 都在，不塌成 ‹…›。
+        let json=stderr_line(&redactor,"fish.clash","{\"level\":\"error\",\"msg\":\"连接失败\"}");
+        assert!(json.contains("\"level\":\"error\"")&&json.contains("连接失败"),"{json}");
+        // 单行截断：4000 字符的一行只留 ~300 字符（redact.rs MAX_LINE）。
+        let long=stderr_line(&redactor,"fish.clash",&"x".repeat(4000));
+        assert!(long.chars().count()<=512,"单行必须截断：{}",long.chars().count());
+        // 1 MB × 2 滚动：写 3 MB 之后只剩两块文件、总量 ≤ 2 MB。
+        let mut sink=Log::open(&log,LOG_LIMIT,LOG_KEEP).unwrap();
+        for _ in 0..(3*1024) { sink.line(&"y".repeat(1023)); }
+        let folder=log.parent().unwrap();
+        let mut names:Vec<String>=std::fs::read_dir(folder).unwrap().flatten().map(|entry|entry.file_name().to_string_lossy().to_string()).collect();
+        names.sort();
+        let total:u64=std::fs::read_dir(folder).unwrap().flatten().map(|entry|entry.metadata().map(|meta|meta.len()).unwrap_or(0)).sum();
+        assert_eq!(names,vec!["fish.clash.log".to_string(),"fish.clash.log.1".to_string()],"只留当前 + 上一份：{names:?}");
+        assert!(total<=2*LOG_LIMIT,"滚动后总量要 ≤ 2 MB，实际 {total}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    // shield/restore 不许把普通行改样：短句子原样进、原样出（只有 Redactor 会动它）。
+    #[test] fn shield_and_restore_round_trip_ordinary_text() {
+        for text in ["plugin ready on port 9090","{\"ok\":true}","配置无效，请重试","mixed 中英 混排 ok"] {
+            let (shielded,held)=shield(text);
+            assert!(shielded.is_ascii(),"占位之后必须是纯 ASCII：{shielded}");
+            assert_eq!(restore(&shielded,&held),text);
+        }
     }
 }

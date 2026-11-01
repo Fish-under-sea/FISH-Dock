@@ -3358,6 +3358,9 @@
 
   function drawTabs() {
     const previous = TABS
+    // 标签页由 pages() 决定（#14-7）：它现在只看「已安装 + 已启用 + 已解锁」，
+    // 不再跟运行态走。所以这里不用补任何运行态判断——插件进程没起来时标签页
+    // 也在，页面由 drawBody 去画「未运行」的错误态。
     TABS = window.ExtensionTabs.order(snap.settings.appearance?.tabOrder, extensionPanel.pages().map(page => page.key))
     tab = window.ExtensionTabs.nearest(tab, previous, TABS)
     extensionPage.sync(extensionPanel.pages())
@@ -3374,11 +3377,22 @@
     tabs.querySelector('[data-tab="agents"] .n').hidden = !Agents.summary(snap, known()).wants.length
   }
 
+  // 插件页在插件没运行时的那一屏（#14-7 / T05）：一句原因 + 「启动」+「打开插件日志」。
+  // 原因用宿主 view() 的 error（带退出码与日志路径），没有就用「插件未运行」。
+  function drawExtensionDown(page) {
+    const zh = lang === 'zh'
+    const reason = page.error || (zh ? '插件未运行，请先启动它的服务。' : 'The extension is not running. Start it first.')
+    setHTML(body, `<section class="extension-down" data-extension-down="${esc(page.plugin)}"><h3>${esc(page.title)}</h3><p class="bad" role="alert">${esc(reason)}</p><div class="r"><button type="button" class="pbtn" data-plugin-start="${esc(page.plugin)}">${esc(zh ? '启动' : 'Start')}</button><button type="button" class="pbtn" data-plugin-logs="${esc(page.plugin)}">${esc(zh ? '打开插件日志' : 'Open logs')}</button></div></section>`)
+  }
+
   // The page, kept as it is when nothing changed; redrawn, the box being
   // typed in (the download box, a plugin's setting, the mail proxy's
   // address) gets the focus and the caret back.
   function drawBody(reset) {
     const extension = extensionPanel.pages().find(page => page.key === tab)
+    // 插件没在跑 / 没启起来（#14-7 / T05）：标签页留着，这一页显示错误态与「启动」。
+    // 以前标签页直接消失，用户以为插件被卸载；现在入口在，能当场拉起，也能一步看日志。
+    if (extension && extension.running === false) { extensionPage.park(); drawExtensionDown(extension); return }
     if (extension) { void extensionPage.enter(body, extension); return }
     extensionPage.park()
     const box = body.contains(document.activeElement) && document.activeElement.matches('input, textarea') ? document.activeElement : null
@@ -3882,6 +3896,11 @@
     if (crashButton && !crashButton.disabled) return window.pet.settings.crash(crashButton.dataset.crash).then(got => ((snap = got), draw()))
     const paperButton = at('[data-paper]')
     if (paperButton && !paperButton.disabled) return paperDo(paperButton.dataset.paper)
+    // 插件页在插件未运行时的两颗粒子按钮（#14-7 / T05）：拉起服务、或一步打开插件日志。
+    const pluginStart = at('[data-plugin-start]')
+    if (pluginStart && !pluginStart.disabled) return extensionPanel.action('enabled', pluginStart.dataset.pluginStart)
+    const pluginLogs = at('[data-plugin-logs]')
+    if (pluginLogs && !pluginLogs.disabled) return extensionPanel.action('logs', pluginLogs.dataset.pluginLogs)
     // 强调色：跟随系统 / 自定义 两种；挑一个颜色就是自定义（settings_win_look）。
     const accentMode = at('[data-winaccent]')
     if (accentMode) {

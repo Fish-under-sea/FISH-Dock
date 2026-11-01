@@ -19,6 +19,7 @@ function make({ agree = true, offline = false, installed = [], manage, verified 
     if (command === 'extension_progress') return typeof progressState === 'function' ? progressState() : progressState
     if (command === 'extension_cancel') return { id: args?.id, active: false }
     if (command === 'extension_thirdparty') return third ? third(args) : { hits: [], hidden: 0 }
+    if (command === 'taskbar_app') return true
   } })
   return { panel, calls, timers }
 }
@@ -210,6 +211,45 @@ test('未验证 Star 时隐藏官方功能标签但保留卸载；第三方功�
   assert.deepEqual(Array.from(panel.pages(), p=>p.key), ['acme.weather/main'])
   assert.match(panel.render(), /data-extension-action="uninstall"/)
   assert.match(panel.render(), /Star/)
+})
+
+// #14-7 / T05：标签页与运行态解耦。以前 pages() 只认 r.running，插件进程一退出
+// 标签页就消失（Dock 重开设置面板时忽隐忽现）。现在只看「已安装 + 已启用 + 已解锁」，
+// 没运行也留着标签页，由页面显示错误态；插件卡另给「打开插件日志」一步开目录。
+test('插件未运行时标签页仍在，功能页按钮不再禁用，插件卡可一步打开插件日志', async () => {
+  const page = { id: 'main', title: 'Clash' }
+  const stopped = { plugin: { manifest: { ...row.plugin.manifest, enabled: true, pages: [page] }, enabled: true }, running: false, error: '插件进程已退出（退出码：1） · 日志：X:/合成/.fish-dock/host/plugin-logs/fish.magpie.log', logPath: 'X:/合成/.fish-dock/host/plugin-logs/fish.magpie.log' }
+  const disabled = { ...stopped, plugin: { ...stopped.plugin, enabled: false } }
+  const pending = { ...stopped, plugin: { ...stopped.plugin, pending: true } }
+  const { panel, calls } = make({ installed: [stopped, disabled, pending] })
+  await panel.load()
+  const pages = panel.pages()
+  assert.deepEqual(Array.from(pages, p => p.key), ['fish.magpie/main'], '没运行也要有标签页；停用与安装未完成的不算')
+  assert.equal(pages[0].running, false, '页面要知道插件没在跑')
+  assert.match(pages[0].error, /退出码/, '错误态文案沿用宿主的 error（带退出码与日志路径）')
+  const html = panel.render()
+  assert.doesNotMatch(html, /data-extension-page="fish\.magpie\/main"[^>]*\sdisabled(?=[\s>])/, '未运行不再把功能页按钮禁用')
+  assert.match(html, /data-extension-page="fish\.magpie\/main"[^>]*插件未运行：打开后会显示错误态与「启动」按钮/)
+  // 插件卡上的「打开插件日志」：一步打开 plugin-logs/（宿主 extension_manage action=logs）
+  assert.match(html, /data-extension-action="logs" data-extension-id="fish\.magpie"/, '插件卡上有日志入口')
+  await panel.action('logs', 'fish.magpie')
+  const manage = calls.filter(c => c.command === 'extension_manage').at(-1)
+  assert.equal(manage.args.action, 'logs')
+  assert.equal(manage.args.id, 'fish.magpie')
+  assert.equal(manage.args.confirm, true)
+})
+
+// 宿主还没接线 action=logs 时不许留一颗死按钮：退回同一个 open-directory 能力
+// （taskbar_app 的「launch」，ShellExecute 打开目录），路径取宿主给的 logPath。
+test('打开插件日志：宿主还没有 logs 动作时退回同一条 open-directory 能力', async () => {
+  const page = { id: 'main', title: 'Clash' }
+  const stopped = { plugin: { manifest: { ...row.plugin.manifest, enabled: true, pages: [page] }, enabled: true }, running: false, logPath: 'X:/合成/.fish-dock/host/plugin-logs/fish.magpie.log' }
+  const { panel, calls } = make({ installed: [stopped], manage: async () => { throw new Error('插件管理操作无效') } })
+  await panel.load()
+  await panel.action('logs', 'fish.magpie')
+  const fallback = calls.filter(c => c.command === 'taskbar_app').at(-1)
+  assert.equal(fallback.args.what, 'launch')
+  assert.equal(fallback.args.path, 'X:/合成/.fish-dock/host/plugin-logs', '目录而非文件')
 })
 
 test('登录未开通时禁用不可用入口，并用一条状态提示而非构建术语', async () => {
