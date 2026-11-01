@@ -1,8 +1,8 @@
 <p align="center"><img src="src-tauri/icons/fish-dock.png" width="112" alt="FISH Dock icon"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">A place for AI sessions to dock, and model connections to come together.</p>
-<p align="center"><strong>2.0.1</strong> · Windows x64 · MIT-licensed code</p>
-<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.1">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-2.0.0.md">Release notes</a></p>
+<p align="center"><strong>2.0.2</strong> · Windows x64 · MIT-licensed code</p>
+<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.2">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-2.0.0.md">Release notes</a></p>
 
 > **A derivative integration, not an official upstream release.** FISH Dock builds on the desktop and AI-session experience of [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku); model capabilities are provided by the Magpie plugin, with plugins, plugin packages and the store catalog maintained by [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Original authors, copyrights, and licenses are credited below.
 
@@ -50,7 +50,7 @@ See the [2.0.0 release notes](docs/release-2.0.0.md) for verification scope.
 
 Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows 11; other Windows releases and third-party taskbar software require separate verification.
 
-1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.1) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-2.0.1.exe` is for first installation or repair; `FISH-Dock-Update-2.0.1.exe` is for an existing installation with intact base resources.
+1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.2) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-2.0.2.exe` is for first installation or repair; `FISH-Dock-Update-2.0.2.exe` is for an existing installation with intact base resources.
 2. Fully exit the previous version from the tray. Run the installer and choose a destination. Fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock`; upgrades reuse the registered directory instead of moving it.
 3. Start **FISH Dock** from the desktop or Start menu. Node.js, Fixed Version WebView2, Windhawk, its compiler, and license notices are bundled. Business plugins are downloaded separately.
 4. The first launch confirms runtime terms and verifies resources. Later launches use installed files without repeatedly extracting the entire runtime.
