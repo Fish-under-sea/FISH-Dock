@@ -6,21 +6,21 @@
 </p>
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark.png"><img src="assets/readme/hero-en-light.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="app/docs/release-2.0.1.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.0.1"></picture></a>
+<a href="app/docs/release-2.0.2.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.0.2"></picture></a>
 <a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
 <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v2.png"><img src="assets/readme/stat-channels-en-light-v2.png" width="23%" alt="Three independent official plugins"></picture></a>
 </p>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.1"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="app/docs/release-2.0.1.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.2"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
+<a href="app/docs/release-2.0.2.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark.png"><img src="assets/readme/key-issues-en-light.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
 
-**2.0.1 · Windows 10/11 x64** — a desktop workspace for Agent sessions, notifications, mail and independent plugins.
+**2.0.2 · Windows 10/11 x64** — a desktop workspace for Agent sessions, notifications, mail and independent plugins.
 
-[Download](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.1) · [中文](README.md) · [Official plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) · [Release notes](app/docs/release-2.0.1.md)
+[Download](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.2) · [中文](README.md) · [Official plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) · [Release notes](app/docs/release-2.0.2.md)
 
 ## Features
 
@@ -52,6 +52,8 @@ This section is only about entry points and operations; capability detail is abo
 
 Business code, plugin packages and the store catalog are maintained in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins); this repository owns the desktop host, SDK, installer, plugin management and Windhawk.
 
+**2.0.2** is a patch release: host 2.0.2, compatible with plugins 2.1.x. It fixes the three ways plugins went wrong silently — no logs, no diagnosis, no reliable stop. Plugin `stderr` is no longer discarded: it is written to `host/plugin-logs/<plugin-id>.log` (1 MB per file, two kept, redacted before writing), failures are persisted as structured JSON in `host/plugin-failures.log` with exit code and log path, and plugin cards gain an "Open plugin logs" action. Plugin pages no longer disappear when the process is not running — the tab stays, shows the reason, and offers a Start button. Liveness now means "process alive plus handshake answers", and orphan kernel reclamation checks pid, real start time and controller reachability together, so a recycled pid is no longer killed. See the [2.0.2 release notes](app/docs/release-2.0.2.md).
+
 **2.0.1** is a maintenance release: host 2.0.1, compatible with plugins 2.1.x (Magpie is at 2.1.1). The notes area gets a Refresh control even when it has content, About refetches after 5 minutes, and note titles no longer repeat the version; a global-shortcut recorder is added; plugin update and uninstall are transactional (old version directories pruned, uninstall thorough but keeps user data) with autostart taking effect live; untitled windows get taskbar buttons, tray icon clicks work, and the context menu is trimmed; the workspace self-heals after a display change and the taskbar stops floating at 110% text; hang stack capture and a WebView2-termination fix. The OFM local model is retired from the store (installed users can still enable or uninstall it), and model capabilities are provided by the Magpie plugin; agy island approvals and the memory issues move to 2.1.0. See the [2.0.1 release notes](app/docs/release-2.0.1.md).
 
 **2.0.0** finishes the legacy-name work. Every version position — `tauri.conf.json`, `Cargo.toml`, the Claude Code plugin manifest, the installer and these documents — is now `2.0.0`, and the old executable is no longer kept as a rollback copy. Legacy names split three ways: internal identities (the uninstall entry, the executable name, the Run value and command-line switches) are untouched; user-facing names (the Task Scheduler author and description, the user data directory) become `FISH Dock`; old uninstall entries and run values pointing at the old executable are removed on install once they are proven ours. The user data directory migrates to `%LOCALAPPDATA%\FISH Dock` and the old one is deleted right after the copy verifies; if the migration does not finish, the old directory stays exactly as it was. Both the full installer and the compact update package are published, with checksums, at [v2.0.0](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.0).
@@ -79,8 +81,8 @@ Choose the package for the published version and verify it with `SHA256SUMS.txt`
 
 | Package | When to use it |
 | --- | --- |
-| `FISH-Dock-Setup-2.0.1.exe` | First installation, missing runtimes or repair; includes the complete offline runtime. |
-| `FISH-Dock-Update-2.0.1.exe` | An existing installation with intact base resources; contains only the changed files (about 31 MB) and points to the full installer if required resources are missing or damaged. |
+| `FISH-Dock-Setup-2.0.2.exe` | First installation, missing runtimes or repair; includes the complete offline runtime. |
+| `FISH-Dock-Update-2.0.2.exe` | An existing installation with intact base resources; contains only the changed files (about 30 MB) and points to the full installer if required resources are missing or damaged. |
 
  Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0, Fixed Version WebView2 155.0.4283.62, and Windhawk 1.7.3 with its LLVM-MinGW compiler. A separate Windhawk installation is unnecessary. The installer is currently unsigned.
 
