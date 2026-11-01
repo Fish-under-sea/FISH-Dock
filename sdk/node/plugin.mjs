@@ -85,7 +85,16 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
       }
       if (!Object.hasOwn(commands,row.method) || typeof commands[row.method] !== 'function') return error('UNKNOWN_METHOD','插件方法未注册');
       return reply(await commands[row.method](row.params ?? {},context));
-    } catch { return error('COMMAND_FAILED','插件操作失败，请检查配置及运行状态'); }
+    } catch (thrown) {
+      // 业务错误带码上行：插件自己抛出的 {code,message}（如 serviceError('PORT_IN_USE')）
+      // 原样交给宿主，页面才能按码查表显示专属文案；认不出来的异常仍折叠成 COMMAND_FAILED，
+      // 免得把可能夹带地址或凭据的原文透给宿主。
+      const code = typeof thrown?.code === 'string' ? thrown.code : '';
+      const message = typeof thrown?.message === 'string' ? thrown.message.trim() : '';
+      if (/^[A-Z][A-Z0-9_]{0,39}$/.test(code) && message && message.length <= 200 && !/[\u0000-\u001f\u007f]/.test(message))
+        return error(code, message);
+      return error('COMMAND_FAILED','插件操作失败，请检查配置及运行状态');
+    }
   }
   function accept(bytes) {
     let row;

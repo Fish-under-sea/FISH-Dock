@@ -18,8 +18,18 @@
     const waiter = pending.get(row.id)
     if (!waiter) return
     pending.delete(row.id); clearTimeout(waiter.timer)
-    if (row.error) waiter.reject(new Error(row.error)); else waiter.resolve(row.result)
+    if (row.error) waiter.reject(failure(row.error)); else waiter.resolve(row.result)
   })
+  // 宿主把插件业务错误编码成「<文案>（错误码 CODE）」（见 plugin_protocol.rs 的 business_error）：
+  // 这里还原成带 code 的 Error，页面就能按码查表显示专属文案；不是这种形状的提示按原文报。
+  const CODE_TAIL = /（错误码 ([A-Z][A-Z0-9_]{0,39})）$/
+  function failure(text) {
+    const raw = String(text ?? '')
+    const hit = CODE_TAIL.exec(raw)
+    const error = new Error(hit ? raw.slice(0, hit.index) : raw)
+    if (hit) error.code = hit[1]
+    return error
+  }
   function call(method, params = {}) {
     if (pending.size >= 32) return Promise.reject(new Error('插件页面请求过多，请稍后重试'))
     const id = ++sequence
