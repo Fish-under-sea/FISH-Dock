@@ -1,5 +1,5 @@
 //! 可恢复安装注册表：先核验资源，最后切换活动版本；卸载保留用户命名空间。
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::BTreeMap, path::{Path,PathBuf}};
 use serde::{Deserialize, Serialize};
 use crate::{plugin_manifest::Manifest, plugin_package::Package, storage::Source, storage_context::{Context, Namespace}};
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -45,6 +45,34 @@ pub struct Manager<'a> { pub context: &'a Context }
 // 上层的锁再进存储。嵌套（本文件 install 等持 EDIT_REGISTRY 时经 namespace/
 // save/notices 进 EDIT）是这个方向的一部分，不算违规。
 static EDIT_REGISTRY:std::sync::Mutex<()>=std::sync::Mutex::new(());
+// ---- 校验快照（T03） ----------------------------------------------------------
+// 「更新后首启慢」的直接成本在这里：以前每次冷启都对插件包做一遍全文 SHA-256，
+// 本机实测 magpie 75.9 MB + clash 53.9 MB，串行 129.9 MB 读 + 哈希，而且是在
+// CURRENT 锁内、拉进程之前做的。现在把「已经核验过的那一版」逐文件的 size+mtime
+// 记进 host/plugin-verified/<id>-<version>-<digest>.json：同一 (id, version, digest)
+// 只要指纹没变就只 stat、不读内容；真的变了才重算**那一个文件**的摘要。
+//
+// 落点与 plugin-logs / plugin-failures.log 同类：都在宿主 data 根下，且都不在配置
+// 备份的收录范围里（config_backup.rs 只收 config/keys/credentials/roster 与
+// plugins/pets）。缓存丢了只是下次启动多哈希一轮，不会把过期指纹带进备份。
+pub fn verified_directory_of(host:&Path)->PathBuf{host.join("plugin-verified")}
+pub fn verified_file_of(host:&Path,id:&str,version:&str,digest:&str)->PathBuf{verified_directory_of(host).join(format!("{id}-{version}-{digest}.json"))}
+// 一个资源的指纹：字节数 + 修改时刻（纳秒口径）。任一变化都当作「可能要重算摘要」。
+// 这是 T03 用 stat 换掉全文哈希的全部依据，判据只此一处（插件页面也用它，见 T09）。
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields,rename_all="camelCase")]
+pub struct Stamp { pub size:u64, pub mtime:u64 }
+pub fn stamp(path:&Path)->Result<Stamp,String>{
+    let meta=std::fs::metadata(path).map_err(|_|"已安装插件资源缺失")?;
+    if !meta.is_file() { return Err("已安装插件资源不是文件".into()); }
+    let mtime=meta.modified().ok().and_then(|at|at.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0,|elapsed|u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX));
+    Ok(Stamp{size:meta.len(),mtime})
+}
+// 快照文件本体。身份三件套（id/version/digest）都记下来：任何一项与当前注册行不
+// 一致，整份快照按缺失处理——缓存绝不把一个摘要的校验结果用到另一个摘要上。
+#[derive(Clone,Debug,Serialize,Deserialize)]
+#[serde(deny_unknown_fields,rename_all="camelCase")]
+struct Verified { schema:u32, id:String, version:String, digest:String, files:BTreeMap<String,Stamp> }
 impl Manager<'_> {
     fn registry(&self) -> Result<Registry,String> {
         let Some(bytes) = self.context.host.read("config","installed-plugins.json")? else { return Ok(Registry { schema:1,entries:BTreeMap::new() }); };
@@ -71,18 +99,83 @@ impl Manager<'_> {
             None => self.context.plugin(&m.id,&m.storage.directory,source(row),&m.version,m.storage.data_schema),
         }
     }
+    // verify 核验这一版落地文件（T03：快照优先，读不到才哈希）。
+    //   1. plugin.json 每次都要读并解析——它决定「这一版该有哪些资源、各自摘要多少」；
+    //   2. 每个资源先 stat，拿到 size+mtime；
+    //   3. 全对上上一轮落盘的快照 → 直接通过，一个字节都不读（129.9 MB 的成本在这里消失）；
+    //   4. 缺失或指纹变了的那几个才算摘要，全通过后把新快照落盘。
+    // 判据的取舍见 plan-dock-2.0.3 §6：指纹变了就重哈希，指纹没变就认上一轮的结论。
     pub fn verify(&self,row:&Installed) -> Result<(),String> {
         use sha2::{Digest,Sha256};
         let root=self.directory(row)?;
         let raw=crate::identity_store::read_optional(&root.join("plugin.json"))?.ok_or("已安装插件清单缺失")?;
         let manifest=Manifest::parse(&raw,&self.context.root,source(row),&platform())?;
         if serde_json::to_value(&manifest).ok()!=serde_json::to_value(&row.manifest).ok() { return Err("安装清单与注册表不一致".into()); }
-        for (name,digest) in &manifest.files {
+        let snapshot=self.verified_snapshot(row);
+        let mut stamps=BTreeMap::new();
+        let mut changed:Vec<String>=Vec::new();
+        for name in manifest.files.keys() {
             let path=crate::plugin_manifest::package_path(&root,name)?;
-            let bytes=crate::plugin_package::read(&path)?.ok_or("已安装插件资源缺失")?;
-            if !format!("{:x}",Sha256::digest(&bytes)).eq_ignore_ascii_case(digest) { return Err(format!("已安装插件资源被改动：{name}")); }
+            let stamp=stamp(&path).map_err(|_|format!("已安装插件资源缺失：{name}"))?;
+            // 只有「快照里记着、而且指纹一模一样」才算命中；没有快照＝首次校验。
+            if snapshot.as_ref().and_then(|snapshot|snapshot.files.get(name))!=Some(&stamp) { changed.push(name.clone()); }
+            stamps.insert(name.clone(),stamp);
         }
+        if changed.is_empty() { return Ok(()); }
+        // 首轮、或者这几个文件变了：只对这几个重算摘要，不是整包重来。
+        for name in changed {
+            let bytes=crate::plugin_package::read(&crate::plugin_manifest::package_path(&root,&name)?)?.ok_or("已安装插件资源缺失")?;
+            if !format!("{:x}",Sha256::digest(&bytes)).eq_ignore_ascii_case(&manifest.files[&name]) { return Err(format!("已安装插件资源被改动：{name}")); }
+        }
+        self.remember_snapshot(row,&stamps);
         Ok(())
+    }
+    // verified_snapshot 读这一版的校验快照。文件名、身份三件套任何一处对不上，或者
+    // 文件坏了，一律当作「没有快照」（等价于首次校验）——缓存绝不跨版本、跨摘要复用。
+    fn verified_snapshot(&self,row:&Installed) -> Option<Verified> {
+        let path=verified_file_of(self.context.host.path(),&row.manifest.id,&row.manifest.version,&row.digest.to_ascii_lowercase());
+        let bytes=crate::identity_store::read_optional(&path).ok()??;
+        let snapshot:Verified=serde_json::from_slice(&bytes).ok()?;
+        (snapshot.schema==1&&snapshot.id==row.manifest.id&&snapshot.version==row.manifest.version&&snapshot.digest.eq_ignore_ascii_case(&row.digest)).then_some(snapshot)
+    }
+    // remember_snapshot 把这一轮核验过的指纹落盘。写不进去只是「下次启动多哈希一轮」：
+    // 绝不影响这次校验的结论，也不许把错误抛给调用方（那会让一次成功的启动无故失败）。
+    // 走 host.atomic 而不是 host.write：快照不是配置，也不该去抢存储层的 EDIT 锁（T09）。
+    fn remember_snapshot(&self,row:&Installed,files:&BTreeMap<String,Stamp>) {
+        let path=verified_file_of(self.context.host.path(),&row.manifest.id,&row.manifest.version,&row.digest.to_ascii_lowercase());
+        let snapshot=Verified{schema:1,id:row.manifest.id.clone(),version:row.manifest.version.clone(),digest:row.digest.to_ascii_lowercase(),files:files.clone()};
+        let Ok(bytes)=serde_json::to_vec(&snapshot) else { return };
+        if let Err(error)=self.context.host.atomic(&path,&bytes) { eprintln!("FISH Dock: 插件 {} 的校验快照写入失败（下次启动会重新核对）：{error}",row.manifest.id); }
+    }
+    // verified_stamps 是给插件页面用的同一份缓存（T09）：这一版上次核验过的指纹表，
+    // 没有快照就是空表。页面据此判断某个资源要不要重算摘要，不再每请求一次哈希一遍。
+    pub fn verified_stamps(&self,row:&Installed) -> BTreeMap<String,Stamp> { self.verified_snapshot(row).map(|snapshot|snapshot.files).unwrap_or_default() }
+    // prune_snapshots 收掉不属于当前活动版本的校验快照（T03 的清理面）：升过级的旧
+    // 版本、同版重打过的旧摘要、别的插件留下的文件都不该继续躺在 host/plugin-verified/
+    // 里等下次启动挨个 stat。与 cleanup() 的其余部分一样**永不失败**：问题只往上报。
+    pub fn prune_snapshots(&self,active:&Installed) -> Vec<String> {
+        let directory=verified_directory_of(self.context.host.path());
+        let entries=match std::fs::read_dir(&directory) {
+            Ok(entries)=>entries,
+            Err(error) if error.kind()==std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(_)=>return vec!["插件校验快照目录读取失败".into()],
+        };
+        let id=&active.manifest.id;
+        // 只收本插件自己那一族（<id>-*）；别的插件的快照由它们自己的 cleanup 收。
+        let family=format!("{id}-");
+        let keep=format!("{family}{}-{}.json",active.manifest.version,active.digest.to_ascii_lowercase());
+        let mut problems=Vec::new();
+        let mut removed=Vec::new();
+        for entry in entries {
+            let entry=match entry { Ok(entry)=>entry, Err(_)=>{problems.push("插件校验快照条目读取失败".into());continue} };
+            if !entry.file_type().is_ok_and(|kind|kind.is_file()) { continue; }
+            let name=entry.file_name().to_string_lossy().to_string();
+            if name.is_empty()||name.contains('/')||name.contains('\\')||name.contains("..") { continue; }
+            if name==keep||!name.starts_with(&family)||!name.ends_with(".json") { continue; }
+            match std::fs::remove_file(entry.path()) { Ok(())=>removed.push(name), Err(_)=>problems.push(format!("旧校验快照清理失败：{name}")) }
+        }
+        if !removed.is_empty() { eprintln!("FISH Dock: 插件校验快照清理完成（{id}）：{}",removed.join("、")); }
+        problems
     }
     pub fn install(&self, package:Package,digest:&str,official:bool) -> Result<Installed,String> {
         let _lock=EDIT_REGISTRY.lock().map_err(|_|"插件安装锁不可用")?;
@@ -397,6 +490,18 @@ impl Manager<'_> {
         let _=self.clear_notice(id);
             let journal=self.context.host.path().join("tmp").join(format!("plugin-install-{id}.json"));
         let _=std::fs::remove_file(&journal);
+        // 这一版已经卸载：它的校验快照也没有归属了（T03）。留着只会在下次重装同
+        // 一个 id 时被当成「这一版核验过」——那正是缓存最不该犯的错。
+        if !id.is_empty()&&!id.contains('/')&&!id.contains('\\')&&!id.contains("..") {
+            let directory=verified_directory_of(self.context.host.path());
+            let family=format!("{id}-");
+            if let Ok(entries)=std::fs::read_dir(&directory) {
+                for entry in entries.flatten() {
+                    let name=entry.file_name().to_string_lossy().to_string();
+                    if name.starts_with(&family)&&name.ends_with(".json") { let _=std::fs::remove_file(entry.path()); }
+                }
+            }
+        }
         let mut records=crate::plugin_store::fetch_records(self.context);
         if records.remove(id).is_some() { let _=crate::plugin_store::save_records(self.context,&records); }
         // t29/C：宿主生成的回滚点（before-update-*）与版本记录（version-*.json）
@@ -524,6 +629,9 @@ impl Manager<'_> {
         let mut problems=Vec::new();
         match self.prune_versions(active) { Ok(removed)=>{ if !removed.is_empty() { eprintln!("FISH Dock: 插件过期文件清理完成（{}）：{}",active.manifest.id,removed.join("、")); } }, Err(error)=>problems.push(error) }
         if let Err(error)=self.prune_backups(active) { problems.push(error); }
+        // 校验快照跟着版本走（T03）：当前版本、当前摘要之外的一律收掉，否则
+        // host/plugin-verified/ 会像以前的 packages/ 一样越攒越多。
+        problems.extend(self.prune_snapshots(active));
         if !problems.is_empty() { let reason=problems.join("；"); eprintln!("FISH Dock: 插件清理失败（{}）：{reason}",active.manifest.id); let _=self.note_cleanup_issue(&active.manifest.id,&active.manifest.version,&reason); }
         problems
     }
@@ -1464,6 +1572,71 @@ mod tests {
         assert!(!root.join("host").join("packages").join("fish.ofm").exists(),"packages/<id>/ 整目录消失");
         assert!(manager.pending().is_empty(),"不会被报成「已落地未登记」");
         assert_eq!(std::fs::read(ns.path().join("keys/fixture.json")).unwrap(),b"synthetic-key","用户配置保留");
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // T03：冷启不再对插件包做全文哈希。这台机器上 magpie 75.9 MB + clash 53.9 MB，
+    // 每轮启动串行 129.9 MB 读+哈希——用例用一个 3 文件的合成包把判据钉死：
+    // ① 装完落一份 host/plugin-verified/<id>-<version>-<digest>.json，逐文件 size+mtime；
+    // ② 内容被改成同样长度、mtime 复原 → verify 仍然通过（说明它只 stat、没读内容）；
+    // ③ 快照没了 → 同一个文件立刻被判「被改动」（说明缺快照时确实全文哈希）。
+    #[test] fn verification_is_cached_by_size_and_mtime_and_a_missing_snapshot_hashes_again() {
+        let (root,context)=installed_fixture("verified-cache","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        let (package,digest)=bundle("2.0.0",1);
+        let active=manager.install(package,&digest,false).unwrap();
+        let host=root.join("host");
+        let snapshot_path=verified_file_of(&host,"acme.weather","2.0.0",&digest.to_ascii_lowercase());
+        assert!(snapshot_path.is_file(),"装完必须落一份校验快照：{}",snapshot_path.display());
+        let snapshot:serde_json::Value=serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+        assert_eq!(snapshot["id"],"acme.weather");
+        assert_eq!(snapshot["version"],"2.0.0");
+        assert!(snapshot["digest"].as_str().unwrap().eq_ignore_ascii_case(&digest));
+        let files=snapshot["files"].as_object().unwrap().clone();
+        assert_eq!(files.len(),2,"清单里 backend.mjs 与 README.md 两个资源都要记得住：{snapshot}");
+        for (name,stamp) in &files {
+            assert!(stamp["size"].as_u64().is_some(),"{name} 要记字节数：{stamp}");
+            assert!(stamp["mtime"].as_u64().is_some(),"{name} 要记修改时刻：{stamp}");
+        }
+        let directory=manager.directory(&active).unwrap();
+        let resource=crate::plugin_manifest::package_path(&directory,"README.md").unwrap();
+        let original=std::fs::read(&resource).unwrap();
+        let before=stamp(&resource).unwrap();
+        // 同样长度的篡改 + 把 mtime 复原成快照里那个值：只看 stat 的校验不会发现内容变了。
+        let mut tampered=original.clone();
+        tampered[0]=b'@';
+        std::fs::write(&resource,&tampered).unwrap();
+        std::fs::File::options().write(true).open(&resource).unwrap()
+            .set_modified(std::time::UNIX_EPOCH+std::time::Duration::from_nanos(before.mtime)).unwrap();
+        assert_eq!(stamp(&resource).unwrap(),before,"长度与 mtime 必须复原，否则这轮验的就不是缓存");
+        manager.verify(&active).expect("指纹没变就必须跳过哈希：命中一次缓存省下的正是那 129.9 MB");
+        // 快照没了（首次升级、或被清理掉）：同一个文件必须当场被哈希出来判「被改动」。
+        std::fs::remove_file(&snapshot_path).unwrap();
+        let error=manager.verify(&active).expect_err("没有快照就必须老老实实全文哈希");
+        assert!(error.contains("README.md"),"错误要说清是哪个资源：{error}");
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // T03：快照跟着版本/摘要走。升级只留当前版本的快照，别的插件的一律不碰；卸载
+    // 之后这个插件的快照也不再有归属。清理与卸载都不会因为快照出错而失败。
+    #[test] fn snapshots_follow_the_active_version_and_vanish_on_uninstall() {
+        let (root,context)=installed_fixture("verified-prune","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        let (package,digest)=bundle("1.0.0",1); manager.install(package,&digest,false).unwrap();
+        let (package,latest)=bundle("2.0.0",1); let active=manager.install(package,&latest,false).unwrap();
+        let host=root.join("host");
+        let old=verified_file_of(&host,"acme.weather","1.0.0",&digest.to_ascii_lowercase());
+        let current=verified_file_of(&host,"acme.weather","2.0.0",&latest.to_ascii_lowercase());
+        let stale=verified_file_of(&host,"acme.weather","2.0.0",&"a".repeat(64));
+        let other=verified_file_of(&host,"fish.clash","2.1.3",&"b".repeat(64));
+        for path in [&old,&stale,&other] { std::fs::create_dir_all(path.parent().unwrap()).unwrap(); std::fs::write(path,b"{\"schema\":1}").unwrap(); }
+        let problems=manager.cleanup(&active);
+        assert!(problems.is_empty(),"正常的快照清理不该报错：{problems:?}");
+        assert!(current.is_file(),"当前版本的快照必须留着：{}",current.display());
+        assert!(!old.exists(),"上一版的快照要收掉");
+        assert!(!stale.exists(),"同版本、旧摘要的快照要收掉");
+        assert!(other.is_file(),"别的插件的快照不归这次 cleanup 管");
+        manager.uninstall("acme.weather").unwrap();
+        assert!(!current.exists(),"卸载之后这一版的快照也没有归属了");
+        assert!(other.is_file(),"卸载不许误伤别的插件");
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 }

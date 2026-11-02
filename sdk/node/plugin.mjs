@@ -3,10 +3,14 @@ const CATEGORIES = new Set(['credentials','roster','keys','config','exports','ba
 const DEFAULT_LIMIT = 1024 * 1024;
 export function createPlugin({ id, input = process.stdin, output = process.stdout,
   activate = async () => {}, deactivate = async () => {}, onEvent = async () => {}, commands = {},
-  onError = () => {}, maxLine = DEFAULT_LIMIT, requestTimeout = 5000 } = {}) {
+  onError = () => {}, maxLine = DEFAULT_LIMIT, requestTimeout: initialTimeout = 5000 } = {}) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id ?? '')) throw new Error('插件 ID 格式无效');
   if (!Number.isSafeInteger(maxLine) || maxLine < 128 || maxLine > DEFAULT_LIMIT) throw new Error('协议帧大小无效');
-  if (!Number.isSafeInteger(requestTimeout) || requestTimeout < 1 || requestTimeout > 30000) throw new Error('宿主调用时限无效');
+  if (!Number.isSafeInteger(initialTimeout) || initialTimeout < 1 || initialTimeout > 30000) throw new Error('宿主调用时限无效');
+  // 宿主调用时限：构造参数先定初值（默认 5000，与宿主热态下发值同一个数），握手时
+  // 若宿主下发 hostCallTimeoutMs（T04 冷/热分档）则按它覆盖——宿主热态给 5000、
+  // 冷态给 20000；旧宿主不带这个字段时就一直是构造时的初值。
+  let requestTimeout = initialTimeout;
   let buffer = Buffer.alloc(0), closed = false, active = false, hello = null;
   let sequence = 0, queued = 0, chain = Promise.resolve();
   const pending = new Map();
@@ -71,6 +75,12 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     const error = (code, message) => send({ id: requestId, error: { code, message } });
     if (row.method === 'host.hello') {
       if (hello || row.params?.protocol !== 1 || row.params?.pluginId !== id || !Array.isArray(row.params.capabilities)) return error('BAD_HANDSHAKE','宿主握手身份或协议无效');
+      // 宿主下发的宿主调用时限（T04）：登录后 5 分钟内宿主会按冷态档给更宽的值；
+      // 旧宿主不带这个字段时回落构造时的 requestTimeout（默认 5000）。非法值
+      // （非整数/越界）按没下发处理，不让握手因此失败。
+      const offered = row.params.hostCallTimeoutMs;
+      const parsed = Number.isSafeInteger(offered) && offered > 0 && offered <= 30000 ? offered : 0;
+      if (parsed) requestTimeout = parsed;
       hello = Object.freeze({ ...row.params, capabilities: Object.freeze([...row.params.capabilities]) });
       return reply({ type:'plugin.hello', protocol:1, pluginId:id });
     }

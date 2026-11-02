@@ -13,6 +13,12 @@ const STDERR_CHUNK:u64=8192;
 // 缓存这么久不再重复探——设置页每次重绘都探一遍会把界面拖慢。
 const PROBE_TIMEOUT:Duration=Duration::from_secs(2);
 const PROBE_TTL:Duration=Duration::from_secs(2);
+// 测试用的尝试计数（t18）：证明冷态真的把 start_once 跑了两次、热态只跑一次。
+// 只在 cfg(test) 下存在，生产路径零影响（不改变任何对外行为）。
+#[cfg(test)]
+static START_ATTEMPTS:std::sync::atomic::AtomicUsize=std::sync::atomic::AtomicUsize::new(0);
+#[cfg(test)]
+fn start_attempts()->usize { START_ATTEMPTS.load(std::sync::atomic::Ordering::Relaxed) }
 pub struct Process { child:Child, owner:Option<crate::plugin_job::Owner>, output:Receiver<Result<Value,String>>, input:SyncSender<Value>, next:u64, namespace:Namespace, capabilities:Vec<String>, id:String, probe:Option<Instant> }
 // autostart_flag 是传给插件的那个环境变量值（#22）：只有 1 是「随 Dock 启动」，
 // 其余一律 0，插件据此决定要不要自己把服务拉起来。
@@ -21,7 +27,30 @@ impl Process {
     // autostart：这次拉起是不是「随 Dock 启动」（#22）。宿主只在开机自启时传
 // true，安装、启用、回滚都传 false——插件读这个信号自己决定要不要把本机服务
 // 拉起来，宿主不再替它猜。
+    // T04（诊断 A4）冷态重试一次：开机自启那阵 I/O 与杀软最重，一次失败往往只是
+    // 暂时的——登录后 5 分钟内（config::plugin_startup_is_cold）退避 500 ms 后整段
+    // 重拉（旧实例在 start_once 失败路径的 Drop 里已停干净，失败多半是管道/超时
+    // 已废，复用只会原地再超时）；热态不重试。每个插件各自重试、各自返回，失败
+    // 的只是它自己（#38 的逐插件容错不变），不会拖住整批。
     pub fn start(manager:&Manager<'_>,row:&Installed,node:Option<&Path>,autostart:bool)->Result<Self,String> {
+        match Self::start_once(manager,row,node,autostart) {
+            Ok(process)=>Ok(process),
+            // 冷/热只在「已经失败」之后判一次（与改造前完全同序）：冷态交 retry_when_cold
+            // 退避后整段重拉，热态把首次错误原样交回。
+            Err(first)=>Self::retry_when_cold(crate::config::plugin_startup_is_cold(),first,||Self::start_once(manager,row,node,autostart)),
+        }
+    }
+    // retry_when_cold 是「冷态失败重试一次」的唯一实现点（T04 / 诊断 A4；t18 的用例
+    // 直接测它，不必真起插件进程）：热态原样返回首次错误、不退避；冷态先退避
+    // PLUGIN_COLD_RETRY_DELAY，再调一次 attempt，把首次原因收进「（冷启已重试一次，
+    // 首次：…）」。attempt 是注入进来的，生产路径传 start_once，测试传计数闭包。
+    fn retry_when_cold<T>(cold:bool,first:String,mut attempt:impl FnMut()->Result<T,String>)->Result<T,String> {
+        if !cold { return Err(first); }
+        std::thread::sleep(crate::config::PLUGIN_COLD_RETRY_DELAY);
+        attempt().map_err(|retry|format!("{retry}（冷启已重试一次，首次：{first}）"))
+    }
+    fn start_once(manager:&Manager<'_>,row:&Installed,node:Option<&Path>,autostart:bool)->Result<Self,String> {
+        #[cfg(test)] START_ATTEMPTS.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
         manager.verify(row)?;
         let namespace=manager.namespace(row)?;
         let directory=manager.directory(row)?;
@@ -44,9 +73,9 @@ impl Process {
         let (input,read)=mpsc::sync_channel::<Value>(2);
         std::thread::spawn(move||{for value in read {let Ok(mut bytes)=serde_json::to_vec(&value) else{break};bytes.push(b'\n');if stdin.write_all(&bytes).and_then(|_|stdin.flush()).is_err(){break;}}});
         let mut process=Self{child,owner:Some(owner),output,input,next:0,namespace,capabilities:row.manifest.capabilities.clone(),id:row.manifest.id.clone(),probe:None};
-        let hello=process.request("host.hello",json!({"protocol":1,"pluginId":row.manifest.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":process.namespace.path(),"storage":process.namespace.identity(),"capabilities":row.manifest.capabilities}),crate::config::plugin_activate_timeout())?;
+        let hello=process.request("host.hello",json!({"protocol":1,"pluginId":row.manifest.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":process.namespace.path(),"storage":process.namespace.identity(),"capabilities":row.manifest.capabilities,"hostCallTimeoutMs":crate::config::plugin_host_call_timeout_ms()}),crate::config::plugin_activate_budget())?;
         if hello["type"]!="plugin.hello" || hello["protocol"]!=1 || hello["pluginId"]!=row.manifest.id {return Err("插件握手身份或协议不匹配".into());}
-        process.request("plugin.activate",json!({}),crate::config::plugin_activate_timeout())?;
+        process.request("plugin.activate",json!({}),crate::config::plugin_activate_budget())?;
         Ok(process)
     }
     fn send(&self,value:Value)->Result<(),String> {
@@ -530,5 +559,88 @@ mod tests {
             assert!(shielded.is_ascii(),"占位之后必须是纯 ASCII：{shielded}");
             assert_eq!(restore(&shielded,&held),text);
         }
+    }
+    // —— t18：冷态失败重试一次（T04 分支的自动化证据；t13-F1 补测）——
+    // 两条都不依赖真实插件进程：一条直测 retry_when_cold 的判定与调用计数；另一条走真
+    // Process::start，但夹具注定在 verify 阶段失败（这一版根本没装进 packages/），
+    // 一个进程也不会 spawn，更不会真等 20 s 预算。环境变量只为强制冷/热；ENV_LOCK
+    // 全程持有但不重入——plugin_startup_is_cold / plugin_activate_budget_of 只读 env，
+    // 不取这把锁（config 测试里那把锁不可重入，别在这里再造一个死锁）。
+    struct ColdWindow(Option<std::ffi::OsString>);
+    impl ColdWindow {
+        fn force(value:&str)->Self {
+            let key=crate::config::ENV_PLUGIN_COLD_UNTIL;
+            let old=std::env::var_os(key);
+            std::env::set_var(key,value);
+            Self(old)
+        }
+    }
+    impl Drop for ColdWindow {
+        fn drop(&mut self) {
+            let key=crate::config::ENV_PLUGIN_COLD_UNTIL;
+            match &self.0 { Some(value)=>std::env::set_var(key,value), None=>std::env::remove_var(key) }
+        }
+    }
+    // 冷态：先退避 500 ms → 再调一次 attempt（这就是「重试一次」）→ 首次原因写进文案；
+    // 热态：attempt 一次都不再调、错误原样、不退避。这里数的是「重试」的执行次数；
+    // 「整次启动一共尝试了几次」（冷 2 / 热 1）由下面走真 Process::start 的用例用电计数器证明。
+    #[test] fn a_cold_failure_retries_exactly_once_and_a_warm_one_does_not() {
+        assert_eq!(crate::config::PLUGIN_COLD_RETRY_DELAY.as_millis(),500,"任务书写的退避就是 500 ms");
+        // 冷态：注定失败 → 重试恰好执行一次，两次的原因都留在终判文案里。
+        let mut retries=0usize;let started=Instant::now();
+        let error=Process::retry_when_cold(true,"合成失败 #1".into(),||{retries+=1;Err::<(),String>("合成失败 #2".into())}).expect_err("冷态失败必须报错");
+        assert_eq!(retries,1,"冷态必须重试一次（重试执行一次 ⇒ 整次启动共 2 次尝试）");
+        assert!(started.elapsed()>=crate::config::PLUGIN_COLD_RETRY_DELAY,"重试之前必须真的退避 500 ms：{:?}",started.elapsed());
+        assert!(error.contains("冷启已重试一次")&&error.contains("首次：合成失败 #1")&&error.contains("合成失败 #2"),"终判要带重试说明、首次原因与重试原因：{error}");
+        // 冷态 + 重试成功：重试执行一次、结果交回、照样先退避。
+        let mut retries=0usize;let started=Instant::now();
+        assert_eq!(Process::retry_when_cold(true,String::new(),||{retries+=1;Ok::<u8,String>(7)}).unwrap(),7);
+        assert_eq!(retries,1,"冷态成功路径的重试也只执行一次");
+        assert!(started.elapsed()>=crate::config::PLUGIN_COLD_RETRY_DELAY,"成功路径也要先退避：{:?}",started.elapsed());
+        // 热态：同样注定失败，但重试一次都不执行，错误原样返回、不退避。
+        let mut retries=0usize;let started=Instant::now();
+        let error=Process::retry_when_cold(false,"合成失败".into(),||{retries+=1;Err::<(),String>("第二次不该被调用".into())}).expect_err("热态失败同样要报错");
+        assert_eq!(retries,0,"热态不许重试");
+        assert_eq!(error,"合成失败","热态必须原样返回首次错误，不许加后缀");
+        assert!(started.elapsed()<crate::config::PLUGIN_COLD_RETRY_DELAY,"热态不许退避：{:?}",started.elapsed());
+    }
+    // 走真 Process::start：包没装 → start_once 第一句 verify 就失败（不 spawn、毫秒级），
+    // 总耗时几乎只剩那次 500 ms 退避，正好被「一次预算 + 500 ms + 一次预算」夹住。
+    #[test] fn a_cold_start_retries_once_and_a_warm_start_does_not() {
+        let root=std::env::temp_dir().join(format!("fish-cold-retry-{}-{}",std::process::id(),crate::now_ms())).join(".fish-dock");
+        let host=t29_namespace(root.join("host"),"host","host","1.0.0");
+        t29_namespace(root.join(".plugin.acme.weather"),"acme.weather",".plugin.acme.weather","1.0.0");
+        let context=crate::storage_context::Context{root:root.clone(),host};
+        let manager=Manager{context:&context};
+        let (package,digest)=t29_package("acme.weather","Weather",".plugin.acme.weather","1.0.0",false);
+        let row=Installed{manifest:package.manifest,digest,official:false,enabled:true,autostart:true};
+        assert!(manager.verify(&row).is_err(),"夹具必须注定失败——这一版还没装进 packages/");
+        let budget=crate::config::plugin_activate_budget_of(true);
+        let _env=crate::config::ENV_LOCK.lock().unwrap_or_else(|p|p.into_inner());
+        // 冷态：窗放到 31 年，必然判冷（不依赖本机真实登录时刻；WTS 可用这个前提与 logon.rs 既有用例相同）。
+        let window=ColdWindow::force("999999999");
+        assert!(crate::config::plugin_startup_is_cold(),"窗口设这么大必须判冷态");
+        let before=start_attempts();
+        let started=Instant::now();
+        let error=Process::start(&manager,&row,None,true).err().expect("注定失败的 start 必须报错");
+        let elapsed=started.elapsed();
+        assert_eq!(start_attempts()-before,2,"冷态下 start_once 必须被调两次（调用计数）");
+        assert!(error.contains("冷启已重试一次")&&error.contains("首次："),"错误要带重试说明：{error}");
+        assert!(elapsed>=crate::config::PLUGIN_COLD_RETRY_DELAY,"必须真的退避 500 ms：{elapsed:?}");
+        assert!(elapsed<=budget*2+crate::config::PLUGIN_COLD_RETRY_DELAY,"总耗时必须 ≤ 一次预算 + 500 ms + 一次预算：{elapsed:?}");
+        assert!(elapsed<crate::config::PLUGIN_COLD_RETRY_DELAY+Duration::from_secs(2),"夹具在 verify 就失败，不该真的等预算：{elapsed:?}");
+        // 热态：窗设 0 秒（只有 since_logon==0.0 才算冷）→ 只调一次、不带重试说明、不退避。
+        drop(window);
+        let warm=ColdWindow::force("0");
+        assert!(!crate::config::plugin_startup_is_cold(),"窗口 0 秒必须判热态（登录秒数远大于 0）");
+        let before=start_attempts();
+        let started=Instant::now();
+        let error=Process::start(&manager,&row,None,true).err().expect("同样注定失败");
+        let elapsed=started.elapsed();
+        assert_eq!(start_attempts()-before,1,"热态下 start_once 只许调一次（调用计数）");
+        assert!(!error.contains("冷启已重试一次"),"热态不许带重试说明：{error}");
+        assert!(elapsed<crate::config::PLUGIN_COLD_RETRY_DELAY,"热态不许退避：{elapsed:?}");
+        drop(warm);
+        let _=std::fs::remove_dir_all(root.parent().unwrap());
     }
 }

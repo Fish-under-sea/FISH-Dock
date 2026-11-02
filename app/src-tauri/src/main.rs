@@ -1691,10 +1691,24 @@ fn main() {
         }
     };
 
+    // 启动资源的校验分两半（2.0.3 T07）：`prepare()` 只做毫秒级的那一半——
+    // 读清单、stat 十四个必需文件、WebView2 许可与「按需」的沙箱读取权限、
+    // 再把 WEBVIEW2_* 设好（窗口创建那一刻 WebView2 就读它）。整棵资源树的
+    // 全量校验（10,513 个文件 / 1.30 GB，实测更新后首启必跑）挪到后台线程，
+    // 而且按 `state/verified` 的逐文件指纹只校验变了的文件（T06）：首帧不再
+    // 等它，插件自启也不再和它抢磁盘。
     #[cfg(feature = "installed")]
-    if let Err(error) = runtime::prepare() {
-        runtime::show_failure(&error);
-        return;
+    {
+        // `prepare()` 把这次启动解析出的数据目录与资源目录一并交出来（R2）：后台那半
+        // 拿着它们跑，不再自己推导一遍——那样一旦推导失败就只剩一句无声的 return。
+        let prepared = match runtime::prepare() {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                runtime::show_failure(&error);
+                return;
+            }
+        };
+        runtime::verify_in_background(prepared);
     }
 
     let legacy_data = data::folder();
