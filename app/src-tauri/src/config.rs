@@ -116,6 +116,18 @@ const ENV_PLUGIN_RPC_SECS: &str = "FISH_DOCK_PLUGIN_RPC_TIMEOUT_SECS";
 const DEFAULT_PLUGIN_RPC_SECS: u64 = 15;
 const ENV_PLUGIN_EVENT_SECS: &str = "FISH_DOCK_PLUGIN_EVENT_TIMEOUT_SECS";
 const DEFAULT_PLUGIN_EVENT_SECS: u64 = 10;
+// —— T04 冷/热分档（诊断 A4）：开机自启那阵 I/O 与杀软最重，热态能过的预算
+// 冷态过不去——按「登录后多久」分档放宽，而不是整体调大（热态保持原值）——
+// t18：测试要拿它强制冷态/热态，所以对 crate 内可见（不对外，语义不变）。
+pub(crate) const ENV_PLUGIN_COLD_UNTIL: &str = "FISH_DOCK_PLUGIN_COLD_UNTIL_SECS";
+/// 冷态判据：登录后这么多秒内（含正好那一刻）算冷启，见 [`plugin_startup_cold`]。
+pub const PLUGIN_COLD_UNTIL_SECS: u64 = 300;
+/// 冷态档的握手/激活预算（热态沿用 [`DEFAULT_PLUGIN_ACTIVATE_SECS`] 不动）。
+const ENV_PLUGIN_ACTIVATE_COLD_SECS: &str = "FISH_DOCK_PLUGIN_ACTIVATE_COLD_TIMEOUT_SECS";
+const PLUGIN_ACTIVATE_COLD_SECS: u64 = 20;
+/// 下发 SDK 的宿主调用时限上限：与 `sdk/node/plugin.mjs` 校验 requestTimeout 的
+/// 上限一致——预算再大（环境变量调高档位）也不许把 SDK 推到「握手即拒绝」。
+const PLUGIN_HOST_CALL_TIMEOUT_CAP_MS: u64 = 30_000;
 /// 超时的上限：再离谱的覆盖也不给一次调用超过它（10 分钟）。
 pub const MAX_TIMEOUT_MS: u64 = 600_000;
 
@@ -213,6 +225,8 @@ pub const KEYS: &[Key] = &[
     Key { name: "timeout.plugin_activate_secs", env: ENV_PLUGIN_ACTIVATE_SECS, default: "5", category: Category::Timeout, impact: "插件激活 RPC 预算" },
     Key { name: "timeout.plugin_rpc_secs", env: ENV_PLUGIN_RPC_SECS, default: "15", category: Category::Timeout, impact: "插件通用 RPC 预算" },
     Key { name: "timeout.plugin_event_secs", env: ENV_PLUGIN_EVENT_SECS, default: "10", category: Category::Timeout, impact: "插件事件投递预算" },
+    Key { name: "timeout.plugin_cold_until_secs", env: ENV_PLUGIN_COLD_UNTIL, default: "300", category: Category::Timeout, impact: "T04 冷态判据：登录后多少秒内算冷启（分档只放宽不收紧）" },
+    Key { name: "timeout.plugin_activate_cold_secs", env: ENV_PLUGIN_ACTIVATE_COLD_SECS, default: "20", category: Category::Timeout, impact: "T04 冷态握手/激活预算（取 max(热态值, 本值)，热态值不变）" },
     // 重试
     Key { name: "retry.plugin_redirect_hops", env: ENV_PLUGIN_REDIRECT_HOPS, default: "5", category: Category::Retry, impact: "插件包下载最大重定向跳数" },
     Key { name: "retry.http_redirects", env: ENV_HTTP_REDIRECTS, default: "10", category: Category::Retry, impact: "通用 web 请求最大重定向数" },
@@ -351,6 +365,49 @@ pub fn plugin_activate_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGI
 pub fn plugin_rpc_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_RPC_SECS, DEFAULT_PLUGIN_RPC_SECS)) }
 pub fn plugin_event_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_EVENT_SECS, DEFAULT_PLUGIN_EVENT_SECS)) }
 
+// —— T04 冷/热分档（诊断 A4）——
+// 判据的唯一入口：`logon::since_logon()`（秒）拿得到且 ≤ [`PLUGIN_COLD_UNTIL_SECS`]
+// 就是冷态。拿不到登录时刻（非 Windows、WTS 查询失败）或时钟被拨到登录时刻之前
+// （`since_logon` 对回拨一律回 None）都按**热态**处理——分档只放宽预算，判不出
+// 冷态时退回热态原值是安全方向，绝不因此 panic。
+pub fn plugin_startup_cold(since_logon_secs: Option<f64>) -> bool {
+    let until = num(ENV_PLUGIN_COLD_UNTIL, PLUGIN_COLD_UNTIL_SECS) as f64;
+    since_logon_secs.is_some_and(|secs| secs >= 0.0 && secs <= until)
+}
+/// 本次启动是不是冷态（登录后 [`PLUGIN_COLD_UNTIL_SECS`] 秒内）。
+pub fn plugin_startup_is_cold() -> bool {
+    plugin_startup_cold(crate::logon::since_logon())
+}
+/// 握手/激活预算：冷态取环境变量或 [`PLUGIN_ACTIVATE_COLD_SECS`]（与热态值取
+/// max），热态与显式环境变量覆盖都走 [`plugin_activate_timeout`] 原值（热态
+/// 超时值不变的验收要求）。`cold` 由调用方注入，测试不依赖真实登录时刻。
+pub fn plugin_activate_budget_of(cold: bool) -> Duration {
+    if cold {
+        let cold = num(ENV_PLUGIN_ACTIVATE_COLD_SECS, PLUGIN_ACTIVATE_COLD_SECS);
+        Duration::from_secs(cold.max(num(ENV_PLUGIN_ACTIVATE_SECS, DEFAULT_PLUGIN_ACTIVATE_SECS)))
+    } else {
+        plugin_activate_timeout()
+    }
+}
+/// 本次握手/激活用的预算（按真实登录时刻分档）。
+pub fn plugin_activate_budget() -> Duration {
+    plugin_activate_budget_of(plugin_startup_is_cold())
+}
+/// 随 host.hello 下发 SDK 的宿主调用时限（毫秒）——就是这一档的激活/握手预算本身：
+/// 热态 5000（诊断 A4 要求「热态超时值不变」，SDK 默认也是 5000）、冷态 20000
+/// （诊断：`hostCallTimeoutMs`「默认仍是 5000，冷启时给 20000」）。再夹住
+/// [`PLUGIN_HOST_CALL_TIMEOUT_CAP_MS`]：SDK 对 requestTimeout 校验 `(1, 30000]`，
+/// 环境变量把预算放大到 30 s 以上时超上限握手会被直接拒绝。
+pub fn plugin_host_call_timeout_ms_of(budget: Duration) -> u64 {
+    (budget.as_millis() as u64).clamp(1, PLUGIN_HOST_CALL_TIMEOUT_CAP_MS)
+}
+/// 本次随 host.hello 下发的宿主调用时限。
+pub fn plugin_host_call_timeout_ms() -> u64 {
+    plugin_host_call_timeout_ms_of(plugin_activate_budget())
+}
+/// 冷态下单个插件启动失败的退避（重试一次之前歇这么久，诊断 A4 建议 500 ms）。
+pub const PLUGIN_COLD_RETRY_DELAY: Duration = Duration::from_millis(500);
+
 // —— 重试 ——
 pub fn plugin_redirect_hops() -> usize { num(ENV_PLUGIN_REDIRECT_HOPS, DEFAULT_PLUGIN_REDIRECT_HOPS) }
 pub fn http_redirects() -> usize { num(ENV_HTTP_REDIRECTS, DEFAULT_HTTP_REDIRECTS) }
@@ -440,6 +497,59 @@ mod tests {
         assert_eq!(ms_of(None, 20_000).as_millis(), 20_000);
     }
 
+    // —— T04 冷/热分档（诊断 A4）——
+    // 判据是纯函数：拿得到登录秒数且落在窗内（含正好那一刻）才是冷态；
+    // 拿不到（非 Windows、WTS 查询失败）与时钟回拨（since_logon 对回拨回 None）
+    // 都判热态——分档只放宽预算，判不出冷态时退回热态原值，绝不 panic。
+    #[test]
+    fn cold_window_is_five_minutes_with_none_and_rollback_as_warm() {
+        assert!(plugin_startup_cold(Some(0.0)), "登录当刻算冷态");
+        assert!(plugin_startup_cold(Some(1.0)));
+        assert!(plugin_startup_cold(Some(299.9)));
+        assert!(plugin_startup_cold(Some(300.0)), "正好 5 分钟（含端点）算冷态");
+        assert!(!plugin_startup_cold(Some(300.1)), "超过 5 分钟就是热态");
+        assert!(!plugin_startup_cold(Some(3600.0)));
+        assert!(!plugin_startup_cold(None), "拿不到登录时刻按热态，不 panic");
+        assert!(!plugin_startup_cold(Some(-1.0)), "负值（时钟回拨的另一种表现）按热态");
+    }
+
+    #[test]
+    fn cold_window_env_can_only_widen_and_defaults_hold() {
+        // 已持锁：走 with_env_locked，绝不在此再调 with_env（会重复取 ENV_LOCK）。
+        let guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // 默认窗 300 s；环境变量可调宽（给慢机器留口），不影响判据语义。
+        assert!(with_env_locked(&guard, ENV_PLUGIN_COLD_UNTIL, "600", || plugin_startup_cold(Some(301.0))));
+        assert!(!with_env_locked(&guard, ENV_PLUGIN_COLD_UNTIL, "600", || plugin_startup_cold(Some(601.0))));
+        assert!(!with_env_locked(&guard, ENV_PLUGIN_COLD_UNTIL, "60", || plugin_startup_cold(Some(120.0))), "收窄也照走环境值（测试可注入）");
+    }
+
+    // 预算分档：冷/热由注入参数决定，测试不依赖真实登录时刻。
+    #[test]
+    fn activate_budget_is_tiered_and_warm_keeps_the_original_value() {
+        // 已持锁：走 with_env_locked，绝不在此再调 with_env（会重复取 ENV_LOCK）。
+        let guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // 热态：原值 5 s（环境覆盖照旧生效——那是既有键的既有语义）。
+        assert_eq!(plugin_activate_budget_of(false), Duration::from_secs(5));
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_ACTIVATE_SECS, "8", || plugin_activate_budget_of(false)), Duration::from_secs(8));
+        // 冷态：20 s 档；热态值更大时取热态值（分档只放宽，不收紧）。
+        assert_eq!(plugin_activate_budget_of(true), Duration::from_secs(20));
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_ACTIVATE_COLD_SECS, "45", || plugin_activate_budget_of(true)), Duration::from_secs(45));
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_ACTIVATE_SECS, "60", || plugin_activate_budget_of(true)), Duration::from_secs(60), "热态覆盖更大时冷态不得收窄");
+    }
+
+    #[test]
+    fn host_call_timeout_derives_from_activate_budget_and_caps_at_sdk_limit() {
+        // 热态默认 5 s：宿主调用时限就是 5000——任务书/诊断 A4 的「热态超时值不变」，
+        // 与 SDK 的默认 requestTimeout 同一个数。
+        assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_secs(5)), 5_000);
+        // 冷态默认 20 s：诊断 A4「默认仍是 5000，冷启时给 20000」，仍在 SDK 上限内。
+        assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_secs(20)), 20_000);
+        // 环境变量把预算放大到 600 s：夹到 SDK 的 30000（requestTimeout 校验 ≤ 30000），
+        // 不会握手即被拒。
+        assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_secs(600)), 30_000);
+        assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_millis(1)), 1, "下限保护：不为 0");
+    }
+
     #[test]
     fn port_prefers_fish_dock_over_legacy() {
         assert_eq!(port_of(None, None), 47213);
@@ -452,8 +562,15 @@ mod tests {
     // —— 5 个键「设 env 后行为改变」实测（串行） ——
     // 每个用例设 env → 调 getter → 断言变化 → 还原。覆盖任务要求的五类：
     // 目录重定向、端口、超时、缓存上限、下载源。
+    // 锁规则（T04 教训，两条用例曾因此自死锁）：**同一线程绝不重复取
+    // ENV_LOCK**——std 的 Mutex 不可重入。已在 `with_env` 外持锁的用例必须走
+    // [`with_env_locked`]（由调用方把 guard 传进来），不能再调 `with_env`。
     fn with_env<T>(key: &str, value: &str, f: impl FnOnce() -> T) -> T {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        with_env_locked(&_guard, key, value, f)
+    }
+    // 已持 ENV_LOCK 的版本：`guard` 只是为了把「调用方确实持有锁」编码进签名。
+    fn with_env_locked<T>(_guard: &std::sync::MutexGuard<'_, ()>, key: &str, value: &str, f: impl FnOnce() -> T) -> T {
         let old = std::env::var_os(key);
         std::env::set_var(key, value);
         let got = f();
@@ -584,6 +701,8 @@ mod tests {
                 "timeout.plugin_activate_secs" => plugin_activate_timeout().as_secs().to_string(),
                 "timeout.plugin_rpc_secs" => plugin_rpc_timeout().as_secs().to_string(),
                 "timeout.plugin_event_secs" => plugin_event_timeout().as_secs().to_string(),
+                "timeout.plugin_cold_until_secs" => PLUGIN_COLD_UNTIL_SECS.to_string(),
+                "timeout.plugin_activate_cold_secs" => PLUGIN_ACTIVATE_COLD_SECS.to_string(),
                 "retry.plugin_redirect_hops" => plugin_redirect_hops().to_string(),
                 "retry.http_redirects" => http_redirects().to_string(),
                 "cache.gallery_keep" => gallery_cache_keep().to_string(),

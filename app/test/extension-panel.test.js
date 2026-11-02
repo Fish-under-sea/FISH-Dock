@@ -3,12 +3,12 @@ const fs = require('node:fs')
 const vm = require('node:vm')
 const path = require('node:path')
 const { test } = require('node:test')
-function make({ agree = true, offline = false, installed = [], manage, verified = true, authenticated = true, configured = true, bytes = 4096, auth, open, deviceDialog = () => {}, runtimeInfo = null, syncAuthFocus = async () => {}, initialStar = {}, entries = null, third = null, progressState = null } = {}) {
+function make({ agree = true, offline = false, installed = [], manage, verified = true, authenticated = true, configured = true, bytes = 4096, auth, open, deviceDialog = () => {}, runtimeInfo = null, syncAuthFocus = async () => {}, initialStar = {}, entries = null, third = null, progressState = null, fetch: fetchRecord = null } = {}) {
   const calls = [], window = {}, timers = new Map(); let star = { verified, authenticated, configured, ...initialStar }, sequence = 0
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/pet/extension-panel.js'), 'utf8'), { window, Date, setTimeout: (fn, ms) => { const id = ++sequence; timers.set(id, { fn, ms }); return id }, clearTimeout: id => timers.delete(id) })
   const panel = window.ExtensionPanel.create({ deviceDialog, syncAuthFocus, lang: () => 'zh', redraw() {}, confirm: () => agree, invoke: async (command, args) => {
     calls.push({ command, args })
-    if (command === 'extension_view') return { installed, star, runtime: runtimeInfo, node: null, root: 'X:/合成/.fish-dock' }
+    if (command === 'extension_view') return { installed, star, runtime: runtimeInfo, node: null, root: 'X:/合成/.fish-dock', fetch: fetchRecord }
     if (command === 'extension_auth') { star = auth ? await auth(args) : { verified, authenticated, configured, pending: { userCode: 'TEST-CODE' } }; return star }
     if (command === 'settings_open_site') return open ? open(args) : undefined
     if (command === 'extension_catalog') {
@@ -210,7 +210,9 @@ test('已安装页检查后显示新版本操作，无更新给出明确结果',
     await buttons['[data-extension-refresh]'].onclick()
   }
   const { panel } = make({ installed: [older] }); await panel.load(); await check(panel)
-  assert.match(panel.render(), /有更新 v2\.5\.3/)
+  // T11：版本与「有更新」合成一条文案（V1.0.0 → v2.5.3），不再另起一个「有更新」标签。
+  assert.match(panel.render(), /v1\.0\.0 → v2\.5\.3/, '有更新写成版本迁移，一条文案')
+  assert.doesNotMatch(panel.render(), /有更新 v/, '旧的「有更新 v…」标签已删')
   assert.match(panel.render(), /data-extension-action="install"/)
   const current = make({ installed: [row] }); await current.panel.load(); await check(current.panel)
   assert.match(current.panel.render(), /已是最新版本/)
@@ -362,11 +364,11 @@ test('同版本重打的包按摘要判定为有更新，摘要相同才写已�
   const installed = digest => ({ plugin: { manifest: { ...row.plugin.manifest, version: '2.0.0' }, digest, enabled: true }, running: false })
   const rebuilt = make({ installed: [installed('a'.repeat(64))], entries: [{ ...entry, sha256: 'b'.repeat(64) }] })
   await rebuilt.panel.load(); await rebuilt.panel.store()
-  assert.match(rebuilt.panel.render(), /有更新 v2\.0\.0/, '同版本、不同摘要必须提示有更新')
+  assert.match(rebuilt.panel.render(), /class="extension-version" data-update="1">v2\.0\.0</, '同版本、不同摘要必须在这一版上标出可更新')
   assert.match(rebuilt.panel.render(), /data-extension-action="install"/)
   const same = make({ installed: [installed('b'.repeat(64))], entries: [{ ...entry, sha256: 'b'.repeat(64) }] })
   await same.panel.load(); await same.panel.store()
-  assert.doesNotMatch(same.panel.render(), /有更新 v2\.0\.0/, '摘要一致就是这一版，不该提示更新')
+  assert.doesNotMatch(same.panel.render(), /data-update="1"/, '摘要一致就是这一版，不该提示更新')
   assert.match(same.panel.render(), /已安装/)
 })
 // #f3：安装崩在写注册表之前，包已经在盘上、注册表里却没有这一行。以前这张卡
@@ -667,4 +669,111 @@ test('t47 particleFlight：阈值铺满 0→100%，前沿约 12 个在飞，并�
   assert.ok(outFlying >= 10 && outFlying <= 15, `卸载 50% 前沿应有 10~15 个，实际 ${outFlying}`)
   const outEarly = Array.from({ length: N }, (_, i) => particleFlight(0.2, i, N, 'out')).filter(Boolean).length
   assert.ok(outEarly >= 10 && outEarly <= 15)
+})
+
+// ── T11：插件页卡面重做 ───────────────────────────────────────────────────────
+// 设计约束写在 app/src/pet/extensions.css 的文件头：一张卡＝一行在跑的服务，
+// 左身份（名字）→ 中信号（LED + 运行态 + 版本迁移）→ 右操作（一颗实心）。
+const carded = (extra = {}) => {
+  const page = { id: 'main', title: 'Clash 代理' }
+  const enabled = { plugin: { manifest: { ...row.plugin.manifest, version: '1.0.0', enabled: true, pages: [page] }, enabled: true, digest: 'a'.repeat(64) }, running: true, logPath: 'X:/合成/.fish-dock/host/plugin-logs/fish.magpie.log' }
+  return make({
+    installed: [enabled],
+    entries: [{ id: 'fish.magpie', name: 'OFM', version: '2.5.3', description: '模型', authors: ['FISH'], hostApi: 1, platform: 'windows-x86_64', bytes: 4096, dependencies: [], sha256: 'b'.repeat(64) }],
+    fetch: { 'fish.magpie': { origin: 'npmRegistry', elapsedMs: 1412 } },
+    ...extra,
+  })
+}
+// 点「检查更新」= 读目录，但停在「已安装」视图：T11 要看的是插件卡本身，不是商店列表。
+const refresh = async panel => {
+  const buttons = { '[data-extension-refresh]': {}, '[data-extension-runtime]': {} }
+  panel.mount({ querySelector: () => ({ querySelector: key => buttons[key], querySelectorAll: () => [] }) })
+  await buttons['[data-extension-refresh]'].onclick()
+}
+test('T11 每张卡最多一颗实心主按钮：只有「更新」是 .al，卸载与日志收进「更多」', async () => {
+  const { panel } = carded(); await panel.load(); await refresh(panel)
+  const html = panel.render()
+  const solid = [...html.matchAll(/<button[^>]*class="pbtn sm al"[^>]*>/g)].map(m => m[0])
+  assert.equal(solid.length, 1, `一张卡只许一颗实心（实测 ${solid.length}）`)
+  assert.match(solid[0], /data-extension-action="install" data-extension-id="fish\.magpie"/, '实心只给「更新」')
+  assert.match(html, /class="pbtn sm al"[^>]*>更新</, '实心那颗写的是「更新」')
+  // 启停/自启动是次级：既不是 .al，也不是旧的三色实心 hook。
+  assert.match(html, /class="pbtn sm hook"/, '自启动仍是同一个按钮 class（三态统一不改）')
+  assert.doesNotMatch(html, /class="pbtn sm al" data-extension-action="autostart"/, '自启动不得是实心')
+  assert.doesNotMatch(html, /class="pbtn sm al" data-extension-action="enabled"/, '停用不得是实心')
+  // 卸载与打开日志在「更多」里，不在主操作行。
+  const more = html.split('<details class="extension-more">')[1]?.split('</details>')[0] || ''
+  assert.match(more, /data-extension-action="uninstall"/, '卸载进「更多」')
+  assert.match(more, /data-extension-action="logs"/, '打开插件日志进「更多」')
+  assert.match(more, /class="pbtn sm extension-danger"/, '卸载带危险 class（危险色只在悬停/聚焦出现，由 CSS 决定）')
+  const actionRow = html.split('<div class="extension-card-actions">')[1]?.split('<details')[0] || ''
+  assert.doesNotMatch(actionRow, /data-extension-action="uninstall"/, '主操作行里没有卸载')
+  assert.doesNotMatch(actionRow, /data-extension-action="logs"/, '主操作行里没有日志入口')
+})
+test('T11 状态区只剩一条：LED + 运行态 + 版本迁移，旧的三个并列标签不再出现', async () => {
+  const { panel } = carded(); await panel.load(); await refresh(panel)
+  const html = panel.render()
+  assert.equal((html.match(/class="extension-signal"/g) || []).length, 1, '一张卡一条状态信号')
+  assert.equal((html.match(/class="extension-state"/g) || []).length, 1)
+  assert.equal((html.match(/class="extension-version"/g) || []).length, 1)
+  assert.match(html, /data-signal="running"[^>]*><span class="extension-led" aria-hidden="true"><\/span><span class="extension-state">运行中</, '运行态是这条信号的文字')
+  assert.match(html, /<span class="extension-version" data-update="1">v1\.0\.0 → v2\.5\.3<\/span>/, '版本与有更新合成一条迁移文案')
+  assert.doesNotMatch(html, /class="extension-update"/, '不再有独立的「有更新」标签')
+  assert.doesNotMatch(html, />1\.0\.0</, '版本不再单独裸排')
+})
+test('T11 元数据下沉为一行次级信息：路径与安装来源同一个 .extension-card-meta', async () => {
+  const { panel } = carded(); await panel.load(); await refresh(panel)
+  const html = panel.render()
+  assert.match(html, /<p class="extension-card-meta"><span class="extension-location mono">\.fishplugin-magpie<\/span><span class="extension-source" role="status">安装来源：npm 官方源 1\.4s<\/span><\/p>/, '路径与来源同一行')
+  assert.doesNotMatch(html, /<p class="extension-location/, '路径不再独占正文级一行')
+  assert.doesNotMatch(html, /安装来源：[^<]*·/, '来源行不再用中点拼串')
+  // 小一档 + 次级色由 extensions.css 的 .extension-card-meta（11.5px / --g4）保证。
+})
+test('T11 视图是真 tablist：role/aria-selected/roving tabindex，键盘左右与 Home/End 换视图', async () => {
+  const { panel, calls } = make({ installed: [row] }); await panel.load()
+  let html = panel.render()
+  assert.match(html, /<div class="extension-views" role="tablist" aria-label="扩展视图">/, '容器是 tablist 且有可访问名')
+  const tabs = [...html.matchAll(/<button[^>]*role="tab"[^>]*>[^<]*<\/button>/g)].map(m => m[0])
+  assert.equal(tabs.length, 3, '三个视图各一颗 tab')
+  assert.match(tabs[0], /aria-selected="true" tabindex="0"[^>]*data-extension-view="installed"/, '当前视图 aria-selected=true 且 tabindex=0')
+  for (const other of tabs.slice(1)) assert.match(other, /aria-selected="false" tabindex="-1"/, '其余 tab tabindex=-1（roving）')
+  assert.equal((html.match(/aria-selected="true"/g) || []).length, 1, '同一时刻只有一个 aria-selected=true')
+  assert.match(html, /<div class="extension-list" id="extension-view-panel" role="tabpanel" aria-labelledby="extension-tab-installed">/, '内容区是 tabpanel 且指向当前 tab')
+  // 键盘：ArrowRight 从「已安装」切到「官方插件」，走的是与点击同一条路（真去读目录）。
+  const installedTab = { dataset: { extensionView: 'installed' } }
+  const storeTab = { dataset: { extensionView: 'store' } }
+  const thirdTab = { dataset: { extensionView: 'thirdparty' } }
+  const landing = { focused: false, focus() { this.focused = true } }
+  const stub = () => ({ querySelector: key => key === '[data-extension-view="store"]' ? landing : {}, querySelectorAll: selector => selector === '[data-extension-view]' ? [installedTab, storeTab, thirdTab] : [] })
+  panel.mount({ querySelector: stub })
+  let prevented = false
+  installedTab.onkeydown({ key: 'ArrowRight', preventDefault() { prevented = true } })
+  assert.equal(prevented, true, '方向键要阻止页面滚动')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.ok(calls.some(c => c.command === 'extension_catalog'), '换视图真的去读目录，不是只改样式')
+  html = panel.render()
+  assert.match(html, /aria-selected="true" tabindex="0" data-extension-view="store"/, '切过去以后 roving tabindex 跟着走')
+  // redraw() 会换掉整棵 DOM：焦点由下一次 mount 按新节点还回去。
+  panel.mount({ querySelector: stub })
+  assert.equal(landing.focused, true, '换视图后焦点落到新的 tab 上')
+  // Home/End：从头到尾、从尾到头。
+  thirdTab.onkeydown({ key: 'Home', preventDefault() {} })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.match(panel.render(), /aria-selected="true" tabindex="0" data-extension-view="installed"/)
+})
+test('T11 功能页入口是按钮不是标签：自有 class、带 ›、不占主操作行', async () => {
+  const { panel } = carded(); await panel.load(); await refresh(panel)
+  const html = panel.render()
+  assert.match(html, /<button type="button" class="extension-page-entry" data-extension-page="fish\.magpie\/main"[^>]*><span class="extension-page-title">Clash 代理<\/span><span class="extension-page-go" aria-hidden="true">›<\/span><\/button>/, '入口自带 › 且是独立 class')
+  assert.doesNotMatch(html, /class="pbtn sm" data-extension-page/, '旧的胶囊样式不再用于功能页入口')
+  assert.match(html, /<div class="extension-pages" role="group" aria-label="功能页">/, '入口成组且有可访问名')
+})
+test('T11 检索是一个字段：输入框有可访问名，按钮缩进字段里', async () => {
+  const { panel } = make({ third: () => ({ hits: [], hidden: 0 }) })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin')
+  const html = panel.render()
+  assert.match(html, /<div class="extension-search" role="search">/, '输入框与按钮在同一个字段容器里')
+  assert.match(html, /<input id="extension-third-query" class="extension-search-input" type="text" aria-label="npm 包名或关键字"/, '输入框有 aria-label（placeholder 不能当名字）')
+  assert.match(html, /class="pbtn sm extension-search-go"/, '「检索」是字段内的次级按钮，不再与同排按钮同权重')
+  assert.doesNotMatch(html, /extension-third-search/, '旧的平铺搜索行已删')
 })
