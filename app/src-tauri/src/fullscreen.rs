@@ -2,10 +2,12 @@
 // elsewhere it never reports one.
 //
 // Full screen: the foreground window covers its whole monitor and has no title
-// bar. A maximised window has one (and stops at the taskbar), so it is not.
-// And only on a display she is on (on: their rects; none given, any): a
-// video full screen on the second display hid her taskbar on the main one
-// (the user, 2026-10-13); Windows' own steps aside only on its own display.
+// bar, or has one by its style and covers it unmaximised, or lies exactly on
+// it (fills). A maximised window has one and goes past the monitor's edges or
+// stops at the taskbar, so it is not. And only on a display she is on (on:
+// their rects; none given, any): a video full screen on the second display hid
+// her taskbar on the main one (the user, 2026-10-13); Windows' own steps aside
+// only on its own display.
 
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -62,6 +64,7 @@ mod imp {
         fn GetClassNameW(hwnd: Hwnd, name: *mut u16, max: i32) -> i32;
         fn GetWindowLongPtrW(hwnd: Hwnd, index: i32) -> isize;
         fn GetWindowRect(hwnd: Hwnd, rect: *mut Rect) -> i32;
+        fn IsZoomed(hwnd: Hwnd) -> i32;
         fn MonitorFromWindow(hwnd: Hwnd, flags: u32) -> *mut c_void;
         fn GetMonitorInfoW(monitor: *mut c_void, info: *mut MonitorInfo) -> i32;
         fn GetWindowThreadProcessId(hwnd: Hwnd, pid: *mut u32) -> u32;
@@ -124,6 +127,26 @@ mod imp {
         style & WS_CAPTION == WS_CAPTION
     }
 
+    // 这个样式的窗口，最大化与否，放在这个矩形（left, top, right, bottom）
+    // 上，算不算在那块显示器（同顺序）上全屏：没有标题栏的，盖住整块就算
+    // （HELLDIVERS 2 每边多出 1 像素，也算盖住）；样式上有标题栏的，盖住整
+    // 块且没有最大化，或者矩形恰好等于显示器，才算。Kazumi 的播放器全屏
+    // （window_manager 0.5.1 的 setFullScreen）保留 WS_CAPTION、不画边框
+    // （它的 WM_NCCALCSIZE）、把窗口设成显示器的 rcMonitor，全屏前已经最大
+    // 化就还是最大化——以前因为有标题栏一律不算全屏，她的任务栏压在视频
+    // 上（zhoupengjie/Wakuwaku#98）。任务栏在顶部时，Windows 自己的被收起
+    // 并设成自动隐藏，这种窗口会被挪到每边多出 11 像素，和整块屏幕都是工作
+    // 区时最大化窗口的位置一样，但它并没有最大化（测试虚拟机，2026-10-30）。
+    // 最大化的窗口不会恰好等于显示器：它的边框会越过工作区的边。
+    fn fills(style: u32, zoomed: bool, r: (i32, i32, i32, i32), m: (i32, i32, i32, i32)) -> bool {
+        let covers = r.0 <= m.0 && r.1 <= m.1 && r.2 >= m.2 && r.3 >= m.3;
+        if titled(style) {
+            r == m || (covers && !zoomed)
+        } else {
+            covers
+        }
+    }
+
     // None: the foreground window is one of ours (keep what was decided).
     pub fn check(own: &[isize], on: &[(i32, i32, i32, i32)]) -> Option<bool> {
         covering(own).map(|c| c.is_some_and(|mon| on.is_empty() || on.contains(&mon)))
@@ -151,9 +174,7 @@ mod imp {
             if SKIP_CLASSES.contains(&String::from_utf16_lossy(&name[..n]).as_str()) {
                 return Some(None);
             }
-            if titled(GetWindowLongPtrW(hwnd, GWL_STYLE) as u32) {
-                return Some(None);
-            }
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
             let mut rect = Rect::default();
             if GetWindowRect(hwnd, &mut rect) == 0 {
                 return Some(None);
@@ -164,7 +185,7 @@ mod imp {
             }
             let m = &info.monitor;
             let mon = (m.left, m.top, m.right - m.left, m.bottom - m.top);
-            let covers = rect.left <= m.left && rect.top <= m.top && rect.right >= m.right && rect.bottom >= m.bottom;
+            let covers = fills(style, IsZoomed(hwnd) != 0, (rect.left, rect.top, rect.right, rect.bottom), (m.left, m.top, m.right, m.bottom));
             Some((covers && !SKIP_PROGRAMS.contains(&program_of(hwnd).as_str())).then_some(mon))
         }
     }
@@ -207,7 +228,32 @@ mod imp {
 
     #[cfg(test)]
     mod tests {
-        use super::titled;
+        use super::{fills, titled};
+
+        // 上游 #98 的三档判据：没有标题栏的盖住就算；有标题栏的「盖住且没最大
+        // 化」或「恰好铺满」才算；最大化的永远不算。每条都对应一个真实窗口。
+        #[test]
+        fn what_fills_a_display() {
+            let mon = (0, 0, 2560, 1440);
+            // Kazumi 的播放器全屏：WS_OVERLAPPEDWINDOW 去掉可调边框和最大化框，
+            // 显示中，矩形就是显示器的（zhoupengjie/Wakuwaku#98）。
+            assert!(fills(0x10ca_0000, false, mon, mon));
+            // 全屏前已经最大化：仍然算。
+            assert!(fills(0x11ca_0000, true, mon, mon));
+            // 任务栏在顶部时被挪到每边多出 11 像素，但它没最大化。
+            assert!(fills(0x10ca_0000, false, (-11, -11, 2571, 1451), mon));
+            // 差一个像素：放上去的窗口，不是全屏。
+            assert!(!fills(0x10ca_0000, false, (0, 0, 2560, 1439), mon));
+            // 最大化的窗口，边框越过工作区：留着任务栏的位置，和没留（Windows
+            // 自己藏着）两种。
+            assert!(!fills(0x15cf_0000, true, (-11, -11, 2571, 1379), mon));
+            assert!(!fills(0x15cf_0000, true, (-11, -11, 2571, 1451), mon));
+            // HELLDIVERS 2 的（#63）：每边多出 1 像素；以及差一点的。
+            assert!(fills(0x9488_0000, false, (-1, -1, 2561, 1441), mon));
+            assert!(!fills(0x9488_0000, false, (0, 0, 2560, 1368), mon));
+            // 主显示器左边那块上的。
+            assert!(fills(0x10ca_0000, false, (-1920, 0, 0, 1080), (-1920, 0, 0, 1080)));
+        }
 
         #[test]
         fn a_title_bar_is_both_bits() {
