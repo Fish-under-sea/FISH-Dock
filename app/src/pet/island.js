@@ -2124,6 +2124,16 @@
     }
   }
 
+  // 这一段的宽度变了，她那个槽位就挪了：托盘图标要在任务栏画好几秒后才陆续
+  // 到，之后新增一个、监控的数字变宽，都会把槽位往左挤。她的胶囊跟着它走；
+  // 以前它留在原处，压在监控上、严重时压住托盘的箭头，直到有东西把整条任务
+  // 栏重画一遍才归位（上游 #98）。三条都看住，槽位一动就重新放一次；不在任务
+  // 栏模式、或横竖位置换了由别的路重放，这里不多管。
+  const slotWatch = new ResizeObserver(() => {
+    if (taskbarBuilt && isOn() && home() === 'taskbar') placeSlot()
+  })
+  for (const zone of Object.values(zones)) slotWatch.observe(zone)
+
   // The settings beside a side bar, from her capsule's top (or foot, in the
   // bar's lower half), kept 8 px off the screen's ends.
   function placeSideSettings(height) {
