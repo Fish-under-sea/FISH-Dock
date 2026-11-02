@@ -437,7 +437,12 @@
           const retry = unlocked(m.id) ? button('install', m.id, text('重试安装', 'Retry install')) : `<span class="note">${esc(text('登录并验证 Star 后解锁', 'Sign in and verify your star to unlock'))}</span>`
           return `<article class="extension-card"><header class="extension-card-header"><div class="extension-card-title"><strong>${esc(m.name)}</strong><span class="extension-version">${esc(m.version)}</span><span class="extension-state">${esc(text('安装未完成', 'Install did not finish'))}</span></div><div class="extension-card-actions">${retry}</div></header><p class="extension-location mono">${esc(m.storage.directory)}</p>${r.error ? `<p class="extension-card-error bad" role="alert">${esc(r.error)}</p>` : ''}${notice}${origin}</article>`
         }
-        const state = r.running ? text('运行中', 'Running') : r.error ? text('启动失败', 'Failed') : r.plugin.enabled ? text('等待启动', 'Waiting to start') : text('已停用', 'Disabled')
+        // 「未响应」是这一轮探针没应答，不是失败（T01）：插件进程还在，下一轮
+        // 重绘自己会好，所以不覆盖 r.running，也不冒充「启动失败」。
+        const state = r.unresponsive ? text('未响应，正在重试', 'Not responding, retrying')
+          : r.running ? text('运行中', 'Running')
+            : r.error ? text('启动失败', 'Failed')
+              : r.plugin.enabled ? text('等待启动', 'Waiting to start') : text('已停用', 'Disabled')
         // 自启动钩子固定在「停用/启用」左侧（#22 / 2026-10-31 三态统一）：
         // 三态都是同一个按钮（同一个 class、同高同内衬，只有配色与文案不同）——
         // 有服务且开着＝红「关闭自启动」（点一下关掉）、有服务但关着＝蓝「随 Dock 启动」

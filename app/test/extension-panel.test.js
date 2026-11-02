@@ -113,6 +113,17 @@ test('设备验证按服务端间隔自动检查，完成或取消后停止', as
   await buttons.logout.onclick(); assert.equal(timers.size, 0)
 })
 const row = { plugin: { manifest: { id: 'fish.magpie', name: 'OFM', version: '2.5.3', capabilities: ['network'], pages: [], storage: { directory: '.fishplugin-magpie' } }, enabled: true }, running: false, error: '进程退出 <trace>' }
+// T01：探针这一轮没应答只报「未响应」，不能说成「启动失败」——它进程还在，
+// 下一轮重绘自己会好；说成失败会让人去查一个不存在的崩溃。
+test('探针没应答报「未响应，正在重试」，不冒充启动失败', async () => {
+  const busy = { plugin: { manifest: { id: 'fish.magpie', name: 'OFM', version: '2.5.3', capabilities: ['network'], pages: [], storage: { directory: '.fishplugin-magpie' } }, enabled: true }, running: true, unresponsive: true }
+  const { panel } = make({ offline: true, installed: [busy] })
+  await panel.load(); await panel.store()
+  const html = panel.render()
+  assert.match(html, /未响应，正在重试/)
+  assert.doesNotMatch(html, /启动失败/)
+  assert.doesNotMatch(html, /运行中</, '未响应时不该同时说运行中')
+})
 test('首次只读取已安装列表，不发起商店网络或安装操作', async () => {
   const { panel, calls } = make()
   await panel.load()
