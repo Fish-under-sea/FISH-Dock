@@ -468,6 +468,39 @@ mod tests {
         assert_ne!(q1, gallery_cache_name(1, "popular", "狗"));
     }
 
+    // 图库真的照「网络代理」走（上游 #99）：设成手动，它就只问那个代理，
+    // 要的是 codex-pets.net:443 的 CONNECT——不是自己直连过去。以前这里的
+    // ureq agent 自己建、只认环境变量，netProxy 与 Windows 的代理都不看，
+    // 只能经代理上网时浏览器打得开、图库等 30 秒后说连不上。
+    // 这是特性回归（characterization）：本仓 fetch 早已走 proxy::web_ways，
+    // 上游补的正是这条断言，补上免得以后被谁改回自己建 agent。
+    #[test]
+    fn the_gallery_goes_the_way_the_network_proxy_says() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let asked = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 512];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let _ = s.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+            String::from_utf8_lossy(&buf[..n]).lines().next().unwrap_or("").to_string()
+        });
+        let cache = std::env::temp_dir().join(format!("wakuwaku-gallery-proxy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&cache);
+        crate::proxy::set_web(&json!({ "mode": "manual", "kind": "http", "address": format!("127.0.0.1:{port}") }));
+        let got = gallery(1, "new", "", &cache);
+        crate::proxy::set_web(&Value::Null);
+        // 没被问（也就是直连去了）就放开它，免得 join 一直等着。
+        let _ = std::net::TcpStream::connect(("127.0.0.1", port)).map(|mut s| s.write_all(b"nothing\r\n"));
+        assert_eq!(asked.join().unwrap(), "CONNECT codex-pets.net:443 HTTP/1.1");
+        // 代理把 CONNECT 拒了，ureq 报的是连接层的错（`network`），不是站点的
+        // 状态码：它连隧道都没建起来。这里只钉「图库没能拿到页面」这件事，
+        // 具体是哪一档由 ureq 决定，不去钉死。
+        assert!(got.is_err(), "代理拒了 CONNECT，图库不该有页面");
+        let _ = fs::remove_dir_all(&cache);
+    }
+
     #[test]
     fn errors_in_words() {
         let e = err("notFound", json!({ "id": "x" }));
