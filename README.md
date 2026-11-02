@@ -12,7 +12,7 @@
 </picture>
 
 <p>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.2"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.0.2" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.3"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.0.3" width="23%"></picture></a>
   <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
   <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
@@ -23,7 +23,7 @@
 
 <p>
   <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="app/docs/release-2.0.2.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
+  <a href="app/docs/release-2.0.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
@@ -42,7 +42,7 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 | 能力 | 说明 |
 | --- | --- |
 | 设置页 | 按规格重排为 5 页（通用 / Agent / 外观 / 邮件 / 插件），各页分节顺序固定；回归测试直接读规格文件比对。 |
-| 插件安装与更新 | 校验来源、平台与资源摘要；官方插件优先 npm（`@fish-under-sea/fish-dock-plugin-*`）→ npmmirror 镜像 → GitHub Release；安装/更新为带 journal 的事务（中断可续做、不可验证则回滚），更新后只保留当前版本。插件卡上统一三态自启动按钮：已开=红「关闭自启动」、已关=蓝「随 Dock 启动」、无自启动能力=绿「无需自启动」（纯展示）。 |
+| 插件安装与更新 | 校验来源、平台与资源摘要；官方插件优先 npm（`@fish-under-sea/fish-dock-plugin-*`）→ npmmirror 镜像 → GitHub Release；安装/更新为带 journal 的事务（中断可续做、不可验证则回滚），更新后只保留当前版本。插件卡上统一三态自启动按钮：已开「关闭自启动」、已关「随 Dock 启动」、无自启动能力「无需自启动」（纯展示）；卡内唯一实心按钮是「更新」，卸载与「打开插件日志」收进「更多」。 |
 | 关于与公告 | 关于页品牌图首位居中、可点击进官网（地址在 `url.official_site` 可覆盖）；更新公告只显示最新版本与新特性要点，完整说明折叠；公告源 GitHub → Gitee → 本地缓存，未配置 Gitee 时明确跳过；内置更新全程在应用内完成。 |
 | 全局快捷键 | 设置页可录制组合键；被其他程序占用时给出提示，30 秒内未录到可用组合就放弃。 |
 | 外观工具链 | 随包提供 Windhawk 引擎和编译器，可在外观页导入模组、编译、启停与恢复。 |
@@ -65,6 +65,8 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器、插件管理与 Windhawk。
 
+2.0.3 补丁版：宿主 2.0.3，兼容插件 2.1.x（Clash 与 Magpie 2.1.3、飞书 2.1.0）。这一版把插件启动链路的任务书做完九项（T02 留 2.1.0）：资源校验判据改逐文件 size+mtime 指纹、全量哈希移出首启关键路径、WebView2 授权改为按需（T06/T07/T08）；插件校验加 size+mtime 快照缓存、插件页面入口不再持全局锁（T03/T09）；插件调用超时分冷/热两档（热 5 s、冷 20 s），冷态失败重试一次（T04）；维护线程与安装/卸载/启停收进同一把上层互斥，不再有「维护线程删掉正在写入的版本目录」这类竞态（t19）。插件页卡面同时重做：状态收成一条 `● 运行中 · v2.1.2 → v2.1.3`，卡内只留一颗实心「更新」，带功能页的卡从 4 行压到 3 行。完整说明与 12 条已知限制见 [2.0.3 更新记录](app/docs/release-2.0.3.md)。
+
 2.0.2 补丁版：宿主 2.0.2，兼容插件 2.1.x。这一版只修插件的「看不见、查不到、停不掉」：插件 stderr 不再被丢弃，落盘到 `host/plugin-logs/<插件 id>.log`（单文件 1 MB、留 2 份、写入前脱敏），失败记录结构化进 `host/plugin-failures.log`（含退出码与日志路径），插件卡新增「打开插件日志」；插件未运行时标签页不再消失，点进去能看到原因并当场「启动」；运行态判据从「进程存活」改为「进程存活 + 握手可应答」，残留内核回收改按 pid + 启动时刻 + 控制器可达三重判定，不再误杀被复用的 pid。完整说明见 [2.0.2 更新记录](app/docs/release-2.0.2.md)。
 
 2.0.1 维护版：宿主 2.0.1，兼容插件 2.1.x（Magpie 已到 2.1.1）。设置页公告区有内容时也有「刷新」，打开关于页超 5 分钟自动重取，公告标题不再重复版本号；新增全局快捷键与设置页录制节（被占用有提示、30 秒重试后放弃）；插件更新/卸载走事务（旧版目录清零、卸载彻底但保留用户数据）、自启动运行中即时生效；无标题窗口也有任务栏按钮、托盘图标点击可用、右键菜单精简；换显示器或改缩放后工作区自愈、文字 110% 下任务栏不再上浮；卡死抓栈、WebView2 被外部结束不再误报。商店里 OFM 本地模型已下架（已装用户仍可启用/卸载），模型能力由 Magpie 插件提供；agy 岛上审批与内存账转 2.1.0。完整说明见 [2.0.1 更新记录](app/docs/release-2.0.1.md)。
@@ -75,19 +77,19 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark-v3.png"><img src="assets/readme/section-install-light-v3.png" alt="INSTALL · 安装" width="100%"></picture></h2>
 
-**FISH Dock 2.0.2** 提供完整安装包和精简更新包。本次是插件诊断与运行态的修复：插件日志落盘、失败可查、标签页不再随运行态消失，并修掉残留内核回收误杀被复用 pid 的隐患。下载及校验文件见 [v2.0.2 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.2)。
+**FISH Dock 2.0.3** 提供完整安装包和精简更新包。本次是插件启动链路的第 2.0.3 批修复：首启不再全量重算 1.3 GB 资源、插件校验走 size+mtime 快照、插件调用超时按冷/热分档，维护线程与安装/卸载/启停收进同一把上层互斥；插件页卡面同时重做。下载及校验文件见 [v2.0.3 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.3)。
 
 | 安装包 | 使用场景 |
 | --- | --- |
-| `FISH-Dock-Setup-2.0.2.exe` | 首次安装、基础资源缺失或修复安装，包含完整离线运行时（约 312 MB）。 |
-| `FISH-Dock-Update-2.0.2.exe` | 已有版本且基础资源完整时使用，只下载本次变更（约 30 MB）；缺失或损坏时提示改用完整包。 |
+| `FISH-Dock-Setup-2.0.3.exe` | 首次安装、基础资源缺失或修复安装，包含完整离线运行时（约 312 MB）。 |
+| `FISH-Dock-Update-2.0.3.exe` | 已有版本且基础资源完整时使用，只下载本次变更（约 30 MB）；缺失或损坏时提示改用完整包。 |
 
-1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.2) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
+1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.3) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源并展示运行时条款。
 3. 打开「插件」页，点击「GitHub 登录」。Dock 内弹窗显示验证码及实际复制结果；在系统浏览器中粘贴并确认，Dock 自动检查授权。等待期间可单独解除临时锁定／置顶，也可取消验证。旧版账号若未保存续期凭据，升级后需重新登录一次；新授权随后自动续期。
 4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
 5. 点击「检查更新」读取官方目录，按需安装 [FISH Dock Official Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。新插件安装成功即启用；凭据和服务参数仍需各自配置。
-6. 官方商店目前只有**三个插件**：**飞书**、**Clash**、**Magpie**（飞书与 Clash 2.1.0，Magpie 2.1.1；要求宿主 ≥ 2.0.0）。OFM 自 2026-10-25 起暂停维护，已从商店下架——已安装的用户仍可在「已安装」里启用或卸载。
+6. 官方商店目前只有**三个插件**：**飞书**、**Clash**、**Magpie**（飞书 2.1.0，Clash 与 Magpie 2.1.3；要求宿主 ≥ 2.0.0）。OFM 自 2026-10-25 起暂停维护，已从商店下架——已安装的用户仍可在「已安装」里启用或卸载。
 
 安装包包含 Node.js 24.14.0、固定版 WebView2 155.0.4283.62、Windhawk 1.7.3 及 LLVM-MinGW 编译器，供对应插件按需调用；无需另外安装 Windhawk。安装包当前未做 Authenticode 签名。
 

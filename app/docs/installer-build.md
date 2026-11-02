@@ -123,11 +123,11 @@
 
 日常启动（主程序）：
 
-1. 读 `resources\manifest.json`，把它的 SHA-256 当验证钥匙。
-2. 与 `state\verified` 记住的一致时只检查 5 个必需文件存在且大小一致。标记里同时记着清单摘要和**规范化后的安装资源目录**（canonicalize、去尾分隔符、按 Windows 的比较方式统一大小写与斜杠）：只比摘要不够，同一份清单装到两个目录时，第二次也该按新目录重新校验并重新授权一次。
-3. 摘要或目录任一不一致时（首次启动、换了新安装、或把安装目录搬走/复制到别处）对清单里每个文件做一次大小 + SHA-256 校验，失败点名损坏文件并提示重新运行安装程序；校验通过后做那一次只读授权，再记住摘要与目录。授权被拒则不记标记（下次启动会重试），并停下来说清修复方式（安装到有权限的目录后重跑安装程序）。
+1. 读 `resources\manifest.json`（schema 2）当清单用。**清单本身不再算 SHA-256**：换一份清单不再等价于换一套资源（T06）。
+2. 判据是 `state\verified` 里**逐文件的 size+mtime 指纹**，加上**规范化后的安装资源目录**（canonicalize、去尾分隔符、按 Windows 的比较方式统一大小写与斜杠）。标记是一份 JSON：`{ "schema": …, "resources": …, "files": { "<path>": { "bytes": …, "mtime": … } } }`。逐文件比较全等即通过，一个字节都不进哈希。只比位置不够：同一份资源装到两个目录时，第二次也要按新目录重新校验并重新授权一次。
+3. 指纹变了的那几个文件才重算 SHA-256，且**在后台线程做、不挡首帧**（T07）；清单里出现新文件、或安装目录被搬走/复制到别处，按变化处理。首次启动与换版本是整棵树的哈希，失败点名损坏文件并提示重新运行安装程序。WebView2 沙箱只读授权改为**按需**：判据认为缺权限才做一次，不再每次启动递归授权（T08）。授权被拒则不记标记（下次启动重试），并停下来说清修复方式（安装到有权限的目录后重跑安装程序）。
 
-上面的第 2 步（只 stat 5 个必需文件、不解压、不哈希 776 MiB、不递归授权）是代码结构上的结论：`prepare()` 里没有任何解压调用，`check_required` 只做 `symlink_metadata` + 长度比较。它由源码和单元测试保证（`runtime::first_start_verifies_everything_then_daily_starts_only_look_at_required_files` 等 15 项），**本环境没有取得该分支的运行证据**——`state\verified` 从未写入成功，程序从未走到 `first=false`，原因见第 7 节。因此这里不给出任何日常启动耗时。
+上面的第 2 步（只 stat、不解压、不哈希整棵树、不递归授权）是代码结构上的结论：`prepare_at()` 里没有任何解压调用，日常判据只做逐文件 `symlink_metadata`；标记的写入是「临时文件 → `storage::replace`」的原子替换，写失败保留旧记录。它由源码和单元测试保证（`runtime::the_start_up_path_hashes_nothing_and_a_damaged_file_is_named_in_the_background`、`runtime::one_changed_file_is_verified_again_and_the_unchanged_ones_are_not`、`runtime::a_new_manifest_alone_does_not_ask_for_the_tree_again`、`runtime::the_old_two_line_marker_counts_as_missing`、`runtime::a_failed_write_of_the_marker_keeps_the_old_record` 等）。**本环境没有取得真机首帧与日常启动的耗时证据**（任务书 H6 未测），因此这里不给出日常启动耗时的实测数字。
 
 ## 4. 卸载
 
@@ -202,7 +202,7 @@ node --test "FISH本地模型工作台/app/scripts/prepare-single-exe.test.mjs"
 **仍未验证**（全部是环境权限所致，不是实现缺陷，也不代表已通过）：
 
 1. 真实 GUI：首次启动在 `icacls /grant` 处失败即退出，Tauri 窗口与模型界面从未建立，没有任何「启动后界面可用」的运行证据。
-2. 日常快路径的真实运行（`first=false` → `check_required`）：`state/verified` 在本环境从未写入成功，程序从未走到该分支。该行为目前**只有源码与单元测试证据**（`runtime::first_start_verifies_everything_then_daily_starts_only_look_at_required_files` 等）。
+2. 日常快路径的真实运行（指纹全等 → 只 stat、一个字节不哈希）：真机首帧 ≤ 3 s 与 `state/verified` 在 10 s 内更新为新指纹（任务书 H6）未测。该行为目前**只有源码与单元测试证据**（`runtime::one_changed_file_is_verified_again_and_the_unchanged_ones_are_not`、`runtime::the_start_up_path_hashes_nothing_and_a_damaged_file_is_named_in_the_background` 等）。
 3. 开始菜单 / 桌面快捷方式、「设置 → 应用」里的 HKCU 卸载项：沙箱拒绝写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall`、`%APPDATA%\Microsoft\Windows\Start Menu` 与桌面，安装阶段就没生成，因此这两项在卸载后「无残留」也不能反证卸载逻辑（脚本内容由 `installer.test.mjs` 静态覆盖）。
 4. 真实任务计划下的登录任务归属清理：沙箱拿不到任务计划服务根目录（见末段），只验到「早退、什么都不碰」这一半。
 5. 模型 iframe 的真实鼠标导航 / 滚动 / 输入 / 切换页 / 收起再开 / 桌面穿透：界面从未建立，无对象可点。这一项**不属于本安装版任务，且尚未通过**——t5 复核因缺真实鼠标证据判 `needs_revision`，判决未改。
