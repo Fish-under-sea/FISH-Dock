@@ -1,8 +1,9 @@
 // Proxies: Windows' own, as Settings (Network, Proxy) has it and as Clash or
 // v2rayN set it when their "system proxy" is on, read for the web (the
-// updates, the crash reports, LHM's download, the plugins: web_ways, a URL
-// for ureq, tried before going straight) and for mail (mail/proxy.rs: an
-// address and a kind to go through); and a proxy as one is typed in. The
+// updates, the crash reports, LHM's download, the plugins, the pets' gallery:
+// web_ways, a URL for ureq, tried before going straight) and for mail
+// (mail/proxy.rs: an address and a kind to go through); and a proxy as one is
+// typed in. The
 // registry's ProxyServer is "host:port" for every protocol, or one for each:
 // "http=host:port;https=host:port;socks=host:port"; ProxyOverride lists the
 // hosts reached straight ("localhost;127.*;10.*;<local>", <local> being a

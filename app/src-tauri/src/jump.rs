@@ -96,7 +96,12 @@ mod imp {
         fn AttachConsole(pid: u32) -> i32;
         fn FreeConsole() -> i32;
         fn GetConsoleWindow() -> Hwnd;
+        fn GetStdHandle(which: u32) -> Handle;
+        fn SetStdHandle(which: u32, handle: Handle) -> i32;
     }
+
+    // STD_INPUT_HANDLE、STD_OUTPUT_HANDLE、STD_ERROR_HANDLE。
+    const STD_HANDLES: [u32; 3] = [-10i32 as u32, -11i32 as u32, -12i32 as u32];
 
     #[link(name = "iphlpapi")]
     extern "system" {
@@ -508,16 +513,31 @@ mod imp {
     // (it owns the console's window), or the console's own. Never
     // while this program has a console of its own (a debug build): it would
     // have to let go of it to look.
+    //
+    // 连上去会把那个控制台的句柄变成她自己的标准句柄，断开时又一起关掉，却没
+    // 把她的放回去：这些句柄号被她之后打开的文件重用，往那儿一写就是往「错误
+    // 输出」写，被拒（os error 5），eprintln! 当它是 panic。上游 #100 就是这
+    // 样退出的（任务栏模式下退出时 tray-icon 没把图标取走，它说一句
+    // eprintln!）。所以连之前记下她的三个，断开之后原样放回去——发行版里本就
+    // 没有标准句柄，放回的就是空。
     fn console_window(pid: u32) -> Option<isize> {
         static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
         let _one = ONE_AT_A_TIME.lock().unwrap();
-        // SAFETY: attached only for these few calls, and let go of again.
+        // SAFETY: attached only for these few calls, and let go of again; the
+        // standard handles put back are the ones she had.
         unsafe {
-            if !GetConsoleWindow().is_null() || AttachConsole(pid) == 0 {
+            if !GetConsoleWindow().is_null() {
+                return None;
+            }
+            let hers = STD_HANDLES.map(|which| GetStdHandle(which));
+            if AttachConsole(pid) == 0 {
                 return None;
             }
             let console = GetConsoleWindow();
             FreeConsole();
+            for (which, handle) in STD_HANDLES.into_iter().zip(hers) {
+                SetStdHandle(which, handle);
+            }
             if console.is_null() {
                 return None;
             }

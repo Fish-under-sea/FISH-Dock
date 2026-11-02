@@ -27,8 +27,11 @@
   let config = {}
   let asks = []
   // 快捷键答得了的（island:hotkey 的 allow / deny 才替它按）：批准或计划、
-  // 不在它自己的窗口里答的那种、也没被标成答不了。
-  const canAnswerWithHotkey = ask => !!ask && (ask.kind === 'permission' || ask.kind === 'plan') && !IN_APP.has(ask.from) && ask.canAnswer !== false
+  // 也没被标成答不了。按钮能答的，快捷键就答得了——ZCode 与 DeepSeek Harness
+  // 也算（IN_APP 只管「去 XX 处理」那颗按钮的措辞）：它们的审批在岛上按允许、
+  // 拒绝本来就能答，答案送到后它们自己的对话框会关掉，快捷键没有理由只能开岛
+  // （上游 #97）。canAnswer === false 仍不替它按。
+  const canAnswerWithHotkey = ask => !!ask && (ask.kind === 'permission' || ask.kind === 'plan') && ask.canAnswer !== false
   // 按钮上的组合键提示（Alt+Y…）：开着且这一个设置有值才有。
   const keyHintOf = (key, ask) => (canAnswerWithHotkey(ask) && config.shortcutsEnabled && config[key] ? config[key] : '')
   let shownId = null

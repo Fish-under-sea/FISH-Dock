@@ -48,9 +48,20 @@ describe('全局快捷键（shortcuts.rs，issue #45）', () => {
       assert.ok(same(decideHotkeyAction({ which: 'allow', ask, shownId: 103, isArmed: true, islandOpen: true }), { type: 'open' }))
     })
 
-    it('要在它自己的窗口里答的（IN_APP 或 canAnswer=false）：只开岛', () => {
-      assert.ok(same(decideHotkeyAction({ which: 'allow', ask: { id: 104, kind: 'permission', from: 'zcode' }, shownId: 104, isArmed: true, islandOpen: true }), { type: 'open' }))
+    it('ZCode、DeepSeek Harness 的审批快捷键也答（上游 #97）', () => {
+      for (const from of ['zcode', 'dsh']) {
+        for (const which of ['allow', 'deny']) {
+          const ask = { id: 104, kind: 'permission', from }
+          assert.ok(same(decideHotkeyAction({ which, ask, shownId: 104, isArmed: true, islandOpen: true }), { type: 'answer', which, id: 104 }), `${from} 的 ${which}`)
+        }
+      }
+      // 计划也算：按钮能答的，快捷键就答得了。
+      assert.ok(same(decideHotkeyAction({ which: 'allow', ask: { id: 104, kind: 'plan', from: 'dsh' }, shownId: 104, isArmed: true, islandOpen: true }), { type: 'answer', which: 'allow', id: 104 }))
+    })
+
+    it('答不了的（canAnswer=false）：只开岛', () => {
       assert.ok(same(decideHotkeyAction({ which: 'allow', ask: { id: 104, kind: 'permission', canAnswer: false }, shownId: 104, isArmed: true, islandOpen: true }), { type: 'open' }))
+      assert.ok(same(decideHotkeyAction({ which: 'allow', ask: { id: 104, kind: 'permission', from: 'zcode', canAnswer: false }, shownId: 104, isArmed: true, islandOpen: true }), { type: 'open' }))
     })
 
     it('岛开着、解禁了、答得了：allow 替它答', () => {
