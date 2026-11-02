@@ -127,3 +127,17 @@
 - `FISH-Dock-Setup-2.0.3.exe`：首次安装、资源缺失或修复安装。
 - `FISH-Dock-Update-2.0.3.exe`：已有版本且基础资源完整时使用，只含本次变更。
 - 两个包都附同名 `.sha256`，另有 `SHA256SUMS.txt` 汇总；安装包当前未做 Authenticode 签名。
+
+### 出包前置：精简更新包的基线（#54）
+
+2.0.2 的教训仍在：`FISH-Dock-Update-2.0.2.exe` 的 payload 是**相对上一版清单的差集**，
+而 `resources/licenses/NOTICE.txt`（412 B → 484 B）与 `runtime-sources.json`（1360 B → 1009 B）
+在 2.0.1 就变过、2.0.2 视为没变不打包，于是 2.0.0 用户的应用内更新**必失败**
+（`install-update.cjs:231` 抛「精简更新包所需基础资源缺失或损坏」）。
+
+2.0.3 出包时如果沿用同一套差集口径，2.0.0 用户会踩同一个坑。至少要做两件事：
+
+1. 确认 payload 覆盖所有受支持起点（2.0.0 / 2.0.1 / 2.0.2 三档），或**给 2.0.0 只发完整包**；
+2. 应用侧判断「本地版本低于精简包基线」或「精简包安装失败」时，自动改下完整包并直接给下载入口。
+
+`install-manifest.json` 加 `baseline_version`、跨版本回归测试等长期项按 [#54](https://github.com/Fish-under-sea/FISH-Dock/issues/54) 原文走 2.1.0。
