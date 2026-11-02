@@ -1,16 +1,72 @@
-/* 插件中心使用独立信息布局，避免通用 .r / .note 给每行叠加大内边距。 */
+/* 插件中心：一张卡＝一行「在跑的服务」（T11 重做）。
+   层级顺序是「谁在跑 → 要不要动 → 动哪个」：左边名字 + 一盏 LED 的合并状态行
+   （v2.1.2 → v2.1.3 写在同一条里），右边唯一实心主操作（更新），启停/自启动是
+   描边次级，卸载与打开日志收进「更多」，最底一行小字是服务标签（路径 + 安装来源）。
+   颜色一律走 settings.css 的主题变量：不新增色系，红色只留给悬停/聚焦时的卸载。 */
 #island-settings .extension-panel { margin-block: 12px 20px; overflow-wrap: anywhere; }
 #island-settings .extension-panel h3 { margin-block: 0 10px; font-size: 14px; }
+#island-settings .extension-panel :is(button, input, summary) { touch-action: manipulation; }
 #island-settings .extension-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-block-end: 10px; }
-#island-settings .extension-actions [aria-pressed='true'] { background: var(--g3); color: var(--fg); box-shadow: inset 0 0 0 1px currentColor; }
-#island-settings .extension-list { display: grid; align-content: start; gap: 8px; }
-#island-settings .extension-card { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; border-radius: 12px; background: var(--g1); padding: 10px 14px; }
-#island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
-#island-settings .extension-card-title { display: flex; flex: 1 1 160px; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; min-width: 0; line-height: 1.4; }
-#island-settings .extension-card-title strong { font-size: 13px; }
-#island-settings .extension-version, #island-settings .extension-state { color: var(--g4); font-size: 12px; }
+
+/* —— 视图栏：三个视图是真 tablist，检查更新退到同一行右端（不再与切换器同权重）—— */
+#island-settings .extension-viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block-end: 10px; }
+#island-settings .extension-views { display: flex; flex: 1 1 auto; min-width: 0; gap: 4px; padding: 2px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); }
+#island-settings .extension-view { flex: none; height: 26px; padding: 0 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--g4); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+#island-settings .extension-view:hover:not(:disabled) { color: var(--fg); }
+#island-settings .extension-view[aria-selected='true'] { border-color: var(--g3); background: var(--g2); color: var(--fg); }
+#island-settings .extension-view:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+#island-settings .extension-check { margin-inline-start: auto; }
+#island-settings .extension-list { display: grid; align-content: start; gap: 8px; min-width: 0; }
+
+/* —— 服务卡 —— */
+#island-settings .extension-card { display: grid; align-content: start; gap: 8px; min-width: 0; margin: 0; padding: 12px 16px; border: 1px solid transparent; border-radius: 12px; background: var(--g1); }
+#island-settings .extension-card:hover { border-color: var(--g3); }
+#island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
+#island-settings .extension-card-title { display: flex; flex: 1 1 220px; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+#island-settings .extension-card-title strong { color: var(--fg); font-size: 13px; font-weight: 600; }
+
+/* 状态信号：一盏 LED + 一句话。版本与「有更新」合成同一条文案
+   （v2.1.2 → v2.1.3）；LED 只是装饰，语义全在文字里。 */
+#island-settings .extension-signal { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 1.4; }
+#island-settings .extension-led { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--g4); }
+#island-settings .extension-signal[data-signal='running'] .extension-led { background: var(--ok-ink); }
+#island-settings .extension-signal[data-signal='unresponsive'] .extension-led { background: var(--warn-ink); }
+#island-settings .extension-signal[data-signal='failed'] .extension-led { background: var(--bad-ink); }
+#island-settings .extension-signal[data-signal='off'] .extension-led { background: transparent; box-shadow: inset 0 0 0 1px var(--g4); }
+#island-settings .extension-state { color: var(--fg); font-weight: 600; }
+#island-settings .extension-signal[data-signal='off'] .extension-state { color: var(--g4); font-weight: 500; }
+#island-settings .extension-version { color: var(--g4); font-size: 12px; font-variant-numeric: tabular-nums; }
+#island-settings .extension-version[data-update='1'] { color: var(--ok-ink); font-weight: 600; }
 #island-settings .extension-card-actions, #island-settings .extension-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-#island-settings .extension-update { color: var(--ok-ink); font-size: 12px; font-weight: 600; }
+/* 按钮文字不折行：窄了换整行，而不是把「打开插件日志」挤成两行。 */
+#island-settings .extension-card-actions .pbtn { white-space: nowrap; }
+
+/* 服务标签：路径 + 安装来源合成一行。面板正文是 13px，这里降一档到 12px 并换次级色
+   （--g4）：两行正文级信息收成一行小字，卡片不再被它们撑高。 */
+#island-settings .extension-card-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; padding: 0; min-width: 0; font-size: 12px; color: var(--g4); }
+#island-settings .extension-card-meta > span { min-width: 0; overflow-wrap: anywhere; }
+#island-settings .extension-location { color: var(--g4); }
+
+/* 「更多」：卸载与打开日志降级到这里。打开时整块占满一行，主操作那一行不动。 */
+#island-settings .extension-more { position: relative; }
+#island-settings .extension-more[open] { flex: 1 1 100%; }
+#island-settings .extension-more > summary { display: flex; align-items: center; gap: 4px; width: fit-content; min-height: 24px; padding: 0 10px; border: 1px solid var(--g3); border-radius: 12px; background: transparent; color: var(--g4); font-size: 12px; font-weight: 600; list-style: none; cursor: pointer; }
+#island-settings .extension-more > summary::-webkit-details-marker { display: none; }
+#island-settings .extension-more > summary:hover { background: var(--g2); color: var(--fg); }
+#island-settings .extension-more > summary:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+#island-settings .extension-more[open] > summary { color: var(--fg); }
+#island-settings .extension-more-body { display: flex; flex-wrap: wrap; gap: 6px; padding-block: 8px 0; }
+#island-settings .extension-more-body .pbtn { border-color: transparent; background: transparent; color: var(--g4); font-weight: 500; }
+#island-settings .extension-more-body .pbtn:hover:not(:disabled) { background: var(--g2); color: var(--fg); }
+/* 危险只在这一颗上、只在悬停或聚焦时出现；平时是次级文字色。 */
+#island-settings .extension-more-body .extension-danger:hover:not(:disabled),
+#island-settings .extension-more-body .extension-danger:focus-visible { color: var(--bad-ink); }
+
+/* 功能页入口：不是标签——32px 高（≥24px 目标尺寸）、自带 ›、悬停抬底色、聚焦描边。 */
+#island-settings .extension-page-entry { display: inline-flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 12px; border: 1px solid var(--g3); border-radius: 10px; background: var(--g2); color: var(--fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+#island-settings .extension-page-entry:hover:not(:disabled) { border-color: var(--g4); background: var(--g3); }
+#island-settings .extension-page-entry:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+#island-settings .extension-page-go { color: var(--g4); font-weight: 400; }
 #island-settings .extension-card p { margin: 0; padding: 0; line-height: 1.45; }
 #island-settings .extension-card .extension-description { font-size: 12px; }
 #island-settings .extension-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 12px; margin: 0; padding: 0; font-size: 12px; line-height: 1.45; color: var(--g4); }
@@ -19,13 +75,19 @@
 #island-settings .extension-meta dd { color: var(--fg); }
 #island-settings .extension-card :is(.extension-dependencies,.extension-location) { color: var(--g4); font-size: 12px; }
 #island-settings .extension-dependencies > span { margin-inline-end: 6px; }
-#island-settings .extension-auth { display: grid; gap: 8px; margin-block-end: 10px; }
-#island-settings .extension-auth .extension-actions { margin: 0; }
-#island-settings .extension-auth :is(.extension-auth-status,.extension-auth-code) { margin: 0; padding: 0; font-size: 12px; line-height: 1.5; color: var(--g4); }
+/* GitHub 身份卡（T11）：左边账号 + 结论（两段，不再用中点拼串），右边一组按钮——
+   一颗实心（登录 / 检查登录与 Star）+ 次级（去 Star / 解除锁定 / 取消 / 退出）。
+   八颗同款按钮不再平铺成一排标签。 */
+#island-settings .extension-auth { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-block-end: 8px; padding: 8px 12px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); }
+#island-settings .extension-auth-lead { display: grid; flex: 1 1 220px; gap: 2px; min-width: 0; }
+#island-settings .extension-auth-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0; padding: 0; min-width: 0; font-size: 12px; line-height: 1.45; color: var(--g4); }
+#island-settings .extension-auth-account { color: var(--fg); font-weight: 600; }
+#island-settings .extension-auth-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#island-settings .extension-auth-code { margin: 0; padding: 0; font-size: 12px; line-height: 1.5; color: var(--g5); }
 #island-settings .extension-auth .mono { user-select: text; }
-#island-settings .extension-panel .extension-star { background: #277c56; color: #fff; }
-#island-settings .extension-actions [data-extension-refresh] { background: #fff; color: #202124; border: 1px solid #c7cbd1; }
-#island-settings .extension-actions [data-extension-refresh]:not(:disabled):hover { background: #edf0f4; }
+/* 去 Star 不再是第二颗实心：它是一句邀请，次级描边即可。 */
+#island-settings .extension-panel .extension-star { border-color: var(--g3); background: transparent; color: var(--fg); }
+#island-settings .extension-panel .extension-star:hover:not(:disabled) { background: var(--g2); }
 #island-settings .extension-panel .pbtn { min-height: 28px; min-width: 28px; }
 .extension-panel :is(button,input,summary):focus-visible { outline: 2px solid #80b6ff; outline-offset: 3px; }
 .extension-panel button:disabled { opacity: .5; cursor: default; }
@@ -34,16 +96,16 @@
 .extension-panel summary { cursor: pointer; min-height: 28px; }
 .extension-panel label { display: block; margin-block: 8px; }
 .extension-node { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--g3); background: var(--g1); color: var(--fg); border-radius: 6px; margin-block-end: 8px; }
-/* 第三方插件：按 npm 包名检索，结果与官方条目同一套卡片。 */
-#island-settings .extension-third { display: grid; gap: 8px; }
-#island-settings .extension-third-search { display: flex; align-items: center; gap: 8px; }
-#island-settings .extension-third-search input { flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--g3); background: var(--g1); color: var(--fg); border-radius: 6px; }
-/* 第三方导入视觉对齐（用户 2026-10-31）：结果行沿用 .extension-card 的几何（左内衬 14px、
-   与 pbtn sm 同高 28px）；窄窗搜索行换行不下溢、长包名换行不撑破卡片；提示行用与
-   「来源 · 上次同步」同级的 note 小字（12px、现有灰 --g4）。只用现有 CSS 变量，不写 hex。 */
-#island-settings .extension-third { min-width: 0; }
-#island-settings .extension-third-search { flex-wrap: wrap; }
-#island-settings .extension-third-search input { min-height: 28px; line-height: 1.3; }
+/* 第三方插件：按 npm 包名检索，结果与官方条目同一套卡片。
+   检索（T11）是一个字段：按钮缩进输入框里，「检索」不再与同排按钮同权重；
+   输入框 32px 高（≥24px 目标尺寸），回车即搜（mount 绑定 Enter）。 */
+#island-settings .extension-third { display: grid; gap: 8px; min-width: 0; }
+#island-settings .extension-search { display: flex; align-items: center; gap: 4px; padding: 2px 2px 2px 12px; border: 1px solid var(--g3); border-radius: 10px; background: var(--g1); }
+#island-settings .extension-search:focus-within { border-color: var(--g4); }
+#island-settings .extension-search-input { flex: 1 1 auto; min-width: 0; min-height: 32px; padding: 0; border: 0; outline: none; background: transparent; color: var(--fg); font: inherit; }
+#island-settings .extension-search-go { border-color: transparent; background: transparent; color: var(--g4); font-weight: 500; }
+#island-settings .extension-search-go:hover:not(:disabled) { background: var(--g2); color: var(--fg); }
+/* 长包名换行不撑破卡片；提示行用 note 小字（12px、次级灰 --g4）。只用现有变量。 */
 #island-settings .extension-third .extension-card-title strong { overflow-wrap: anywhere; word-break: break-word; }
 #island-settings .extension-third .note { font-size: 12px; color: var(--g4); }
 /* 外观标签顺序支持鼠标拖动与键盘按钮。 */
@@ -60,21 +122,18 @@
 .extension-frame:focus-visible { outline: 2px solid #80b6ff; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .extension-panel *, .extension-frame { animation: none; transition: none; transform: none; } }
 
-/* 插件卡上的自启动控件（#22 / 2026-10-31 三态统一）：三态是**同一个按钮**——
-   同一个 class（.pbtn.sm.hook）、同 height/padding/圆角/字号/左右内衬，只有配色与
-   文案不同（用户：没有自启动功能的也要给按钮，只是换底色）。颜色一律走 settings.css
-   里的主题变量，这里不写 hex：
-     开（有服务且开着）＝ --hook-on 红，「关闭自启动」；
-     关（有服务但关着）＝ --hook-off 蓝（强调色），「随 Dock 启动」；
-     没有本机服务        ＝ --hook-none 绿，「无需自启动」（纯装饰，点了不发 IPC）。
-   位置固定在「停用/启用」左侧，所有插件卡一致。 */
-#island-settings .extension-card-actions .pbtn.hook { min-width: 96px; padding: 0 12px; }
-#island-settings .extension-card-actions .pbtn.hook[data-hook='on'] { border-color: transparent; background: var(--hook-on); color: var(--hook-on-ink); }
-#island-settings .extension-card-actions .pbtn.hook[data-hook='on']:hover:not(:disabled) { filter: brightness(1.12); }
-#island-settings .extension-card-actions .pbtn.hook[data-hook='off'] { border-color: transparent; background: var(--hook-off); color: var(--hook-off-ink); }
-#island-settings .extension-card-actions .pbtn.hook[data-hook='off']:hover:not(:disabled) { filter: brightness(1.12); }
-#island-settings .extension-card-actions .pbtn.hook[data-hook='none'] { border-color: transparent; background: var(--hook-none); color: var(--hook-none-ink); cursor: default; }
-#island-settings .extension-card-actions .pbtn.hook[data-hook='none']:hover { filter: none; }
+/* 插件卡上的自启动控件（#22 / 2026-10-31 三态统一，T11 降为次级）：
+   三态是**同一个按钮**——同一个 class（.pbtn.sm.hook）、同 height/padding/圆角/字号/
+   左右内衬，只有文案不同（用户：没有自启动功能的也要给按钮）：
+     开（有服务且开着）＝「关闭自启动」；
+     关（有服务但关着）＝「随 Dock 启动」；
+     没有本机服务        ＝「无需自启动」（纯装饰，aria-disabled，点了不发 IPC）。
+   T11：不再用 --hook-on 的整块实色——红色不再贴在这个不危险的动作上；三态一律描边、
+   同一份中性色，状态靠文案说。位置固定在「停用/启用」左侧，所有插件卡一致。 */
+#island-settings .extension-card-actions .pbtn.hook { min-width: 0; padding: 0 10px; border-color: var(--g3); background: transparent; color: var(--fg); font-weight: 500; }
+#island-settings .extension-card-actions .pbtn.hook:hover:not(:disabled) { background: var(--g2); }
+#island-settings .extension-card-actions .pbtn.hook[data-hook='none'] { border-color: transparent; color: var(--g5); cursor: default; }
+#island-settings .extension-card-actions .pbtn.hook[data-hook='none']:hover { background: transparent; }
 /* 目录条目的一行说明（OFM 的「此插件于 10 月 25 日暂停维护」）。 */
 #island-settings .extension-card .extension-note { color: var(--g4); font-size: 12px; }
 
@@ -95,6 +154,7 @@
   gap: 12px;
   padding: 20px;
   background: rgba(0, 0, 0, .45);
+  overscroll-behavior: contain;
 }
 #island-settings .ext-progress {
   box-sizing: border-box;
@@ -223,4 +283,15 @@
   color: var(--g5);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* 窄窗（≤480px，T11）：按钮整行换行、标签栏横向滚动，绝不横向溢出；
+   每个按钮的文字都不折行（要换行的是行，不是按钮里的字）。 */
+@media (max-width: 480px) {
+  #island-settings .extension-card { padding: 8px 12px; }
+  #island-settings .extension-card-title { flex-basis: 100%; }
+  #island-settings .extension-card-actions { width: 100%; }
+  #island-settings .extension-views { overflow-x: auto; }
+  #island-settings .extension-card-meta { font-size: 12px; }
+  #island-settings .extension-page-entry { width: 100%; justify-content: space-between; }
 }
