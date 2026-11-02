@@ -77,13 +77,24 @@ impl Process {
     // 进程退出码（#53-3）：还活着是 None；已经退出就是它带走的那个码
     // （被强杀时是 Windows 的码，Task Manager 杀进程是 1）。
     pub fn exit_code(&mut self)->Option<i32>{match self.child.try_wait(){Ok(Some(status))=>status.code(),_=>None}}
+    // 进程是不是真的还在：只看 try_wait，不看应答（T01）。探针超时只说明它此刻
+    // 答不上——长任务、GC、被 Defender 扫着——不等于进程没了。以前两者是一件事
+    // （`!running()` 就当没了），于是设置页一次重绘碰上一次卡顿，就把它从
+    // `CURRENT` 里 remove 掉，`Drop` 顺手 kill，连它拉起的 magpie.exe / mihomo.exe
+    // 一起带走（#55，诊断 A1）。
+    pub fn alive(&mut self)->bool{matches!(self.child.try_wait(),Ok(None))}
+    // 真的没了：Some(退出码)，问不出退出码也是 Some(None)；还活着：None。
+    pub fn exited(&mut self)->Option<Option<i32>>{
+        match self.child.try_wait(){Ok(None)=>None,Ok(Some(status))=>Some(status.code()),Err(_)=>Some(None)}
+    }
     // 运行态判据（#14-4 宿主侧）：「进程存活 + 握手可应答」双条件。
     // 只看 try_wait 会把「进程还在、事件循环卡死」的假活当成运行中——那正是 #14
     // 现象 C 里「内核已停止 + 代理有效」的另一半根因。探针走 host.hello：SDK 对
     // 重复握手回 BAD_HANDSHAKE，那也是一条应答，所以只要编号对得上就说明它还听得
     // 见；探过之后缓存 PROBE_TTL，设置页每次重绘不会各探一轮。
+    // 调用方要分「没应答」和「没了」的，用 alive() / exited()，别拿它当死亡证明。
     pub fn running(&mut self)->bool{
-        if !matches!(self.child.try_wait(),Ok(None)) { self.probe=None; return false; }
+        if !self.alive() { self.probe=None; return false; }
         if self.probe.is_some_and(|at|at.elapsed()<PROBE_TTL) { return true; }
         if self.handshake() { self.probe=Some(Instant::now()); true } else { self.probe=None; false }
     }

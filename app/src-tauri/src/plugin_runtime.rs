@@ -29,6 +29,19 @@ impl Failure {
     }
 }
 
+// 这一个实例这一轮该报成什么（T01）。判据只此一处，`view()` 照着做：
+// 真没了才移除实例、记一条失败；还在但探针没应答只是「未响应」，下一轮重绘
+// 自己会好，绝不 remove（remove 会 Drop → kill，连它拉起的服务一起带走）。
+#[derive(Clone,Copy,Debug,PartialEq)]
+enum Liveness { Gone(Option<i32>), Unresponsive, Running }
+fn liveness(exited:Option<Option<i32>>,responsive:bool)->Liveness{
+    match exited {
+        Some(code)=>Liveness::Gone(code),
+        None if responsive=>Liveness::Running,
+        None=>Liveness::Unresponsive,
+    }
+}
+
 #[derive(Default)]
 pub struct Runner {
     processes:BTreeMap<String,Process>,
@@ -73,13 +86,28 @@ impl Runner {
             let id=&installed.manifest.id;
             self.versions.insert(id.clone(),installed.manifest.version.clone());
             // 运行态判据（#14-4）在 Process::running 里：进程存活 + 握手可应答。
-            // 退出时要连退出码一起取——移除之后就问不到了（#53-3）。
-            let gone=if let Some(process)=self.processes.get_mut(id){(!process.running()).then(||process.exit_code())}else{None};
+            // 但「应答不上」不等于「进程没了」（T01）：前者只报一轮「未响应」，
+            // 后者才移除实例、记一条失败。两件事以前被 `!running()` 混成一件，
+            // 于是设置页一次重绘碰上一次卡顿就把活着的插件 remove + Drop 杀掉，
+            // `plugin-failures.log` 里那批 `exitCode:null` 就是这么来的（#55）。
+            let (gone, unresponsive)=match self.processes.get_mut(id){
+                None=>(None,false),
+                Some(process)=>{
+                    let exited=process.exited();
+                    // 真的没了就不再握手（alive() 会立刻答否，但省一趟也省心）。
+                    let responsive=exited.is_none()&&process.running();
+                    match liveness(exited,responsive){
+                        Liveness::Gone(code)=>(Some(code),false),
+                        Liveness::Unresponsive=>(None,true),
+                        Liveness::Running=>(None,false),
+                    }
+                }
+            };
             if let Some(code)=gone {
                 self.processes.remove(id);
-                // 有退出码＝进程真的没了；没有＝进程还在但握手不应答（假活），
-                // 两句话不能说成一句，否则用户按「进程已退出」去查会查不出东西。
-                let raw=if code.is_some(){"插件进程已退出，请检查配置后重新启用"}else{"插件进程无响应（握手超时），已按未运行处理"};
+                // 到这里一定是进程真的没了。退出码取不到时也别冒充「已退出」以外的
+                // 判断——说清是问不到退出码，用户才知道该去查什么。
+                let raw=if code.is_some(){"插件进程已退出，请检查配置后重新启用"}else{"插件进程已退出（退出码未知），请检查配置后重新启用"};
                 self.record(manager,Failure{plugin:id.clone(),version:installed.manifest.version.clone(),stage:"运行".into(),code,at:crate::now_ms(),raw:raw.into(),log:log_file(manager.context,id)});
             }
             let running=self.processes.contains_key(id);
@@ -94,6 +122,9 @@ impl Runner {
                 // 退出码、阶段、日志路径同时单独给出，页面要用就不必解析中文。
                 "error":if package_missing {Some("插件程序包缺失，请在官方商店重新安装；原配置已保留".to_string())}else{failure.map(Failure::text)},
                 "failure":failure.map(Failure::json),
+                // 活着但这一轮探针没应答（T01）：页面说「未响应，正在重试」，
+                // 下一轮重绘自己会好；它不是失败，所以 error / failure 仍是空。
+                "unresponsive":unresponsive,
                 "exitCode":failure.and_then(|failure|failure.code),
                 "logPath":failure.map(|failure|failure.log.to_string_lossy().into_owned()).unwrap_or_else(||log_file(manager.context,id).to_string_lossy().into_owned())}));
         }
@@ -413,5 +444,17 @@ mod tests {
         assert!(attachable(&listening,|port|port==9090),"控制端口通得上＝可 attach，留着");
         assert!(!attachable(&listening,|_|false),"连不上＝僵尸内核，回收");
         assert!(!attachable(&json!({"pid":4242}),|_|true),"run-state 没记控制端口：不当作可 attach");
+    }
+    // 探针没应答 ≠ 进程没了（T01 / #55，诊断 A1）。以前 `!running()` 被当成
+    // 「进程已退出」，于是设置页一次重绘碰上一次卡顿就把活着的插件 remove + Drop
+    // 杀掉；现在只有 exited() 说没了才算没了，没应答只报一轮「未响应」。
+    #[test] fn an_unresponsive_plugin_is_not_a_dead_one() {
+        // 还在（exited = None）但这一轮探针没应答：未响应，不能当成没了。
+        assert_eq!(liveness(None,false),Liveness::Unresponsive,"没应答就当没了＝把活插件杀了");
+        assert_eq!(liveness(None,true),Liveness::Running);
+        // 真的没了：有退出码、问不到退出码，都算没了。
+        assert_eq!(liveness(Some(Some(3)),true),Liveness::Gone(Some(3)));
+        assert_eq!(liveness(Some(None),false),Liveness::Gone(None));
+        assert_eq!(liveness(Some(None),true),Liveness::Gone(None),"已经没了就不再算在跑");
     }
 }
