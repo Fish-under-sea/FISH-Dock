@@ -1,12 +1,12 @@
 {
   "format": "fish-dock/source-snapshot",
-  "version": "2.0.1",
+  "version": "2.0.3",
   "projects": [
     {
       "path": "app",
       "repository": "https://github.com/zhoupengjie/Wakuwaku",
       "baseCommit": "f1441cbbcf6801d18c27a1d241fd4e5475086e3b",
-      "selectedUpstreamThrough": "27104eab",
+      "selectedUpstreamThrough": "ab0eb65a",
       "license": "app/LICENSE",
       "selectedChanges": [
         "Settings WebView DPI/hit testing and clipping",
@@ -17,14 +17,21 @@
         "Workspace self-heal after a display is moved or scaled (upstream #92, f698cb66)",
         "110% text with display scaling: taskbar parts and cards no longer misalign (upstream #90, 0162f8f5)",
         "Shortcut recording pauses itself, handshake extended to 30 s (upstream #86, a9f19173 + d0843cf8)",
-        "agy approvals read globalPermissionGrants from config.json (upstream #91, 5a0fee56)",
-        "Codex: a failed command counts as failure, Approve for me returns to Codex (upstream #89/#90, 2ca4d955 + 7a91375a)"
+        "Codex: a failed command counts as failure, Approve for me returns to Codex (upstream #89/#90, 2ca4d955 + 7a91375a)",
+        "ZCode/DeepSeek Harness approvals answerable by the shortcut keys (upstream #97, 3efcc47d)",
+        "A titled window covering its display unmaximized, or exactly on it, is full screen (upstream #98, c019eb70 + 7e8af4a7)",
+        "The island follows its slot as the taskbar runs grow or shrink (upstream #98, ba4c6cab)",
+        "Console standard handles put back after looking for a session's console window (upstream #100, 9ca1c269)",
+        "Pets' gallery and download documented as going the way the Network proxy says (upstream #99, 513f9979)"
       ],
       "excludedChanges": [
         "Upstream web-file plugin store and auto-update protocol",
         "Wi-Fi/tray-clock appearance changes and Codex wrapper discovery",
         "DeepSeek Harness token accounting",
-        "Upstream P2 product-semantics items that conflict with our own implementation (evaluated in issue #48)"
+        "Upstream P2 product-semantics items that conflict with our own implementation (evaluated in issue #48)",
+        "agy PreToolUse approval subsystem (upstream #91 chain 237197d3 + 44664d4c + e0bf5ceb + 5a0fee56): built on the agent-core crate this repository removed, so it needs a rewrite against our own asks.rs rather than a port (issue #51)",
+        "Upstream's taskbar tug-of-war debounce (upstream #98, efbcfb52): implemented here first, independently (6376a35), and already equivalent",
+        "Upstream's pets' gallery proxy plumbing (upstream #99, 513f9979): implemented here first with a stricter variant (pet budget, HTTP status not an error, config-driven site); only its documentation was missing"
       ]
     },
     {
@@ -47,7 +54,8 @@
   "notes": [
     "Host SDK, runtime, storage, installer and independent-plugin management are published here.",
     "OFM business source and distribution are maintained separately; the old snapshot and staging scripts are removed.",
-    "Selected Wakuwaku v0.3.7–v0.3.8 fixes preserve FISH Dock plugin protocols and storage isolation.",
+    "Selected Wakuwaku v0.3.7–v0.3.9 fixes preserve FISH Dock plugin protocols and storage isolation.",
+    "2.0.3 drops a claim carried since 2.0.1: 5a0fee56 (globalPermissionGrants) was listed as selected but no such code exists here — there is no agy approval subsystem to attach it to, and it is now recorded as excluded under issue #51.",
     "Original author copyright notices are retained. No user credentials or runtime state are published."
   ]
 }
