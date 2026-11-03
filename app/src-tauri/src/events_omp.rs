@@ -212,7 +212,7 @@ mod tests {
         for (e, at) in [(event("UserPromptSubmit", json!({ "prompt": "fix it" })), 1), (event("PostToolUse", json!({ "tool_name": "write", "tool_input": { "path": "b.txt" } })), 2), (event("Stop", json!({})), 3)] {
             pet.apply(&to_message(&e).unwrap(), at, crate::state::Hold::Seen);
         }
-        assert_eq!((pet.get(4)["mood"].as_str(), pet.get(4)["agent"].as_str()), (Some("review"), Some("omp")));
+        assert_eq!((pet.get(4, true)["mood"].as_str(), pet.get(4, true)["agent"].as_str()), (Some("review"), Some("omp")));
     }
 
     #[test]

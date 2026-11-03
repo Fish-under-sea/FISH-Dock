@@ -74,6 +74,9 @@ pub struct Request {
 
     // If Some, a message must be sent after responding
     notify_when_responded: Option<Sender<()>>,
+
+    // Wakuwaku（2.0.4，/v1 的 SSE）：写端 socket 的共享句柄，用来设写超时。
+    write_handle: Option<std::sync::Arc<crate::connection::Connection>>,
 }
 
 struct NotifyOnDrop<R> {
@@ -135,6 +138,7 @@ pub fn new_request<R, W>(
     remote_addr: Option<SocketAddr>,
     mut source_data: R,
     writer: W,
+    write_handle: Option<std::sync::Arc<crate::connection::Connection>>,
 ) -> Result<Request, RequestCreationError>
 where
     R: Read + Send + 'static,
@@ -238,10 +242,25 @@ where
         body_length: content_length,
         must_send_continue: expects_continue,
         notify_when_responded: None,
+        write_handle,
     })
 }
 
 impl Request {
+    /// Wakuwaku（2.0.4，/v1 的 SSE）：给这条连接的 socket 设写超时；到点写失败返回，
+    /// respond 随之结束，SSE 的 worker 槽位才能归还（A4）。
+    /// Wakuwaku（2.0.4，/v1 的 SSE）：这条连接的强制关闭句柄（退出/超时唤醒写线程）。
+    pub fn stream_handle(&self) -> Option<crate::StreamHandle> {
+        self.write_handle.as_ref().map(|handle| crate::StreamHandle(handle.clone()))
+    }
+
+    pub fn set_write_timeout(&mut self, timeout: Option<std::time::Duration>) -> std::io::Result<()> {
+        match &self.write_handle {
+            Some(handle) => handle.set_write_timeout(timeout),
+            None => Ok(()),
+        }
+    }
+
     /// Returns true if the request was made through HTTPS.
     #[inline]
     pub fn secure(&self) -> bool {

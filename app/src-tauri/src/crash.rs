@@ -551,7 +551,7 @@ fn post(url: &str, body: &str) -> Result<Value, Fail> {
         let sent = agent
             .post(url)
             .header("content-type", "application/json")
-            .header("user-agent", &format!("wakuwaku/{}", crate::updates::current()))
+            .header("user-agent", &format!("fish-dock/{}", crate::updates::current()))
             .header("x-wakuwaku", "1")
             .send(body);
         match sent {
@@ -587,6 +587,9 @@ struct Status {
 }
 
 static STATUS: Mutex<Status> = Mutex::new(Status { sending: false, error: None, next_at: 0 });
+
+/// 上一次「导出报告」保存到哪（2.0.4 T-M：走系统保存对话框，路径给前端确认一次）。
+static EXPORTED: Mutex<Option<String>> = Mutex::new(None);
 
 // Those waiting sent (five at a time), each claimed first (renamed
 // .sending) so the guard and she never send one twice. Whether all went.
@@ -914,6 +917,11 @@ pub fn view(sh: &Shared) -> Value {
         "sending": s.sending,
         "error": s.error,
         "last": last,
+        // 2.0.4 T-M（方案 §8.7）：即使没有 relay，预填 issue 与导出也是可用入口，
+        // 前端据此在「有未发送报告」时显示两个按钮。
+        "prefill": true,
+        // 上次导出保存的路径（用户取消时为 null）。
+        "exported": EXPORTED.lock().unwrap().clone(),
     })
 }
 
@@ -925,6 +933,184 @@ pub fn open_last(sh: &Shared) -> Option<String> {
     let url = v["answer"]["url"].as_str()?.to_string();
     let ours = ["https://github.com/Fish-under-sea/FISH-Dock/issues/"];
     (ours.iter().any(|p| url.starts_with(p)) || test_urls().is_some()).then_some(url)
+}
+
+// --- 2.0.4 T-M：零部署反馈（GitHub issue 预填 + 脱敏文件导出）----------------------------
+//
+// 用户已选零部署：报告由本机的同一个 `Redactor` 脱敏（report_of 已做），再用
+// GitHub issue 预填地址交给用户自己在浏览器审阅、提交；不携带 token、不部署
+// relay、不代提交。relay 常量只作历史材料保留，不再是活动入口（方案 §8.7）。
+
+const ISSUE_NEW: &str = "https://github.com/Fish-under-sea/FISH-Dock/issues/new";
+/// 最终编码 URL 的保守上限（ASCII 字节）：浏览器对过长 URL 会回 414（审计 A13）。
+const ISSUE_URL_LIMIT: usize = 6000;
+
+/// 百分号编码（保留 unreserved 字符；空格用 %20，不用 +）。
+fn url_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 3);
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+// issue 的标题与正文（Markdown 模板；字段与 .github/ISSUE_TEMPLATE/crash.md 对应）。
+fn issue_title(report: &Value) -> String {
+    format!("[crash] {} · v{}", report["kind"].as_str().unwrap_or("panic"), report["app"].as_str().unwrap_or("?"))
+}
+
+fn issue_body(report: &Value, log_lines: usize, frames: usize) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("### FISH Dock 崩溃报告 · v{}", report["app"].as_str().unwrap_or("?")));
+    lines.push(String::new());
+    lines.push(format!("- 类型：{}", report["kind"].as_str().unwrap_or("?")));
+    if let Some(code) = report["code"].as_i64() {
+        lines.push(format!("- 退出码：{code}"));
+    }
+    if let Some(place) = report["where"].as_str() {
+        lines.push(format!("- 位置：{place}"));
+    }
+    if let Some(message) = report["message"].as_str() {
+        lines.push(format!("- 消息：{message}"));
+    }
+    for key in ["os", "webview2"] {
+        if let Some(value) = report[key].as_str() {
+            lines.push(format!("- {key}：{value}"));
+        }
+    }
+    if let Some(at) = report["at"].as_str() {
+        lines.push(format!("- 时间：{at}"));
+    }
+    if let Some(list) = report["frames"].as_array() {
+        let top: Vec<String> = list.iter().take(frames).filter_map(|f| f.as_str().map(str::to_string)).collect();
+        if !top.is_empty() {
+            lines.push(String::new());
+            lines.push("### 栈顶".into());
+            for frame in top {
+                lines.push(format!("- {frame}"));
+            }
+        }
+    }
+    if let Some(list) = report["log"].as_array() {
+        let entries: Vec<&str> = list.iter().filter_map(Value::as_str).collect();
+        if log_lines > 0 && !entries.is_empty() {
+            let tail = entries.len().saturating_sub(log_lines);
+            lines.push(String::new());
+            lines.push("### 最近日志".into());
+            for line in &entries[tail..] {
+                lines.push(format!("- {line}"));
+            }
+        }
+    }
+    lines.push(String::new());
+    lines.push("> 完整脱敏报告可用「导出报告」保存后拖进这里。".into());
+    lines.join("\n")
+}
+
+/// 报告 → GitHub issue 预填地址：按**最终编码 URL** 的字节数裁剪（先裁日志，
+/// 再裁栈；标题、版本与导出口诀始终保留）。打开失败也还能导出（方案 §8.7）。
+pub fn issue_link(report: &Value) -> String {
+    let title = url_encode(&issue_title(report));
+    let mut log_lines = report["log"].as_array().map_or(0, Vec::len);
+    let mut frames = report["frames"].as_array().map_or(0, Vec::len).min(8);
+    loop {
+        let body = url_encode(&issue_body(report, log_lines, frames));
+        let url = format!("{ISSUE_NEW}?labels=crash&title={title}&body={body}");
+        if url.len() <= ISSUE_URL_LIMIT || (log_lines == 0 && frames == 0) {
+            return url;
+        }
+        if log_lines > 0 {
+            log_lines /= 2;
+        } else {
+            frames /= 2;
+        }
+    }
+}
+
+/// 报告文件写入：**先原子占位再写**，绝不先 `exists` 再 `write`。
+/// `create_new(true)` 让「检查后冒出同名文件」也无法覆盖；同名时在有界范围内加 `-N` 后缀。
+/// 写入只针对本次 create_new 亲手创建的那个文件；失败只删自己创建的文件，不留半截。
+const EXPORT_NAME_TRIES: u32 = 64;
+
+fn create_report_file(target: &Path, text: &str) -> Result<PathBuf, String> {
+    let stem = target.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "crash".into());
+    let ext = target.extension().map(|s| s.to_string_lossy().into_owned()).filter(|s| !s.is_empty());
+    for n in 0..=EXPORT_NAME_TRIES {
+        let candidate = if n == 0 {
+            target.to_path_buf()
+        } else {
+            let name = match &ext {
+                Some(ext) => format!("{stem}-{n}.{ext}"),
+                None => format!("{stem}-{n}"),
+            };
+            target.with_file_name(name)
+        };
+        match fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(text.as_bytes()).and_then(|_| file.sync_all()) {
+                    drop(file);
+                    let _ = fs::remove_file(&candidate);
+                    return Err(format!("报告写入未完成：{error}"));
+                }
+                return Ok(candidate);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("无法创建报告文件 {}：{error}", candidate.display())),
+        }
+    }
+    Err(format!("同名文件过多（已试 {EXPORT_NAME_TRIES} 个后缀），未创建新报告"))
+}
+
+/// 把最新一份待发报告（已脱敏）导出成 .txt，返回路径。`data` 是她数据根。
+fn export_report_at(data: &Path) -> Result<String, String> {
+    let waiting = pending(data);
+    let path = waiting.last().ok_or("没有待发送的崩溃报告")?;
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let dir = folder(data).join("exports");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "crash".into());
+    let out = dir.join(format!("{stem}.txt"));
+    let saved = create_report_file(&out, &text)?;
+    Ok(saved.to_string_lossy().into_owned())
+}
+
+pub fn export_report(sh: &Shared) -> Result<String, String> {
+    export_report_at(&sh.dir)
+}
+
+/// 选择结果 → 落盘的共享实现（选择器可注入，测试不要求真实 HWND）：
+/// 取消（`save` 返回 None）不写任何文件、不动 `EXPORTED`；成功只更新 `EXPORTED` 为新路径。
+fn save_report_with(text: &str, directory: &Path, name: &str, save: impl FnOnce(&Path, &str) -> Result<Option<PathBuf>, String>) -> Result<Option<String>, String> {
+    let Some(target) = save(directory, name)? else { return Ok(None) };
+    let saved = create_report_file(&target, text)?;
+    let saved = saved.to_string_lossy().into_owned();
+    *EXPORTED.lock().unwrap() = Some(saved.clone());
+    Ok(Some(saved))
+}
+
+/// 「导出报告」的用户路径：复用宿主已有的系统保存对话框与导出目录选择
+/// （identity_dialog::export_directory / save_text），不是固定写死数据根、也不另造选择器。
+/// 返回保存到的路径；用户取消为 None。
+pub fn export_report_dialog(sh: &Shared, owner: isize) -> Result<Option<String>, String> {
+    let waiting = pending(&sh.dir);
+    let path = waiting.last().ok_or("没有待发送的崩溃报告")?;
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let dir = crate::identity_dialog::export_directory(sh.setting("identityExportDirectory").as_str())?;
+    let name = format!("FISH-Dock-crash-{}.txt", crate::now_ms());
+    save_report_with(&text, &dir, &name, |dir, name| crate::identity_dialog::save_text(owner, dir, name))
+}
+
+/// 打开发送界面：最新一份报告的预填 issue（零部署路径的唯一活动入口）。
+pub fn open_issue(sh: &Shared) -> Result<(), String> {
+    let waiting = pending(&sh.dir);
+    let path = waiting.last().ok_or("没有待发送的崩溃报告")?;
+    let report: Value = serde_json::from_str(&fs::read_to_string(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    crate::jump::open_url(&issue_link(&report));
+    Ok(())
 }
 
 // --- WebView2 ------------------------------------------------------------------------------
@@ -1016,6 +1202,9 @@ pub fn webview_failed(sh: &Arc<Shared>, label: &str, kind: i32, reason: i32, cod
 #[cfg(test)]
 mod tests {
     use super::{found_for, is_crash_code, is_frame, iso_minute, thread_said, webview_crash};
+    use serde_json::{json, Value};
+    // 导出用例都会读写同一个 EXPORTED 静态，串行跑，避免并行互相踩。
+    static EXPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn crash_codes() {
@@ -1205,5 +1394,137 @@ mod tests {
         assert!(frames[0].starts_with("ntdll.dll+0x"), "{frames:?}");
         let exe = std::env::current_exe().unwrap().file_name().unwrap().to_string_lossy().into_owned();
         assert!(frames.iter().any(|f| f.starts_with(&format!("{exe}+0x"))), "{frames:?}");
+    }
+
+    // 2.0.4 T-M / 审计 A13：按**最终编码 URL** 的字节数裁剪，不是「1500 个正文字符」。
+    // 标题与版本始终保留；超长日志先裁，再裁栈。
+    #[test]
+    fn issue_link_is_clipped_by_the_final_encoded_url_length() {
+        let long_log: Vec<Value> = (0..400).map(|i| json!(format!("line {i} 中文日志 {}", "x".repeat(40)))).collect();
+        let report = json!({
+            "app": "2.0.4", "kind": "panic", "code": 101, "where": "src/main.rs:1",
+            "frames": (0..40).map(|i| json!(format!("frame-{i}"))).collect::<Vec<_>>(),
+            "log": long_log, "at": "2026-11-03T12:00Z", "os": "Windows 11",
+        });
+        let url = super::issue_link(&report);
+        assert!(url.starts_with(super::ISSUE_NEW), "{url}");
+        assert!(url.len() <= super::ISSUE_URL_LIMIT, "最终 URL 必须 ≤ {} 字节，实际 {}", super::ISSUE_URL_LIMIT, url.len());
+        // 标题/版本/导出口诀保留（裁剪只动日志与栈）。
+        assert!(url.contains("%5Bcrash%5D"), "标题保留：{url}");
+        assert!(url.contains("2.0.4"), "版本保留");
+        assert!(url.contains("%E5%AF%BC%E5%87%BA"), "导出口诀（中文百分号编码）保留");
+        // 参数里没有裸空格或中文（编码正确）。
+        assert!(!url.contains(' '), "URL 不应含裸空格");
+        assert!(url.is_ascii(), "最终 URL 必须是 ASCII");
+    }
+
+    // 短报告不裁剪，标题/类型/退出码/栈都编码进去。
+    #[test]
+    fn issue_link_encodes_the_template_fields() {
+        let report = json!({ "app": "2.0.4", "kind": "panic", "code": 101, "frames": ["a b", "c.dll+0x1"], "log": ["x y"] });
+        let url = super::issue_link(&report);
+        assert!(url.contains("title=%5Bcrash%5D%20panic"), "{url}");
+        assert!(url.contains("body="));
+        assert!(url.contains("101"), "退出码应在正文");
+        assert!(super::url_encode("a b") == "a%20b");
+    }
+
+    // 导出：最新一份待发报告（已脱敏）写成 .txt，路径返回；没有报告时明确报错。
+    #[test]
+    fn export_writes_the_redacted_report_to_a_txt() {
+        let dir = std::env::temp_dir().join(format!("fish-crash-export-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let folder = super::folder(&dir);
+        std::fs::create_dir_all(&folder).unwrap();
+        assert!(super::export_report_at(&dir).is_err(), "没有报告时要报错，不写空文件");
+        let name = "20261103T1200-00-panic-123.json";
+        std::fs::write(folder.join(name), r#"{"kind":"panic","app":"2.0.4"}"#).unwrap();
+        let path = super::export_report_at(&dir).unwrap();
+        assert!(path.ends_with(".txt"), "{path}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"kind":"panic","app":"2.0.4"}"#);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // t38 O1：原子创建。已有目标原字节不变；新内容写到有界后缀文件；EXPORTED 指向新文件。
+    #[test]
+    fn export_creates_atomically_and_never_overwrites_existing_bytes() {
+        let _guard = EXPORT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let base = std::env::temp_dir().join(format!("fish-crash-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let chosen = base.join("FISH-Dock-crash.txt");
+        std::fs::write(&chosen, b"KEEP-ORIGINAL").unwrap();
+        let text = "redacted report body";
+        let got = super::save_report_with(text, &base, "FISH-Dock-crash.txt", |_d, _n| Ok(Some(chosen.clone()))).unwrap().unwrap();
+        assert_eq!(std::fs::read_to_string(&chosen).unwrap(), "KEEP-ORIGINAL", "已有文件必须一字不改");
+        assert_ne!(std::path::Path::new(&got), chosen, "不得写进已有文件");
+        assert_eq!(std::fs::read_to_string(&got).unwrap(), text);
+        assert_eq!(super::EXPORTED.lock().unwrap().as_deref(), Some(got.as_str()));
+        // 后缀碰撞：x.txt 与 x-1.txt 都在，则落到 x-2.txt，两个旧文件都不动。
+        let suffix = base.join("suffix");
+        std::fs::create_dir_all(&suffix).unwrap();
+        let target = suffix.join("x.txt");
+        std::fs::write(&target, b"one").unwrap();
+        std::fs::write(suffix.join("x-1.txt"), b"two").unwrap();
+        let got2 = super::create_report_file(&target, "three").unwrap();
+        assert_eq!(got2.file_name().unwrap().to_string_lossy(), "x-2.txt");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "one");
+        assert_eq!(std::fs::read_to_string(suffix.join("x-1.txt")).unwrap(), "two");
+        *super::EXPORTED.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // 取消：选择器返回 None → 不写文件、不改 EXPORTED。
+    #[test]
+    fn cancelling_the_chooser_writes_nothing_and_keeps_exported() {
+        let _guard = EXPORT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let base = std::env::temp_dir().join(format!("fish-crash-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        *super::EXPORTED.lock().unwrap() = Some("previous-path".into());
+        let got = super::save_report_with("body", &base, "x.txt", |_d, _n| Ok(None)).unwrap();
+        assert_eq!(got, None);
+        assert_eq!(super::EXPORTED.lock().unwrap().as_deref(), Some("previous-path"));
+        assert_eq!(std::fs::read_dir(&base).unwrap().count(), 0, "取消不得留下文件");
+        *super::EXPORTED.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // 写入失败（目标目录不存在）：Err、不留半文件、EXPORTED 不变。
+    #[test]
+    fn a_failed_write_leaves_no_half_file_and_keeps_exported() {
+        let _guard = EXPORT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let base = std::env::temp_dir().join(format!("fish-crash-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        *super::EXPORTED.lock().unwrap() = Some("previous-path".into());
+        let missing = base.join("missing").join("x.txt");
+        let got = super::save_report_with("body", &base, "x.txt", |_d, _n| Ok(Some(missing.clone())));
+        assert!(got.is_err(), "写不进目录要报错");
+        assert!(!missing.exists());
+        assert_eq!(super::EXPORTED.lock().unwrap().as_deref(), Some("previous-path"));
+        assert_eq!(std::fs::read_dir(&base).unwrap().count(), 0, "失败不得留下半文件");
+        *super::EXPORTED.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // 默认导出（数据根 exports/）同样原子：已有同名文件不被覆盖，改写到后缀。
+    #[test]
+    fn the_default_export_also_never_overwrites() {
+        let dir = std::env::temp_dir().join(format!("fish-crash-default-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let folder = super::folder(&dir);
+        std::fs::create_dir_all(&folder).unwrap();
+        let name = "20261103T1200-00-panic-321.json";
+        std::fs::write(folder.join(name), r#"{"kind":"panic"}"#).unwrap();
+        let exports = folder.join("exports");
+        std::fs::create_dir_all(&exports).unwrap();
+        let existing = exports.join("20261103T1200-00-panic-321.txt");
+        std::fs::write(&existing, b"KEEP").unwrap();
+        let path = super::export_report_at(&dir).unwrap();
+        assert_ne!(std::path::Path::new(&path), existing, "不得覆盖已有同名导出");
+        assert_eq!(std::fs::read_to_string(&existing).unwrap(), "KEEP");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"kind":"panic"}"#);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

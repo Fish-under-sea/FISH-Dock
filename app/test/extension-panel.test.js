@@ -430,7 +430,7 @@ test('第三方检索：不合规包被隐藏，界面写出被隐藏的数量�
   await panel.load()
   await panel.thirdparty('lodash')
   const html = panel.render()
-  assert.match(html, /已隐藏 3 个不符合 fish-dock-plugin-\* 命名的包/)
+  assert.match(html, /本页已隐藏 3 个不符合 fish-dock-plugin-\* 命名的包/)
   assert.doesNotMatch(html, /data-extension-third="install"/)
 })
 test('第三方检索：提示行是 note 小字，合规结果与隐藏提示可并存', async () => {
@@ -438,7 +438,7 @@ test('第三方检索：提示行是 note 小字，合规结果与隐藏提示�
   await panel.load()
   await panel.thirdparty('fish-dock')
   const html = panel.render()
-  assert.match(html, /<p role="status" class="note">已隐藏 2 个不符合 fish-dock-plugin-\* 命名的包<\/p>/)
+  assert.match(html, /<p role="status" class="note">本页已隐藏 2 个不符合 fish-dock-plugin-\* 命名的包<\/p>/)
   assert.match(html, /data-extension-third="install"/)
 })
 // t29：安装/更新期间显示进度弹窗（插件名 + 阶段 + 百分比 + 已下载/总量 + 取消），
@@ -705,7 +705,13 @@ test('T11 每张卡最多一颗实心主按钮：只有「更新」是 .al，卸
   const more = html.split('<details class="extension-more">')[1]?.split('</details>')[0] || ''
   assert.match(more, /data-extension-action="uninstall"/, '卸载进「更多」')
   assert.match(more, /data-extension-action="logs"/, '打开插件日志进「更多」')
-  assert.match(more, /class="pbtn sm extension-danger"/, '卸载带危险 class（危险色只在悬停/聚焦出现，由 CSS 决定）')
+  // T-C / #63：行式动作列表——两行都整行可点（.extension-more-row），日志在上、
+  // 卸载在下；卸载常态就是危险色（class 决定颜色，不必悬停）。
+  const rows = [...more.matchAll(/<button[^>]*class="([^"]*extension-more-row[^"]*)"[^>]*data-extension-action="(\w+)"[^>]*>([^<]*)</g)].map(m => ({ classes: m[1], action: m[2], label: m[3] }))
+  assert.deepEqual(rows.map(r => r.action), ['logs', 'uninstall'], '日志在上、卸载在下')
+  assert.ok(rows.every(r => r.classes.includes('pbtn') && r.classes.includes('sm')), '两行沿用 pbtn sm 的尺寸语言')
+  assert.match(rows[1].classes, /extension-danger/, '卸载带危险 class（常态危险色，由 CSS 决定）')
+  assert.doesNotMatch(rows[0].classes, /extension-danger/, '日志不是危险动作')
   const actionRow = html.split('<div class="extension-card-actions">')[1]?.split('<details')[0] || ''
   assert.doesNotMatch(actionRow, /data-extension-action="uninstall"/, '主操作行里没有卸载')
   assert.doesNotMatch(actionRow, /data-extension-action="logs"/, '主操作行里没有日志入口')
@@ -776,4 +782,192 @@ test('T11 检索是一个字段：输入框有可访问名，按钮缩进字段�
   assert.match(html, /<input id="extension-third-query" class="extension-search-input" type="text" aria-label="npm 包名或关键字"/, '输入框有 aria-label（placeholder 不能当名字）')
   assert.match(html, /class="pbtn sm extension-search-go"/, '「检索」是字段内的次级按钮，不再与同排按钮同权重')
   assert.doesNotMatch(html, /extension-third-search/, '旧的平铺搜索行已删')
+})
+
+// T-C / #63：placeholder 只留一句短话；整句命名规则移到下方 note——
+// 窄窗原来把规则截成半句，用户看到的是一段被吃掉的提示。
+test('检索占位符是短句，命名规则落在下方 note 行', async () => {
+  const { panel } = make({ third: () => ({ hits: [], hidden: 0 }) })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin')
+  const html = panel.render()
+  assert.match(html, /placeholder="搜索 npm 包，如 fish-dock-plugin-weather"/, 'placeholder 是一句短话')
+  assert.doesNotMatch(html, /placeholder="包名需为/, '整句规则不再放在 placeholder 里')
+  assert.match(html, /<p class="note">包名需为 fish-dock-plugin-&lt;名字&gt;（可带 @scope）/, '规则改到下方 note 行')
+})
+
+// ── T-C / A10：npm 发现式检索（分页、去重、迟到隔离、错误重试）──────────
+const thirdCalls = calls => calls.filter(c => c.command === 'extension_thirdparty').map(c => c.args)
+
+test('首次进入第三方页做默认发现：空词 + discovery，不要求用户先认识包名', async () => {
+  const { panel, calls } = make({ third: () => ({ hits: [{ name: 'fish-dock-plugin-weather', version: '1.0.0', description: '', publisher: 'acme', updated: '' }], hidden: 0, total: 1, filtered: 1, hasMore: false }) })
+  await panel.load(); await panel.thirdparty('', { discovery: true })
+  const [asked] = thirdCalls(calls)
+  assert.equal(asked.query, '', '空词交给后端做默认发现')
+  assert.equal(asked.discovery, true, '带 discovery 标志')
+  assert.equal(asked.from, 0); assert.equal(asked.size, 20, '分页大小 20')
+  assert.match(panel.render(), /fish-dock-plugin-weather/, '发现结果直接可安装')
+})
+
+test('精确包名与普通关键字都原样交给后端，前端不自己拼搜索语义', async () => {
+  const { panel, calls } = make({ third: () => ({ hits: [], hidden: 0 }) })
+  await panel.load(); await panel.thirdparty('@acme/fish-dock-plugin-weather')
+  await panel.thirdparty('weather widget')
+  const asked = thirdCalls(calls)
+  assert.equal(asked[0].query, '@acme/fish-dock-plugin-weather'); assert.equal(asked[0].discovery, false, '点名要包就不是发现式')
+  assert.equal(asked[1].query, 'weather widget'); assert.equal(asked[1].discovery, false)
+})
+
+test('加载更多带 from 累加，并按包名跨页去重', async () => {
+  const pages = [
+    { hits: [{ name: 'fish-dock-plugin-a', version: '1.0.0' }, { name: 'fish-dock-plugin-b', version: '1.0.0' }], hidden: 0, total: 4, filtered: 2, hasMore: true, nextFrom: 2 },
+    { hits: [{ name: 'fish-dock-plugin-b', version: '1.0.0' }, { name: 'fish-dock-plugin-c', version: '1.0.0' }], hidden: 0, total: 4, filtered: 2, hasMore: false, nextFrom: 4 }
+  ]
+  let next = 0
+  const { panel, calls } = make({ third: () => pages[next++] })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin', { discovery: true })
+  assert.match(panel.render(), /data-extension-third="more"/, '还有下一页时给「加载更多」')
+  await panel.thirdparty('fish-dock-plugin', { append: true })
+  const asked = thirdCalls(calls)
+  assert.equal(asked[1].from, 2, '第二页用后端给的 nextFrom 接着要')
+  const html = panel.render()
+  assert.equal((html.match(/data-extension-third="install"/g) || []).length, 3, 'b 重复出现只保留一条')
+  assert.doesNotMatch(html, /data-extension-third="more"/, '到底了就不再给「加载更多」')
+})
+
+// t19 F1：默认发现是「空词 + discovery」，翻页时不能退化成 discovery=false
+// （后端对「空词且非 discovery」直接报错，等于默认发现永远只能看第一页）。
+test('默认发现的「加载更多」仍然带 discovery=true', async () => {
+  const { panel, calls } = make({ third: args => ({ hits: [], hidden: 0, total: 40, hasMore: true, nextFrom: args.from + 20 }) })
+  await panel.load(); await panel.thirdparty('', { discovery: true })
+  await panel.thirdparty('', { append: true })
+  const asked = thirdCalls(calls)
+  assert.equal(asked.length, 2)
+  assert.equal(asked[0].discovery, true, '第一页是发现式')
+  assert.equal(asked[1].discovery, true, '第二页仍然是发现式（F1）')
+  assert.equal(asked[1].query, '', '词仍然是空的，后端用默认前缀')
+  assert.equal(asked[1].from, 20, '偏移前进')
+})
+
+// t19 F2：偏移按 registry 页长（nextFrom）走，不是按可见条数；
+// 整页被过滤时也必须前进，否则「加载更多」永远返回同一页。
+test('整页被过滤时加载更多仍前进（不会原地死循环）', async () => {
+  const asked = []
+  const { panel } = make({ third: args => {
+    asked.push(args)
+    // 第一页：20 个对象全被命名规范过滤，registry 说还有更多。
+    if (asked.length === 1) return { hits: [], hidden: 20, total: 40, filtered: 0, hasMore: true, nextFrom: 20 }
+    return { hits: [{ name: 'fish-dock-plugin-ok', version: '1.0.0' }], hidden: 0, total: 40, filtered: 1, hasMore: false, nextFrom: 40 }
+  } })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin', { discovery: true })
+  await panel.thirdparty('fish-dock-plugin', { append: true })
+  assert.deepEqual(asked.map(call => call.from), [0, 20], '第二次必须从 20 开始，不是 0')
+  assert.match(panel.render(), /fish-dock-plugin-ok/, '第二页结果进来了')
+})
+
+// t19 F2 的退化保护：后端没给 nextFrom 且页面没有前进时，不许再给「加载更多」。
+test('偏移没有前进时不再显示「加载更多」', async () => {
+  const { panel } = make({ third: () => ({ hits: [], hidden: 0, total: 0, filtered: 0, hasMore: true, nextFrom: 0 }) })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin', { discovery: true })
+  assert.doesNotMatch(panel.render(), /data-extension-third="more"/, '没有前进就当到底，避免死循环')
+})
+
+// t42 F-A/F-B 端到端：喂给面板的是**命令返回体的真实字段形状**
+// （app/test/fixtures/thirdparty-search.json，Rust 契约测试断言 `search_json` 的字段集合
+// 与它逐一相同），而不是在桩里手写 nextFrom。
+// 场景就按 t27 复现的那条：首页 20 对象、次页只有 5 对象、total 41、hasMore=true
+// → 第三次请求必须 from=25（不是 40，否则跳过 25..39）。
+test('真实命令返回体驱动分页：短页按 nextFrom=25 继续，不跳到 40', async () => {
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/thirdparty-search.json'), 'utf8'))
+  const pages = [fixture.firstPage, fixture.secondPage, fixture.lastPage]
+  const asked = []
+  const { panel } = make({ third: args => { asked.push(args); return pages[asked.length - 1] } })
+  await panel.load()
+  await panel.thirdparty('', { discovery: true })
+  await panel.thirdparty('', { append: true })
+  assert.match(panel.render(), /data-extension-third="more"/, '短页但 hasMore=true 时仍给「加载更多」')
+  await panel.thirdparty('', { append: true })
+  assert.deepEqual(asked.map(call => call.from), [0, 20, 25], '短页从 25 继续（不是 40），中间对象不被跳过')
+  assert.equal(asked.every(call => call.discovery === true), true, '默认发现翻页始终 discovery=true')
+  const html = panel.render()
+  assert.match(html, /fish-dock-plugin-p1\b/, '第一页第一条在')
+  assert.match(html, /fish-dock-plugin-p21/, '第二页（21..25）确实进来了')
+  assert.match(html, /fish-dock-plugin-p25/)
+  assert.doesNotMatch(html, /data-extension-third="more"/, 'hasMore=false 之后不再给「加载更多」')
+})
+
+// t19 F5：被隐藏的数量是「本页」的，文案要说清楚，不能像全局总数。
+test('被隐藏数量写成「本页」，并显示 registry 总数与本页可用数', async () => {
+  const { panel } = make({ third: () => ({ hits: [{ name: 'fish-dock-plugin-a', version: '1.0.0' }], hidden: 2, total: 41, filtered: 18, hasMore: false, nextFrom: 20 }) })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin')
+  const html = panel.render()
+  assert.match(html, /本页已隐藏 2 个不符合 fish-dock-plugin-\* 命名的包/, 'hidden 文案说明是本页')
+  assert.match(html, /共 41 个结果，本页可用 18 个/, '总数与本页可用数分开写')
+})
+
+// t19 F6：增量（加载更多）失败后点「重试」，要重发原来那一页，
+// 不能把已加载的列表清空、从第 0 页重来。
+test('加载更多失败后的重试回到原来那一页，并保留已加载条目', async () => {
+  const asked = []
+  let failAppend = true
+  const { panel } = make({ third: args => {
+    asked.push(args)
+    if (args.from === 0) return { hits: [{ name: 'fish-dock-plugin-a', version: '1.0.0' }], hidden: 0, total: 40, filtered: 1, hasMore: true, nextFrom: 20 }
+    if (failAppend) { failAppend = false; throw new Error('registry 暂时不可达') }
+    return { hits: [{ name: 'fish-dock-plugin-b', version: '1.0.0' }], hidden: 0, total: 40, filtered: 1, hasMore: false, nextFrom: 40 }
+  } })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin', { discovery: true })
+  await panel.thirdparty('fish-dock-plugin', { append: true })
+  assert.match(panel.render(), /registry 暂时不可达/, '增量失败要有错误')
+  assert.match(panel.render(), /fish-dock-plugin-a/, '已加载的条目还在')
+  await panel.retryThird()
+  assert.deepEqual(asked.map(call => call.from), [0, 20, 20], '重试发的是原来那一页（20），不是 0')
+  const html = panel.render()
+  assert.match(html, /fish-dock-plugin-a/); assert.match(html, /fish-dock-plugin-b/, '重试成功后两页都在')
+  assert.doesNotMatch(html, /registry 暂时不可达/, '成功后悔错误收起')
+})
+
+test('迟到结果不覆盖新词：先发的后到也只能被丢弃', async () => {
+  const pending = new Map()
+  const third = args => new Promise(resolve => pending.set(args.query, resolve))
+  const { panel } = make({ third })
+  await panel.load()
+  const first = panel.thirdparty('first')
+  const second = panel.thirdparty('second')
+  pending.get('second')({ hits: [{ name: 'fish-dock-plugin-second', version: '1.0.0' }], hidden: 0 })
+  await second
+  pending.get('first')({ hits: [{ name: 'fish-dock-plugin-first', version: '0.0.1' }], hidden: 0 })
+  await first
+  const html = panel.render()
+  assert.match(html, /fish-dock-plugin-second/, '新词的结果在')
+  assert.doesNotMatch(html, /fish-dock-plugin-first/, '旧词的迟到结果没盖上来')
+})
+
+test('检索失败显示原因与「重试」，重试沿用上一次的词', async () => {
+  let attempt = 0
+  const { panel, calls } = make({ third: () => {
+    attempt += 1
+    if (attempt === 1) throw new Error('registry 连接被拒绝')
+    return { hits: [{ name: 'fish-dock-plugin-ok', version: '1.0.0' }], hidden: 0 }
+  } })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin')
+  let html = panel.render()
+  assert.match(html, /registry 连接被拒绝/, '失败原因照实写')
+  assert.match(html, /data-extension-third="retry"/, '给重试入口')
+  assert.doesNotMatch(html, /没有找到可安装的包/, '失败不冒充空结果')
+  await panel.retryThird()
+  html = panel.render()
+  assert.match(html, /fish-dock-plugin-ok/, '重试成功后结果出现')
+  assert.doesNotMatch(html, /registry 连接被拒绝/, '错误提示收起')
+  assert.equal(thirdCalls(calls)[1].query, 'fish-dock-plugin', '重试用的是同一个词')
+})
+
+test('registry 总数、本页可用数与空结果三态各写各的', async () => {
+  const { panel } = make({ third: () => ({ hits: [{ name: 'fish-dock-plugin-a', version: '1.0.0' }], hidden: 2, total: 41, filtered: 18, hasMore: true }) })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin')
+  const html = panel.render()
+  assert.match(html, /共 41 个结果，本页可用 18 个/, 'registry 总数与本页可用数分开写')
+  assert.match(html, /本页已隐藏 2 个不符合 fish-dock-plugin-\* 命名的包/, '被过滤的数量照实说')
+  const empty = make({ third: () => ({ hits: [], hidden: 0, total: 0, filtered: 0, hasMore: false }) })
+  await empty.panel.load(); await empty.panel.thirdparty('fish-dock-plugin')
+  assert.match(empty.panel.render(), /没有找到可安装的包。可换一个包名再试。/, '空结果单独一句')
 })

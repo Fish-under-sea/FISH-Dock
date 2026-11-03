@@ -11,10 +11,23 @@
 // stopping a turn. Each step's hooks run in the background (connection.rs),
 // so one can arrive after its turn is over: the turn id tells it apart
 // (state.rs).
+//
+// 2.0.4 T-I（上游 #74）：Codex Desktop 自己的内部请求（它自己开的线程、它自己塞进
+// 一轮的内容）不是一个会话。判据在会话记录里（agent-core 的 codex，只在记录写得
+// 出来时判断；读不到就照旧算人的），过滤状态按 session / turn 记在这里：
+//   - 内部线程：整个会话都不显示（没有挥手、不算轮次、不收尾）；
+//   - 已有的人的会话：只丢内部轮的步骤与结算，前一用户轮不动；
+//   - 会话头还没写出来时，SessionStart 的挥手先不发；第一轮是人的，挥手跟这一轮
+//     一起出来（不事后补，也不假称没发生）。
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::sync::Mutex;
 
 use serde_json::{json, Value};
+
+use agent_core::codex::session_origin;
+use agent_core::Origin;
 
 use crate::events::{base, project_of, reply_of, step, step_of, task_of};
 
@@ -157,12 +170,150 @@ fn mood_of(e: &Value) -> Option<Value> {
     Some(m)
 }
 
+// 2.0.4 T-I：一次分类的结果。Silent：这个事件什么都不该发生（内部轮/内部会话）。
+enum Hearing {
+    Heard { welcome: bool },
+    Silent,
+}
+
+// 会话与轮次的结论各留几个：记录不会再变，读到一次就够；满了整批丢掉重读，
+// 只是慢一次，不会判错。
+const KEPT_ORIGINS: usize = 64;
+
+#[derive(Default)]
+struct Origins {
+    sessions: HashMap<String, bool>,
+    turns: HashMap<String, bool>,
+    // 会话头还没写出来时该发而没发的挥手，等第一轮的人来。
+    welcome: HashMap<String, bool>,
+}
+
+static ORIGINS: Mutex<Option<Origins>> = Mutex::new(None);
+
+fn origins<R>(f: impl FnOnce(&mut Origins) -> R) -> R {
+    let mut held = ORIGINS.lock().unwrap_or_else(|e| e.into_inner());
+    f(held.get_or_insert_with(Origins::default))
+}
+
+// 会话记录的头一行：谁是这条线程的。
+fn rollout_session(rollout: &str) -> Option<Origin> {
+    if rollout.is_empty() {
+        return None;
+    }
+    let mut file = File::open(rollout).ok()?;
+    let mut first = Vec::new();
+    // 会话头是第一行；一行里还有很长的 base_instructions，只要前面这一段。
+    (&mut file).take(256 * 1024).read_to_end(&mut first).ok()?;
+    let line = String::from_utf8_lossy(&first);
+    let first = line.lines().next()?;
+    let entry: Value = serde_json::from_str(first).ok()?;
+    (s(&entry, "type") == "session_meta").then(|| session_origin(&entry))
+}
+
+// 这一轮是谁的：先看记录末尾，找不到再整份看（这一轮很长时它的那一行在前面）。
+fn rollout_turn(rollout: &str, turn: &str) -> Option<Origin> {
+    if rollout.is_empty() || turn.is_empty() {
+        return None;
+    }
+    let find = |lines: String| agent_core::codex::turn_origin(lines.lines(), turn);
+    tail(rollout, ROLLOUT_TAIL).and_then(find).or_else(|| tail(rollout, u64::MAX).and_then(find))
+}
+
+// 这一轮要不要听：内部轮、内部会话都不听；会话头还没写出来的会话，挥手等第一轮。
+fn hearing(e: &Value) -> Hearing {
+    let name = s(e, "hook_event_name");
+    let session = s(e, "session_id");
+    let turn = s(e, "turn_id");
+    let rollout = s(e, "transcript_path");
+    let starts = name == "SessionStart" && s(e, "source") != "compact";
+
+    if starts {
+        match rollout_session(rollout) {
+            Some(Origin::Internal) => {
+                origins(|o| {
+                    o.sessions.insert(session.to_string(), true);
+                    o.welcome.remove(session);
+                });
+                return Hearing::Silent;
+            }
+            Some(Origin::User) => {
+                origins(|o| {
+                    o.sessions.insert(session.to_string(), false);
+                    o.welcome.remove(session);
+                });
+            }
+            // 有记录、但会话头还没写出来：现在挥手就是替一个还不知道是谁的线程挥手。
+            None if !rollout.is_empty() => {
+                if !session.is_empty() {
+                    origins(|o| {
+                        o.welcome.insert(session.to_string(), true);
+                    });
+                }
+                return Hearing::Silent;
+            }
+            // 没有记录可读（codex exec --ephemeral）：照旧挥手。
+            None => {}
+        }
+    } else if !session.is_empty() {
+        let known = origins(|o| o.sessions.get(session).copied());
+        match known {
+            Some(true) => return Hearing::Silent,
+            Some(false) => {}
+            None => {
+                // 会话开始的 hook 没来过（或过滤状态满了重来）：从记录补一次。
+                if let Some(origin) = rollout_session(rollout) {
+                    let internal = origin == Origin::Internal;
+                    origins(|o| {
+                        o.sessions.insert(session.to_string(), internal);
+                    });
+                    if internal {
+                        return Hearing::Silent;
+                    }
+                }
+            }
+        }
+        if !turn.is_empty() {
+            match origins(|o| o.turns.get(&format!("{session}|{turn}")).copied()) {
+                Some(true) => return Hearing::Silent,
+                Some(false) => {}
+                None => {
+                    if let Some(origin) = rollout_turn(rollout, turn) {
+                        let internal = origin == Origin::Internal;
+                        origins(|o| {
+                            if o.turns.len() >= KEPT_ORIGINS {
+                                o.turns.clear();
+                            }
+                            o.turns.insert(format!("{session}|{turn}"), internal);
+                        });
+                        if internal {
+                            return Hearing::Silent;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 该发而没发的挥手：跟着这一轮的第一句话一起出来。
+    let welcome = !session.is_empty() && name == "UserPromptSubmit" && origins(|o| o.welcome.remove(session).unwrap_or(false));
+    if origins(|o| o.welcome.len() >= KEPT_ORIGINS) {
+        origins(|o| o.welcome.clear());
+    }
+    Hearing::Heard { welcome }
+}
+
 // The message for an event, or None for one that changes nothing.
 pub fn to_message(e: &Value) -> Option<Value> {
     if !e.is_object() {
         return None;
     }
+    let hearing = hearing(e);
+    let Hearing::Heard { welcome } = hearing else { return None };
     let mut message = mood_of(e)?;
+    if welcome {
+        // 会话头还没写出来时欠下的那一次挥手（T-I）：连同这一轮的开始一起出来。
+        message["react"] = json!("wave");
+        message["say"] = json!({ "key": "say.hello" });
+    }
     message["agent"] = json!("codex");
     for (from, to) in [("session_id", "session"), ("turn_id", "turn")] {
         if !s(e, from).is_empty() {
@@ -290,6 +441,128 @@ mod tests {
         // Its settings further back than the end read: found all the same.
         let long = write("long.jsonl", &[turn("t1", Some("auto_review")), "x".repeat(ROLLOUT_TAIL as usize + 10)]);
         assert!(auto_reviewed(&long));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // T-I：会话记录里写着的线程来源与每一轮的旁注，决定这一轮要不要听。
+    // 造一份会话记录（格式照本机 13 份真记录的字段，不抄内容）。
+    fn origin_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("fish-dock-codex-origin-{tag}-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    fn rollout_file(dir: &std::path::Path, name: &str, lines: &[String]) -> String {
+        let path = dir.join(name);
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    fn meta_line(thread_source: &str) -> String {
+        json!({ "type": "session_meta", "payload": { "session_id": "s", "thread_source": thread_source, "originator": "Codex Desktop", "source": "vscode" } }).to_string()
+    }
+
+    fn person_line(turn: &str, provenance: &str, kind: &str) -> String {
+        json!({ "type": "response_item", "payload": { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "…" }],
+            "internal_chat_message_metadata_passthrough": { "turn_id": turn, "content_item_kinds": [kind],
+                "content_item_metadata": [{ "provenance": { "type": provenance } }] } } })
+        .to_string()
+    }
+
+    // 纯内部线程：Codex Desktop 自己开的会话，挥手、步骤、结算都不该出现。
+    #[test]
+    fn an_internal_thread_is_no_session() {
+        let dir = origin_dir("thread");
+        let rollout = rollout_file(&dir, "sub.jsonl", &[meta_line("subagent"), person_line("t1", "user", "user_input")]);
+        let heard = |name: &str, more: Value| {
+            let mut e = json!({ "session_id": "sub-1", "turn_id": "t1", "cwd": "Z:\\nowhere\\p", "hook_event_name": name, "transcript_path": rollout });
+            for (k, v) in more.as_object().unwrap() {
+                e[k] = v.clone();
+            }
+            to_message(&e)
+        };
+        assert!(heard("SessionStart", json!({ "source": "startup" })).is_none());
+        assert!(heard("UserPromptSubmit", json!({ "prompt": "delegated task" })).is_none());
+        assert!(heard("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "ls" } })).is_none());
+        assert!(heard("Stop", json!({ "last_assistant_message": "done" })).is_none());
+        // 人的线程照旧。
+        let mine = rollout_file(&dir, "mine.jsonl", &[meta_line("user"), person_line("t1", "user", "user_input")]);
+        let mut e = json!({ "session_id": "mine-1", "turn_id": "t1", "cwd": "Z:\\nowhere\\p", "hook_event_name": "SessionStart", "source": "startup", "transcript_path": mine });
+        let wave = to_message(&e).expect("a person's session waves");
+        assert_eq!((wave["mood"].as_str(), wave["react"].as_str()), (Some("idle"), Some("wave")));
+        e["hook_event_name"] = json!("UserPromptSubmit");
+        e["prompt"] = json!("fix the login page");
+        assert_eq!(to_message(&e).unwrap()["task"], "fix the login page");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 混合会话：内部轮（Codex 自己塞的环境）不显示，人之前那一轮不动，人后面再来一轮照旧。
+    #[test]
+    fn a_mixed_session_keeps_the_person_s_turns() {
+        let dir = origin_dir("mixed");
+        let rollout = rollout_file(
+            &dir,
+            "mix.jsonl",
+            &[
+                meta_line("user"),
+                person_line("t1", "user", "user_input"),
+                person_line("t2", "harness", "environments.environment_context"),
+                person_line("t3", "user", "user_input"),
+            ],
+        );
+        let said = |turn: &str, name: &str, more: Value| {
+            let mut e = json!({ "session_id": "mix-1", "turn_id": turn, "cwd": "Z:\\nowhere\\p", "hook_event_name": name, "transcript_path": rollout });
+            for (k, v) in more.as_object().unwrap() {
+                e[k] = v.clone();
+            }
+            to_message(&e)
+        };
+        assert!(said("", "SessionStart", json!({ "source": "startup" })).is_some());
+        assert_eq!(said("t1", "UserPromptSubmit", json!({ "prompt": "first" })).unwrap()["event"], "turn-start");
+        assert_eq!(said("t1", "PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "ls" } })).unwrap()["event"], "tool-start");
+        // 内部轮：步骤与结算都不出现。
+        assert!(said("t2", "UserPromptSubmit", json!({ "prompt": "…" })).is_none());
+        assert!(said("t2", "PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "x" } })).is_none());
+        assert!(said("t2", "Stop", json!({ "last_assistant_message": "…" })).is_none());
+        // 人后面这一轮照旧。
+        assert_eq!(said("t3", "UserPromptSubmit", json!({ "prompt": "second" })).unwrap()["task"], "second");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 只有图片、没有文字的一轮是人的：名字不变，也不吞。
+    #[test]
+    fn a_turn_of_images_alone_stays_the_person_s() {
+        let dir = origin_dir("images");
+        let image_turn = json!({ "type": "response_item", "payload": { "type": "message", "role": "user",
+            "content": [{ "type": "input_image", "image_url": "data:…" }],
+            "internal_chat_message_metadata_passthrough": { "turn_id": "i1", "content_item_kinds": ["user_input"], "content_item_metadata": [{ "provenance": { "type": "user" } }] } } })
+        .to_string();
+        let rollout = rollout_file(&dir, "img.jsonl", &[meta_line("user"), image_turn]);
+        let mut e = json!({ "session_id": "img-1", "turn_id": "i1", "cwd": "Z:\\nowhere\\p", "hook_event_name": "UserPromptSubmit", "prompt": "", "transcript_path": rollout });
+        let m = to_message(&e).expect("an image-only turn is still the person's");
+        assert_eq!(m["event"], "turn-start");
+        // 名字（task）留空，不拿别的东西冒充。
+        assert!(m.get("task").is_none());
+        // 同名会话的下一步也照旧（不是内部轮）。
+        e["hook_event_name"] = json!("PreToolUse");
+        e["tool_name"] = json!("Bash");
+        e["tool_input"] = json!({ "command": "ls" });
+        assert_eq!(to_message(&e).unwrap()["event"], "tool-start");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 会话头还没写出来：SessionStart 的挥手先不发；第一轮是人的，挥手跟这一轮一起出来。
+    #[test]
+    fn a_welcome_waits_for_the_first_real_turn() {
+        let dir = origin_dir("welcome");
+        let rollout = rollout_file(&dir, "empty.jsonl", &[]);
+        let mut e = json!({ "session_id": "wait-1", "turn_id": "", "cwd": "Z:\\nowhere\\p", "hook_event_name": "SessionStart", "source": "startup", "transcript_path": rollout });
+        assert!(to_message(&e).is_none(), "no wave for a thread we cannot read yet");
+        e["hook_event_name"] = json!("UserPromptSubmit");
+        e["turn_id"] = json!("t1");
+        e["prompt"] = json!("hello");
+        let m = to_message(&e).unwrap();
+        assert_eq!((m["event"].as_str(), m["react"].as_str(), m["say"]["key"].as_str()), (Some("turn-start"), Some("wave"), Some("say.hello")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

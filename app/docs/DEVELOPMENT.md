@@ -118,7 +118,7 @@ cd .. && node --test "test/*.test.js"   # 页面的单元测试
 | `WAKUWAKU_USER_DATA` | 换一个数据目录 |
 | `CLAUDE_CONFIG_DIR` | Claude Code 的配置目录（测试里指向临时目录，不碰真实设置） |
 | `CODEX_HOME` | Codex 的配置目录（`hooks.json`、`pets/`），默认 `~/.codex` |
-| `WAKUWAKU_DEBUG=1` | `/health` 带上两个窗口和设置，开放 `/debug/eval`、`/debug/walk` |
+| `FISH_DOCK_DEBUG=1`（旧 `WAKUWAKU_DEBUG` 只读兼容） | `/health` 带上两个窗口和设置，开放 `/debug/eval`、`/debug/walk`（统一经 `config::debug_enabled`） |
 | `WAKUWAKU_IDLE_HIDE_MS` | 空闲会话多久不再显示（毫秒，`0` 一直显示），代替设置 `idleHideMin` |
 
 ## 插件

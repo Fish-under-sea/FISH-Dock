@@ -1,14 +1,14 @@
 {
-  "name": "wakuwaku",
+  "name": "fish-dock",
   "owner": {
     "name": "Pengjie Zhou"
   },
-  "description": "A desktop pet for Claude Code: her hooks.",
+  "description": "FISH Dock hooks for Claude Code.",
   "plugins": [
     {
-      "name": "wakuwaku",
+      "name": "fish-dock",
       "source": "./integrations/claude-code",
-      "description": "Tells the Wakuwaku desktop pet what Claude Code is doing, and lets you answer its prompts on her."
+      "description": "Tells the FISH Dock desktop pet what Claude Code is doing, and lets you answer its prompts on her."
     }
   ]
 }

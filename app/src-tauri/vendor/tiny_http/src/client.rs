@@ -5,9 +5,11 @@ use std::io::Result as IoResult;
 use std::io::{BufReader, BufWriter, ErrorKind, Read};
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::str::FromStr;
 
 use crate::common::{HTTPVersion, Method};
+use crate::connection::Connection;
 use crate::util::RefinedTcpStream;
 use crate::util::{SequentialReader, SequentialReaderBuilder, SequentialWriterBuilder};
 use crate::Request;
@@ -34,6 +36,9 @@ pub struct ClientConnection {
 
     // true if the connection goes through SSL
     secure: bool,
+
+    // Wakuwaku（2.0.4，/v1 的 SSE）：写端 socket 的共享句柄，用来设写超时。
+    write_handle: Option<Arc<Connection>>,
 }
 
 /// Error that can happen when reading a request.
@@ -58,6 +63,7 @@ impl ClientConnection {
         let mut source = SequentialReaderBuilder::new(BufReader::with_capacity(1024, read_socket));
         let first_header = source.next().unwrap();
 
+        let write_handle = write_socket.tcp_handle();
         ClientConnection {
             source,
             sink: SequentialWriterBuilder::new(BufWriter::with_capacity(1024, write_socket)),
@@ -65,6 +71,7 @@ impl ClientConnection {
             next_header_source: first_header,
             no_more_requests: false,
             secure,
+            write_handle,
         }
     }
 
@@ -162,6 +169,7 @@ impl ClientConnection {
             remote_addr,
             data_source,
             writer,
+            self.write_handle.clone(),
         )
         .map_err(|e| {
             use crate::request;

@@ -56,8 +56,9 @@ const GITHUB_RELEASES: &str = "https://api.github.com/repos/Fish-under-sea/FISH-
 //   2) FISH_DOCK_NOTES_GITEE 指向它（如 https://gitee.com/fish-under-sea/FISH-Dock）；
 //   3) 该仓库的发行说明按 GitHub 同名约定维护（tag_name/name/body/published_at）。
 // 未配置时这一源**明确跳过并记录「未配置」**（notes_sources 返回 Skip），不伪装可用、
-// 不静默空白（t10 硬要求）。GITEE_REPO 是更新检查那一路的旧占位，仍为空串。
-const GITEE_REPO: &str = "";
+// 不静默空白（t10 硬要求）。更新检查那一路的仓库地址自 2.0.4 起由
+// `config::gitee_repo()` 提供（默认空＝不启用，方案 §7.4 / 审计 A05）——这里不再
+// 留一个写死的空常量当第二事实源。
 // 公告源的环境变量：与 plugin_store 的 setting 入口共用读取方式。
 const ENV_NOTES_GITHUB: &str = "FISH_DOCK_NOTES_GITHUB";
 const ENV_NOTES_GITEE: &str = "FISH_DOCK_NOTES_GITEE";
@@ -327,7 +328,12 @@ pub fn merge(found: Vec<Found>) -> Option<Release> {
 // From GitHub or Gitee itself (their release pages, and the downloads they
 // redirect to), unless a test gave the release from elsewhere.
 fn allowed(url: &str) -> bool {
-    testing() || [GITHUB_REPO, GITEE_REPO].iter().any(|repo| !repo.is_empty() && url.get(..repo.len()).is_some_and(|p| p.eq_ignore_ascii_case(repo)))
+    if testing() {
+        return true;
+    }
+    // 2.0.4 T-F：Gitee 的仓库地址来自配置（默认空＝不启用），不再读死常量。
+    let repos = [GITHUB_REPO.to_string(), crate::config::gitee_repo()];
+    repos.iter().filter(|repo| !repo.is_empty()).any(|repo| url.get(..repo.len()).is_some_and(|p| p.eq_ignore_ascii_case(repo)))
 }
 
 // At most so many redirects (GitHub's exe: one, to release-assets.githubusercontent.com).
@@ -352,22 +358,45 @@ enum Miss {
 // A GET, each way in turn (proxy::web_ways: Windows' proxy first, where one
 // is set; then as is) till one is answered. The seconds are the caller's
 // whole-call budget (proxy.rs); CONNECT/HEAD clamp inside agent_with.
+//
+// 2.0.4 T-F：更新检查/公告的元数据也走统一择源（sources::candidates：原地址 +
+// 明确映射的镜像；镜像默认空就只有原地址），候选 × 代理路共用一次总预算。
 fn get(url: &str, seconds: u64, accept: Option<&str>) -> Result<Answer, Miss> {
+    let deadline = Instant::now() + Duration::from_secs(seconds.max(1));
     let mut failed = Vec::new();
-    for way in crate::proxy::web_ways(url) {
-        match get_way(&way, url, seconds, accept) {
-            Ok(answer) => return Ok(answer),
-            Err(None) => return Err(Miss::NotThere),
-            Err(Some(e)) => failed.push(format!("{}, {e}", way.name())),
+    let mut not_there = false;
+    for pick in crate::sources::candidates(url) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            failed.push(format!("{}: 总预算已用完", pick.label));
+            break;
+        }
+        for way in crate::proxy::web_ways(&pick.url) {
+            // 剩余预算按 Duration 原样传下去（不在候选/代理切换时重新放满秒）。
+            let left = deadline.saturating_duration_since(Instant::now()).max(Duration::from_millis(1));
+            match get_way_budget(&way, &pick.url, left, accept) {
+                Ok(answer) => return Ok(answer),
+                Err(None) => not_there = true,
+                Err(Some(e)) => failed.push(format!("{} / {}, {e}", pick.label, way.name())),
+            }
         }
     }
-    Err(Miss::Failed(failed.join("; ")))
+    if not_there && failed.is_empty() {
+        Err(Miss::NotThere)
+    } else {
+        Err(Miss::Failed(failed.join("; ")))
+    }
 }
 
 // One way: its redirects followed by hand (to https only, unless a test's),
 // so what goes wrong says at which host. Err(None): not there (404).
 fn get_way(way: &crate::proxy::Way, url: &str, seconds: u64, accept: Option<&str>) -> Result<Answer, Option<String>> {
-    let agent = way.agent_with(Duration::from_secs(seconds), |c| c.max_redirects(0)).ok_or_else(|| Some(format!("{}: not a proxy to go through", way.name())))?;
+    get_way_budget(way, url, Duration::from_secs(seconds.max(1)), accept)
+}
+
+// 与 get_way 相同，只是预算按 Duration（秒以下也保留），供总 deadline 的剩余量直传。
+fn get_way_budget(way: &crate::proxy::Way, url: &str, budget: Duration, accept: Option<&str>) -> Result<Answer, Option<String>> {
+    let agent = way.agent_with(budget, |c| c.max_redirects(0)).ok_or_else(|| Some(format!("{}: not a proxy to go through", way.name())))?;
     let mut at = url.to_string();
     let mut hosts = vec![crate::proxy::host_of(url).unwrap_or_default()];
     for _ in 0..=HOPS {
@@ -431,9 +460,17 @@ fn get_text(url: &str, limit: u64) -> Result<Option<String>, String> {
 
 // Where each place's release is looked at (GitHub's API, Gitee's repo):
 // both, or those a test gives.
+//
+// 2.0.4 T-F（方案 §7.4 / 审计 A05）：生产的 Gitee 候选只在 `url.gitee_repo`
+// 配了时才加入；未配置＝不启用，不是「选而无效果」的假选项。
 fn endpoints() -> Vec<(Source, String)> {
     if !testing() {
-        return vec![(Source::GitHub, crate::config::update_latest())];
+        let mut list = vec![(Source::GitHub, crate::config::update_latest())];
+        let repo = crate::config::gitee_repo();
+        if !repo.is_empty() {
+            list.push((Source::Gitee, repo));
+        }
+        return list;
     }
     [(Source::GitHub, test_url(GITHUB_TEST)), (Source::Gitee, test_url(GITEE_TEST))].into_iter().filter_map(|(source, url)| Some((source, url?))).collect()
 }
@@ -525,6 +562,18 @@ pub fn check_now(sh: &Arc<Shared>) {
         let blocked = s.error.as_ref().is_some_and(|e| e["code"] == "blocked");
         match &got {
             Ok(release) => {
+                // 2.0.4 T-F / 审计 A05：这一轮另一源没回答时（单源结果），不能用它
+                // 清掉上一轮同版本已经发现的摘要冲突——只比较半边的摘要不是「已验证」。
+                let previous = s.latest.clone();
+                let release = release.clone().map(|mut r| {
+                    if let Some(prev) = previous.as_ref() {
+                        if same_version(&prev.version, &r.version) && prev.conflict && !r.conflict {
+                            r.conflict = true;
+                            r.digest = None;
+                        }
+                    }
+                    r
+                });
                 s.latest = release.clone();
                 s.next_at = now + DAY_MS;
                 if s.stage.is_none() && !blocked {
@@ -1002,6 +1051,9 @@ pub fn view(sh: &Shared) -> Value {
             "canInstall": mode.installed || r.can_install(),
             "installer": mode.installed,
             "places": r.from.iter().map(|f| f.source.name()).collect::<Vec<_>>(),
+            // 2.0.4 T-F（A05）：配了 Gitee 却只拿到一侧结果时，明确标「降级」，
+            // 不装作两边都已核对。
+            "degraded": !crate::config::gitee_repo().is_empty() && r.from.len() < 2,
         })
     });
     json!({
@@ -1018,6 +1070,9 @@ pub fn view(sh: &Shared) -> Value {
         "from": s.from.map(Source::name),
         "got": s.got,
         "total": s.total,
+        // 2.0.4 T-F（方案 §7.4）：未配置 Gitee 时，设置页要能明确显示「未配置」，
+        // 而不是留一个选而无效果的选项。
+        "giteeConfigured": !crate::config::gitee_repo().is_empty(),
         "notes": notes_view(),
     })
 }
@@ -1397,27 +1452,61 @@ pub fn take_name_back(dir: &Path) {
 // should it fail before the download began (a connection that did not
 // come, as one straight through a VPN's TUN may not).
 fn download(sh: &Shared, url: &str, to: &Path) -> Result<(String, String), String> {
-    let ways = crate::proxy::web_ways(url);
-    let tries = if ways.len() == 1 { 2 } else { ways.len() };
-    let mut failed: Vec<String> = Vec::new();
-    for i in 0..tries {
-        let way = &ways[i.min(ways.len() - 1)];
-        if i > 0 && ways.len() == 1 {
-            std::thread::sleep(Duration::from_secs(3));
-        }
+    // 2.0.4 T-F：更新包下载也走统一择源层（原地址 + 镜像候选，见 sources::candidates），
+    // 候选 × 代理路共用一次总 deadline；镜像失败回原站；进度（STATE.got/total）、
+    // 临时路径（调用方给的 .part）、摘要（返回值交由调用方 verified）与应用/回滚都不变。
+    download_with(url, to, Duration::from_secs(600), |pick, way, left| {
         STATE.lock().unwrap().got = 0;
-        match download_way(sh, way, url, to) {
-            Ok(done) => {
-                if !failed.is_empty() {
-                    sh.log(&format!("update: downloaded {}, after: {}", done.1, failed.join("; ")));
-                }
-                return Ok(done);
+        download_way(sh, way, &pick.url, to, left)
+    }, |line| sh.log(line), |pause| std::thread::sleep(pause), Instant::now)
+}
+
+/// 候选 × 代理路 × 单总 deadline 的编排（注入 fetch/等待/时钟，测试不要求 Shared/真机网络）：
+/// 换候选或换代理路都把**剩余 Duration** 原样传下去（不重新放满秒）；单路退避也受同一条
+/// deadline 约束（最多等到剩余用完，睡后重算，耗尽即终止，绝不在过期后发请求）；任何失败清掉
+/// 调用方的半截文件；成功只返回摘要与来源，**不会**把未校验内容改名发布（摘要/发布在调用方）。
+fn download_with<F, L, W, C>(url: &str, to: &Path, budget: Duration, mut fetch: F, mut log: L, mut wait: W, mut now: C) -> Result<(String, String), String>
+where
+    F: FnMut(&crate::sources::Pick, &crate::proxy::Way, Duration) -> Result<(String, String), (String, bool)>,
+    L: FnMut(&str),
+    W: FnMut(Duration),
+    C: FnMut() -> Instant,
+{
+    let deadline = now() + budget;
+    let mut failed: Vec<String> = Vec::new();
+    for pick in crate::sources::candidates(url) {
+        let ways = crate::proxy::web_ways(&pick.url);
+        let tries = if ways.len() == 1 { 2 } else { ways.len() };
+        for i in 0..tries {
+            let mut left = deadline.saturating_duration_since(now());
+            if left.is_zero() {
+                failed.push(format!("{}: 总预算已用完", pick.label));
+                return Err(failed.join("; "));
             }
-            Err((e, began)) => {
-                let _ = std::fs::remove_file(to);
-                failed.push(format!("{}, {e}", way.name()));
-                if began && ways.len() == 1 {
-                    break;
+            let way = &ways[i.min(ways.len() - 1)];
+            if i > 0 && ways.len() == 1 {
+                // 退避纳入同一条 deadline：等待不超过剩余预算；睡后重算，耗尽就终止，
+                // 不再拿睡前的 left（更不能 max(1ms)）去发一个已经过期的请求。
+                wait(Duration::from_secs(3).min(left));
+                left = deadline.saturating_duration_since(now());
+                if left.is_zero() {
+                    failed.push(format!("{}: 总预算已用完", pick.label));
+                    return Err(failed.join("; "));
+                }
+            }
+            match fetch(&pick, way, left) {
+                Ok(done) => {
+                    if !failed.is_empty() {
+                        log(&format!("update: downloaded {}, after: {}", done.1, failed.join("; ")));
+                    }
+                    return Ok(done);
+                }
+                Err((e, began)) => {
+                    let _ = std::fs::remove_file(to);
+                    failed.push(format!("{} / {}, {e}", pick.label, way.name()));
+                    if began && ways.len() == 1 {
+                        break;
+                    }
                 }
             }
         }
@@ -1426,8 +1515,8 @@ fn download(sh: &Shared, url: &str, to: &Path) -> Result<(String, String), Strin
 }
 
 // One way; Err: what went wrong, and whether the download had begun (an answer came).
-fn download_way(sh: &Shared, way: &crate::proxy::Way, url: &str, to: &Path) -> Result<(String, String), (String, bool)> {
-    let mut a = match get_way(way, url, 600, None) {
+fn download_way(sh: &Shared, way: &crate::proxy::Way, url: &str, to: &Path, budget: Duration) -> Result<(String, String), (String, bool)> {
+    let mut a = match get_way_budget(way, url, budget, None) {
         Ok(a) => a,
         Err(None) => return Err((format!("{}: not there (404)", crate::proxy::host_of(url).unwrap_or_default()), false)),
         Err(Some(e)) => return Err((e, false)),
@@ -1604,6 +1693,7 @@ mod tests {
     use serde_json::json;
 
     use std::io::{Read, Write};
+    use std::time::{Duration, Instant};
 
     use super::{allowed, digest_of, error, get_way, github_release, installer_names, merge, newer, newest_tag, notes_entries, notes_load, notes_plain_error, notes_request_due, notes_save, notes_sources, notes_state, redirected, sums_of, Found, NotesCache, NotesConfig, NotesSource, Source, NOTES_FILE, NOTES_REQUEST_MIN_MS};
 
@@ -1897,7 +1987,7 @@ mod tests {
     #[ignore]
     fn live_places() {
         let github = super::fetch(Source::GitHub, super::GITHUB_LATEST).unwrap();
-        let gitee = super::fetch(Source::Gitee, super::GITEE_REPO).unwrap();
+        let gitee = super::fetch(Source::Gitee, &crate::config::gitee_repo()).unwrap();
         println!("GitHub: {github:?}\nGitee: {gitee:?}");
         assert!(github.as_ref().is_some_and(|f| f.digest.is_some() && f.exe.is_some()));
         assert!(gitee.as_ref().is_some_and(|f| f.digest.is_some() && f.exe.is_some()));
@@ -2053,5 +2143,282 @@ mod tests {
         assert!(dir.join("notes.txt").exists(), "不是更新下下来的文件，一个都不碰");
         assert!(!dir.join(format!("installer-v{here}-setup.exe")).exists(), "用过的安装器必须删掉");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // 2.0.4 T-F：更新检查/公告的元数据 GET 走统一择源（sources::candidates）：
+    // 未知主机只有原地址；npm 元数据有镜像候选；本地 200 能读、404 报「不在」。
+    #[test]
+    fn metadata_get_uses_the_shared_candidate_layer() {
+        use crate::sources;
+        let plain = sources::candidates("https://api.github.com/repos/a/b/releases/latest");
+        assert_eq!(plain.first().map(|p| p.label), Some("原地址"));
+        // 默认 registry.npmjs.org 映射到 npmmirror（与 plugin 下载同一张表）。
+        let npm = sources::candidates("https://registry.npmjs.org/@scope/name");
+        assert!(npm.iter().any(|p| p.label == "npm 镜像"), "{npm:?}");
+        // 本地 200：get 读到正文；404：NotThere（不是异常）。
+        let port = serve(vec!["HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nhi".into()]);
+        let a = match super::get(&format!("http://127.0.0.1:{port}/x"), 5, None) { Ok(a) => a, Err(_) => panic!("local answer") };
+        assert_eq!(a.final_url, format!("http://127.0.0.1:{port}/x"));
+        let port = serve(vec!["HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".into()]);
+        assert!(matches!(super::get(&format!("http://127.0.0.1:{port}/x"), 5, None), Err(super::Miss::NotThere)));
+    }
+
+    // —— t38 O2：更新包下载的「候选 × 代理路 × 单总 deadline」编排（注入 fetch，无 Shared/无网络）——
+    static UPDATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("fish-update-dl-{tag}-{}-{}", std::process::id(), crate::now_ms()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn with_gh_proxy<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let old = std::env::var_os("FISH_DOCK_GH_PROXY");
+        match value {
+            Some(value) => std::env::set_var("FISH_DOCK_GH_PROXY", value),
+            None => std::env::remove_var("FISH_DOCK_GH_PROXY"),
+        }
+        let got = f();
+        match old {
+            Some(value) => std::env::set_var("FISH_DOCK_GH_PROXY", value),
+            None => std::env::remove_var("FISH_DOCK_GH_PROXY"),
+        }
+        got
+    }
+
+    const RELEASE_URL: &str = "https://github.com/o/r/releases/download/v1/x.exe";
+
+    // 测试里把「上网方式」固定成直连：否则本机系统代理会让 web_ways 多出一路，
+    // 这些用例断言的是编排本身，不该受机器代理设置影响。Drop 时恢复。
+    struct StraightWebGuard(serde_json::Value);
+    impl Drop for StraightWebGuard {
+        fn drop(&mut self) { crate::proxy::set_web(&self.0); }
+    }
+    fn straight_web() -> StraightWebGuard {
+        let old = StraightWebGuard(crate::proxy::web_setting().json());
+        crate::proxy::set_web(&json!({"mode": "none"}));
+        old
+    }
+
+    #[test]
+    fn update_download_falls_back_to_mirror_and_cleans_half_files() {
+        let _env = UPDATE_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _web = straight_web();
+        with_gh_proxy(Some("https://gh.example"), || {
+            let dir = temp_dir("mirror");
+            let to = dir.join("update.part");
+            let mut labels: Vec<&'static str> = Vec::new();
+            let got = super::download_with(RELEASE_URL, &to, Duration::from_secs(5), |pick, _way, _left| {
+                labels.push(pick.label);
+                if pick.label == "原地址" {
+                    std::fs::write(&to, b"half").unwrap();
+                    Err(("connection refused".into(), true))
+                } else {
+                    std::fs::write(&to, b"payload").unwrap();
+                    Ok(("aa".into(), "Release 加速, gh.example".into()))
+                }
+            }, |_| {}, |_| {}, Instant::now);
+            assert!(got.is_ok(), "{got:?}");
+            assert_eq!(labels, vec!["原地址", "Release 加速"], "镜像失败要回原站、原站失败才走镜像（顺序按 mirror.prefer）");
+            assert_eq!(std::fs::read(&to).unwrap(), b"payload");
+            // 只有调用方给的暂存路径；核心不会改名发布成最终包。
+            let files: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+            assert_eq!(files, vec!["update.part".to_string()]);
+            std::fs::remove_dir_all(&dir).unwrap();
+        });
+    }
+
+    #[test]
+    fn update_download_carries_one_deadline_with_subsecond_precision() {
+        let _env = UPDATE_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _web = straight_web();
+        with_gh_proxy(Some("https://gh.example"), || {
+            let dir = temp_dir("deadline");
+            let to = dir.join("update.part");
+            let mut lefts: Vec<Duration> = Vec::new();
+            let got = super::download_with(RELEASE_URL, &to, Duration::from_millis(150), |pick, _way, left| {
+                lefts.push(left);
+                if pick.label == "原地址" {
+                    std::thread::sleep(Duration::from_millis(60));
+                    Err(("slow".into(), true))
+                } else {
+                    std::fs::write(&to, b"ok").unwrap();
+                    Ok(("bb".into(), "Release 加速".into()))
+                }
+            }, |_| {}, |_| {}, Instant::now);
+            assert!(got.is_ok(), "{got:?}");
+            assert_eq!(lefts.len(), 2);
+            assert!(lefts[0] <= Duration::from_millis(150), "{:?}", lefts[0]);
+            assert!(lefts[1] < Duration::from_millis(150), "换候选不得重新放满：{:?}", lefts[1]);
+            assert!(lefts[1] > Duration::ZERO);
+            assert_eq!(lefts[1].as_secs(), 0, "剩余预算不得被向上取整成整秒：{:?}", lefts[1]);
+            std::fs::remove_dir_all(&dir).unwrap();
+        });
+    }
+
+    #[test]
+    fn update_download_stops_when_the_one_deadline_is_spent() {
+        let _env = UPDATE_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _web = straight_web();
+        with_gh_proxy(Some("https://gh.example"), || {
+            let dir = temp_dir("spent");
+            let to = dir.join("update.part");
+            let mut calls = 0;
+            let began = std::time::Instant::now();
+            let got = super::download_with(RELEASE_URL, &to, Duration::from_millis(60), |_pick, _way, _left| {
+                calls += 1;
+                std::thread::sleep(Duration::from_millis(80));
+                Err(("timeout".into(), true))
+            }, |_| {}, |_| {}, Instant::now);
+            let err = got.unwrap_err();
+            assert!(err.contains("总预算已用完"), "{err}");
+            assert_eq!(calls, 1, "预算耗尽后不再开下一路");
+            assert!(began.elapsed() < Duration::from_secs(1), "不得白等：{:?}", began.elapsed());
+            assert!(!to.exists());
+            std::fs::remove_dir_all(&dir).unwrap();
+        });
+    }
+
+    #[test]
+    fn update_download_removes_the_half_file_on_failure() {
+        let _env = UPDATE_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _web = straight_web();
+        with_gh_proxy(None, || {
+            let dir = temp_dir("half");
+            let to = dir.join("update.part");
+            let got = super::download_with(RELEASE_URL, &to, Duration::from_secs(2), |_pick, _way, _left| {
+                std::fs::write(&to, b"half").unwrap();
+                Err(("cut off".into(), true))
+            }, |_| {}, |_| {}, Instant::now);
+            assert!(got.is_err());
+            assert!(!to.exists(), "失败必须清掉半截文件");
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+            std::fs::remove_dir_all(&dir).unwrap();
+        });
+    }
+
+    // t44 F1：单路退避（began=false 才走的重试）也要受同一条 deadline 约束。
+    // 注入等待与时钟：等待最大只到剩余预算，睡后重算耗尽即终止，绝不拿睡前 left 发过期请求。
+    #[test]
+    fn update_download_backoff_waits_within_the_one_deadline_and_then_stops() {
+        let _env = UPDATE_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _web = straight_web();
+        with_gh_proxy(None, || {
+            let dir = temp_dir("backoff");
+            let to = dir.join("update.part");
+            let fake = std::rc::Rc::new(std::cell::Cell::new(Duration::ZERO));
+            let base = Instant::now();
+            let mut calls = 0usize;
+            let mut lefts: Vec<Duration> = Vec::new();
+            let mut waits: Vec<Duration> = Vec::new();
+            let clock = fake.clone();
+            let waited = fake.clone();
+            let got = super::download_with(
+                RELEASE_URL,
+                &to,
+                Duration::from_millis(200),
+                |_pick, _way, left| {
+                    calls += 1;
+                    lefts.push(left);
+                    Err(("connection refused".into(), false))
+                },
+                |_| {},
+                |pause| {
+                    waits.push(pause);
+                    waited.set(waited.get() + pause);
+                },
+                move || base + clock.get(),
+            );
+            let err = got.unwrap_err();
+            assert!(err.contains("总预算已用完"), "{err}");
+            assert_eq!(calls, 1, "预算耗尽后不得再发第二次请求：{lefts:?}");
+            assert_eq!(waits.len(), 1, "只应退避一次：{waits:?}");
+            assert!(waits[0] <= Duration::from_millis(200), "等待不得超过剩余预算：{:?}", waits[0]);
+            assert!(lefts[0] > Duration::ZERO && lefts[0] <= Duration::from_millis(200), "{:?}", lefts[0]);
+            assert!(std::time::Instant::now() - base < Duration::from_secs(1), "不得真等 3 秒");
+            assert!(!to.exists());
+            std::fs::remove_dir_all(&dir).unwrap();
+        });
+    }
+
+    // t44 F1 的另一条可用预算路径：退避真的等到（≤3 s）后，重试拿到的是**减少后的**剩余量。
+    #[test]
+    fn update_download_backoff_leaves_less_budget_for_the_retry() {
+        let _env = UPDATE_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _web = straight_web();
+        with_gh_proxy(None, || {
+            let dir = temp_dir("backoff-retry");
+            let to = dir.join("update.part");
+            let fake = std::rc::Rc::new(std::cell::Cell::new(Duration::ZERO));
+            let base = Instant::now();
+            let mut calls = 0usize;
+            let mut lefts: Vec<Duration> = Vec::new();
+            let mut waits: Vec<Duration> = Vec::new();
+            let clock = fake.clone();
+            let waited = fake.clone();
+            let got = super::download_with(
+                RELEASE_URL,
+                &to,
+                Duration::from_secs(5),
+                |_pick, _way, left| {
+                    calls += 1;
+                    lefts.push(left);
+                    if calls == 1 {
+                        Err(("connection refused".into(), false))
+                    } else {
+                        std::fs::write(&to, b"ok").unwrap();
+                        Ok(("cc".into(), "straight".into()))
+                    }
+                },
+                |_| {},
+                |pause| {
+                    waits.push(pause);
+                    waited.set(waited.get() + pause);
+                },
+                move || base + clock.get(),
+            );
+            assert!(got.is_ok(), "{got:?}");
+            assert_eq!(calls, 2, "began=false 的单路应重试一次");
+            assert_eq!(waits.len(), 1);
+            assert_eq!(waits[0], Duration::from_secs(3), "预算足够时退避仍是 3 秒");
+            assert!(lefts[1] < lefts[0], "睡后剩余必须减少：{:?} → {:?}", lefts[0], lefts[1]);
+            assert!(lefts[1] < Duration::from_secs(5));
+            assert!(lefts[1] > Duration::from_secs(1), "5 s 预算睡 3 s 后应还剩约 2 s：{:?}", lefts[1]);
+            std::fs::remove_dir_all(&dir).unwrap();
+        });
+    }
+
+    // t44 F1 的真实等待版：budget=200 ms、began=false、单路，生产用 `thread::sleep` 与
+    // `Instant::now`。应只调用一次、总耗时约 200 ms（旧逻辑会等满 3 s 后再发一次请求）。
+    #[test]
+    fn update_download_real_backoff_stops_within_the_deadline() {
+        let _env = UPDATE_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _web = straight_web();
+        with_gh_proxy(None, || {
+            let dir = temp_dir("backoff-real");
+            let to = dir.join("update.part");
+            let started = Instant::now();
+            let mut calls = 0usize;
+            let got = super::download_with(
+                RELEASE_URL,
+                &to,
+                Duration::from_millis(200),
+                |_pick, _way, _left| {
+                    calls += 1;
+                    Err(("connection refused".into(), false))
+                },
+                |_| {},
+                |pause| std::thread::sleep(pause),
+                Instant::now,
+            );
+            let elapsed = started.elapsed();
+            assert_eq!(calls, 1, "预算耗尽后不得再发第二次请求");
+            assert!(elapsed >= Duration::from_millis(150), "应真的等完剩余预算：{elapsed:?}");
+            assert!(elapsed < Duration::from_secs(1), "不得再等 3 秒：{elapsed:?}");
+            assert!(got.unwrap_err().contains("总预算已用完"));
+            assert!(!to.exists());
+            std::fs::remove_dir_all(&dir).unwrap();
+        });
     }
 }

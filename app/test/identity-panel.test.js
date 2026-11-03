@@ -12,7 +12,7 @@ function make(confirm = () => true) {
     invoke: async (command, args) => {
       calls.push({ command, args })
       if (command === 'identity_view') return { directory: 'X:/用户下载', missingMailCredentials: 1 }
-      if (command === 'identity_preview') return { ticket: 'private-ticket', name: 'accounts.zip', ofmAccounts: 2, mailAccounts: null, missingCredentials: 1, format: 'fish-dock/ofm-backup' }
+      if (command === 'identity_preview') return { ticket: 'private-ticket', name: 'accounts.zip', legacyAccounts: 2, mailAccounts: null, missingCredentials: 1, format: 'fish-dock/ofm-backup' }
       if (command === 'identity_export') return { saved: true, path: 'X:/用户下载/new.zip' }
       if (command === 'identity_import') return { imported: true, backup: 'X:/身份/.backups/txn-one' }
     },
@@ -27,7 +27,7 @@ test('备份界面说明整个配置仓及实际默认导出位置', async () =>
   assert.match(html, /exports/)
   assert.doesNotMatch(html, /首次使用系统「下载」目录|统一保存 OFM/)
 })
-test('预览不会提交，并清楚说明旧 OFM 包保留邮件身份', async () => {
+test('预览不会提交：旧业务资料只做识别，邮件身份保持不变', async () => {
   const { panel, calls } = make()
   await panel.load()
   await panel.preview()

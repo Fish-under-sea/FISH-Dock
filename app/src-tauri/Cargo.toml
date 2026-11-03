@@ -3,7 +3,7 @@
 # 包名与二进制名不同是刻意的：包名要 Cargo 合法（小写连字符），而 Windows 上用户
 # 看到、任务计划/注册表/快捷方式指向的必须是 FISH-Dock.exe。
 name = "fish-dock"
-version = "2.0.3"
+version = "2.0.4"
 edition = "2021"
 license = "MIT"
 authors = ["Pengjie Zhou"]
@@ -62,6 +62,9 @@ ruzstd = { version = "=0.9.1", default-features = false, features = ["std"] }
 # source built in, no system library). New to the tree: about 1.5 MB of the
 # release exe with the reading of their bills.
 rusqlite = { version = "=0.32.1", features = ["bundled"] }
+# 2.0.4 T-A：中性事件与各 agent 可独立转换的纯逻辑（crates/agent-core）。
+# 只依赖 serde_json，不依赖 tauri / windows：它自己要能单独 cargo test。
+agent-core = { path = "crates/agent-core" }
 
 [dev-dependencies]
 # Her tests make a connection's split fail (server.rs); her builds never have it.
@@ -72,6 +75,12 @@ tiny_http = { version = "0.12", features = ["test-failed-split"] }
 # (vendor/tiny_http/README.md); 0.12.0 is the latest there is, and its master
 # panics the same way.
 tiny_http = { path = "vendor/tiny_http" }
+
+# 2.0.4 T-A：宿主是这个 workspace 的根包，agent-core 是它的一个成员。
+# 只是本地路径包：没有新的外部依赖，但 Cargo.lock 会多出 agent-core 这一条
+# （集成时统一解析，见 parallel/contracts.md §12/§13）。
+[workspace]
+members = ["crates/agent-core"]
 
 [features]
 default = ["custom-protocol"]

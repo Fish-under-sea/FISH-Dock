@@ -91,7 +91,9 @@
   const windhawkPanel = window.WindhawkPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, redraw: () => draw() })
   const extensionLayouts = new Map()
   let extensionLayoutFrame = 0
-  const extensionPage = window.ExtensionPage.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, onLayout: (key, value) => {
+  // remembered：首个 layout 之前先用这一页上次的高度（宿主侧记忆，不碰沙盒 iframe 的
+  // localStorage）；没有记忆时由 extension-page.js 给固定占位高度。
+  const extensionPage = window.ExtensionPage.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, remembered: key => extensionLayouts.get(key), onLayout: (key, value) => {
     if (JSON.stringify(extensionLayouts.get(key)) === JSON.stringify(value)) return
     extensionLayouts.set(key, value)
     cancelAnimationFrame(extensionLayoutFrame)
@@ -445,12 +447,18 @@
   // --- The pages -------------------------------------------------------------------------
 
   // 会话列表：Agent 页的（#23）。会话是 Agent 的，放在「已找到的 Agent」下面读得通；
-// 通用页只留 4 个快捷开关。
+  // 通用页只留 4 个快捷开关。
+  // 2.0.4 T-J：每一行可以展开，看这一轮改的文件（最多 15 个，多的说「等 N 个」）
+  // 与最近几步（成功 / 失败）。「显示具体内容」关掉时后端投影里就没有 fileList /
+  // recentSteps，这里也不给展开，并把记着的展开状态清掉（不留缓存）。
+  const openSessions = new Set()
+
   function pageSessions() {
     const s = snap.settings
     const sessions = snap.sessions || []
     // Each session: its name, and where it is (or how its turn ended).
     const detailed = s.details !== false
+    if (!detailed) openSessions.clear()
     const list = sessions.length
       ? sessions
           .map(x => {
@@ -464,7 +472,23 @@
             // One with a window to go to: a click on it goes there.
             const jump = x.jump ? ` data-jump="${esc(x.id)}"` : ''
             const tip = [...what, x.jump ? T('jump.hint') : ''].filter(Boolean).join('\n')
-            return `<div class="r${x.jump ? ' jumps' : ''}"${jump} title="${esc(tip)}"><span class="dot" style="background:${COLOR[x.mood] || COLOR.idle}"></span><div class="grow"><div class="ellip">${esc(name || '—')}</div><div class="d ellip">${esc(what.join(' · '))}</div></div>${clockTag(x)}</div>`
+            // 展开的那一块：只认后端真的给了的 fileList / recentSteps。
+            const files = detailed && Array.isArray(x.fileList) ? x.fileList : []
+            const steps = detailed && Array.isArray(x.recentSteps) ? x.recentSteps : []
+            const canOpen = files.length > 0 || steps.length > 0
+            const open = canOpen && openSessions.has(x.id)
+            const toggle = canOpen
+              ? `<button class="sess-toggle" data-sess-open="${esc(x.id)}" aria-expanded="${open ? 'true' : 'false'}" aria-label="${esc(T('s.open'))}" title="${esc(T('s.open'))}">${open ? '▾' : '▸'}</button>`
+              : '<span class="sess-toggle gap"></span>'
+            const fileRows = files.map(f => `<div class="f ellip" title="${esc(f)}">${esc(f)}</div>`).join('')
+            const more = x.filesMore ? `<div class="d">${esc(T('s.filesMore', { n: x.filesMore }))}</div>` : ''
+            const stepRows = steps
+              .map(step => `<div class="st ${step.ok ? 'ok' : 'bad'}"><span class="mk">${step.ok ? '✓' : '✗'}</span><span class="ellip">${esc(String(step.key || '').replace(/^step\./, ''))}</span></div>`)
+              .join('')
+            const detail = open
+              ? `<div class="sess-detail"><div class="sess-cap">${esc(T('s.files'))}</div>${files.length ? fileRows + more : `<div class="note">${esc(T('s.none'))}</div>`}${steps.length ? `<div class="sess-cap">${esc(T('s.steps'))}</div>${stepRows}` : ''}</div>`
+              : ''
+            return `<div class="sess-item${open ? ' open' : ''}"><div class="r${x.jump ? ' jumps' : ''}"${jump} title="${esc(tip)}">${toggle}<span class="dot" style="background:${COLOR[x.mood] || COLOR.idle}"></span><div class="grow"><div class="ellip">${esc(name || '—')}</div><div class="d ellip">${esc(what.join(' · '))}</div></div>${clockTag(x)}</div>${detail}</div>`
           })
           .join('')
       : `<div class="note">${esc(T('home.noSessions', { list: toolNames(toolsHere()) }))}</div>`
@@ -3122,10 +3146,17 @@
     const when = u.checkedAt
       ? T('s.updateCheckedAt', { time: new Date(u.checkedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) })
       : ''
+    // 2.0.4 T-F（方案 §7.4）：没配 Gitee 时明确显示「未配置」，且不提供选而无效果的
+    // 强制选项（已存成 gitee 的就按 auto 显示，不静默改文件）。
+    const giteeOff = u.giteeConfigured === false
+    const fromOptions = giteeOff
+      ? [['auto', T('s.updateFromAuto')], ['github', 'GitHub']]
+      : [['auto', T('s.updateFromAuto')], ['gitee', 'Gitee'], ['github', 'GitHub']]
+    const fromValue = giteeOff && snap.settings.updateFrom === 'gitee' ? 'auto' : snap.settings.updateFrom || 'auto'
     return `${sec(T('s.update'))}<div class="grp">
         ${row(esc(title), esc(state), buttons)}${way}
         ${row(esc(T('s.updateAuto')), esc([T('s.updateAutoNote'), when].filter(Boolean).join(' · ')), sw('autoUpdateCheck', snap.settings.autoUpdateCheck !== false))}
-        ${row(esc(T('s.updateFrom')), esc(T('s.updateFromNote')), seg('updateFrom', [['auto', T('s.updateFromAuto')], ['gitee', 'Gitee'], ['github', 'GitHub']], snap.settings.updateFrom || 'auto'))}
+        ${row(esc(T('s.updateFrom')), esc([T('s.updateFromNote'), giteeOff ? (lang === 'zh' ? 'Gitee 未配置' : 'Gitee not configured') : ''].filter(Boolean).join(' · ')), seg('updateFrom', fromOptions, fromValue))}
       </div>`
   }
 
@@ -3135,7 +3166,8 @@
   // there is nowhere to send to (a build from the source tree, no relay yet).
   function pageCrash() {
     const c = snap.crash || {}
-    if (!c.can) return ''
+    // 2.0.4 T-M（零部署）：没有 relay 也能「报告这个问题 / 导出报告」（crash.prefill）。
+    if (!c.can && !c.prefill) return ''
     const when = ms => new Date(ms).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     const ask =
       c.mode === 'ask' && c.newest
@@ -3145,6 +3177,11 @@
             <div class="r"><button class="pbtn sm" data-crash-show>${esc(T(crashShown ? 's.crashHide' : 's.crashShow'))}</button><div class="grow"></div><span class="btns"><button class="pbtn sm" data-crash="no">${esc(T('s.crashNo'))}</button><button class="pbtn sm al" data-crash="yes">${esc(T('s.crashYes'))}</button></span></div>
           </div>`
         : ''
+    // 用户路径：浏览器审阅并手动提交的 GitHub issue，或把脱敏报告导出成 .txt。
+    const report = c.waiting
+      ? `<div class="grp"><div class="note">${esc(lang === 'zh' ? `有 ${c.waiting} 份崩溃报告（已脱敏），可在浏览器审阅后提交。` : `${c.waiting} crash report(s), redacted. Review and submit in your browser.`)}</div>
+          <div class="r"><button class="pbtn sm al" data-crash="issue">${esc(lang === 'zh' ? `有 ${c.waiting} 份 · 报告这个问题` : `${c.waiting} report(s) · Report this`)}</button><button class="pbtn sm" data-crash="export">${esc(lang === 'zh' ? '导出报告' : 'Export report')}</button></div></div>`
+      : ''
     let state = ''
     if (c.sending) state = T('s.crashSending')
     else if (c.mode === 'auto' && c.waiting && c.error) state = T('s.crashError', { n: c.waiting, detail: c.error })
@@ -3152,7 +3189,7 @@
     else if (c.last?.at) state = T('s.crashSent', { when: when(c.last.at), n: c.last.number ? `#${c.last.number}` : '' })
     const retry = c.mode === 'auto' && c.waiting && !c.sending ? `<button class="pbtn sm" data-crash="send">${esc(T('s.crashSend'))}</button>` : ''
     const open = c.last?.url ? `<button class="pbtn sm" data-crash="open">${esc(T('s.crashOpen'))}</button>` : ''
-    return `${sec(T('s.crash'))}${ask}<div class="grp">
+    return `${sec(T('s.crash'))}${ask}${report}<div class="grp">
         ${row(esc(T('s.crashAuto')), esc([T('s.crashAutoNote'), state].filter(Boolean).join(' · ')), `${retry}${open}${sw('crashReports', c.mode === 'auto')}`)}
       </div>`
   }
@@ -3720,6 +3757,14 @@
       const input = eye.parentElement?.querySelector?.(`input[data-eye-for="${eye.dataset.eye}"]`)
       if (input && !eye.disabled && input.value) paintEye(input, eye.getAttribute('aria-pressed') !== 'true')
       return
+    }
+    // A session line opened or folded: its files and recent steps (T-J).
+    const sessOpen = at('[data-sess-open]')
+    if (sessOpen) {
+      const id = sessOpen.dataset.sessOpen
+      if (openSessions.has(id)) openSessions.delete(id)
+      else openSessions.add(id)
+      return draw()
     }
     // A session: to its window (the settings close as it comes to the front).
     const session = at('[data-jump]')

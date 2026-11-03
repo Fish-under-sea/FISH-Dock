@@ -17,8 +17,11 @@ pub(super)fn prepare(resources:&Path,root:&Path)->Result<Option<Layout>,String>{
  layout(root).map(Some)
 }
 fn resources()->Result<PathBuf,String>{
+ // 2.0.4 T-Q：资源目录只走 config 的集中解析（FISH_DOCK_RESOURCES 新名优先，
+ // DSH_FISH_RESOURCES 旧名只读兼容），不再在这里各读一份环境变量。
+ if let Some(path)=crate::config::resources_override(){return Ok(path.join("windhawk"));}
  #[cfg(feature="installed")]{return crate::runtime::resources_directory().map(|p|p.join("windhawk"));}
- #[cfg(not(feature="installed"))]{Ok(std::env::var_os("DSH_FISH_RESOURCES").map(PathBuf::from).unwrap_or_else(||PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources")).join("windhawk"))}
+ #[cfg(not(feature="installed"))]{Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources").join("windhawk"))}
 }
 pub(super)fn configured()->Result<Option<Layout>,String>{let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;prepare(&resources()?,&context.host.path().join("config/windhawk"))}
 pub(super)fn is_bundled(layout:&Layout)->bool{crate::storage_context::current().is_some_and(|c|layout.install==c.host.path().join("config/windhawk"))}

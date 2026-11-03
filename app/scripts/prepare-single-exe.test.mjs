@@ -21,8 +21,15 @@ test('便携单 EXE 的构建入口已移除，只保留安装包这一条构建
 test('运行时不再内嵌归档，改为使用安装目录里的资源', () => {
   const runtime = readFileSync(path.join(root, 'src-tauri/src/runtime.rs'), 'utf8')
   assert.doesNotMatch(runtime, /include_bytes!|runtime\.tar|flate2::read::GzDecoder/)
-  assert.match(runtime, /DSH_FISH_RESOURCES/, '安装资源路径要能被显式指定')
+  // 2.0.4 T-Q（t33/F6）：资源目录只有一个解析点——旧断言只看字符串出现过 DSH_FISH_RESOURCES，
+  // 管不住「到底有没有接线」。现在钉住 runtime.rs / windhawk_bundle.rs 都调用
+  // config::resources_override，且不再自己读环境变量。
+  assert.match(runtime, /config::resources_override\(\)/, '安装资源路径必须经 config::resources_override 收口')
+  assert.doesNotMatch(runtime, /var_os\(\s*[`"'](?:DSH_FISH|FISH_DOCK)_RESOURCES/, 'runtime.rs 不许再自己读资源环境变量')
   assert.match(runtime, /fn resources_directory/)
+  const bundle = readFileSync(path.join(root, 'src-tauri/src/windhawk_bundle.rs'), 'utf8')
+  assert.match(bundle, /config::resources_override\(\)/, 'windhawk_bundle 也走同一个资源解析点')
+  assert.doesNotMatch(bundle, /var_os\(\s*[`"']DSH_FISH_RESOURCES/, 'windhawk_bundle 不许再自己读旧名')
   const manifest = readFileSync(path.join(root, 'src-tauri/Cargo.toml'), 'utf8')
   assert.doesNotMatch(manifest, /^single-exe\s*=/m, 'feature 已改名为 installed')
   assert.match(manifest, /^installed\s*=\s*\[\]/m)
@@ -31,8 +38,15 @@ test('运行时不再内嵌归档，改为使用安装目录里的资源', () =>
 test('构建入口按「准备资源 → 编译 → 打包」三段串起来，且不再要求内嵌归档', () => {
   const build = readFileSync(path.join(root, 'scripts/build-installer.ps1'), 'utf8')
   assert.match(build, /prepare-installer\.mjs/)
-  assert.match(build, /--features installed/)
+  // 2.0.4 T-L：编译这一段收进 build-release.ps1（加 --remap-path-prefix 并扫路径残留），
+  // 安装器脚本只负责接线，features 由 -Features installed 传进去。
+  assert.match(build, /build-release\.ps1/)
+  assert.match(build, /-Features installed/)
   assert.match(build, /installer\.mjs/)
+  const release = readFileSync(path.join(root, 'scripts/build-release.ps1'), 'utf8')
+  assert.match(release, /'--features'/, 'features 由参数拼进 cargo 命令行')
+  assert.match(release, /--remap-path-prefix/, '编译时洗掉开发机绝对路径')
+  assert.match(release, /UTF16|Unicode/, '构建后按 UTF-8 与 UTF-16LE 两种写法扫残留')
   assert.doesNotMatch(build, /DSH_FISH_RUNTIME_BUNDLE/)
   const prepare = readFileSync(path.join(root, 'scripts/prepare-installer.mjs'), 'utf8')
   assert.doesNotMatch(prepare, /runtime\.tar\.gz/, '安装资源不压缩成归档，安装器直接摆放文件')

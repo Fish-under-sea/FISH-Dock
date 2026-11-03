@@ -273,13 +273,27 @@
   }
 
   // Tell main how much room the panel needs; null when it is gone.
+  // 同一尺寸不重复发：ResizeObserver 的回调很密，而 pet.panel 会动原生窗口。
+  let lastPanelSize = ''
   function report() {
     // In the island, the island sizes itself and the window around it.
     if (window.Island?.isOn()) return window.Island.changed()
     requestAnimationFrame(() => {
-      window.pet.panel(panel.hidden ? null : { width: panel.offsetWidth + 16, height: panel.offsetHeight + 10 })
+      if (panel.hidden) { lastPanelSize = ''; window.pet.panel(null); return }
+      const next = { width: panel.offsetWidth + 16, height: panel.offsetHeight + 10 }
+      const key = `${next.width}x${next.height}`
+      if (key === lastPanelSize) return
+      lastPanelSize = key
+      window.pet.panel(next)
     })
   }
+
+  // 内容后来才变高（隐藏行转显示、按钮换行）：以前只在打开时量一次，全靠各处
+  // 手动补调，漏一处就被裁。观察回调只走 report()（帧合并 + 同尺寸去重），
+  // 也不反过来改被观察的尺寸，所以不会形成通知循环；页面卸载即断开。
+  const panelObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (!panel.hidden) report() }) : null
+  panelObserver?.observe(panel)
+  if (typeof window.addEventListener === 'function') window.addEventListener('pagehide', () => panelObserver?.disconnect(), { once: true })
 
   // Which page holds the panel: her home's (the island's window), which
   // talks for her; the open settings have it as a banner.

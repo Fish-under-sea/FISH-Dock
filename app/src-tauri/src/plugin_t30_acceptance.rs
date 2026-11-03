@@ -189,33 +189,52 @@ fn t30_acceptance_matrix() {
         }
         // 真实下载中途取消：官方大包 magpie，取消不动已装 feishu。
         // 用仓库里的稳定目录写成本地缓存（不靠刷新网络），obtain 仍走真实 npm/GitHub 下载。
-        let catalog = include_bytes!("../../../../plugins/catalog/stable.json");
-        context.host.write("config", "official-plugin-catalog.json", catalog).unwrap();
-        crate::plugin_progress::begin("fish.magpie").unwrap();
-        let old_running = runner.is_running("fish.feishu");
-        let old_dirs = dirs(&manager, "fish.feishu");
-        let context_for_download = context.clone();
-        let join = std::thread::spawn(move || crate::plugin_store::obtain(&context_for_download, "fish.magpie"));
-        let mut progress_samples = Vec::new();
-        for _ in 0..30 {
-            std::thread::sleep(Duration::from_millis(50));
-            let snap = crate::plugin_progress::snapshot();
-            if snap["active"].as_bool() == Some(true) {
-                progress_samples.push((snap["received"].as_u64().unwrap_or(0), snap["total"].as_u64().unwrap_or(0)));
-            }
-        }
-        crate::plugin_progress::cancel("fish.magpie").unwrap();
-        let cancelled = join.join().unwrap();
-        let distinct_received: Vec<u64> = {
-            let mut values: Vec<u64> = progress_samples.iter().map(|(received, _)| *received).collect();
-            values.sort_unstable(); values.dedup(); values
+        //
+        // 2.0.4 t11 基础设施修正：这里原来用 include_bytes!("../../../../plugins/catalog/stable.json")
+        // 把**仓外插件仓**的文件编进二进制——普通 cargo test 因此编译不过（基线阻断）。
+        // 现在改为运行期参数：只有手动跑这条 #[ignore] 的「真实 registry 集成」用例时才设
+        // FISH_DOCK_TEST_OFFICIAL_CATALOG 指向官方 stable.json；没设就明确记一行跳过，
+        // 普通 cargo test 不再依赖别的 checkout，也不伪造一份假目录冒充真实集成。
+        // 2.0.4 t11：真实下载段可能被跳过（见下），把「断网安装不应改动」的
+        // feishu 版本目录基线提到这里，后续断网用例不依赖那个可跳过的代码块。
+        let feishu_dirs_before = dirs(&manager, "fish.feishu");
+        let catalog = match std::env::var_os("FISH_DOCK_TEST_OFFICIAL_CATALOG").map(std::path::PathBuf::from) {
+            Some(path) => match std::fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) => { say(&log, &format!("[1] 跳过真实下载段：读取 FISH_DOCK_TEST_OFFICIAL_CATALOG 失败：{error}")); None }
+            },
+            None => { say(&log, "[1] 跳过真实下载段：未设置 FISH_DOCK_TEST_OFFICIAL_CATALOG（真实 registry 集成用例需它指向官方 stable.json）"); None }
         };
-        let cancel_err = cancelled.as_ref().err().cloned().unwrap_or_default();
-        let still_running = runner.is_running("fish.feishu");
-        let cancel_ok = cancelled.is_err() && old_running && still_running && dirs(&manager, "fish.feishu") == old_dirs;
-        if !cancel_ok { failures += 1; }
-        say(&log, &format!("[1] 下载中途取消 err={cancel_err} old_running={old_running} still_running={still_running} progress_samples={progress_samples:?} distinct={distinct_received:?}"));
-        rows.push(json!({"scenario":"官方×更新×运行中×下载中途取消","round":1,"failed":!cancel_ok,"err":cancel_err,"progress_samples":progress_samples,"distinct_received":distinct_received}));
+        if let Some(catalog) = catalog {
+            context.host.write("config", "official-plugin-catalog.json", &catalog).unwrap();
+            crate::plugin_progress::begin("fish.magpie").unwrap();
+            let old_running = runner.is_running("fish.feishu");
+            let old_dirs = dirs(&manager, "fish.feishu");
+            let context_for_download = context.clone();
+            let join = std::thread::spawn(move || crate::plugin_store::obtain(&context_for_download, "fish.magpie"));
+            let mut progress_samples = Vec::new();
+            for _ in 0..30 {
+                std::thread::sleep(Duration::from_millis(50));
+                let snap = crate::plugin_progress::snapshot();
+                if snap["active"].as_bool() == Some(true) {
+                    progress_samples.push((snap["received"].as_u64().unwrap_or(0), snap["total"].as_u64().unwrap_or(0)));
+                }
+            }
+            crate::plugin_progress::cancel("fish.magpie").unwrap();
+            let cancelled = join.join().unwrap();
+            let distinct_received: Vec<u64> = {
+                let mut values: Vec<u64> = progress_samples.iter().map(|(received, _)| *received).collect();
+                values.sort_unstable(); values.dedup(); values
+            };
+            let cancel_err = cancelled.as_ref().err().cloned().unwrap_or_default();
+            let still_running = runner.is_running("fish.feishu");
+            let cancel_ok = cancelled.is_err() && old_running && still_running && dirs(&manager, "fish.feishu") == old_dirs;
+            if !cancel_ok { failures += 1; }
+            say(&log, &format!("[1] 下载中途取消 err={cancel_err} old_running={old_running} still_running={still_running} progress_samples={progress_samples:?} distinct={distinct_received:?}"));
+            rows.push(json!({"scenario":"官方×更新×运行中×下载中途取消","round":1,"failed":!cancel_ok,"err":cancel_err,"progress_samples":progress_samples,"distinct_received":distinct_received}));
+        } else {
+            rows.push(json!({"scenario":"官方×更新×运行中×下载中途取消","round":1,"skipped":"未提供 FISH_DOCK_TEST_OFFICIAL_CATALOG（真实 registry 集成段跳过）"}));
+        }
         // 安装 × 断网：把代理指向一个没有监听的端口，obtain 必须在下载阶段失败，
         // 且不新增注册行/目录；恢复环境后同一函数可重试。
         let old_https = std::env::var_os("HTTPS_PROXY");
@@ -227,7 +246,7 @@ fn t30_acceptance_matrix() {
         match old_http { Some(value) => std::env::set_var("HTTP_PROXY", value), None => std::env::remove_var("HTTP_PROXY") }
         let offline_dirs = dirs(&manager, "fish.feishu");
         let offline_err = offline.as_ref().err().cloned().unwrap_or_default();
-        let offline_ok = offline.is_err() && offline_dirs == old_dirs && runner.is_running("fish.feishu");
+        let offline_ok = offline.is_err() && offline_dirs == feishu_dirs_before && runner.is_running("fish.feishu");
         if !offline_ok { failures += 1; }
         say(&log, &format!("[7] 断网安装 err={offline_err} dirs={offline_dirs:?} old_running={}", runner.is_running("fish.feishu")));
         rows.push(json!({"scenario":"安装×断网（代理端口 9）","round":1,"failed":!offline_ok,"err":offline_err,"dirs":offline_dirs}));

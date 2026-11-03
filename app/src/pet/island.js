@@ -1570,8 +1570,20 @@
   // the volume, in its own icon font (.fi: Segoe Fluent Icons).
   const quickBox = el('span', 'tquick')
   quickBox.dataset.bar = 'quick'
+  // 2.0.4 T-G/T-H：时钟秒与 Wi-Fi 格数的纯函数来自 indicators.js（index.html 在 island.js
+  // 之前加载）。测试夹具若只拼了 island.js，用同语义的兜底，免得整页因缺一个全局而崩。
+  const INDICATORS = globalThis.FishIndicators || {
+    clockTime: (d, lang, seconds) => d.toLocaleTimeString(lang === 'zh' ? 'zh-CN' : undefined, seconds ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' }),
+    signalBars: value => (Number.isInteger(value) && value >= 0 && value <= 5 ? value : null),
+  }
   const NET = { wired: '', wifi: '', other: '', none: '' }
+  // The icon and, for Wi-Fi, its signal's bars (2.0.4 T-H): as many of five lit
+  // as Windows reports (taskbar.rs keys bars, 0..5; null = unknown, none lit).
   const netMark = el('span', 'fi net')
+  const netGlyph = el('span', 'glyph')
+  const netBars = el('span', 'netbars')
+  for (let step = 0; step < 5; step++) netBars.append(el('i'))
+  netMark.append(netGlyph, netBars)
   // The volume as Windows draws it: the speaker's three waves faint, those up
   // to the volume solid over them; struck through, muted.
   const volMark = el('span', 'fi vol')
@@ -1640,8 +1652,13 @@
     },
     { passive: false },
   )
-  function showNet(kind) {
-    netMark.textContent = NET[kind] || NET.other
+  function showNet(kind, bars) {
+    netGlyph.textContent = NET[kind] || NET.other
+    // Windows' bars only mean something for Wi-Fi; unknown (null) lights none.
+    const steps = kind === 'wifi' ? INDICATORS.signalBars(bars) : null
+    netBars.hidden = steps === null
+    for (const [index, bar] of [...netBars.children].entries()) bar.classList.toggle('on', steps !== null && index < steps)
+    netMark.title = steps === null ? '' : `${steps}/5`
   }
   showNet('other')
   function showVolume(v) {
@@ -3742,7 +3759,7 @@
     showIme(keys)
     capsMark.classList.toggle('on', !!keys?.caps)
     capsMark.title = keys?.caps ? 'Caps Lock' : ''
-    showNet(keys?.net)
+    showNet(keys?.net, keys?.bars)
     showPrivacy(keys?.use)
     showVolume(keys?.volume)
     showBattery(keys?.battery)
@@ -4004,6 +4021,11 @@
       taskViewOn = look.taskView
       drawTaskView()
     }
+    // Windows' clock seconds (2.0.4 T-G): follow its setting, redraw at once.
+    if (l?.seconds !== undefined) {
+      secondsOn = l.seconds === true
+      tickClock()
+    }
     // How many times a button flashes for attention (style.css .flash).
     if (l?.flashes !== undefined) barRest.style.setProperty('--flashes', l.flashes === 0 ? 'infinite' : String(l.flashes))
     const colour = look.accent && (look.mode === 'light' ? look.accent.dark : look.accent.light)
@@ -4028,9 +4050,12 @@
   })
 
   // The time and the date, as Windows' taskbar has them.
+  // 2.0.4 T-G：Windows 开着「显示秒」时画 HH:mm:ss 并每秒重绘（tickClock 按文本去重，
+  // 秒没变就不重画）。
+  let secondsOn = false
   function tickClock() {
     const d = new Date()
-    const time = d.toLocaleTimeString(lang === 'zh' ? 'zh-CN' : undefined, { hour: '2-digit', minute: '2-digit' })
+    const time = INDICATORS.clockTime(d, lang, secondsOn)
     const date = d.toLocaleDateString(lang === 'zh' ? 'zh-CN' : undefined, isSide() ? { month: 'numeric', day: 'numeric' } : { year: 'numeric', month: 'numeric', day: 'numeric' })
     if (clockBox.dataset.at !== time + date) {
       clockBox.dataset.at = time + date
@@ -4038,8 +4063,9 @@
       tipClock()
     }
   }
-  // 任务栏模式下时钟刷新间隔（前端界面节奏，就地具名常量；与 bar.js 各自 bundle 各留一份）。
-  const CLOCK_TICK_MS = 5000
+  // 任务栏模式下时钟刷新间隔：一秒一次（是否真的重画由 tickClock 的文本比较决定；
+  // 关秒时文本一分钟才变，同样不会多画）。
+  const CLOCK_TICK_MS = 1000
   setInterval(() => isOn() && home() === 'taskbar' && tickClock(), CLOCK_TICK_MS)
   // Its tip as Windows' own (zhoupengjie/Wakuwaku#36, clock.rs): the date in
   // full with its weekday, in the person's own format, and Windows'
@@ -4925,16 +4951,29 @@
       setTimeout(grow, late)
     } else grow()
 
-    // 新-1（二次测量兜底）：ask 的正文（diff 摘要）在长文换行/字体就位后
-    // 才到它的最终高度，第一次量出的房间会偏小，把卡裁在路径块。等布局
-    // 稳定后再量一次：还差得远就再画一遍，让房间跟上实际高度。
+    // 新-1（二次测量兜底，T-N / A16）：ask 的正文（diff 摘要）在长文换行/
+    // 字体就位后才到最终高度，第一次量出的房间会偏小，把卡裁在路径块。
+    // 这里**只补尺寸、不整轮重画**：
+    //   · 字体先就位：等 document.fonts.ready，最多 300ms，超时按正常测量走；
+    //   · 差值 ≤2px 当取整/字体噪声忽略（原来 >1px 就 update()，几乎必然多画一轮）；
+    //   · >2px 只 setRoom + setSize —— 不再调用 update()，避免再触发一轮分段生长。
+    // 40ms 那一步是否要合并，需要真机时间戳/录屏证据，这里先不动（见 handoff 待验项）。
     if (view === 'ask') {
       const remeasure = () => {
         if (view !== 'ask' || !isAsking()) return
         const again = sizeOf('ask')
-        if (again.height > want.height + 1) update()
+        if (Math.abs(again.height - want.height) <= 2) return
+        setRoom(roomFor(again))
+        setSize(again)
       }
-      requestAnimationFrame(() => setTimeout(remeasure, 0))
+      const later = () => requestAnimationFrame(() => setTimeout(remeasure, 0))
+      const fonts = document.fonts
+      if (fonts && fonts.ready && typeof fonts.ready.then === 'function') {
+        let settled = false
+        const once = () => { if (settled) return; settled = true; later() }
+        fonts.ready.then(once, once)
+        setTimeout(once, 300)
+      } else later()
     }
 
     // The clocks run: the turn's, the step's, the other sessions'. Their words

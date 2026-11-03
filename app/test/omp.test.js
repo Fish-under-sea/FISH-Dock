@@ -11,7 +11,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { test } = require('node:test')
 
-const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'omp', 'wakuwaku.ts'), 'utf8')
+const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'omp', 'fish-dock.ts'), 'utf8')
 let loads = 0
 
 // The file as she writes it (connection.rs omp_extension), on this port.
@@ -21,7 +21,7 @@ function render(port, exe = '', data = '') {
 
 // A fresh copy of the module (its shared state gone) on a pretend omp.
 async function load(port, exe, data) {
-  delete globalThis.__wakuwakuOmp1
+  delete globalThis.__wakuwakuOmp1; delete globalThis.__fishDockOmp1
   const file = path.join(os.tmpdir(), `wakuwaku-omp-test-${process.pid}-${++loads}.mjs`)
   fs.writeFileSync(file, render(port, exe, data))
   try {
@@ -92,7 +92,7 @@ test('a turn in omp reaches her as Claude Code events, in order, waited on by no
   await port.close()
   const { calls } = port
   assert.deepEqual(names(calls), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PreToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'])
-  assert.ok(calls.every(x => x.url === '/hook?from=wakuwaku&agent=omp'))
+  assert.ok(calls.every(x => x.url === '/hook?from=fish-dock&agent=omp'))
   assert.ok(calls.every(x => x.body.session_id === 's1' && x.body.cwd === 'C:\\waku\\omp\\proj'))
   assert.equal(calls[0].body.source, 'startup')
   assert.equal(calls[1].body.prompt, 'Run echo hi')
@@ -208,8 +208,8 @@ test('her not up as a session starts: her exe asked to start her, saying it is o
     // #t18：写出名是 --fish-dock-ensure-running（旧 --wakuwaku-ensure-running 只在
     // 读取侧兼容，见 src-tauri/src/flags.rs 的别名表）。
     assert.deepEqual(runs[0].args, ['--fish-dock-ensure-running', 'omp', 'resume'])
-    assert.equal(runs[0].options.env.WAKUWAKU_PORT, String(port))
-    assert.equal(runs[0].options.env.WAKUWAKU_USER_DATA, 'C:\\waku\\data')
+    assert.equal(runs[0].options.env.FISH_DOCK_PORT, String(port))
+    assert.equal(runs[0].options.env.FISH_DOCK_DATA, 'C:\\waku\\data')
     assert.equal(runs[0].options.detached, true)
     // Once in an omp: another session starting runs it no more.
     on.session_start({}, ctx({ id: 's2' }))

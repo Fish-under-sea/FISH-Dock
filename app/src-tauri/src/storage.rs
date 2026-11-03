@@ -67,7 +67,9 @@ pub fn namespace(root: &Path, plugin_id: &str, directory: &str, source: Source) 
     if !root.is_absolute() { return Err("插件数据根必须是绝对路径".into()); }
     let expected = match source {
         Source::OfficialCatalog => match plugin_id {
-            "fish.ofm" => ".fishplugin-ourfreemodel".to_owned(),
+            // 退役 OFM 的命名空间从 legacy_ofm 取：已装用户的数据目录必须继续可解析，
+            // 但新安装不再创建它，也不再新增其他退役业务的映射。
+            "fish.ofm" => crate::legacy_ofm::retired_namespace().to_owned(),
             "fish.feishu" => ".fishplugin-feishu".to_owned(),
             "fish.clash" => ".fishplugin-clash".to_owned(),
             "fish.magpie" => ".fishplugin-magpie".to_owned(),
@@ -175,7 +177,7 @@ pub fn initialize(root: &Path, owner: &str, version: &str, schema: u32) -> Resul
         #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).map_err(|_| "分类目录权限设置失败")?; }
     }
     for (index, (category, directory)) in directories.iter().enumerate() {
-        let text = format!("# FISH Dock 数据目录\n\n插件/宿主：{owner}  \n版本：{version}  \nschema: {schema}\n\n{}\n\n数据根由宿主启动设置、FISH_DOCK_HOME、系统用户目录依次解析。插件只使用宿主传入的命名空间。\n\n导出在 exports 中生成；导入先校验身份、类别、相对路径与摘要，再在 tmp 暂存并提交。恢复前副本放入 backups。Magpie 与 OFM 身份各自独立。\n\n本说明随发行版本生成，不包含账号或密钥实值。用户自有说明请存为 USER-NOTES.md，更新时保留。\n", purpose(category));
+        let text = format!("# FISH Dock 数据目录\n\n插件/宿主：{owner}  \n版本：{version}  \nschema: {schema}\n\n{}\n\n数据根由宿主启动设置、FISH_DOCK_HOME、系统用户目录依次解析。插件只使用宿主传入的命名空间。\n\n导出在 exports 中生成；导入先校验身份、类别、相对路径与摘要，再在 tmp 暂存并提交。恢复前副本放入 backups。各插件身份相互独立。\n\n本说明随发行版本生成，不包含账号或密钥实值。用户自有说明请存为 USER-NOTES.md，更新时保留。\n", purpose(category));
         if let Err(error) = put(&directory.join("README.md"), text.as_bytes()) {
             let mut restored = true;
             for before in 0..index {

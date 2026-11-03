@@ -29,7 +29,9 @@
 pub type Chain = Vec<(u32, u64)>;
 
 // Where Codex's hook command puts its chain in the event it hands on.
-pub const CODEX_CHAIN: &str = "wakuwaku_chain";
+pub const CODEX_CHAIN: &str = "fish_dock_chain";
+// 旧事件里的字段名：只读兼容。
+pub const LEGACY_CODEX_CHAIN: &str = "wakuwaku_chain";
 
 #[cfg(windows)]
 mod imp {

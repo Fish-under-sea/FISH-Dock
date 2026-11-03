@@ -5,6 +5,8 @@ use sha2::{Digest,Sha256};
 use std::{io::Write,sync::Mutex};
 static EDIT:Mutex<()>=Mutex::new(());
 const ACTIVE:&str="windhawk-import-active.json";
+/// 一次编译的等待上限（秒）。前端的状态行文案直接取这个数，不再手写「120 秒」。
+pub const COMPILE_SECS:u64=120;
 #[derive(Debug)]
 struct Plan { compiler:PathBuf,engine:PathBuf,stage:PathBuf,library:String,targets:Vec<(&'static str,&'static str)>,source:String,meta:Metadata,settings:BTreeMap<String,Value>,presets:BTreeMap<String,Value>,options:Vec<String>,architecture:Vec<String> }
 #[derive(Clone,Debug,Serialize,Deserialize,PartialEq,Eq)]
@@ -64,7 +66,7 @@ fn compile(plan:&Plan)->Result<(),String>{
   #[cfg(windows)]{use std::os::windows::process::CommandExt;cmd.creation_flags(0x08000000);}
   let mut child=cmd.spawn().map_err(|e|format!("编译器启动失败：{e}"))?;
   let owner=match crate::plugin_job::Owner::attach(&child){Ok(owner)=>owner,Err(error)=>{let _=child.kill();let _=child.wait();return Err(error);}};
-  let start=Instant::now();let status=loop{if start.elapsed()>Duration::from_secs(120)||fs::metadata(&log_path).map(|m|m.len()>1024*1024).unwrap_or(false){drop(owner);let _=child.kill();let _=child.wait();return Err("编译超时或日志超过 1 MiB，编译任务已结束".into());}if let Some(status)=child.try_wait().map_err(|_|"读取编译器状态失败")?{break status;}std::thread::sleep(Duration::from_millis(25));};drop(owner);
+  let start=Instant::now();let status=loop{if start.elapsed()>Duration::from_secs(COMPILE_SECS)||fs::metadata(&log_path).map(|m|m.len()>1024*1024).unwrap_or(false){drop(owner);let _=child.kill();let _=child.wait();return Err("编译超时或日志超过 1 MiB，编译任务已结束".into());}if let Some(status)=child.try_wait().map_err(|_|"读取编译器状态失败")?{break status;}std::thread::sleep(Duration::from_millis(25));};drop(owner);
   if !status.success(){let bytes=fs::read(&log_path).unwrap_or_default();let message=String::from_utf8_lossy(&bytes[..bytes.len().min(24*1024)]);return Err(format!("{target} 编译失败：\n{message}"));}
   for(from,to)in [("libc++.dll","libc++.whl"),("libunwind.dll","libunwind.whl"),("windhawk-mod-shim.dll","windhawk-mod-shim.dll")]{let source=plan.compiler.join(target).join("bin").join(from);crate::storage::safe(&source)?;fs::copy(source,plan.stage.join(folder).join(to)).map_err(|_|format!("{target} 编译运行库缺失：{from}"))?;}
  }

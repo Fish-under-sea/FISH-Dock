@@ -237,7 +237,8 @@ static SHOWN_MOOD: Mutex<String> = Mutex::new(String::new());
 // The face and the tooltip, on every change of mood.
 pub fn refresh(sh: &Shared) {
     let Some(tray) = sh.app.tray_by_id(TRAY_ID) else { return };
-    let now = sh.pet.lock().unwrap().get(now_ms());
+    let details = sh.details();
+    let now = sh.pet.lock().unwrap().get(now_ms(), details);
     let mood = now["mood"].as_str().unwrap_or("idle").to_string();
     let lang = sh.lang();
     // Whose: the session's name, unless the specifics are kept off screen.

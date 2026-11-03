@@ -1,13 +1,13 @@
 {
   "manifest_version": 2,
-  "name": "Wakuwaku Mail",
-  "description": "New mail in Wakuwaku's island: the unread count, and the island opens for a new letter.",
+  "name": "FISH Dock Mail",
+  "description": "New mail in FISH Dock island: the unread count, and the island opens for a new letter.",
   "version": "1.0",
-  "author": "Wakuwaku",
-  "homepage_url": "https://github.com/zhoupengjie/wakuwaku",
+  "author": "FISH Dock",
+  "homepage_url": "https://github.com/Fish-under-sea/FISH-Dock",
   "browser_specific_settings": {
     "gecko": {
-      "id": "mail@wakuwaku",
+      "id": "mail@fish-dock",
       "strict_min_version": "115.0"
     }
   },

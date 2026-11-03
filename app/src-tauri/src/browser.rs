@@ -3,6 +3,16 @@ fn web_url(url: &str) -> bool {
     tauri::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "https" | "http") && u.host_str().is_some() && u.username().is_empty() && u.password().is_none() && !url.contains('\0'))
 }
 
+/// #67：插件页外链的唯一判定入口（可单测、不启动任何东西）。
+/// 只认 http/https、host 非空、无 userinfo、无 NUL；其余协议/形状一律拒绝。
+pub fn is_web_url(url: &str) -> bool { web_url(url) }
+
+/// #67：插件页里点开的链接走这里。判定不过就**不启动浏览器**，只回一句人话。
+pub fn open_web(url: &str) -> Result<(), String> {
+    if !web_url(url) { return Err("链接不是可打开的网页地址（只支持 http/https）".into()); }
+    open(url)
+}
+
 pub fn open(url: &str) -> Result<(), String> {
     if !web_url(url) { return Err("浏览器链接无效".into()); }
     #[cfg(windows)] {
@@ -76,8 +86,17 @@ mod tests {
         for code in ["", "ABCD-EFGH\n", "gho_secret", "ABCD&EFGH", "设备验证码", "ABCD-EFGH-IJKL"] { assert!(!super::valid_device_code(code)); }
     }
     #[test] fn browser_accepts_only_web_links() {
-        for url in ["https://github.com/Fish-under-sea/FISH-Dock", "https://github.com/login/device"] { assert!(super::web_url(url)); }
-        for url in ["file:///C:/Windows/notepad.exe", "javascript:alert(1)", "https://u:p@github.com/", "https://github.com/\0evil", ""] { assert!(!super::web_url(url)); }
+        for url in ["https://github.com/Fish-under-sea/FISH-Dock", "https://github.com/login/device", "http://127.0.0.1:38080/ui"] { assert!(super::web_url(url)); }
+        for url in ["file:///C:/Windows/notepad.exe", "javascript:alert(1)", "data:text/html,<script>alert(1)</script>", "vbscript:msgbox(1)", "https://u:p@github.com/", "https://github.com/\0evil", "", "   "] { assert!(!super::web_url(url)); }
+    }
+    // #67：插件页外链的判定就是这一条 —— 网页地址放行，危险协议与畸形 URL 明确拒绝；
+    // `open_web` 在判定不过时只回错误，不会启动浏览器。
+    #[test] fn page_external_links_are_judged_before_anything_opens() {
+        assert!(super::is_web_url("https://example.com/a?b=1"));
+        assert_eq!(super::open_web("file:///C:/Windows/notepad.exe").unwrap_err(), "链接不是可打开的网页地址（只支持 http/https）");
+        for url in ["javascript:alert(1)", "data:text/html,x", "vbscript:msgbox(1)", "https://user:pw@example.com/", "https://example.com/\0"] {
+            assert!(super::open_web(url).is_err(), "{url} 必须拒绝");
+        }
     }
     #[test] fn desktop_browser_integration() {
         if std::env::var("FISH_TEST_OPEN_BROWSER").as_deref() != Ok("1") { return; }

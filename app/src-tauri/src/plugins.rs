@@ -158,7 +158,7 @@ impl Conf<'_> {
     }
 }
 
-// The scripts' own parameters (examples/widgets/<id>.ps1) and periods.
+// The scripts' own parameters (test/fixtures/plugins/params/<id>.ps1) and periods.
 pub static PLUGINS: [Plugin; 7] = [
     Plugin { id: "weather", icon: "weather", params: &[p("City", Kind::Text, false)], by_lang: true, on_web: true, make: |c| Box::new(weather::Weather::new(c.text("City"), c.lang, web_fetch())) },
     Plugin {
@@ -648,7 +648,7 @@ pub(crate) mod tests {
     #[test]
     fn the_parameters_are_the_scripts_own() {
         for p in &PLUGINS {
-            let script = std::fs::read_to_string(format!("{}/../examples/widgets/{}.ps1", env!("CARGO_MANIFEST_DIR"), p.id)).unwrap();
+            let script = std::fs::read_to_string(format!("{}/../test/fixtures/plugins/params/{}.ps1", env!("CARGO_MANIFEST_DIR"), p.id)).unwrap();
             let block = script.split_once("param(").map(|(_, b)| b).unwrap_or("");
             for param in p.params {
                 let names: Vec<&str> = match param.kind {

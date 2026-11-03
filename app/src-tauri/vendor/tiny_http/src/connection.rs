@@ -94,6 +94,16 @@ impl std::io::Write for Connection {
         (&*self).flush()
     }
 }
+/// Wakuwaku（2.0.4，/v1 的 SSE）：连接的可关闭句柄。给调用方在退出/超时时
+/// 强制结束一条流，唤醒阻塞在写系统调用里的线程（不必等 socket 写超时）。
+pub struct StreamHandle(pub(crate) std::sync::Arc<Connection>);
+
+impl StreamHandle {
+    pub fn shutdown(&self) {
+        self.0.shutdown(Shutdown::Both).ok();
+    }
+}
+
 impl Connection {
     /// Gets the peer's address. Some for TCP, None for Unix sockets.
     pub(crate) fn peer_addr(&self) -> std::io::Result<Option<SocketAddr>> {
@@ -101,6 +111,15 @@ impl Connection {
             Self::Tcp(s) => s.peer_addr().map(Some),
             #[cfg(unix)]
             Self::Unix(_) => Ok(None),
+        }
+    }
+
+    // Wakuwaku（2.0.4，/v1 的 SSE）：把 socket 的写超时交给宿主，写阻塞到点就失败返回。
+    pub(crate) fn set_write_timeout(&self, timeout: Option<std::time::Duration>) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(s) => s.set_write_timeout(timeout),
+            #[cfg(unix)]
+            Self::Unix(_) => Ok(()),
         }
     }
 

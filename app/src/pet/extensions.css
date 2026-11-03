@@ -55,12 +55,21 @@
 #island-settings .extension-more > summary:hover { background: var(--g2); color: var(--fg); }
 #island-settings .extension-more > summary:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 #island-settings .extension-more[open] > summary { color: var(--fg); }
-#island-settings .extension-more-body { display: flex; flex-wrap: wrap; gap: 6px; padding-block: 8px 0; }
-#island-settings .extension-more-body .pbtn { border-color: transparent; background: transparent; color: var(--g4); font-weight: 500; }
-#island-settings .extension-more-body .pbtn:hover:not(:disabled) { background: var(--g2); color: var(--fg); }
-/* 危险只在这一颗上、只在悬停或聚焦时出现；平时是次级文字色。 */
-#island-settings .extension-more-body .extension-danger:hover:not(:disabled),
-#island-settings .extension-more-body .extension-danger:focus-visible { color: var(--bad-ink); }
+/* 行式动作列表（T-C / #63）：不再是两颗挤在一行的裸灰字胶囊。
+   column、无间隙；每行整行可点（按钮撑满、文字左对齐），32px 高；
+   第二行起 1px 发丝线（--g3）隔 8px；禁用/空态不塌陷（min-height 保住）。 */
+#island-settings .extension-more-body { display: flex; flex-direction: column; gap: 0; padding-block: 8px 0; }
+#island-settings .extension-more-row { display: flex; align-items: center; width: 100%; min-height: 32px; margin: 0; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--g4); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
+#island-settings .extension-more-row + .extension-more-row { margin-top: 8px; border-top: 1px solid var(--g3); border-radius: 0 0 8px 8px; }
+#island-settings .extension-more-row:hover:not(:disabled) { background: var(--g2); color: var(--fg); }
+#island-settings .extension-more-row:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+#island-settings .extension-more-row:disabled { color: var(--g5); cursor: default; }
+/* 危险动作常态就是危险色（作废 2.0.3 的「红色只留 hover/focus」口径）：
+   卸载与「打开插件日志」不再同色，用户不用悬停才知道哪个会删东西。
+   悬停只补一层极淡底色，尺寸不变；聚焦描边照旧可见。 */
+#island-settings .extension-more-row.extension-danger { color: var(--bad-ink); }
+#island-settings .extension-more-row.extension-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--bad-ink) 8%, transparent); color: var(--bad-ink); }
+#island-settings .extension-more-row.extension-danger:disabled { color: var(--bad-ink); opacity: 0.55; }
 
 /* 功能页入口：不是标签——32px 高（≥24px 目标尺寸）、自带 ›、悬停抬底色、聚焦描边。 */
 #island-settings .extension-page-entry { display: inline-flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 12px; border: 1px solid var(--g3); border-radius: 10px; background: var(--g2); color: var(--fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
@@ -89,6 +98,12 @@
 #island-settings .extension-panel .extension-star { border-color: var(--g3); background: transparent; color: var(--fg); }
 #island-settings .extension-panel .extension-star:hover:not(:disabled) { background: var(--g2); }
 #island-settings .extension-panel .pbtn { min-height: 28px; min-width: 28px; }
+/* t26：动作行必须 ≥32px（#63 的验收项），但紧邻上面那条 `.extension-panel .pbtn`
+   的 min-height:28px 特异性是 1,2,0，比 `.extension-more-row` 的 1,1,0 高 —— 真实
+   Edge 实测把两行压回了 28px。这里用同档特异性但更靠后的规则把它要回来，并让高度
+   由内容决定（不再吃 `.pbtn.sm` 的固定 height:24px）。不改通用按钮规则，别的按钮
+   仍是 28px。改这条时记得同步 extension-style.test.js 的级联断言。 */
+#island-settings .extension-panel .extension-more-row { height: auto; min-height: 32px; }
 .extension-panel :is(button,input,summary):focus-visible { outline: 2px solid #80b6ff; outline-offset: 3px; }
 .extension-panel button:disabled { opacity: .5; cursor: default; }
 .extension-panel button:not(:disabled):active { transform: translateY(1px); }
@@ -102,12 +117,16 @@
 #island-settings .extension-third { display: grid; gap: 8px; min-width: 0; }
 #island-settings .extension-search { display: flex; align-items: center; gap: 4px; padding: 2px 2px 2px 12px; border: 1px solid var(--g3); border-radius: 10px; background: var(--g1); }
 #island-settings .extension-search:focus-within { border-color: var(--g4); }
-#island-settings .extension-search-input { flex: 1 1 auto; min-width: 0; min-height: 32px; padding: 0; border: 0; outline: none; background: transparent; color: var(--fg); font: inherit; }
+#island-settings .extension-search-input { flex: 1 1 auto; min-width: 0; min-height: 32px; padding: 0; border: 0; outline: none; background: transparent; color: var(--fg); font: inherit; text-overflow: ellipsis; }
 #island-settings .extension-search-go { border-color: transparent; background: transparent; color: var(--g4); font-weight: 500; }
 #island-settings .extension-search-go:hover:not(:disabled) { background: var(--g2); color: var(--fg); }
 /* 长包名换行不撑破卡片；提示行用 note 小字（12px、次级灰 --g4）。只用现有变量。 */
 #island-settings .extension-third .extension-card-title strong { overflow-wrap: anywhere; word-break: break-word; }
 #island-settings .extension-third .note { font-size: 12px; color: var(--g4); }
+/* 检索状态行（T-C）：计数、加载更多、失败重试各自一行；计数只写数字，不抢卡片位置。 */
+#island-settings .extension-third-count { margin: 0; font-size: 12px; color: var(--g4); }
+#island-settings .extension-third-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#island-settings .extension-third-actions .pbtn { min-height: 32px; }
 /* 外观标签顺序支持鼠标拖动与键盘按钮。 */
 .tab-order { padding-block: 12px; }
 .tab-order ol { list-style: none; padding: 0; }
@@ -116,6 +135,9 @@
 .s-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .models .s-body { overflow: hidden; margin-right: 0; padding-right: 0; }
 .extension-frame { display: block; width: 100%; height: 100%; min-height: 0; border: 0; border-radius: 0; background: transparent; }
+/* 首个 layout 超时（T-N / A14）：不藏页面，只在帧前面给一条可重试的状态。 */
+.extension-page-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; font-size: 12px; color: var(--g4); }
+.extension-page-notice p { margin: 0; }
 .extension-service-shell { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; gap: 10px; }
 .extension-service-toolbar { flex: none; }
 .extension-service-content { display: block; flex: 1; width: 100%; min-height: 0; border: 0; border-radius: 18px; background: var(--g1); }

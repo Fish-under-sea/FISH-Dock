@@ -8,7 +8,7 @@ $all=@(Get-CimInstance Win32_Process)
 while($parents.Count -gt 0){$children=@($all|Where-Object {$parents -contains [int]$_.ParentProcessId});$descendants+=$children;$parents=@($children|ForEach-Object {[int]$_.ProcessId})}
 foreach($app in $owned){
  $ports=@(Get-NetTCPConnection -State Listen -OwningProcess $app.ProcessId -ErrorAction SilentlyContinue|Where-Object {$_.LocalAddress -eq '127.0.0.1'})
- foreach($port in $ports){try{$health=Invoke-RestMethod -Uri ('http://127.0.0.1:{0}/health' -f $port.LocalPort) -TimeoutSec 2;if($health.app -eq 'wakuwaku' -and $health.runtime -eq 'tauri'){Invoke-RestMethod -Uri ('http://127.0.0.1:{0}/quit' -f $port.LocalPort) -Method Post -TimeoutSec 2|Out-Null;break}}catch{}}
+ foreach($port in $ports){try{$health=Invoke-RestMethod -Uri ('http://127.0.0.1:{0}/health' -f $port.LocalPort) -TimeoutSec 2;if($health.runtime -eq 'tauri' -and @('fish-dock','wakuwaku') -contains $health.app){Invoke-RestMethod -Uri ('http://127.0.0.1:{0}/quit' -f $port.LocalPort) -Method Post -TimeoutSec 2|Out-Null;break}}catch{}}
  $live=Get-Process -Id $app.ProcessId -ErrorAction SilentlyContinue
  if($live){try{Wait-Process -Id $app.ProcessId -Timeout 12 -ErrorAction Stop}catch{
   $still=Get-CimInstance Win32_Process -Filter ('ProcessId={0}' -f $app.ProcessId)

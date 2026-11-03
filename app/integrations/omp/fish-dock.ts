@@ -45,7 +45,7 @@ const PORT = Number(choose("__FISH_DOCK_PORT__", "__WAKUWAKU_PORT__")) || 47213
 const EXE = choose("__FISH_DOCK_EXE__", "__WAKUWAKU_EXE__")
 const DATA = choose("__FISH_DOCK_DATA__", "__WAKUWAKU_DATA__")
 
-const PATH = '/hook?from=wakuwaku&agent=omp'
+const PATH = '/hook?from=fish-dock&agent=omp'
 // #t18：写出名是 --fish-dock-ensure-running。旧 exe 认的 --wakuwaku-ensure-running
 // 只在读取侧兼容（flags.rs 别名表）：这份扩展由当前版本写出，宿主也是当前版本，
 // 不需要在命令行里塞两个开关（塞了会打乱后面的 who/source 位置参数）。
@@ -66,7 +66,7 @@ const MAX_TOOLS = 200
 const filled = value => (value && !value.startsWith('__') ? value : '')
 
 // What every copy of this module shares in the process.
-const S = (globalThis.__wakuwakuOmp1 ??= {
+const S = (globalThis.__fishDockOmp1 ??= globalThis.__wakuwakuOmp1 ??= {
   queue: Promise.resolve(),
   // Answered once (her up), and nothing tried until then (her not up).
   up: false,
@@ -182,8 +182,8 @@ function startHer(source) {
   if (S.started || !exe) return
   S.started = true
   try {
-    const env = { ...process.env, WAKUWAKU_PORT: String(PORT) }
-    if (filled(DATA)) env.WAKUWAKU_USER_DATA = filled(DATA)
+    const env = { ...process.env, FISH_DOCK_PORT: String(PORT), WAKUWAKU_PORT: String(PORT) }
+    if (filled(DATA)) { env.FISH_DOCK_DATA = filled(DATA); env.WAKUWAKU_USER_DATA = filled(DATA) }
     const child = spawn(exe, [ENSURE_FLAG, 'omp', source], { detached: true, stdio: 'ignore', windowsHide: true, env })
     child.on('error', () => {})
     child.unref()
@@ -247,7 +247,7 @@ function askPlan(e, ctx) {
     .catch(() => {})
 }
 
-export default function wakuwaku(pi) {
+export default function fishDock(pi) {
   // Each handler: the main agent's alone, nothing thrown, nothing waited on.
   const on = (name, handle) =>
     pi.on(name, (e, ctx) => {

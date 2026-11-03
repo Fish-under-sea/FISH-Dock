@@ -46,6 +46,13 @@ What is changed, each marked `Wakuwaku:` in the code:
   so a test can make the next connection's split fail; her builds never have
   it.
 
+- `src/response.rs`（2.0.4，/v1 的 SSE）：响应头写完立即 flush；chunked 正文改成按块编码、
+  每块写后 flush（0.12.0 的 `io::copy` 与 `chunked_transfer::Encoder` 都不把 flush 透传，
+  一帧小事件会压在 1 KiB 的 BufWriter 里）。
+- `src/request.rs`、`src/client.rs`、`src/util/refined_tcp_stream.rs`、`src/connection.rs`
+  （2.0.4，/v1 的 SSE）：`Request::set_write_timeout(Option<Duration>)` 把 socket 的写超时
+  交给调用方（连接句柄是共享的 `Arc<Connection>`），写阻塞到点失败返回，SSE 的写线程才能
+  结束并归还连接槽位（A4）。
 - `src/lib.rs`: `#![allow(unused_imports, dead_code)]`, for 0.12.0's own
   warnings, which a path dependency shows on every build of hers.
 

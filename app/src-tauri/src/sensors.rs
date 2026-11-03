@@ -974,22 +974,30 @@ mod imp {
 
     // Downloaded to `to` and its SHA-256 checked; the file is removed if it
     // does not match.
+    //
+    // 2.0.4 T-F（审计 A20）：不再自建裸 ureq、也不再每路 600 s——走 `sources`
+    // 的候选/代理/一次总预算与流式落地。先落自己的私有暂存，摘要按**固定值**
+    // 核对通过后才发布到 `to`（captain §13.4：未校验的包不提前成为最终资源）。
+    // 提权来源约束（allowed）仍在最前面，配置前缀不能把这里变成任意 URL 下载执行。
     fn download_verify(url: &str, expect: &str, to: &Path) -> Result<(), String> {
         if !allowed(url) {
             return Err(format!("not an allowed download host: {url}"));
         }
-        let agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(600))).build().new_agent();
-        let mut res = agent.get(url).header("user-agent", "wakuwaku").call().map_err(|e| e.to_string())?;
-        let mut reader = res.body_mut().with_config().limit(64 * 1024 * 1024).reader();
-        let mut file = std::fs::File::create(to).map_err(|e| e.to_string())?;
-        std::io::copy(&mut reader, &mut file).map_err(|e| e.to_string())?;
-        file.flush().map_err(|e| e.to_string())?;
-        drop(file);
-        let got = sha256_file(to).map_err(|e| e.to_string())?;
+        let staged = to.with_extension("part-download");
+        let budget = Duration::from_secs(600);
+        crate::sources::fetch_to_file(url, budget, 64 * 1024 * 1024, &staged).map_err(|fail| fail.reason())?;
+        let got = match sha256_file(&staged) {
+            Ok(got) => got,
+            Err(error) => {
+                let _ = std::fs::remove_file(&staged);
+                return Err(error.to_string());
+            }
+        };
         if got.eq_ignore_ascii_case(expect) {
+            std::fs::rename(&staged, to).map_err(|e| e.to_string())?;
             Ok(())
         } else {
-            let _ = std::fs::remove_file(to);
+            let _ = std::fs::remove_file(&staged);
             Err(format!("SHA-256 {got}, not {expect}"))
         }
     }

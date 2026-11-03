@@ -1,6 +1,6 @@
-// Wakuwaku Mail: new mail in Wakuwaku's island, from Thunderbird. The unread
+// FISH Dock Mail: new mail in FISH Dock island, from Thunderbird. The unread
 // count of the inboxes; for a new letter, the island opens with who it is
-// from and what about. Private: while Wakuwaku's 显示具体内容 is off, only the
+// from and what about. Private: while FISH Dock's 显示具体内容 is off, only the
 // count shows. Thunderbird keeps the accounts and how they sign in (OAuth for
 // Gmail and Outlook too); this only reads and tells the pet, as any widget
 // script does (examples/widgets).
@@ -73,7 +73,7 @@ function start(messenger, fetchImpl, every = EVERY_MS) {
     try {
       await send(fetchImpl, widgetFor(await unreadCount(messenger), newest, isNew))
     } catch (err) {
-      console.warn('wakuwaku:', err)
+      console.warn('fish-dock:', err)
     }
   }
   messenger.messages.onNewMailReceived.addListener(async (folder, list) => {

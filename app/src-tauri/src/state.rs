@@ -135,6 +135,17 @@ struct Todo {
     status: String,
 }
 
+// 最近做完的一步（T-J）：它是什么，成没成，什么时候开始的。
+struct Step {
+    key: String,
+    ok: bool,
+    since: u64,
+}
+
+// 会话行展开给前端看的最少、最多的几条：再多的文件只说「等 N 个」。
+const FILE_LIST_MAX: usize = 15;
+const STEP_LIST_MAX: usize = 5;
+
 struct Session {
     id: String,
     project: String,
@@ -160,6 +171,8 @@ struct Session {
     added: u32,
     // The files this turn edited.
     files: Vec<String>,
+    // 这一轮最近做完的几步（T-J，最多 STEP_LIST_MAX 条）。
+    steps: Vec<Step>,
     reply: String,
     error: Value,
     agent: String,
@@ -197,6 +210,7 @@ impl Session {
             todos: Vec::new(),
             added: 0,
             files: Vec::new(),
+            steps: Vec::new(),
             reply: String::new(),
             error: Value::Null,
             agent: String::new(),
@@ -299,17 +313,30 @@ fn todo_view(s: &Session) -> Value {
     json!({ "done": done, "total": s.todos.len(), "active": active })
 }
 
-// A session as the pages draw it.
-fn view(s: &Session) -> Value {
+// 一步的键：适配器给的 { key, vars } 里那个 key（"step.edit" 之类）。
+fn step_key(step: &Value) -> String {
+    match step {
+        Value::Object(fields) => fields.get("key").and_then(Value::as_str).map(|key| clip(key, 60)).unwrap_or_default(),
+        Value::String(text) => clip(text, 60),
+        _ => String::new(),
+    }
+}
+
+// A session as the pages draw it. `details` 是「显示具体内容」开关（settings.rs）。
+// 关掉时，文件清单与最近步骤**在这里就不给**：/v1、SSE 与设置页同源同规则，
+// 不给前端留缓存（T-J）。
+fn view(s: &Session, details: bool) -> Value {
     let is_working = s.mood == "working";
     let (step, step_since) = match s.running.last() {
         _ if !is_working => (Value::Null, None),
         Some(r) => (r.step.clone(), Some(r.since)),
         None => (json!({ "key": "step.thinking", "vars": {} }), s.thought_at),
     };
-    json!({
+    let mut view = json!({
         "id": s.id,
         "project": s.project,
+        // /v1/sessions 按路径组件过滤要用它（契约 §6.3 的已知边界，需 Bearer）。
+        "cwd": s.workspace,
         "agent": s.agent,
         // A window to go to when clicked.
         "jump": !s.chain.is_empty(),
@@ -325,7 +352,50 @@ fn view(s: &Session) -> Value {
         "files": s.files.len(),
         "reply": if is_ending(&s.mood) { s.reply.as_str() } else { "" },
         "error": if s.mood == "error" { s.error.clone() } else { Value::Null },
-    })
+    });
+    if details {
+        let from = s.steps.len().saturating_sub(STEP_LIST_MAX);
+        view["fileList"] = json!(s.files.iter().take(FILE_LIST_MAX).cloned().collect::<Vec<String>>());
+        // 超过 15 个时前端说「等 N 个」；计数 files 照旧。
+        view["filesMore"] = json!(s.files.len().saturating_sub(FILE_LIST_MAX));
+        view["recentSteps"] = json!(s.steps[from..]
+            .iter()
+            .map(|step| json!({ "key": step.key, "ok": step.ok, "since": step.since }))
+            .collect::<Vec<Value>>());
+    }
+    view
+}
+
+// `/v1/sessions` 的接口投影（A3）：只给外部脚本需要的稳定字段；页面用的 detail / step /
+// reply / error 不原样外露，cwd 只在宿主内部用于过滤、不写进响应。details 关掉时连
+// 名字、项目、文件与步骤一起裁剪；计数类字段保留。
+fn api_view(s: &Session, details: bool) -> Value {
+    let mut view = json!({
+        "id": s.id,
+        "agent": s.agent,
+        "mood": s.mood,
+        "at": s.at,
+        "since": s.since,
+        "took": s.took,
+        "jump": !s.chain.is_empty(),
+        "files": s.files.len(),
+    });
+    let todo = todo_view(s);
+    if !todo.is_null() {
+        view["todo"] = todo;
+    }
+    if details {
+        view["name"] = json!(s.name());
+        view["project"] = json!(s.project);
+        let from = s.steps.len().saturating_sub(STEP_LIST_MAX);
+        view["fileList"] = json!(s.files.iter().take(FILE_LIST_MAX).cloned().collect::<Vec<String>>());
+        view["filesMore"] = json!(s.files.len().saturating_sub(FILE_LIST_MAX));
+        view["recentSteps"] = json!(s.steps[from..]
+            .iter()
+            .map(|step| json!({ "key": step.key, "ok": step.ok, "since": step.since }))
+            .collect::<Vec<Value>>());
+    }
+    view
 }
 
 #[derive(Default)]
@@ -450,6 +520,7 @@ impl Pet {
                     s.running.clear();
                     s.thought_at = Some(now);
                     s.files.clear();
+                    s.steps.clear();
                     s.reply.clear();
                     s.error = Value::Null;
                     // A list all done belongs to the work before.
@@ -468,13 +539,28 @@ impl Pet {
                     }
                     "tool-done" | "tool-failed" => {
                         // Its own start, or with no id to pair them by, the latest.
-                        match s.running.iter().rposition(|r| r.id == tool_id) {
-                            Some(at) => drop(s.running.remove(at)),
-                            None if tool_id.is_empty() => drop(s.running.pop()),
-                            None => {}
-                        }
+                        let at = s.running.iter().rposition(|r| r.id == tool_id).or_else(|| {
+                            (tool_id.is_empty() && !s.running.is_empty()).then(|| s.running.len() - 1)
+                        });
+                        let ended = at.map(|at| s.running.remove(at));
                         if s.running.is_empty() {
                             s.thought_at = Some(now);
+                        }
+                        // 最近几步（T-J）：这一步是什么、成没成、什么时候开始的。
+                        let key = ended
+                            .as_ref()
+                            .map(|running| step_key(&running.step))
+                            .filter(|key| !key.is_empty())
+                            .or_else(|| {
+                                let key = step_key(msg.get("step").unwrap_or(&Value::Null));
+                                (!key.is_empty()).then_some(key)
+                            })
+                            .or_else(|| Some(str_field(msg, "detail", 60)).filter(|detail| !detail.is_empty()));
+                        if let Some(key) = key {
+                            if s.steps.len() >= STEP_LIST_MAX {
+                                s.steps.remove(0);
+                            }
+                            s.steps.push(Step { key, ok: event == "tool-done", since: ended.map_or(now, |running| running.since) });
                         }
                     }
                     _ => {}
@@ -587,8 +673,8 @@ impl Pet {
     }
 
     // What the pet shows: the session that most wants you, and the rest in
-    // sight.
-    pub fn get(&self, now: u64) -> Value {
+    // sight. `details` 是「显示具体内容」开关（view）。
+    pub fn get(&self, now: u64, details: bool) -> Value {
         let top = self
             .shown()
             .fold(None::<&Session>, |best, s| match best {
@@ -597,12 +683,12 @@ impl Pet {
                 _ => Some(s),
             });
         let Some(top) = top else {
-            let mut empty = view(&Session::new(String::new(), now));
+            let mut empty = view(&Session::new(String::new(), now), details);
             empty["others"] = json!(0);
             empty["sessions"] = json!(0);
             return empty;
         };
-        let mut now = view(top);
+        let mut now = view(top, details);
         now["others"] = json!(self.shown().filter(|s| s.id != top.id && s.mood != "idle").count());
         now["sessions"] = json!(self.shown().count());
         now
@@ -610,10 +696,10 @@ impl Pet {
 
     // Every session in sight, the one that most wants you first: the island's
     // open lines, the settings' list, the marks on the taskbar's buttons.
-    pub fn list(&self) -> Value {
+    pub fn list(&self, details: bool) -> Value {
         let mut all: Vec<&Session> = self.shown().filter(|s| !s.id.is_empty() || s.mood != "idle").collect();
         all.sort_by(|a, b| priority(&b.mood).cmp(&priority(&a.mood)).then(b.at.cmp(&a.at)));
-        Value::Array(all.into_iter().map(view).collect())
+        Value::Array(all.into_iter().map(|s| view(s, details)).collect())
     }
 
     // The mood of the next session that wants something, after the one shown:
@@ -648,8 +734,37 @@ impl Pet {
         Some((s.chain.clone(), vec![s.title.clone(), s.task.clone(), s.project.clone()]))
     }
 
+    // `/v1/sessions` 的会话列表：`agent` 与 `cwd` 都是逗号列表（cwd 是路径组件包含，
+    // 多条取并；`agent` 空串按 claude，与页面一致）。过滤用 cwd，但 api_view 不输出它。
+    pub fn api_list(&self, details: bool, agent: Option<&str>, cwd: Option<&str>) -> Value {
+        let list = |text: Option<&str>| -> Option<Vec<String>> {
+            text.map(|text| {
+                text.split(',')
+                    .map(|part| part.trim().to_ascii_lowercase())
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<String>>()
+            })
+            .filter(|parts| !parts.is_empty())
+        };
+        let agents = list(agent);
+        let roots = list(cwd);
+        let mut all: Vec<&Session> = self.shown().filter(|s| !s.id.is_empty() || s.mood != "idle").collect();
+        all.sort_by(|a, b| priority(&b.mood).cmp(&priority(&a.mood)).then(b.at.cmp(&a.at)));
+        let kept: Vec<Value> = all
+            .into_iter()
+            .filter(|s| {
+                let named = if s.agent.is_empty() { "claude" } else { s.agent.as_str() };
+                let by_agent = agents.as_ref().map_or(true, |wanted| wanted.iter().any(|one| one == named));
+                let by_cwd = roots.as_ref().map_or(true, |wanted| wanted.iter().any(|root| crate::agent_hub::path_contains(root, &s.workspace)));
+                by_agent && by_cwd
+            })
+            .map(|s| api_view(s, details))
+            .collect();
+        Value::Array(kept)
+    }
+
     pub fn mood(&self, now: u64) -> String {
-        self.get(now)["mood"].as_str().unwrap_or("idle").to_string()
+        self.get(now, false)["mood"].as_str().unwrap_or("idle").to_string()
     }
 }
 
@@ -667,8 +782,8 @@ mod tests {
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), 1, Hold::Seen);
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "detail": "Edit", "event": "tool-done" })), 2, Hold::Seen);
         let out = pet.apply(&msg(json!({ "session": "a", "mood": "done" })), 5, Hold::Seen).unwrap();
-        assert_eq!(pet.get(6)["mood"], "review");
-        assert_eq!(pet.get(6)["took"], 4);
+        assert_eq!(pet.get(6, true)["mood"], "review");
+        assert_eq!(pet.get(6, true)["took"], 4);
         assert_eq!(out.alerts.len(), 1);
         assert_eq!((out.alerts[0].mood.as_str(), out.alerts[0].whose.as_str()), ("review", ""));
     }
@@ -678,7 +793,7 @@ mod tests {
         let mut pet = Pet::default();
         pet.apply(&msg(json!({ "session": "a", "mood": "waiting", "project": "one" })), 1, Hold::Seen);
         pet.apply(&msg(json!({ "session": "b", "mood": "working", "project": "two" })), 2, Hold::Seen);
-        let now = pet.get(3);
+        let now = pet.get(3, true);
         assert_eq!(now["mood"], "waiting");
         assert_eq!(now["project"], "one");
         assert_eq!(now["others"], 1);
@@ -691,12 +806,12 @@ mod tests {
         pet.apply(&msg(json!({ "session": "a", "mood": "done" })), 1, Hold::Seen);
         assert!(!pet.tick(1_000_000, Hold::Seen));
         assert!(pet.seen(2, Hold::Seen));
-        assert_eq!(pet.get(3)["mood"], "idle");
+        assert_eq!(pet.get(3, true)["mood"], "idle");
 
         pet.apply(&msg(json!({ "session": "a", "mood": "error" })), 10, Hold::Secs(8));
         assert!(!pet.tick(8_009, Hold::Secs(8)));
         assert!(pet.tick(8_010, Hold::Secs(8)));
-        assert_eq!(pet.get(8_011)["mood"], "idle");
+        assert_eq!(pet.get(8_011, true)["mood"], "idle");
     }
 
     #[test]
@@ -714,11 +829,11 @@ mod tests {
         pet.apply(&msg(json!({ "session": "a", "mood": "working" })), 0, Hold::Seen);
         pet.apply(&msg(json!({ "session": "b", "mood": "idle" })), 0, Hold::Seen);
         assert!(pet.check_stale(STALE_MS + 1, Hold::Seen));
-        assert_eq!(pet.get(STALE_MS + 2)["mood"], "idle");
+        assert_eq!(pet.get(STALE_MS + 2, true)["mood"], "idle");
         pet.check_stale(FORGET_MS + 1, Hold::Seen);
-        assert_eq!(pet.get(FORGET_MS + 2)["sessions"], 1);
+        assert_eq!(pet.get(FORGET_MS + 2, true)["sessions"], 1);
         pet.apply(&msg(json!({ "session": "a", "mood": "idle", "event": "session-end" })), 1, Hold::Seen);
-        assert_eq!(pet.get(FORGET_MS + 3)["sessions"], 0);
+        assert_eq!(pet.get(FORGET_MS + 3, true)["sessions"], 0);
     }
 
     #[test]
@@ -727,24 +842,24 @@ mod tests {
         let edit = json!({ "key": "step.edit", "vars": { "file": "a.rs" } });
         let agent = json!({ "key": "step.agent", "vars": { "what": "Explore" } });
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), 10, Hold::Seen);
-        assert_eq!(pet.get(11)["step"]["key"], "step.thinking");
-        assert_eq!(pet.get(11)["stepSince"], 10);
+        assert_eq!(pet.get(11, true)["step"]["key"], "step.thinking");
+        assert_eq!(pet.get(11, true)["stepSince"], 10);
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "tool-start", "toolId": "1", "step": agent })), 20, Hold::Seen);
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "tool-start", "toolId": "2", "step": edit })), 30, Hold::Seen);
-        assert_eq!((pet.get(31)["step"].clone(), pet.get(31)["stepSince"].clone()), (edit, json!(30)));
+        assert_eq!((pet.get(31, true)["step"].clone(), pet.get(31, true)["stepSince"].clone()), (edit, json!(30)));
         // The subagent's tool ends: back to the agent, not to thinking.
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "tool-done", "toolId": "2", "detail": "Edit", "file": "D:/p/a.rs" })), 40, Hold::Seen);
-        assert_eq!(pet.get(41)["step"], agent);
+        assert_eq!(pet.get(41, true)["step"], agent);
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "tool-failed", "toolId": "1" })), 50, Hold::Seen);
-        assert_eq!((pet.get(51)["step"]["key"].clone(), pet.get(51)["stepSince"].clone()), (json!("step.thinking"), json!(50)));
-        assert_eq!(pet.get(51)["files"], 1);
+        assert_eq!((pet.get(51, true)["step"]["key"].clone(), pet.get(51, true)["stepSince"].clone()), (json!("step.thinking"), json!(50)));
+        assert_eq!(pet.get(51, true)["files"], 1);
         // Waiting or done, there is no step.
         pet.apply(&msg(json!({ "session": "a", "mood": "done", "reply": "改好了。" })), 60, Hold::Seen);
-        let now = pet.get(61);
+        let now = pet.get(61, true);
         assert_eq!((now["mood"].as_str(), now["step"].is_null(), now["reply"].as_str(), now["files"].as_u64()), (Some("review"), true, Some("改好了。"), Some(1)));
         // The next turn starts clean.
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), 70, Hold::Seen);
-        assert_eq!((pet.get(71)["files"].as_u64(), pet.get(71)["reply"].as_str()), (Some(0), Some("")));
+        assert_eq!((pet.get(71, true)["files"].as_u64(), pet.get(71, true)["reply"].as_str()), (Some(0), Some("")));
     }
 
     #[test]
@@ -753,24 +868,24 @@ mod tests {
         let edit = json!({ "session": "a", "mood": "working", "detail": "Write", "event": "tool-done", "toolId": "c1", "file": "C:/w/notes.md", "agent": "dsh", "within": true });
         // No such session: none made.
         assert!(pet.apply(&msg(edit.clone()), 1, Hold::Seen).is_none());
-        assert_eq!(pet.get(2)["sessions"], 0);
+        assert_eq!(pet.get(2, true)["sessions"], 0);
         // At rest, or its turn ended (an idle review): left as it is.
         pet.apply(&msg(json!({ "session": "a", "mood": "idle", "agent": "dsh" })), 3, Hold::Seen);
         assert!(pet.apply(&msg(edit.clone()), 4, Hold::Seen).is_none());
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start", "task": "整理笔记" })), 5, Hold::Seen);
         pet.apply(&msg(json!({ "session": "a", "mood": "done" })), 6, Hold::Seen);
         assert!(pet.apply(&msg(edit.clone()), 7, Hold::Seen).is_none());
-        assert_eq!((pet.get(8)["mood"].as_str(), pet.get(8)["files"].as_u64()), (Some("done"), Some(0)));
+        assert_eq!((pet.get(8, true)["mood"].as_str(), pet.get(8, true)["files"].as_u64()), (Some("done"), Some(0)));
         // Within its turn: its edit is the turn's, and the turn ends in review.
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), 10, Hold::Seen);
         assert!(pet.apply(&msg(edit), 11, Hold::Seen).unwrap().changed);
-        assert_eq!(pet.get(12)["files"], 1);
+        assert_eq!(pet.get(12, true)["files"], 1);
         pet.apply(&msg(json!({ "session": "a", "mood": "done" })), 13, Hold::Seen);
-        assert_eq!(pet.get(14)["mood"], "review");
+        assert_eq!(pet.get(14, true)["mood"], "review");
         // A subagent's own line, should one have been made: gone.
         pet.apply(&msg(json!({ "session": "9d1f", "mood": "idle", "agent": "dsh" })), 15, Hold::Seen);
         pet.apply(&msg(json!({ "session": "9d1f", "mood": "idle", "event": "session-end", "agent": "dsh" })), 16, Hold::Seen);
-        assert_eq!(pet.get(17)["sessions"], 1);
+        assert_eq!(pet.get(17, true)["sessions"], 1);
     }
 
     #[test]
@@ -780,12 +895,12 @@ mod tests {
         assert_eq!(out.alerts.len(), 1);
         assert_eq!((out.alerts[0].mood.as_str(), out.alerts[0].whose.as_str()), ("waiting", "pet"));
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start", "task": "修复岛" })), 2, Hold::Seen);
-        assert_eq!(pet.get(3)["name"], "修复岛");
+        assert_eq!(pet.get(3, true)["name"], "修复岛");
         pet.apply(&msg(json!({ "session": "a", "mood": "done", "title": "岛的设置" })), 4, Hold::Seen);
-        assert_eq!(pet.get(5)["name"], "岛的设置");
+        assert_eq!(pet.get(5, true)["name"], "岛的设置");
         // A new task does not take over a title.
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start", "task": "下一件事" })), 6, Hold::Seen);
-        assert_eq!(pet.list()[0]["name"], "岛的设置");
+        assert_eq!(pet.list(true)[0]["name"], "岛的设置");
     }
 
     #[test]
@@ -793,7 +908,7 @@ mod tests {
         let mut pet = Pet::default();
         let todo = |pet: &mut Pet, todo: Value| {
             pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "tool-start", "todo": todo })), 1, Hold::Seen);
-            pet.get(2)["todo"].clone()
+            pet.get(2, true)["todo"].clone()
         };
         let list = json!({ "set": [
             { "text": "A", "active": "Doing A", "status": "completed" },
@@ -810,7 +925,7 @@ mod tests {
         assert_eq!(todo(&mut pet, json!({ "update": { "id": "2", "status": "deleted" } })), json!({ "done": 1, "total": 1, "active": "" }));
         // All done, and a new turn: the list is gone.
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), 3, Hold::Seen);
-        assert!(pet.get(4)["todo"].is_null());
+        assert!(pet.get(4, true)["todo"].is_null());
     }
 
     #[test]
@@ -834,9 +949,9 @@ mod tests {
         pet.apply(&codex("t1", json!({ "mood": "working", "event": "turn-start" })), 1, Hold::Seen);
         pet.apply(&codex("t1", json!({ "mood": "working", "detail": "apply_patch", "event": "tool-done" })), 2, Hold::Seen);
         pet.apply(&codex("t1", json!({ "mood": "done", "event": "turn-end" })), 3, Hold::Seen);
-        assert_eq!(pet.get(4)["mood"], "review");
-        assert_eq!(pet.get(4)["agent"], "codex");
-        assert_eq!(pet.list()[0]["agent"], "codex");
+        assert_eq!(pet.get(4, true)["mood"], "review");
+        assert_eq!(pet.get(4, true)["agent"], "codex");
+        assert_eq!(pet.list(true)[0]["agent"], "codex");
     }
 
     #[test]
@@ -846,25 +961,25 @@ mod tests {
         pet.apply(&codex("t1", json!({ "mood": "working", "detail": "apply_patch", "event": "tool-done" })), 1, Hold::Seen);
         pet.apply(&codex("t1", json!({ "mood": "working", "event": "turn-start" })), 2, Hold::Seen);
         pet.apply(&codex("t1", json!({ "mood": "done", "event": "turn-end" })), 3, Hold::Seen);
-        assert_eq!(pet.get(4)["mood"], "review");
+        assert_eq!(pet.get(4, true)["mood"], "review");
 
         // A step after its turn ended: she stays done, not back at work.
         pet.apply(&codex("t2", json!({ "mood": "working", "event": "turn-start" })), 10, Hold::Seen);
         pet.apply(&codex("t2", json!({ "mood": "done", "event": "turn-end" })), 11, Hold::Seen);
         pet.apply(&codex("t2", json!({ "mood": "working", "detail": "Bash", "event": "tool-start", "step": { "key": "step.command", "vars": { "what": "ls" } } })), 12, Hold::Seen);
-        assert_eq!(pet.get(13)["mood"], "done");
+        assert_eq!(pet.get(13, true)["mood"], "done");
         // A late edit makes that done a review.
         pet.apply(&codex("t2", json!({ "mood": "working", "detail": "apply_patch", "event": "tool-done" })), 14, Hold::Seen);
-        assert_eq!(pet.get(15)["mood"], "review");
+        assert_eq!(pet.get(15, true)["mood"], "review");
 
         // Interrupted: back to rest, and its stragglers too.
         pet.apply(&codex("t3", json!({ "mood": "working", "event": "turn-start" })), 20, Hold::Seen);
         pet.apply(&codex("t3", json!({ "mood": "idle", "event": "turn-end" })), 21, Hold::Seen);
         pet.apply(&codex("t3", json!({ "mood": "working", "detail": "Bash" })), 22, Hold::Seen);
-        assert_eq!(pet.get(23)["mood"], "idle");
+        assert_eq!(pet.get(23, true)["mood"], "idle");
         // The next turn works as ever.
         pet.apply(&codex("t4", json!({ "mood": "working", "event": "turn-start" })), 30, Hold::Seen);
-        assert_eq!(pet.get(31)["mood"], "working");
+        assert_eq!(pet.get(31, true)["mood"], "working");
     }
 
     #[test]
@@ -878,9 +993,9 @@ mod tests {
         assert_eq!(out.turns, 1);
         let out = pet.apply(&codex("t2", json!({ "mood": "working", "event": "turn-start" })), 10_100, Hold::Seen).unwrap();
         assert_eq!(out.turns, 0);
-        assert_eq!(pet.get(10_200)["files"], 0);
+        assert_eq!(pet.get(10_200, true)["files"], 0);
         pet.apply(&codex("t2", json!({ "mood": "done", "event": "turn-end" })), 12_000, Hold::Seen);
-        assert_eq!(pet.get(12_100)["mood"], "done");
+        assert_eq!(pet.get(12_100, true)["mood"], "done");
     }
 
     #[test]
@@ -888,13 +1003,13 @@ mod tests {
         let mut pet = Pet::default();
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "project": "pet", "chain": [[10, 5], [8, 3]] })), 1, Hold::Seen);
         assert!(pet.has_chain("a"));
-        assert_eq!(pet.get(2)["jump"], true);
+        assert_eq!(pet.get(2, true)["jump"], true);
         // A message without one keeps it.
         pet.apply(&msg(json!({ "session": "a", "mood": "done", "title": "岛" })), 3, Hold::Seen);
         assert_eq!(pet.jump_target("a"), Some((vec![(10, 5), (8, 3)], vec!["岛".into(), String::new(), "pet".into()])));
         pet.apply(&msg(json!({ "session": "b", "mood": "working" })), 4, Hold::Seen);
         assert!(!pet.has_chain("b") && pet.jump_target("b").is_none());
-        assert_eq!(pet.list().as_array().unwrap().iter().find(|s| s["id"] == "b").unwrap()["jump"], false);
+        assert_eq!(pet.list(true).as_array().unwrap().iter().find(|s| s["id"] == "b").unwrap()["jump"], false);
     }
 
     #[test]
@@ -932,7 +1047,7 @@ mod tests {
     const HIDE: u64 = IDLE_HIDE_MIN * 60 * 1000;
 
     fn ids(pet: &Pet) -> Vec<String> {
-        let mut ids: Vec<String> = pet.list().as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_string()).collect();
+        let mut ids: Vec<String> = pet.list(true).as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_string()).collect();
         ids.sort();
         ids
     }
@@ -969,7 +1084,7 @@ mod tests {
         assert!(!pet.hide_quiet(seen + HIDE - 1, HIDE));
         assert!(pet.hide_quiet(seen + HIDE, HIDE));
         assert_eq!(ids(&pet), ["b"]);
-        let now = pet.get(seen + HIDE);
+        let now = pet.get(seen + HIDE, true);
         assert_eq!((now["id"].as_str(), now["sessions"].as_u64(), now["others"].as_u64()), (Some("b"), Some(1), Some(0)));
         // Kept all the same: its names stay out of a crash report.
         assert!(pet.names().contains(&"修复岛".to_string()));
@@ -977,9 +1092,9 @@ mod tests {
         let back = seen + HIDE + 10;
         pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), back, Hold::Seen);
         assert!(!pet.hide_quiet(back, HIDE));
-        let a = pet.list().as_array().unwrap().iter().find(|s| s["id"] == "a").cloned().unwrap();
+        let a = pet.list(true).as_array().unwrap().iter().find(|s| s["id"] == "a").cloned().unwrap();
         assert_eq!((a["name"].as_str(), a["project"].as_str(), a["mood"].as_str()), (Some("修复岛"), Some("pet"), Some("working")));
-        assert_eq!(pet.get(back)["sessions"], 2);
+        assert_eq!(pet.get(back, true)["sessions"], 2);
     }
 
     #[test]
@@ -990,7 +1105,7 @@ mod tests {
         assert!(!pet.hide_quiet(8_000 + HIDE - 1, HIDE));
         assert!(pet.hide_quiet(8_000 + HIDE, HIDE));
         assert!(ids(&pet).is_empty());
-        assert_eq!(pet.get(8_000 + HIDE)["sessions"], 0);
+        assert_eq!(pet.get(8_000 + HIDE, true)["sessions"], 0);
         // Always shown, set so: back in sight.
         assert!(pet.hide_quiet(8_000 + HIDE, 0));
         assert_eq!(ids(&pet), ["a"]);
@@ -1014,5 +1129,87 @@ mod tests {
         assert_eq!(pet.sessions.len(), 2);
         pet.check_stale(STALE_MS + 1 + FORGET_MS + 1, Hold::Seen);
         assert_eq!(pet.sessions.len(), 1);
+    }
+
+    // T-J：会话行能展开看到这一轮改的文件（最多 15 条，多的说「等 N 个」）
+    // 与最近几步（最多 5 条，含成功/失败）；换一轮就清空。
+    #[test]
+    fn a_session_line_opens_to_its_files_and_recent_steps() {
+        let mut pet = Pet::default();
+        pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), 1, Hold::Seen);
+        for n in 0..20 {
+            pet.apply(&msg(json!({ "session": "a", "mood": "working", "detail": "Edit", "event": "tool-done", "toolId": format!("t{n}"), "file": format!("D:/w/f{n}.rs") })), 2 + n, Hold::Seen);
+        }
+        pet.apply(&msg(json!({ "session": "a", "mood": "working", "detail": "Bash", "event": "tool-failed", "toolId": "fail-1", "step": { "key": "step.command", "vars": { "what": "cargo test" } } })), 30, Hold::Seen);
+        let now = pet.get(31, true);
+        assert_eq!(now["files"], 20);
+        assert_eq!(now["fileList"].as_array().unwrap().len(), 15);
+        assert_eq!(now["filesMore"], 5);
+        assert_eq!(now["fileList"][0], "D:/w/f0.rs");
+        let steps = now["recentSteps"].as_array().unwrap();
+        assert_eq!(steps.len(), 5);
+        let last = steps.last().unwrap();
+        assert_eq!((last["key"].as_str(), last["ok"].as_bool()), (Some("step.command"), Some(false)));
+        assert_eq!(steps[steps.len() - 2]["ok"], true);
+        // 换一轮：文件与步骤都从头来。
+        pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start", "task": "下一件事" })), 40, Hold::Seen);
+        let next = pet.get(41, true);
+        assert_eq!((next["fileList"].as_array().unwrap().len(), next["filesMore"].as_u64(), next["recentSteps"].as_array().unwrap().len()), (0, Some(0), 0));
+    }
+
+    // T-J：显不显示具体内容由后端投影决定——关掉时 fileList / recentSteps 根本
+    // 不在给出的 JSON 里（不是前端藏起来），/v1 与 SSE 用的是同一个 view。
+    #[test]
+    fn the_specifics_are_left_out_when_the_setting_is_off() {
+        let mut pet = Pet::default();
+        pet.apply(&msg(json!({ "session": "a", "mood": "working", "event": "turn-start" })), 1, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "a", "mood": "working", "detail": "Edit", "event": "tool-done", "toolId": "t1", "file": "D:/w/a.rs" })), 2, Hold::Seen);
+        let open = pet.get(3, true);
+        assert!(open.get("fileList").is_some() && open.get("recentSteps").is_some());
+        let shut = pet.get(3, false);
+        assert!(shut.get("fileList").is_none(), "no file list when the setting is off");
+        assert!(shut.get("recentSteps").is_none(), "no steps when the setting is off");
+        // 计数与其余字段一个不少。
+        assert_eq!((shut["files"].as_u64(), shut["mood"].as_str()), (Some(1), Some("working")));
+        assert!(pet.list(false).as_array().unwrap().iter().all(|s| s.get("fileList").is_none()));
+    }
+
+    // A3：`/v1/sessions` 的接口投影不把页面用的 detail/step/reply/error/cwd 原样外露；
+    // 关掉 details 时连名字、项目、文件清单与步骤一起裁剪，计数保留。
+    #[test]
+    fn the_api_projection_hides_raw_ui_fields() {
+        let mut pet = Pet::default();
+        pet.apply(&msg(json!({ "session": "a", "agent": "codex", "workspace": "D:\\\\w\\\\pet", "project": "pet", "mood": "working", "event": "turn-start", "task": "修复岛", "detail": "Bash", "step": { "key": "step.command", "vars": { "what": "cargo test" } } })), 1, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "a", "mood": "working", "detail": "Edit", "event": "tool-done", "toolId": "t1", "file": "D:/w/pet/a.rs" })), 2, Hold::Seen);
+        let open = pet.api_list(true, None, None);
+        let first = &open.as_array().unwrap()[0];
+        for hidden in ["detail", "step", "reply", "error", "cwd"] {
+            assert!(first.get(hidden).is_none(), "页面用的原始字段不外露：{hidden}");
+        }
+        assert_eq!((first["name"].as_str(), first["project"].as_str()), (Some("修复岛"), Some("pet")));
+        assert_eq!(first["fileList"].as_array().unwrap().len(), 1);
+        let shut = pet.api_list(false, None, None);
+        let first = &shut.as_array().unwrap()[0];
+        for hidden in ["name", "project", "fileList", "recentSteps", "detail", "reply", "cwd"] {
+            assert!(first.get(hidden).is_none(), "关掉 specifics 后也不给：{hidden}");
+        }
+        assert_eq!((first["mood"].as_str(), first["files"].as_u64()), (Some("working"), Some(1)));
+    }
+
+    // A1/A3：过滤用私有 cwd（路径组件）与 agent 逗号列表；响应里没有 cwd。
+    #[test]
+    fn the_api_lists_filter_by_agent_and_cwd_components() {
+        let mut pet = Pet::default();
+        pet.apply(&msg(json!({ "session": "a", "agent": "codex", "workspace": "D:\\\\w\\\\pet", "mood": "working", "event": "turn-start" })), 1, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "b", "agent": "dsh", "workspace": "D:\\\\work\\\\other", "mood": "working" })), 2, Hold::Seen);
+        pet.apply(&msg(json!({ "session": "c", "workspace": "D:\\\\w\\\\pet\\\\deep", "mood": "waiting" })), 3, Hold::Seen);
+        let ids = |value: Value| value.as_array().unwrap().iter().filter_map(|s| s["id"].as_str().map(str::to_string)).collect::<Vec<String>>();
+        assert_eq!(ids(pet.api_list(true, Some("codex"), Some("D:/w"))), ["a"]);
+        assert_eq!(ids(pet.api_list(true, Some("dsh"), None)), ["b"]);
+        let mut both = ids(pet.api_list(true, None, Some("D:\\\\w")));
+        both.sort();
+        assert_eq!(both, ["a", "c"], "路径组件包含，不是裸前缀；claude 会话也算");
+        assert!(ids(pet.api_list(true, None, Some("D:/work"))).contains(&"b".to_string()));
+        assert!(!ids(pet.api_list(true, None, Some("D:/work"))).contains(&"a".to_string()), "D:/w 不含 D:/work");
     }
 }

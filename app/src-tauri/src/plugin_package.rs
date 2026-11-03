@@ -59,16 +59,38 @@ mod tests {
     #[test] fn official_release_archives_use_the_host_installation_validator() {
         let Some(folder) = std::env::var_os("FISH_PLUGIN_RELEASE_DIR") else { return; };
         let root = std::env::temp_dir().join("fish-official-release-contract");
-        for key in ["feishu", "clash", "magpie", "ofm"] {
+        // 三个现行官方插件各自带自己的版本：验包只认包内清单的版本/平台/字节/SHA-256，
+        // 不再要求插件版本等于宿主版本——两者可以独立升级（T-O 验收口径）。
+        for key in ["feishu", "clash", "magpie"] {
             let bytes = std::fs::read(Path::new(&folder).join(format!("{key}.fish-plugin"))).unwrap();
             let digest = format!("{:x}", Sha256::digest(&bytes));
             let package = inspect(&bytes, &digest, &root, Source::OfficialCatalog, "windows-x86_64").unwrap();
             assert_eq!(package.manifest.id, format!("fish.{key}"));
-            // 本批（2.0.0）四个插件与宿主同版；跟着 Cargo.toml 走，下一批换版本号时
-            // 这里不用再改一次，也不会像写死 "1.0.0" 那样在 2.0.0 资产上直接失败。
-            assert_eq!(package.manifest.version, env!("CARGO_PKG_VERSION"));
-            println!("{key}: {} resources verified", package.files.len());
+            let version = package.manifest.version.clone();
+            let parts: Vec<&str> = version.split('.').collect();
+            assert_eq!(parts.len(), 3, "{key} 的插件版本必须是 x.y.z：{version}");
+            assert!(parts.iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())), "{key} 的插件版本必须是纯数字段：{version}");
+            assert!(!version.is_empty(), "{key} 缺插件版本");
+            println!("{key}: {version}, {} resources verified", package.files.len());
         }
+    }
+    // 退役 OFM 不再是发行包：只为旧安装保留“按字节识别、不误当默认安装或更新源”的兼容测试。
+    #[test] fn retired_ofm_archive_is_recognised_but_never_a_release_target() {
+        let root = std::env::temp_dir().join("fish-retired-ofm-contract");
+        let readme = b"# OFM 2.0.1 (retired)".to_vec();
+        let manifest = serde_json::json!({"schema":1,"id":"fish.ofm","name":"OFM 本地模型","version":"2.0.1","hostApi":1,"platforms":["windows-x86_64"],"storage":{"directory":crate::legacy_ofm::retired_namespace(),"dataSchema":1},"backend":{"runtime":"node","entry":"backend.mjs"},"capabilities":["storage"],"pages":[{"id":"main","title":"模型","entry":"page.html"}],"files":{"backend.mjs":format!("{:x}",Sha256::digest(b"console.log('retired')")),"page.html":format!("{:x}",Sha256::digest(b"<html></html>")),"README.md":format!("{:x}",Sha256::digest(&readme))}});
+        let bytes = crate::identity_archive::zip(&BTreeMap::from([
+            ("plugin.json".into(), serde_json::to_vec(&manifest).unwrap()),
+            ("backend.mjs".into(), b"console.log('retired')".to_vec()),
+            ("page.html".into(), b"<html></html>".to_vec()),
+            ("README.md".into(), readme),
+        ])).unwrap();
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        let package = inspect(&bytes, &digest, &root, Source::OfficialCatalog, "windows-x86_64").expect("已装旧包仍要被识别");
+        assert_eq!(package.manifest.id, crate::legacy_ofm::RETIRED_PLUGIN_ID);
+        // 官方商店目录不再接受它：旧包只能来自用户已有安装，不会成为默认安装或更新源。
+        let entry = serde_json::json!({"schema":1,"plugins":[{"id":"fish.ofm","name":"OFM","description":"本地模型","authors":["FISH"],"version":"2.0.1","hostApi":1,"platform":"windows-x86_64","url":"https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.0.1/ofm.fish-plugin","sha256":"a".repeat(64),"bytes":1}]});
+        assert!(crate::plugin_store::parse(&serde_json::to_vec(&entry).unwrap()).is_err(), "退役插件不得出现在官方目录");
     }
     #[test] fn package_requires_both_archive_and_resource_checksums() {
         let root = std::env::temp_dir().join("fish-package-contract");

@@ -8,7 +8,7 @@ const http = require('node:http')
 const path = require('node:path')
 const { test } = require('node:test')
 
-const TEMPLATE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'opencode', 'wakuwaku.js'), 'utf8')
+const TEMPLATE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'opencode', 'fish-dock.js'), 'utf8')
 
 // The plugin as she writes it for a port.
 const load = port => import('data:text/javascript,' + encodeURIComponent(TEMPLATE.replace('const PORT = 47213', `const PORT = ${port}`)))
@@ -72,7 +72,7 @@ test('a turn as OpenCode 2.0.29 gives it, told in order with what only the plugi
     plugin.hear(e)
   }
   await plugin.idle()
-  assert.ok(her.got.every(g => g.url === '/hook?from=wakuwaku&agent=opencode'))
+  assert.ok(her.got.every(g => g.url === '/hook?from=fish-dock&agent=opencode'))
   const told = her.got.map(g => g.event)
   assert.deepEqual(
     told.map(e => e.type),
@@ -138,7 +138,7 @@ test('with her not there nothing waits, and OpenCode is never answered', async (
 test('OpenCode loads it: a default export with an id and a setup, which listens until let go', async () => {
   const her = await fakeHer()
   const plugin = (await load(her.port)).default
-  assert.equal(plugin.id, 'wakuwaku')
+  assert.equal(plugin.id, 'fish-dock')
   let subscribed = 0
   const { ctx } = fakeOpenCode()
   ctx.event.subscribe = ({ signal }) => {

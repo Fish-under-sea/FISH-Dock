@@ -390,6 +390,8 @@ body {
   align-items: center;
   padding: 4px 0;
   height: auto;
+  /* 2.0.4 T-G：侧边条只有 44 px，带秒的 HH:mm:ss 用 11 px 才不挤掉托盘。 */
+  font-size: 11px;
 }
 
 .b-side .desk {

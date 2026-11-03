@@ -7,7 +7,7 @@
 //!     拿一次短锁结账；等待期间实例被停用/卸载就按代次作废（`retire`/`settles`）；
 //!   - 启动后的清理（`cleanup()` / `cleanup_staging()`）挪到 `MAINTENANCE_DELAY` 之后
 //!     的维护线程，不再排在拉进程之前。
-use std::{collections::BTreeMap, fs, path::{Path,PathBuf}, sync::{Arc,Mutex,Once}};
+use std::{collections::{BTreeMap,BTreeSet}, fs, path::{Path,PathBuf}, sync::{Arc,Mutex,Once}};
 use serde_json::{json,Value};
 use crate::{plugin_install::{Installed,Manager},plugin_package::Package,plugin_process::Process,storage_context::Context};
 
@@ -23,6 +23,10 @@ pub fn log_directory(context:&Context)->PathBuf{log_directory_of(context.host.pa
 pub fn log_file(context:&Context,id:&str)->PathBuf{log_directory(context).join(format!("{id}.log"))}
 // pid 复用防线：记录里的启动时刻与这个 pid 的实际启动时刻差这么多就别认。
 const ORPHAN_SLACK_MS:u64=5000;
+// 回收孤儿内核时探测 controllerPort 的连接等待（毫秒）：连上就是可 attach 的活内核，
+// 留给插件的 attach 路径接管；连不上才当上一轮遗留的僵尸内核。提成具名常量，别在
+// 网络调用里留裸 300（红线 5：硬编码魔法值）。
+const ORPHAN_PROBE_TIMEOUT_MS:u64=300;
 // 启动后多久跑清理（T03）。冷启关键路径上不许有「扫目录、删文件」这类活：以前
 // cleanup()/cleanup_staging() 在 resume() 里同步做，占着 CURRENT、排在拉进程之前，
 // 而它扫的正是 packages/ 与各命名空间的 tmp/。现在统一挪到启动 30 s 之后。
@@ -130,15 +134,21 @@ pub struct Runner {
     // 正在退出（shutdown → stop_all）：拉起的线程看到它就放弃，别在退出中途又开一个
     // 插件进程（T03 把拉进程挪出了 CURRENT，所以这条闸必须有）。
     stopping:bool,
+    // 2.0.4 t33（F1）：最终退出。stop_all 之后不再接受 resume；身份导出的暂停只用
+    // `stopping`（可复位），不会把所有插件永久停在备份时刻。
+    closed:bool,
+    // 2.0.4 t33（F1/A04）：正在拉起的 id。scheduler 的 token 只管一轮；跨轮重复 resume
+    // 时靠它挡住「同一个插件两个 worker 同时 spawn / 替换健康实例」。
+    in_flight:BTreeSet<String>,
     // 拉进程走锁外（T03「先取快照再放锁」）。只有全局 CURRENT 那一份打开它：那条
     // 启动链的锁由 plugin_api::resume 持有，resume() 只能把活交出去才不占着锁。
     // 直接 new 出来的 Runner（单测、或调用方自己持有一份）保持同步语义。
     deferred:bool,
 }
 impl Default for Runner {
-    fn default()->Self{Runner{processes:BTreeMap::new(),generations:BTreeMap::new(),failures:BTreeMap::new(),rollback_notes:BTreeMap::new(),host:None,versions:BTreeMap::new(),stopping:false,deferred:false}}
+    fn default()->Self{Runner{processes:BTreeMap::new(),generations:BTreeMap::new(),failures:BTreeMap::new(),rollback_notes:BTreeMap::new(),host:None,versions:BTreeMap::new(),stopping:false,closed:false,in_flight:BTreeSet::new(),deferred:false}}
 }
-pub static CURRENT:Mutex<Runner>=Mutex::new(Runner{processes:BTreeMap::new(),generations:BTreeMap::new(),failures:BTreeMap::new(),rollback_notes:BTreeMap::new(),host:None,versions:BTreeMap::new(),stopping:false,deferred:true});
+pub static CURRENT:Mutex<Runner>=Mutex::new(Runner{processes:BTreeMap::new(),generations:BTreeMap::new(),failures:BTreeMap::new(),rollback_notes:BTreeMap::new(),host:None,versions:BTreeMap::new(),stopping:false,closed:false,in_flight:BTreeSet::new(),deferred:true});
 // valid_method 判一次业务方法名（宿主保留前缀、长度、字符集）。两条入口共用，
 // 免得「页面能调、设置页不能调」这种两套判据。
 fn valid_method(method:&str)->Result<(),String>{
@@ -176,60 +186,147 @@ pub fn present(id:&str)->bool{
     let Ok(runner)=CURRENT.lock() else {return false};
     runner.present(id)
 }
-// spawn_starts 在 CURRENT 之外逐个拉起自启插件（T03「先取快照再放锁」）。每个插件
-// 拿两次短锁：
-//   ① 先看一眼「还要不要拉起」（没在退出、也没有实例在跑）→ 记下代次 → 放锁；
-//   ② 锁外做最贵的那一段：快照校验 + spawn + hello/activate 握手 + 注册表复核；
-//   ③ 回来只做「代次比较 + 装入实例表」，等待期间被停用/卸载/退出就把刚拉起来的
-//      进程当场丢掉，绝不塞回实例表，也绝不碰之后拉起的新实例。
-//
-// t5-F2（t19/R3 修正口径）：**结算段**才是「锁内外那条线」的落点——回来只调
-// `install_instance`，它参数里连 Manager 都没有，所以「在锁里读注册表 / verify / 写盘」
-// 在类型上就写不出来。但别把这句话扩大到整条拉起路径：这个函数里还有两处也持着
-// CURRENT 短锁——①开头看「还要不要拉起」（present/generation，纯内存查表）；
-// ②失败记账 `record → append` 会**写一行 plugin-failures.log**（有 I/O，但有界）。
-// 以前这里握着 CURRENT 调 manager.list() + manager.set_enabled()：后者会走
-// recover_unlocked + verify + namespace + save，升级后首启没有 plugin-verified 快照时
-// 就是对 129.9 MB 的全文哈希——那正好把 T03 省下的成本又塞回锁里（且页面 open / 设置页
-// view / present() 全排在后面）。
+// discard_late（t33/F3）：整轮到期后才起来的实例不登记为健康，直接停掉并摘除；
+// 只有代次仍对得上才动手，绝不误杀之后拉起的新实例。
+pub fn discard_late(id:&str,generation:u64){
+    // 只借出句柄：实例锁在 CURRENT 之外等/停，避免与「持实例锁回 CURRENT 结账」的
+    // call_outside 形成锁序环。
+    let handle={
+        let Ok(mut runner)=CURRENT.lock() else{return};
+        if runner.generation(id)!=generation{return;}
+        runner.processes.remove(id)
+    };
+    if let Some(handle)=handle{
+        if let Ok(mut process)=handle.lock(){process.stop();}
+    }
+}
+// spawn_starts 在 CURRENT 之外跑整轮自启调度（T-E / A02–A04）：每插件一个在途 token
+// （id + 代次 + 版本 + 摘要），最多两槽并发，一次尝试一个共享 deadline，整轮 180 s 生命周期，
+// 首次 + 至多 3 次重试（退避 0.5/2/5 s）。回填只在 CURRENT 下做代次比较与登记。
 fn spawn_starts(context:Context,rows:Vec<Installed>,node:Option<PathBuf>){
     std::thread::spawn(move||{
         let manager=Manager{context:&context};
-        for row in rows {
-            let id=row.manifest.id.clone();
-            let generation=match CURRENT.lock() {
-                Ok(runner) if !runner.stopping&&!runner.present(&id)=>runner.generation(&id),
-                _=>continue,
-            };
-            let started=match Process::start(&manager,&row,node.as_deref(),true) {
-                Ok(process)=>process,
-                Err(error)=>{
-                    // 失败也要落到插件卡上，但只在这一轮还没被作废时才记（#53-3）。
-                    if let Ok(mut runner)=CURRENT.lock() {
-                        if runner.settles_generation(&id,generation) { let failure=runner.failure(&id,&row.manifest.version,"启动",None,&error); runner.record(&manager,failure); }
-                    }
-                    continue;
-                }
-            };
-            // 锁外复核注册表：用户并发点了停用的话那边已经是 false，这次拉起就作废。
-            // 这里**只读**，不再写 set_enabled(true)——resume() 交来的 wanted 本来就只有
-            // row.enabled==true 的行，那次重复写会连带 recover+verify+save 一整趟。
-            if !registry_enabled(&manager,&id) { drop(started); continue; }
-            match CURRENT.lock() {
-                Ok(mut runner)=>{ runner.install_instance(&id,generation,started); }
-                Err(_)=>{ return; }
+        // F1（t33）：退出/暂停闸与实例表都在建 token 之前看一次——基线在同一个位置有
+        // `!runner.stopping && !runner.present(&id)`；这里再加 `in_flight`（跨轮重复 resume
+        // 时挡第二个 worker）。被挡下的 id 不建 token，卡片继续按实时 running 报状态。
+        let tokens:Vec<crate::plugin_start::Token>=match CURRENT.lock() {
+            Ok(runner)=>{
+                if runner.closed { eprintln!("FISH Dock: 宿主正在退出，跳过自启动调度"); return; }
+                if runner.stopping { eprintln!("FISH Dock: 插件运行已暂停，跳过自启动调度"); return; }
+                rows.iter()
+                    .filter(|row|!runner.present(&row.manifest.id)&&!runner.in_flight.contains(&row.manifest.id))
+                    .map(|row|crate::plugin_start::Token::of(row,runner.generation(&row.manifest.id)))
+                    .collect()
             }
-        }
+            Err(_)=>{eprintln!("FISH Dock: 插件运行锁不可用，跳过自启动调度");return;},
+        };
+        if tokens.is_empty() { return; }
+        let cold=crate::config::plugin_startup_is_cold();
+        // 每一轮都有独立编号（F3）：旧轮的 worker 回来时 `finish` 按 round 丢弃。
+        let round=crate::plugin_start::begin(cold,crate::config::plugin_start_lifecycle(),crate::config::plugin_start_budget_of(true),crate::config::plugin_start_budget_of(false));
+        eprintln!("FISH Dock: 插件自启调度第 {round} 轮开始，候选 {} 个",tokens.len());
+        for token in tokens { crate::plugin_start::enqueue(token); }
+        let node=node.as_deref();
+        crate::plugin_start::drive(|assignment|scheduled_attempt(&manager,node,assignment));
     });
 }
-// registry_enabled 在 CURRENT 之外读一次注册表：只为挡住「拉起期间用户点了停用」。
-// 它可能要拿存储层的 EDIT 锁，所以绝不能放进 CURRENT 的持有区（t5-F2）。
-fn registry_enabled(manager:&Manager<'_>,id:&str)->bool{
-    manager.list().ok().and_then(|rows|rows.into_iter().find(|row|row.manifest.id==id)).is_some_and(|row|row.enabled)
+// scheduled_attempt 是一次真实启动尝试：先在 CURRENT 之外复核注册表（enabled/autostart、
+// 版本与摘要），过期就按取消处理；起好后回到 CURRENT 只做代次比较与登记（A04）。
+fn scheduled_attempt(manager:&Manager<'_>,node:Option<&Path>,assignment:&crate::plugin_start::Assignment)->crate::plugin_start::Outcome{
+    use crate::plugin_start::{Failure,Outcome,Phase};
+    // F1（t33）：spawn 之前先拿一次 CURRENT 短锁复核——最终退出/暂停、实例已在运行、
+    // 已有一次在途拉起，都不许再开第二个进程。`Flight` 守护到本次尝试结束（含 panic 展开），
+    // 保证 in_flight 一定回收。
+    let _flight=match CURRENT.lock() {
+        Ok(mut runner)=>{
+            if runner.generation(&assignment.token.id)!=assignment.token.generation { return Outcome::cancelled("任务代次已变化"); }
+            match runner.try_begin_attempt(&assignment.token.id) {
+                Ok(flight)=>flight,
+                Err(reason)=>return Outcome::cancelled(reason),
+            }
+        }
+        Err(_)=>return Outcome::cancelled("插件运行锁不可用"),
+    };
+    let rows=match manager.list() {
+        Ok(rows)=>rows,
+        Err(error)=>return Outcome::transient(Phase::Verify,format!("注册表读取失败：{error}")),
+    };
+    let Some(row)=rows.into_iter().find(|row|row.manifest.id==assignment.token.id) else {
+        return Outcome::cancelled("插件已卸载");
+    };
+    if !row.enabled||!row.autostart { return Outcome::cancelled("自启已关闭或被停用"); }
+    if row.manifest.version!=assignment.token.version||row.digest!=assignment.token.digest { return Outcome::cancelled("启动期间版本或安装摘要已变化"); }
+    let started=match Process::start_with_budget(manager,&row,node,true,assignment.budget) {
+        Ok(started)=>started,
+        Err(error)=>{
+            eprintln!("FISH Dock: [plugin-start] id={} attempt={} failed_at={} permanent={} error={}",assignment.token.id,assignment.attempt,error.phase.as_str(),error.permanent,error.message);
+            return Outcome::failed(error.phase,if error.permanent{Failure::Permanent(error.text())}else{Failure::Transient(error.text())});
+        }
+    };
+    let mut started=started;
+    // F3（t33）：拉起成功不代表可以登记——整轮生命周期已经到期时，结果按丢弃处理，
+    // 并且把刚起的进程停掉，不让它变成「调度外仍在跑但卡片 failed」的实例。
+    if !crate::plugin_start::accepting() {
+        started.process.stop();
+        eprintln!("FISH Dock: [plugin-start] id={} attempt={} state=discarded reason=lifecycle",assignment.token.id,assignment.attempt);
+        return Outcome::cancelled("自启生命周期已到期，本次结果丢弃");
+    }
+    let service=started.service.as_str();
+    let installed=match CURRENT.lock() {
+        Ok(mut runner)=>runner.install_instance(&row.manifest.id,assignment.token.generation,assignment.round,started.process),
+        Err(_)=>false,
+    };
+    if !installed { return Outcome::cancelled("等待期间已停用、卸载或宿主退出"); }
+    eprintln!("FISH Dock: [plugin-start] id={} attempt={} state=ready service={service}",assignment.token.id,assignment.attempt);
+    Outcome::Ready{service}
 }
 impl Runner {
     // 记住宿主 data 根：`call()` 这类没有 Manager 参数的路径也要能把失败落盘（#53-3）。
     fn remember(&mut self,manager:&Manager<'_>){self.host=Some(manager.context.host.path().to_path_buf());}
+}
+// 一次在途启动的守卫（t33/F1）：成功登记后由 scheduler worker 持有，结束/panic 时
+// Drop 把 id 从 `in_flight` 摘掉，跨轮重复 resume 才能真正做到「每插件单在途」。
+struct Flight { id:String }
+impl Drop for Flight {
+    fn drop(&mut self){
+        if let Ok(mut runner)=CURRENT.lock() { runner.in_flight.remove(&self.id); }
+    }
+}
+impl Runner {
+    // 能不能为这个 id 开一次新的拉起（必须在 CURRENT 里调用）：最终退出、暂停、实例已在、
+    // 已有在途启动，任一条命中都不许再 spawn（基线 `!stopping && !present` 的恢复与加强）。
+    fn try_begin_attempt(&mut self,id:&str)->Result<Flight,String>{
+        if self.closed {return Err("宿主正在退出".into())}
+        if self.stopping {return Err("插件运行已暂停".into())}
+        if self.processes.contains_key(id) {return Err("插件实例已在运行，不重复拉起".into())}
+        if !self.in_flight.insert(id.to_string()) {return Err("已有一次启动尝试在途".into())}
+        Ok(Flight{id:id.to_string()})
+    }
+    // 暂停（身份导出/导入用）：停掉当前实例、取消这一轮调度，但**不是最终退出**——
+    // 随后的 resume 会把 stopping 复位，插件照常回来（t33/F1）。
+    pub fn pause_all(&mut self){
+        self.quiesce("插件运行已暂停（身份操作）");
+    }
+    fn quiesce(&mut self,reason:&str){
+        self.stopping=true;
+        crate::plugin_start::cancel_all(reason);
+        // t46/F1-1：暂停时还在 Process::start 里的 id 也必须 retire——否则 resume 会以
+        // 同一代次再放一次，旧/新两个 worker 都能 install_instance，后到者覆盖并杀掉
+        // 前一个 Process。清 in_flight 的同时把代次推走，旧 worker 回来只能被丢弃。
+        let flying:Vec<String>=self.in_flight.iter().cloned().collect();
+        self.in_flight.clear();
+        for id in flying { self.retire(&id); }
+        let taken=std::mem::take(&mut self.processes);
+        for (id,handle) in taken {
+            self.retire(&id);
+            if let Ok(mut process)=handle.lock(){process.stop();}
+        }
+    }
+    // 最终退出：此后 resume 一律不再拉起（main.rs 的退出路径）。
+    pub fn close(&mut self){
+        self.closed=true;
+        self.quiesce("宿主退出");
+    }
     // 一条失败：先进内存（插件卡当场显示），再逐行追加进 plugin-failures.log。
     // 落盘失败只影响「宿主重启后还能不能查」，绝不影响这次调用本身的返回。
     fn record(&mut self,manager:&Manager<'_>,failure:Failure){
@@ -261,6 +358,8 @@ impl Runner {
     // Drop 兜底杀进程树；代次已经 +1，那个线程回来也不会再把实例塞回去。
     fn drop_instance(&mut self,id:&str){
         self.retire(id);
+        // T-E/A04：停用、卸载、换版都作废这个插件的在途自启尝试（迟到的结果不许回填）。
+        crate::plugin_start::cancel(id,"插件已停用、卸载或换版");
         if let Some(handle)=self.processes.remove(id) { if let Ok(mut process)=handle.try_lock(){process.stop();} }
     }
     // 结账判据的一半：代次没变。另一半是「句柄还是原来那一个」（settles）。
@@ -271,14 +370,25 @@ impl Runner {
     // 注册表、verify、写盘在类型上就写不出来。装不进去（等待期间停用/卸载/退出）时
     // 返回 false，调用方把进程丢掉。
     fn accepts_instance(&self,id:&str,generation:u64)->bool{ !self.stopping && self.settles_generation(id,generation) }
-    fn install_instance(&mut self,id:&str,generation:u64,process:Process)->bool{
-        if !self.accepts_instance(id,generation) { return false; }
+    // t46/F1-1：除退出闸+代次，还要看这一轮。暂停不复位代次时旧 worker 也可能回来；
+    // 旧轮编号一律不许安装，无论先到后到。
+    fn accepts_instance_round(&self,id:&str,generation:u64,round:u64)->bool{
+        self.accepts_instance(id,generation) && crate::plugin_start::is_current_round(round)
+    }
+    fn install_instance(&mut self,id:&str,generation:u64,round:u64,process:Process)->bool{
+        if !self.accepts_instance_round(id,generation,round) { return false; }
         self.processes.insert(id.into(),Arc::new(Mutex::new(process)));
         self.failures.remove(id);
         true
     }
     pub fn view(&mut self,manager:&Manager<'_>)->Result<Value,String>{
         self.remember(manager);
+        // T-E：自启调度器的生命周期状态（contracts §5.1）。先取快照再读注册表，
+        // 锁序 CURRENT → SCHEDULER 与取消路径一致，不会反向。
+        let mut lifecycle:BTreeMap<String,Value>=BTreeMap::new();
+        if let Some(rows)=crate::plugin_start::snapshot().as_array(){
+            for row in rows { if let Some(id)=row.get("id").and_then(Value::as_str) { lifecycle.insert(id.to_string(),row.clone()); } }
+        }
         let mut rows=Vec::new();
         for installed in manager.list()? {
             let id=&installed.manifest.id;
@@ -320,6 +430,15 @@ impl Runner {
             let notice=manager.notice(id);
             let rollback=self.rollback_notes.get(id).map(String::as_str);
             let failure=self.failures.get(id);
+            // T-E 生命周期字段（desktop 只读；没有调度记录时按实例在不在回落到 ready/stopped）。
+            let life=lifecycle.get(id.as_str());
+            let life_state=life.and_then(|row|row["state"].as_str()).unwrap_or(if running{"ready"}else{"stopped"});
+            let life_phase=life.map(|row|row["phase"].clone()).unwrap_or(Value::Null);
+            let life_attempt=life.and_then(|row|row["attempt"].as_u64()).unwrap_or(0);
+            let life_max=life.and_then(|row|row["maxAttempts"].as_u64()).unwrap_or(crate::plugin_start::MAX_ATTEMPTS as u64);
+            let life_permanent=life.and_then(|row|row["permanent"].as_bool()).unwrap_or(false);
+            let life_retry=life.map(|row|row["retryInMs"].clone()).unwrap_or(Value::Null);
+            let life_reason=life.map(|row|row["reason"].clone()).unwrap_or(Value::Null);
             rows.push(json!({"plugin":installed,"running":running,"packageMissing":package_missing,"notice":notice,"rollbackWarning":rollback,
                 // error 仍是字符串（前端直接渲染）：退出码与日志路径都在里面（#53-4）；
                 // 退出码、阶段、日志路径同时单独给出，页面要用就不必解析中文。
@@ -329,7 +448,9 @@ impl Runner {
                 // 下一轮重绘自己会好；它不是失败，所以 error / failure 仍是空。
                 "unresponsive":unresponsive,
                 "exitCode":failure.and_then(|failure|failure.code),
-                "logPath":failure.map(|failure|failure.log.to_string_lossy().into_owned()).unwrap_or_else(||log_file(manager.context,id).to_string_lossy().into_owned())}));
+                "logPath":failure.map(|failure|failure.log.to_string_lossy().into_owned()).unwrap_or_else(||log_file(manager.context,id).to_string_lossy().into_owned()),
+                // T-E：自启调度的生命周期状态（stable 枚举，desktop 不得自造）。
+                "state":life_state,"phase":life_phase,"attempt":life_attempt,"maxAttempts":life_max,"permanent":life_permanent,"retryInMs":life_retry,"reason":life_reason}));
         }
         // 盘上有、注册表里没有的那一版（安装崩在写注册表之前，或者那次写入失败）：
         // 以前它只是消失——插件卡不出现，用户看到的是「装完了，但更新拿不到」，也
@@ -340,7 +461,8 @@ impl Runner {
             let notice=manager.notice(&id);
             let mut plugin=serde_json::to_value(&pending).unwrap_or(Value::Null);
             if let Some(map)=plugin.as_object_mut() { map.insert("pending".into(),Value::Bool(true)); }
-            rows.push(json!({"plugin":plugin,"running":false,"packageMissing":false,"notice":notice,"error":"安装未完成：这一版已经落地但没登记，点「重试安装」补上"}));
+            rows.push(json!({"plugin":plugin,"running":false,"packageMissing":false,"notice":notice,"error":"安装未完成：这一版已经落地但没登记，点「重试安装」补上",
+                "state":"stopped","phase":Value::Null,"attempt":0,"maxAttempts":crate::plugin_start::MAX_ATTEMPTS,"permanent":false,"retryInMs":Value::Null,"reason":Value::Null}));
         }
         Ok(json!(rows))
     }
@@ -410,9 +532,16 @@ impl Runner {
             Err(error)=>{let failure=self.failure(&id,&row.manifest.version,"启动",None,&error);self.record(manager,failure);return Err(error)}
         };
         if let Err(error)=manager.set_enabled(&id,true){process.stop();return Err(error);}
-        self.processes.insert(id.clone(),Arc::new(Mutex::new(process)));self.failures.remove(&id);Ok(())
+        self.processes.insert(id.clone(),Arc::new(Mutex::new(process)));self.failures.remove(&id);
+        // F2（t33）：手动启动已经定案，摘掉上一轮自启的调度记录——卡片以后只看实时 running。
+        crate::plugin_start::forget(&id);
+        Ok(())
     }
     pub fn resume(&mut self,manager:&Manager<'_>,node:Option<&Path>)->Result<(),String>{
+        // F1（t33）：最终退出之后不再拉起；身份导出的「暂停」在这里复位，导出/导入结束
+        // 插件会照常回来，而不是被 stopping 永久停在备份时刻。
+        if self.closed { eprintln!("FISH Dock: 宿主已最终退出，忽略插件恢复"); return Ok(()); }
+        self.stopping=false;
         self.remember(manager);
         manager.recover()?;
         // T03：清理类工作不再排在拉进程之前。register 一次维护线程，启动 30 s 后再收
@@ -574,15 +703,10 @@ impl Runner {
         }
     }
     pub fn stop_all(&mut self){
-        // 先立闸再摘实例：锁外拉起线程看到 stopping 就不会再开新进程（T03）。
-        self.stopping=true;
-        let taken=std::mem::take(&mut self.processes);
-        for (id,handle) in taken {
-            // 退出时不忍「留一个活着的插件」：这里等实例锁（在途 RPC 最长到超时，
-            // 与以前持 CURRENT 等它的时间一样），然后照常走 deactivate + 杀进程树。
-            self.retire(&id);
-            if let Ok(mut process)=handle.lock(){process.stop();}
-        }
+        // T03：先立闸再摘实例，锁外拉起线程看到 stopping 就不会再开新进程。
+        // t33/F1：这是**最终退出**（closed 一旦立起，resume 不再拉起）；身份备份那种
+        // 「暂停→恢复」走 pause_all/resume，不会把插件永久留在停止状态。
+        self.close();
     }
 }
 impl Drop for Runner {fn drop(&mut self){self.stop_all();}}
@@ -615,7 +739,7 @@ impl Runner {
             let Ok(state)=serde_json::from_slice::<Value>(&bytes) else {continue};
             let now=crate::now_ms();
             let Some(pid)=orphan_pid(&state,now,std::process::id(),|pid|crate::shell::running_for(pid).map(|age|age.as_millis() as u64)) else {continue};
-            if attachable(&state,|port|std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127,0,0,1],port)),std::time::Duration::from_millis(300)).is_ok()) { continue; }
+            if attachable(&state,|port|std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127,0,0,1],port)),std::time::Duration::from_millis(ORPHAN_PROBE_TIMEOUT_MS)).is_ok()) { continue; }
             // taskkill /T /F：与 dsh_bridge.rs 收子进程树同一个办法，不新造 FFI。
             match std::process::Command::new("taskkill").args(["/T","/F","/PID",&pid.to_string()]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
                 Ok(mut child)=>{let _=child.wait();eprintln!("FISH Dock: 插件 {} 上一轮遗留的内核进程 {pid} 已按 run-state 回收",row.manifest.id);},
@@ -980,5 +1104,163 @@ mod tests {
         assert!(!runner.accepts_instance("acme.weather",generation),"旧代次也不许装回去");
         drop(runner);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+    // —— t33/F1：暂停（身份备份）可恢复，最终退出不可恢复；重复 resume 不换健康实例 ——
+    #[test] fn pause_is_revivable_and_close_is_final() {
+        let (root,context)=installed_context("pause-flags","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        let mut runner=Runner::default();
+        runner.pause_all();
+        assert!(runner.stopping,"暂停要立起「不许再拉」的闸");
+        assert!(!runner.closed,"暂停不是最终退出");
+        assert!(!runner.accepts_instance("acme.weather",runner.generation("acme.weather")),"暂停期间不许回填实例");
+        // 备份结束：resume 复位暂停；插件还能重新拉起（没有实例时）。
+        runner.resume(&manager,None).unwrap();
+        assert!(!runner.stopping,"resume 必须复位暂停，否则备份后所有插件永远停着");
+        assert!(!runner.closed);
+        runner.close();
+        assert!(runner.closed && runner.stopping,"最终退出要同时立 closed 与 stopping");
+        runner.resume(&manager,None).unwrap();
+        assert!(runner.closed,"最终退出之后 resume 不再放开");
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // t33/F1：跨轮重复 resume 的「单在途」闸——同一 id 第二次登记必须被拒绝。
+    #[test] fn the_attempt_gate_refuses_a_second_flight() {
+        let mut runner=Runner::default();
+        let flight=runner.try_begin_attempt("acme.weather").expect("第一次应当允许");
+        assert!(runner.try_begin_attempt("acme.weather").is_err(),"同一 id 不许两个 worker 同时 spawn");
+        drop(flight);
+        // Drop 的清理只对全局 CURRENT 生效（生产路径）；本地实例手动清。
+        runner.in_flight.clear();
+        runner.stopping=true;
+        assert!(runner.try_begin_attempt("acme.weather").is_err(),"暂停/退出期间不许开新拉起");
+        runner.stopping=false;
+        runner.closed=true;
+        assert!(runner.try_begin_attempt("acme.weather").is_err(),"最终退出期间不许开新拉起");
+    }
+    // t46/F1-1：安装除 stopping+代次，还要校验轮次；旧轮编号无论先到后到都不许安装。
+    #[test] fn installation_requires_the_current_round() {
+        let _serial=crate::plugin_start::GLOBAL_ROUND_TEST.lock().unwrap_or_else(|poison|poison.into_inner());
+        let round=crate::plugin_start::begin(true,std::time::Duration::from_secs(60),std::time::Duration::from_secs(60),std::time::Duration::from_secs(10));
+        let runner=Runner::default();
+        assert!(runner.accepts_instance_round("acme.weather",0,round),"当前轮允许安装");
+        assert!(!runner.accepts_instance_round("acme.weather",0,round.wrapping_add(1)),"旧轮/错轮不许安装（t46 F1-1）");
+    }
+    // t33/F1 端到端（合成 Node 插件，真进程）：健康 → 暂停（备份语义）→ 恢复 → 重复 resume。
+    #[test]
+    #[ignore = "需 FISH_DOCK_TEST_NODE；t33/F1 备份暂停→恢复端到端（合成插件，不碰真实安装）"]
+    fn pause_and_resume_brings_the_plugin_back_without_replacing_it() {
+        let node=std::env::var_os("FISH_DOCK_TEST_NODE").map(PathBuf::from).expect("设置 FISH_DOCK_TEST_NODE");
+        let (root,context)=installed_context("pause-e2e","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        let backend=r#"let buf='';const send=(id,result)=>process.stdout.write(JSON.stringify({id,result})+'\n');
+process.stdin.setEncoding('utf8');process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);if(!line)continue;const row=JSON.parse(line);
+if(row.method==='host.hello')send(row.id,{type:'plugin.hello',protocol:1,pluginId:'acme.weather'});
+else if(row.method==='plugin.activate')send(row.id,{active:true});
+else if(row.method==='plugin.deactivate')send(row.id,{active:false});
+else if(row.method==='plugin.health')send(row.id,{ready:true});
+else send(row.id,'pong');}});"#;
+        let (package,digest)=synthetic_package("acme.weather",".plugin.acme.weather","1.0.0",backend);
+        manager.install(package,&digest,false).unwrap();
+        manager.set_autostart("acme.weather",true).unwrap();
+        // 全局 CURRENT 是生产路径；先把上一位使用者的闸复位（测试串行跑）。
+        {
+            let mut runner=CURRENT.lock().unwrap();
+            runner.closed=false; runner.stopping=false; runner.in_flight.clear(); runner.failures.clear();
+            runner.processes.remove("acme.weather");
+        }
+        {
+            let mut runner=CURRENT.lock().unwrap();
+            runner.set_enabled(&manager,"acme.weather",true,Some(&node)).expect("合成插件要能起来");
+            assert!(runner.is_running("acme.weather"),"先要有健康实例");
+        }
+        let healthy_generation={ CURRENT.lock().unwrap().generation("acme.weather") };
+        // 备份开始：暂停——实例停掉、调度取消，但不是最终退出。
+        CURRENT.lock().unwrap().pause_all();
+        assert!(!CURRENT.lock().unwrap().present("acme.weather"),"暂停要真的停实例");
+        // 备份结束：resume 让插件回来。
+        CURRENT.lock().unwrap().resume(&manager,Some(&node)).unwrap();
+        let wait_until=|max:std::time::Duration|{
+            let began=std::time::Instant::now();
+            while began.elapsed()<max {
+                if CURRENT.lock().map(|runner|runner.present("acme.weather")).unwrap_or(false) { return true; }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            false
+        };
+        assert!(wait_until(std::time::Duration::from_secs(15)),"恢复后插件必须重新拉起（不能永久停在备份时刻）");
+        let resumed_generation={ CURRENT.lock().unwrap().generation("acme.weather") };
+        assert_ne!(resumed_generation,healthy_generation,"暂停会停掉代次，重新拉起是新代次");
+        // 重复 resume：健康实例不许被替换（代次不变）。
+        CURRENT.lock().unwrap().resume(&manager,Some(&node)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let after_resume={ let runner=CURRENT.lock().unwrap(); (runner.present("acme.weather"),runner.generation("acme.weather")) };
+        assert!(after_resume.0,"重复 resume 之后实例仍要在");
+        assert_eq!(after_resume.1,resumed_generation,"重复 resume 不许替换健康实例（代次必须不变）");
+        {
+            let mut runner=CURRENT.lock().unwrap();
+            runner.stop_all();
+            runner.closed=false; runner.stopping=false; runner.in_flight.clear(); runner.failures.clear();
+        }
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // t46/F1-1：暂停发生在「启动在途」时（hello 还没回来）——暂停必须把在途 id 也 retire，
+    // 恢复后旧 worker 不得安装、更不得覆盖/替换新健康实例。合成 Node 插件用延迟 hello 制造屏障。
+    #[test]
+    #[ignore = "需 FISH_DOCK_TEST_NODE；t46/F1-1 启动途中暂停→恢复双 spawn 回归（合成插件）"]
+    fn pausing_while_startup_in_flight_cannot_install_twice_after_resume() {
+        let node=std::env::var_os("FISH_DOCK_TEST_NODE").map(PathBuf::from).expect("设置 FISH_DOCK_TEST_NODE");
+        let (root,context)=installed_context("pause-inflight","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        // hello 故意晚 350 ms 回答：暂停窗口稳定落在 Process::start 里；每个进程有自己的 instance id。
+        let backend=r#"let buf='';const instance=Math.random().toString(36).slice(2);const send=(id,result)=>process.stdout.write(JSON.stringify({id,result})+'\n');
+process.stdin.setEncoding('utf8');process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);if(!line)continue;const row=JSON.parse(line);const reply=result=>send(row.id,result);
+if(row.method==='host.hello')setTimeout(()=>reply({type:'plugin.hello',protocol:1,pluginId:'acme.weather'}),350);
+else if(row.method==='plugin.activate')reply({active:true});
+else if(row.method==='plugin.deactivate')reply({active:false});
+else if(row.method==='plugin.health')reply({ready:true});
+else if(row.method==='instance')reply(instance);
+else reply('pong');}});"#;
+        let (package,digest)=synthetic_package("acme.weather",".plugin.acme.weather","1.0.0",backend);
+        manager.install(package,&digest,false).unwrap();
+        manager.set_autostart("acme.weather",true).unwrap();
+        manager.set_enabled("acme.weather",true).unwrap();
+        {
+            let mut runner=CURRENT.lock().unwrap();
+            runner.closed=false; runner.stopping=false; runner.in_flight.clear(); runner.failures.clear();
+            runner.processes.remove("acme.weather");
+        }
+        let wait_until=|max:std::time::Duration,check:&dyn Fn()->bool|{
+            let began=std::time::Instant::now();
+            while began.elapsed()<max { if check() { return true; } std::thread::sleep(std::time::Duration::from_millis(20)); }
+            false
+        };
+        // 从 resume（生产启动链）开始，等它真的把 hello 发出去、还没有实例。
+        CURRENT.lock().unwrap().resume(&manager,Some(&node)).unwrap();
+        let inflight=wait_until(std::time::Duration::from_secs(8),&||{
+            let runner=CURRENT.lock().unwrap();
+            runner.in_flight.contains("acme.weather")&&!runner.present("acme.weather")
+        });
+        assert!(inflight,"测试屏障没有建立：启动在途窗口内没看到 in_flight");
+        let before={ CURRENT.lock().unwrap().generation("acme.weather") };
+        // 备份开始：暂停发生在启动途中。
+        CURRENT.lock().unwrap().pause_all();
+        let paused={ CURRENT.lock().unwrap().generation("acme.weather") };
+        assert_ne!(paused,before,"暂停必须 retire 在途 id；否则同代次会被 resume 再放行（t46 F1-1）");
+        // 备份结束：恢复。旧 worker 仍在 hello 里，会在之后回来。
+        CURRENT.lock().unwrap().resume(&manager,Some(&node)).unwrap();
+        assert!(wait_until(std::time::Duration::from_secs(15),&||CURRENT.lock().map(|r|r.present("acme.weather")).unwrap_or(false)),"恢复后必须有健康实例");
+        let first=call_outside("acme.weather","instance",json!({})).expect("新实例必须能回答 instance");
+        // 等过旧 worker 的 350ms hello：它回来时不许覆盖/杀掉这个新实例。
+        std::thread::sleep(std::time::Duration::from_millis(900));
+        let second=call_outside("acme.weather","instance",json!({})).expect("旧 worker 回来后新实例必须还活着");
+        assert_eq!(first,second,"后到的旧 worker 不许替换/杀掉新健康实例（instance id 必须不变）");
+        {
+            let mut runner=CURRENT.lock().unwrap();
+            assert!(runner.present("acme.weather"),"最终只应有一个健康实例");
+            runner.stop_all();
+            runner.closed=false; runner.stopping=false; runner.in_flight.clear(); runner.failures.clear();
+        }
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 }

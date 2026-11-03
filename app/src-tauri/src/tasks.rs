@@ -52,6 +52,60 @@ mod imp {
         fn GetIpForwardTable(table: *mut u32, size: *mut u32, order: i32) -> u32;
     }
 
+    // wlanapi.dll（2.0.4 T-H）：已连接 Wi-Fi profile 的信号质量，映射成 0–5 格。
+    // 结构照 wlanapi.h：GUID 16 字节、WCHAR 描述 256、SSID 36 字节，repr(C) 的
+    // 对齐与 C 一致（bssid[6] 之后由编译器补 2 字节到 phy_type 的 4 字节边界）。
+    #[repr(C)]
+    struct Dot11Ssid {
+        length: u32,
+        ssid: [u8; 32],
+    }
+    #[repr(C)]
+    struct WlanAssociationAttributes {
+        ssid: Dot11Ssid,
+        bss_type: u32,
+        bssid: [u8; 6],
+        phy_type: u32,
+        phy_index: u32,
+        signal_quality: u32,
+        rx_rate: u32,
+        tx_rate: u32,
+    }
+    #[repr(C)]
+    struct WlanSecurityAttributes {
+        auth_algorithm: u32,
+        cipher_algorithm: u32,
+        security_enabled: i32,
+    }
+    #[repr(C)]
+    struct WlanConnectionAttributes {
+        state: u32,
+        mode: u32,
+        profile: [u16; 256],
+        association: WlanAssociationAttributes,
+        security: WlanSecurityAttributes,
+    }
+    #[repr(C)]
+    struct WlanInterfaceInfo {
+        guid: [u8; 16],
+        description: [u16; 256],
+        state: u32,
+    }
+    #[repr(C)]
+    struct WlanInterfaceInfoList {
+        count: u32,
+        index: u32,
+        info: [WlanInterfaceInfo; 1],
+    }
+    #[link(name = "wlanapi")]
+    extern "system" {
+        fn WlanOpenHandle(version: u32, reserved: *mut c_void, negotiated: *mut u32, handle: *mut isize) -> u32;
+        fn WlanCloseHandle(handle: isize, reserved: *mut c_void) -> u32;
+        fn WlanEnumInterfaces(handle: isize, reserved: *mut c_void, list: *mut *mut WlanInterfaceInfoList) -> u32;
+        fn WlanQueryInterface(handle: isize, guid: *const [u8; 16], opcode: u32, reserved: *mut c_void, size: *mut u32, data: *mut *mut c_void, kind: *mut u32) -> u32;
+        fn WlanFreeMemory(memory: *mut c_void);
+    }
+
     #[repr(C)]
     struct ShFileInfo {
         icon: isize,
@@ -1292,6 +1346,66 @@ mod imp {
         way_out(if_type(index), under_tunnel)
     }
 
+    // 2.0.4 T-H：Wi-Fi 信号格数（0–5），取自 Windows 自己「已连接 Wi-Fi profile」的
+    // 信号质量；不是 Wi-Fi 出口 / 没连接 / 读不到时一律 None（页面画中性态，绝不
+    // 用全亮信号伪装）。代理的 TUN（类型 53）不会盖住底下的 Wi-Fi：这里读的是
+    // Wi-Fi 网卡自己的连接，不是默认路由。
+    pub fn wifi_bars() -> Option<u8> {
+        let mut handle: isize = 0;
+        let mut negotiated = 0u32;
+        // SAFETY: our own out-parameters; client version 2 = Windows Vista and later.
+        if unsafe { WlanOpenHandle(2, std::ptr::null_mut(), &mut negotiated, &mut handle) } != 0 {
+            return None;
+        }
+        let mut list: *mut WlanInterfaceInfoList = std::ptr::null_mut();
+        let enumerated = unsafe { WlanEnumInterfaces(handle, std::ptr::null_mut(), &mut list) } == 0 && !list.is_null();
+        let quality = if enumerated { unsafe { first_signal_quality(handle, list) } } else { None };
+        if enumerated {
+            // SAFETY: WlanEnumInterfaces' own buffer, freed as wlanapi requires.
+            unsafe { WlanFreeMemory(list as *mut c_void) };
+        }
+        // SAFETY: the handle opened above.
+        unsafe { WlanCloseHandle(handle, std::ptr::null_mut()) };
+        quality.map(bars_of_quality)
+    }
+
+    // wlan_interface_state_connected = 1, wlan_intf_opcode_current_connection = 7 (wlanapi.h).
+    const WIFI_CONNECTED: u32 = 1;
+    const WLAN_CURRENT_CONNECTION: u32 = 7;
+
+    // SAFETY: `list` is WlanEnumInterfaces' own buffer; entries counted by dwNumberOfItems.
+    unsafe fn first_signal_quality(handle: isize, list: *mut WlanInterfaceInfoList) -> Option<u32> {
+        let list = &*list;
+        for index in 0..list.count as usize {
+            let info = &*list.info.as_ptr().add(index);
+            if info.state != WIFI_CONNECTED {
+                continue;
+            }
+            let mut size = 0u32;
+            let mut data: *mut c_void = std::ptr::null_mut();
+            let mut kind = 0u32;
+            if WlanQueryInterface(handle, &info.guid, WLAN_CURRENT_CONNECTION, std::ptr::null_mut(), &mut size, &mut data, &mut kind) != 0 || data.is_null() {
+                continue;
+            }
+            let quality = (*(data as *const WlanConnectionAttributes)).association.signal_quality;
+            WlanFreeMemory(data);
+            return Some(quality.min(100));
+        }
+        None
+    }
+
+    // Windows 自己的五格映射：质量 0–100 每 20% 一格；0 是「连着但没格」。
+    pub fn bars_of_quality(quality: u32) -> u8 {
+        match quality {
+            0 => 0,
+            1..=20 => 1,
+            21..=40 => 2,
+            41..=60 => 3,
+            61..=80 => 4,
+            _ => 5,
+        }
+    }
+
     // Interface types (ipifcons.h): a cable (Ethernet), Wi-Fi, a phone's
     // mobile broadband (WWANPP and WWANPP2).
     const IF_ETHERNET: u64 = 6;
@@ -1376,6 +1490,22 @@ mod imp {
     #[cfg(test)]
     mod net_tests {
         use super::*;
+
+        // 2.0.4 T-H：Windows 的五格映射（0–100 质量 → 0–5 格）与边界。
+        #[test]
+        fn wifi_bars_map_windows_five_steps() {
+            assert_eq!(bars_of_quality(0), 0, "连着但没有信号");
+            assert_eq!(bars_of_quality(1), 1);
+            assert_eq!(bars_of_quality(20), 1);
+            assert_eq!(bars_of_quality(21), 2);
+            assert_eq!(bars_of_quality(40), 2);
+            assert_eq!(bars_of_quality(41), 3);
+            assert_eq!(bars_of_quality(60), 3);
+            assert_eq!(bars_of_quality(61), 4);
+            assert_eq!(bars_of_quality(80), 4);
+            assert_eq!(bars_of_quality(81), 5);
+            assert_eq!(bars_of_quality(100), 5);
+        }
 
         // Interfaces by index: 1 Wi-Fi, 2 a cable, 3 a proxy's TUN (53), 4
         // and 5 VMware's VMnet1 and VMnet8 (6), 6 a VPN's (53), 7 a VPN's
@@ -1569,6 +1699,10 @@ mod imp {
     pub fn net() -> &'static str {
         "other"
     }
+    // Not Windows: no WLAN to read; unknown is null, never a made-up full signal.
+    pub fn wifi_bars() -> Option<u8> {
+        None
+    }
     pub fn is_shell_flyout(_hwnd: isize) -> bool {
         false
     }
@@ -1668,7 +1802,7 @@ mod imp {
     }
 }
 
-pub use imp::{alive, app_id, app_name, close, cover, covered, is_topmost, destroy_icon, file_icon, front, icon_of, in_use, ime_native, is_ours, is_desktop, is_search, is_shell_flyout, is_start, is_task_window, keys_cheap, keys_held, launch, launch_as_admin, list, net, dwm_flush, no_transitions, plain_program_icon, press, press_all, raise_own, raise_top, shift_down, title, toggle_native, under_desktop, window_menu, with_com, end_task, launch_with, launch_as_admin_with};
+pub use imp::{alive, app_id, app_name, close, cover, covered, is_topmost, destroy_icon, file_icon, front, icon_of, in_use, ime_native, is_ours, is_desktop, is_search, is_shell_flyout, is_start, is_task_window, keys_cheap, keys_held, launch, launch_as_admin, list, net, wifi_bars, dwm_flush, no_transitions, plain_program_icon, press, press_all, raise_own, raise_top, shift_down, title, toggle_native, under_desktop, window_menu, with_com, end_task, launch_with, launch_as_admin_with};
 
 #[cfg(test)]
 mod tests {

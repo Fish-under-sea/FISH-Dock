@@ -73,6 +73,16 @@ pub fn stamp(path:&Path)->Result<Stamp,String>{
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(deny_unknown_fields,rename_all="camelCase")]
 struct Verified { schema:u32, id:String, version:String, digest:String, files:BTreeMap<String,Stamp> }
+// 校验失败的性质（2.0.4 t33 / F4）：**不是**按错误文案猜，而是按出错的那一步分。
+//   · Tampered：清单/摘要/注册表不一致、资源缺失、摘要不符——重试也不会变好，永久错误；
+//   · Io：读文件/读元数据失败（权限、共享冲突、磁盘瞬时忙）——值得按调度预算重试。
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub enum VerifyFail { Tampered(String), Io(String) }
+impl VerifyFail {
+    pub fn text(&self)->&str { match self { VerifyFail::Tampered(text)|VerifyFail::Io(text)=>text } }
+    pub fn permanent(&self)->bool { matches!(self,VerifyFail::Tampered(_)) }
+}
+impl std::fmt::Display for VerifyFail { fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { f.write_str(self.text()) } }
 impl Manager<'_> {
     fn registry(&self) -> Result<Registry,String> {
         let Some(bytes) = self.context.host.read("config","installed-plugins.json")? else { return Ok(Registry { schema:1,entries:BTreeMap::new() }); };
@@ -106,17 +116,24 @@ impl Manager<'_> {
     //   4. 缺失或指纹变了的那几个才算摘要，全通过后把新快照落盘。
     // 判据的取舍见 plan-dock-2.0.3 §6：指纹变了就重哈希，指纹没变就认上一轮的结论。
     pub fn verify(&self,row:&Installed) -> Result<(),String> {
+        self.verify_kind(row).map_err(|fail|fail.text().to_string())
+    }
+    /// 带性质分类的校验（t33/F4）：启动调度只按「读失败可重试 / 篡改或配置永久」处理，
+    /// 不再把摘要不符与磁盘瞬时读失败塞进同一个字符串里靠文案猜。
+    pub fn verify_kind(&self,row:&Installed) -> Result<(),VerifyFail> {
         use sha2::{Digest,Sha256};
-        let root=self.directory(row)?;
-        let raw=crate::identity_store::read_optional(&root.join("plugin.json"))?.ok_or("已安装插件清单缺失")?;
-        let manifest=Manifest::parse(&raw,&self.context.root,source(row),&platform())?;
-        if serde_json::to_value(&manifest).ok()!=serde_json::to_value(&row.manifest).ok() { return Err("安装清单与注册表不一致".into()); }
+        let root=self.directory(row).map_err(VerifyFail::Tampered)?;
+        let raw=crate::identity_store::read_optional(&root.join("plugin.json")).map_err(VerifyFail::Io)?.ok_or_else(||VerifyFail::Tampered("已安装插件清单缺失".into()))?;
+        let manifest=Manifest::parse(&raw,&self.context.root,source(row),&platform()).map_err(VerifyFail::Tampered)?;
+        if serde_json::to_value(&manifest).ok()!=serde_json::to_value(&row.manifest).ok() { return Err(VerifyFail::Tampered("安装清单与注册表不一致".into())); }
         let snapshot=self.verified_snapshot(row);
         let mut stamps=BTreeMap::new();
         let mut changed:Vec<String>=Vec::new();
         for name in manifest.files.keys() {
-            let path=crate::plugin_manifest::package_path(&root,name)?;
-            let stamp=stamp(&path).map_err(|_|format!("已安装插件资源缺失：{name}"))?;
+            let path=crate::plugin_manifest::package_path(&root,name).map_err(VerifyFail::Tampered)?;
+            // 文件不在 = 被删/被搬走（永久）；stat 失败（权限/共享冲突）= 瞬时 IO。
+            if !path.is_file() { return Err(VerifyFail::Tampered(format!("已安装插件资源缺失：{name}"))); }
+            let stamp=stamp(&path).map_err(|_|VerifyFail::Io(format!("已安装插件资源读取失败：{name}")))?;
             // 只有「快照里记着、而且指纹一模一样」才算命中；没有快照＝首次校验。
             if snapshot.as_ref().and_then(|snapshot|snapshot.files.get(name))!=Some(&stamp) { changed.push(name.clone()); }
             stamps.insert(name.clone(),stamp);
@@ -124,8 +141,9 @@ impl Manager<'_> {
         if changed.is_empty() { return Ok(()); }
         // 首轮、或者这几个文件变了：只对这几个重算摘要，不是整包重来。
         for name in changed {
-            let bytes=crate::plugin_package::read(&crate::plugin_manifest::package_path(&root,&name)?)?.ok_or("已安装插件资源缺失")?;
-            if !format!("{:x}",Sha256::digest(&bytes)).eq_ignore_ascii_case(&manifest.files[&name]) { return Err(format!("已安装插件资源被改动：{name}")); }
+            let path=crate::plugin_manifest::package_path(&root,&name).map_err(VerifyFail::Tampered)?;
+            let bytes=crate::plugin_package::read(&path).map_err(VerifyFail::Io)?.ok_or_else(||VerifyFail::Tampered(format!("已安装插件资源缺失：{name}")))?;
+            if !format!("{:x}",Sha256::digest(&bytes)).eq_ignore_ascii_case(&manifest.files[&name]) { return Err(VerifyFail::Tampered(format!("已安装插件资源被改动：{name}"))); }
         }
         self.remember_snapshot(row,&stamps);
         Ok(())
@@ -1397,6 +1415,31 @@ mod tests {
         assert!(notice.cleanup,"cleanup 失败必须标成警告而不是安装失败");
         assert_eq!(notice.version,"2.0.0");
         assert!(notice.reason.contains("插件备份目录读取失败"),"{}",notice.reason);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // t33/F4：校验失败必须按性质分类——缺失/摘要不符是永久错误；不是靠文案猜。
+    #[test] fn verify_kind_separates_tampering_from_readable_files() {
+        let (root,context)=installed_fixture("verify-kind","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        let (package,digest)=bundle("1.0.0",1);
+        let row=manager.install(package,&digest,false).unwrap();
+        assert!(manager.verify_kind(&row).is_ok(),"刚装好的一版必须核验通过");
+        let dir=manager.directory(&row).unwrap();
+        let victim=dir.join("plugin.json");
+        let saved=std::fs::read(&victim).unwrap();
+        std::fs::remove_file(&victim).unwrap();
+        let missing=manager.verify_kind(&row).expect_err("清单缺失必须失败");
+        assert!(missing.permanent(),"清单缺失是永久错误：{missing:?}");
+        assert!(missing.text().contains("清单"),"{missing:?}");
+        std::fs::write(&victim,&saved).unwrap();
+        let target=row.manifest.files.keys().find(|name|name.as_str()!="plugin.json").cloned().expect("夹具至少有一个资源");
+        let path=dir.join(&target);
+        let mut bytes=std::fs::read(&path).unwrap();
+        bytes.push(b'X');
+        std::fs::write(&path,&bytes).unwrap();
+        let tampered=manager.verify_kind(&row).expect_err("摘要不符必须失败");
+        assert!(tampered.permanent(),"摘要不符必须判永久：{tampered:?}");
+        assert!(tampered.text().contains("被改动"),"{tampered:?}");
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
     // 一处装好宿主命名空间 + 一个插件命名空间的夹具。旧用例各自内联了同一段准备

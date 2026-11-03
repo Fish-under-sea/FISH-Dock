@@ -90,6 +90,15 @@ const ENV_CATALOG_RAW: &str = "FISH_DOCK_PLUGIN_CATALOG_URL";
 pub const CATALOG_RAW_DEFAULT: &str = "https://raw.githubusercontent.com/Fish-under-sea/FISH-DOCK-Plugins/main/catalog/stable.json";
 const ENV_CATALOG_API: &str = "FISH_DOCK_PLUGIN_CATALOG_API";
 pub const CATALOG_API_DEFAULT: &str = "https://api.github.com/repos/Fish-under-sea/FISH-DOCK-Plugins/contents/catalog/stable.json?ref=main";
+// —— 2.0.4 T-F（resources）：镜像前缀与择源偏好 ——
+// 四个都是「配了才启用」：默认空＝不加候选，保留原地址（方案 §7.2）。
+// 空串必须能表达「没配」，因此这几个 getter 不以内置地址兜底。
+const ENV_RAW_MIRROR: &str = "FISH_DOCK_RAW_MIRROR";
+const ENV_GH_PROXY: &str = "FISH_DOCK_GH_PROXY";
+const ENV_GITEE_REPO: &str = "FISH_DOCK_GITEE_REPO";
+const ENV_PET_MIRROR: &str = "FISH_DOCK_PET_MIRROR";
+/// raw.githubusercontent.com 的前缀镜像（sources::picks 的 raw 候选）。
+pub const RAW_MIRROR_DEFAULT: &str = "";
 
 // —— 超时（Timeout，毫秒除非注明）——
 const ENV_NET_CONNECT_MS: &str = "FISH_DOCK_NET_CONNECT_MS";
@@ -130,6 +139,30 @@ const PLUGIN_ACTIVATE_COLD_SECS: u64 = 20;
 const PLUGIN_HOST_CALL_TIMEOUT_CAP_MS: u64 = 30_000;
 /// 超时的上限：再离谱的覆盖也不给一次调用超过它（10 分钟）。
 pub const MAX_TIMEOUT_MS: u64 = 600_000;
+
+// —— 2.0.4 T-E（runtime）：自启调度预算 ——
+// A02：hello / activate / 业务服务探测共用**一次尝试的 deadline**，重试与整轮生命周期
+// 另有硬上限，不再把「阶段预算 × 重试次数」相乘（旧账 4×(60+60)+0.5+2+5≈487.5 s）。
+// 旧键 `timeout.plugin_activate_secs` / `timeout.plugin_activate_cold_secs` 降级为
+// **只读下限**：新键生效，旧键被显式设置时参与 max()，已有用户配置只放宽不收紧。
+const ENV_PLUGIN_COLD_AFTER_START: &str = "FISH_DOCK_PLUGIN_COLD_AFTER_START_SECS";
+/// 冷态判据的第二个锚点：进程启动后这么多秒内也算冷态（登录锚点是
+/// `timeout.plugin_cold_until_secs`）。慢机器上「登录很久了 Dock 才被拉起」同样要紧。
+pub const PLUGIN_COLD_AFTER_START_SECS: u64 = 120;
+const ENV_PLUGIN_START_COLD_SECS: &str = "FISH_DOCK_PLUGIN_START_COLD_SECS";
+/// 冷态一次启动尝试的共享预算（hello + activate + 服务探测）。
+const PLUGIN_START_COLD_SECS: u64 = 60;
+const ENV_PLUGIN_START_WARM_SECS: &str = "FISH_DOCK_PLUGIN_START_WARM_SECS";
+/// 热态一次启动尝试的共享预算。
+const PLUGIN_START_WARM_SECS: u64 = 10;
+const ENV_PLUGIN_START_LIFECYCLE_SECS: &str = "FISH_DOCK_PLUGIN_START_LIFECYCLE_SECS";
+/// 一次自启生命周期总预算：排队、校验、退避、重试全计入；到期不再开新尝试。
+const PLUGIN_START_LIFECYCLE_SECS: u64 = 180;
+
+// —— 2.0.4 T-Q（runtime）：排障开关的集中入口 ——
+// 旧 `WAKUWAKU_DEBUG=1` 仍然认（只读别名），新名 `FISH_DOCK_DEBUG` 优先。
+const ENV_DEBUG: &str = "FISH_DOCK_DEBUG";
+const ENV_DEBUG_LEGACY: &str = "WAKUWAKU_DEBUG";
 
 // —— 重试（Retry）——
 const ENV_PLUGIN_REDIRECT_HOPS: &str = "FISH_DOCK_PLUGIN_REDIRECT_HOPS";
@@ -191,6 +224,10 @@ const ENV_BROWSER_ARGS: &str = "FISH_DOCK_BROWSER_ARGS";
 /// 旧名，保留兼容（优先序低于 `FISH_DOCK_BROWSER_ARGS`）。
 const ENV_BROWSER_ARGS_LEGACY: &str = "WAKUWAKU_BROWSER_ARGS";
 const ENV_GITHUB_CLIENT_ID: &str = "FISH_DOCK_GITHUB_CLIENT_ID";
+// —— 2.0.4 T-F（resources）：择源偏好（auto / domestic / overseas）——
+const ENV_MIRROR_PREFER: &str = "FISH_DOCK_MIRROR_PREFER";
+/// 择源偏好默认值：auto 表示按现状（原站优先、镜像兜底）。
+pub const MIRROR_PREFER_DEFAULT: &str = "auto";
 
 /// 全部配置键的清单（文档表 + 自查脚本对照）。
 pub const KEYS: &[Key] = &[
@@ -212,6 +249,11 @@ pub const KEYS: &[Key] = &[
     Key { name: "url.catalog_raw", env: ENV_CATALOG_RAW, default: CATALOG_RAW_DEFAULT, category: Category::Url, impact: "官方插件目录（raw 文本）" },
     Key { name: "url.catalog_api", env: ENV_CATALOG_API, default: CATALOG_API_DEFAULT, category: Category::Url, impact: "官方插件目录（GitHub contents API）" },
     Key { name: "url.official_site", env: ENV_OFFICIAL_SITE, default: OFFICIAL_SITE_DEFAULT, category: Category::Url, impact: "官网地址（关于页品牌图点击打开；当前是临时落地页）" },
+    // 2.0.4 T-F（resources）：镜像前缀，默认空＝不加候选（方案 §7.2）
+    Key { name: "url.raw_mirror", env: ENV_RAW_MIRROR, default: "(空)", category: Category::Url, impact: "raw.githubusercontent.com 文件的前缀镜像（sources::picks 候选；空＝只走 jsDelivr 与原站）" },
+    Key { name: "url.gh_proxy", env: ENV_GH_PROXY, default: "(空)", category: Category::Url, impact: "GitHub Release 资产下载的前缀加速（sources::picks 候选；空＝不加）" },
+    Key { name: "url.gitee_repo", env: ENV_GITEE_REPO, default: "(空)", category: Category::Url, impact: "Gitee 仓库地址（updates::endpoints 的更新检查候选；空＝不启用 Gitee）" },
+    Key { name: "url.pet_mirror", env: ENV_PET_MIRROR, default: "(空)", category: Category::Url, impact: "宠物图库图片的前缀镜像（fetch 的预览候选；空＝保留原站）" },
     // 超时
     Key { name: "timeout.net_connect_ms", env: ENV_NET_CONNECT_MS, default: "15000", category: Category::Timeout, impact: "所有 web 请求的 TCP 连接层预算" },
     Key { name: "timeout.net_head_ms", env: ENV_NET_HEAD_MS, default: "30000", category: Category::Timeout, impact: "所有 web 请求的响应头预算" },
@@ -227,6 +269,11 @@ pub const KEYS: &[Key] = &[
     Key { name: "timeout.plugin_event_secs", env: ENV_PLUGIN_EVENT_SECS, default: "10", category: Category::Timeout, impact: "插件事件投递预算" },
     Key { name: "timeout.plugin_cold_until_secs", env: ENV_PLUGIN_COLD_UNTIL, default: "300", category: Category::Timeout, impact: "T04 冷态判据：登录后多少秒内算冷启（分档只放宽不收紧）" },
     Key { name: "timeout.plugin_activate_cold_secs", env: ENV_PLUGIN_ACTIVATE_COLD_SECS, default: "20", category: Category::Timeout, impact: "T04 冷态握手/激活预算（取 max(热态值, 本值)，热态值不变）" },
+    // —— 2.0.4 T-E（runtime）——
+    Key { name: "timeout.plugin_cold_after_start_secs", env: ENV_PLUGIN_COLD_AFTER_START, default: "120", category: Category::Timeout, impact: "冷态判据第二锚点：进程启动后多少秒内算冷启（任一锚点命中即冷）" },
+    Key { name: "timeout.plugin_start_cold_secs", env: ENV_PLUGIN_START_COLD_SECS, default: "60", category: Category::Timeout, impact: "冷态一次启动尝试共享预算（hello+activate+服务探测；旧激活键作只读下限）" },
+    Key { name: "timeout.plugin_start_warm_secs", env: ENV_PLUGIN_START_WARM_SECS, default: "10", category: Category::Timeout, impact: "热态一次启动尝试共享预算（旧激活键作只读下限）" },
+    Key { name: "timeout.plugin_start_lifecycle_secs", env: ENV_PLUGIN_START_LIFECYCLE_SECS, default: "180", category: Category::Timeout, impact: "一次自启生命周期总预算：排队/校验/退避/重试全计入，到期不再开新尝试" },
     // 重试
     Key { name: "retry.plugin_redirect_hops", env: ENV_PLUGIN_REDIRECT_HOPS, default: "5", category: Category::Retry, impact: "插件包下载最大重定向跳数" },
     Key { name: "retry.http_redirects", env: ENV_HTTP_REDIRECTS, default: "10", category: Category::Retry, impact: "通用 web 请求最大重定向数" },
@@ -255,6 +302,10 @@ pub const KEYS: &[Key] = &[
     // 字符串开关
     Key { name: "text.browser_args", env: ENV_BROWSER_ARGS, default: "(空=用内置)", category: Category::Text, impact: "WebView2 额外启动参数（旧 WAKUWAKU_BROWSER_ARGS 兼容）" },
     Key { name: "text.github_client_id", env: ENV_GITHUB_CLIENT_ID, default: "(见内置 DEFAULT_CLIENT_ID)", category: Category::Text, impact: "GitHub OAuth 设备流 clientId 覆盖" },
+// —— 2.0.4 T-Q（runtime）——
+    Key { name: "text.debug", env: ENV_DEBUG, default: "(空=关)", category: Category::Text, impact: "排障日志开关（1 开）；旧 WAKUWAKU_DEBUG 只读兼容，新名优先" },
+    // 2.0.4 T-F（resources）：择源偏好，白名单外回落 auto
+    Key { name: "mirror.prefer", env: ENV_MIRROR_PREFER, default: MIRROR_PREFER_DEFAULT, category: Category::Text, impact: "sources::picks 的候选排序（auto/domestic/overseas；非法值回落 auto）" },
 ];
 
 // —— 解析器（纯函数，测试注入值，不碰进程环境）——
@@ -350,6 +401,12 @@ pub fn plugin_npm_registry() -> String { text(ENV_NPM_REGISTRY, NPM_REGISTRY_DEF
 pub fn plugin_npm_mirror() -> String { text(ENV_NPM_MIRROR, NPM_MIRROR_DEFAULT) }
 pub fn plugin_catalog_raw() -> String { text(ENV_CATALOG_RAW, CATALOG_RAW_DEFAULT) }
 pub fn plugin_catalog_api() -> String { text(ENV_CATALOG_API, CATALOG_API_DEFAULT) }
+// —— 2.0.4 T-F（resources）：镜像前缀 ——
+// 空串就是「没配」：调用方据此决定不加候选，不许伪造镜像或改指第三方站点。
+pub fn raw_mirror() -> String { text(ENV_RAW_MIRROR, RAW_MIRROR_DEFAULT) }
+pub fn gh_proxy() -> String { text(ENV_GH_PROXY, "") }
+pub fn gitee_repo() -> String { text(ENV_GITEE_REPO, "") }
+pub fn pet_mirror() -> String { text(ENV_PET_MIRROR, "") }
 
 // —— 超时 ——
 pub fn net_connect_timeout() -> Duration { ms(ENV_NET_CONNECT_MS, DEFAULT_NET_CONNECT_MS) }
@@ -376,26 +433,58 @@ pub fn plugin_startup_cold(since_logon_secs: Option<f64>) -> bool {
 }
 /// 本次启动是不是冷态（登录后 [`PLUGIN_COLD_UNTIL_SECS`] 秒内）。
 pub fn plugin_startup_is_cold() -> bool {
-    plugin_startup_cold(crate::logon::since_logon())
+    plugin_startup_cold_of(crate::logon::since_logon(), crate::plugin_start::since_process_start())
 }
-/// 握手/激活预算：冷态取环境变量或 [`PLUGIN_ACTIVATE_COLD_SECS`]（与热态值取
-/// max），热态与显式环境变量覆盖都走 [`plugin_activate_timeout`] 原值（热态
-/// 超时值不变的验收要求）。`cold` 由调用方注入，测试不依赖真实登录时刻。
-pub fn plugin_activate_budget_of(cold: bool) -> Duration {
+/// 2.0.4 T-E：冷态判据的两个锚点——登录后 ≤ `timeout.plugin_cold_until_secs`（默认 300 s）
+/// **或**进程启动后 ≤ `timeout.plugin_cold_after_start_secs`（默认 120 s）。任一命中即冷态；
+/// 两个都拿不到（非 Windows / WTS 失败 / 进程入口未标记）按热态——分档只放宽预算，
+/// 判不出冷态时退回热态是安全方向，绝不 panic。
+pub fn plugin_startup_cold_of(since_logon_secs: Option<f64>, since_process_start_secs: Option<f64>) -> bool {
+    let until = num(ENV_PLUGIN_COLD_UNTIL, PLUGIN_COLD_UNTIL_SECS) as f64;
+    let after = plugin_cold_after_start_secs() as f64;
+    let at_logon = since_logon_secs.is_some_and(|secs| secs >= 0.0 && secs <= until);
+    let at_start = since_process_start_secs.is_some_and(|secs| secs >= 0.0 && secs <= after);
+    at_logon || at_start
+}
+/// 冷态判据的第二个锚点（秒）。
+pub fn plugin_cold_after_start_secs() -> u64 {
+    num(ENV_PLUGIN_COLD_AFTER_START, PLUGIN_COLD_AFTER_START_SECS).clamp(1, MAX_TIMEOUT_MS / 1000)
+}
+/// 秒级配置：正数且不超过 [`MAX_TIMEOUT_MS`]，否则回落默认。
+fn plugin_secs(env: &str, default_secs: u64) -> Duration {
+    Duration::from_secs(num(env, default_secs).clamp(1, MAX_TIMEOUT_MS / 1000))
+}
+/// 一次启动尝试的共享预算（hello + activate + 服务探测）：冷态
+/// `timeout.plugin_start_cold_secs`（默认 60 s）、热态 `timeout.plugin_start_warm_secs`
+/// （默认 10 s）。旧激活键作**只读下限**：旧热态键对两档都参与 max()，旧冷态键只对冷态
+/// 参与——已有用户配置只会被放宽，不会被新默认值收紧（contracts §3.2）。
+pub fn plugin_start_budget_of(cold: bool) -> Duration {
+    let legacy_warm = plugin_activate_timeout();
     if cold {
-        let cold = num(ENV_PLUGIN_ACTIVATE_COLD_SECS, PLUGIN_ACTIVATE_COLD_SECS);
-        Duration::from_secs(cold.max(num(ENV_PLUGIN_ACTIVATE_SECS, DEFAULT_PLUGIN_ACTIVATE_SECS)))
+        let legacy_cold = Duration::from_secs(num(ENV_PLUGIN_ACTIVATE_COLD_SECS, PLUGIN_ACTIVATE_COLD_SECS));
+        plugin_secs(ENV_PLUGIN_START_COLD_SECS, PLUGIN_START_COLD_SECS).max(legacy_warm).max(legacy_cold)
     } else {
-        plugin_activate_timeout()
+        plugin_secs(ENV_PLUGIN_START_WARM_SECS, PLUGIN_START_WARM_SECS).max(legacy_warm)
     }
 }
-/// 本次握手/激活用的预算（按真实登录时刻分档）。
-pub fn plugin_activate_budget() -> Duration {
-    plugin_activate_budget_of(plugin_startup_is_cold())
+/// 本次启动尝试的共享预算（按真实冷/热档）。
+pub fn plugin_start_budget() -> Duration {
+    plugin_start_budget_of(plugin_startup_is_cold())
 }
-/// 随 host.hello 下发 SDK 的宿主调用时限（毫秒）——就是这一档的激活/握手预算本身：
-/// 热态 5000（诊断 A4 要求「热态超时值不变」，SDK 默认也是 5000）、冷态 20000
-/// （诊断：`hostCallTimeoutMs`「默认仍是 5000，冷启时给 20000」）。再夹住
+/// 整轮自启生命周期（`timeout.plugin_start_lifecycle_secs`，默认 180 s）。
+pub fn plugin_start_lifecycle() -> Duration {
+    plugin_secs(ENV_PLUGIN_START_LIFECYCLE_SECS, PLUGIN_START_LIFECYCLE_SECS)
+}
+/// 2.0.4 T-Q：排障日志开关。新名 `FISH_DOCK_DEBUG` 优先，旧 `WAKUWAKU_DEBUG` 只读兼容；
+/// 只认 `1`（与 server.rs 改造前一致），空/空白视为没设。
+pub fn debug_enabled_of(fish_dock: Option<&str>, legacy: Option<&str>) -> bool {
+    fish_dock.or(legacy).is_some_and(|value| value.trim() == "1")
+}
+/// 本次进程的排障日志开关。
+pub fn debug_enabled() -> bool {
+    debug_enabled_of(var(ENV_DEBUG).as_deref(), var(ENV_DEBUG_LEGACY).as_deref())
+}
+/// 随 host.hello 下发 SDK 的宿主调用时限（毫秒）——就是这一档启动预算本身，再夹住
 /// [`PLUGIN_HOST_CALL_TIMEOUT_CAP_MS`]：SDK 对 requestTimeout 校验 `(1, 30000]`，
 /// 环境变量把预算放大到 30 s 以上时超上限握手会被直接拒绝。
 pub fn plugin_host_call_timeout_ms_of(budget: Duration) -> u64 {
@@ -403,10 +492,8 @@ pub fn plugin_host_call_timeout_ms_of(budget: Duration) -> u64 {
 }
 /// 本次随 host.hello 下发的宿主调用时限。
 pub fn plugin_host_call_timeout_ms() -> u64 {
-    plugin_host_call_timeout_ms_of(plugin_activate_budget())
+    plugin_host_call_timeout_ms_of(plugin_start_budget())
 }
-/// 冷态下单个插件启动失败的退避（重试一次之前歇这么久，诊断 A4 建议 500 ms）。
-pub const PLUGIN_COLD_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 // —— 重试 ——
 pub fn plugin_redirect_hops() -> usize { num(ENV_PLUGIN_REDIRECT_HOPS, DEFAULT_PLUGIN_REDIRECT_HOPS) }
@@ -451,6 +538,16 @@ pub fn browser_args_extra() -> Option<String> {
 pub fn github_client_id_override() -> Option<String> {
     var(ENV_GITHUB_CLIENT_ID).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
+/// 择源偏好（`mirror.prefer`）：只认 auto / domestic / overseas，其余（含未设、空串）
+/// 一律回落 `auto`——与 `num_of` / `text_of` 同风格，坏值不改行为。
+pub fn mirror_prefer_of(raw: Option<&str>) -> &'static str {
+    match raw.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("domestic") => "domestic",
+        Some("overseas") => "overseas",
+        _ => MIRROR_PREFER_DEFAULT,
+    }
+}
+pub fn mirror_prefer() -> &'static str { mirror_prefer_of(var(ENV_MIRROR_PREFER).as_deref()) }
 
 // 环境变量相关的测试要串行（进程环境是全局的）。runtime.rs 的 app_home 覆盖测试
 // 也用这把锁，避免两边同时改 FISH_DOCK_APP_HOME。
@@ -503,6 +600,8 @@ mod tests {
     // 都判热态——分档只放宽预算，判不出冷态时退回热态原值，绝不 panic。
     #[test]
     fn cold_window_is_five_minutes_with_none_and_rollback_as_warm() {
+        // t46/F2-1：并行 cargo test 下其他用例会临时改 COLD_UNTIL；读环境也要拿同一把锁。
+        let _env = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         assert!(plugin_startup_cold(Some(0.0)), "登录当刻算冷态");
         assert!(plugin_startup_cold(Some(1.0)));
         assert!(plugin_startup_cold(Some(299.9)));
@@ -523,31 +622,75 @@ mod tests {
         assert!(!with_env_locked(&guard, ENV_PLUGIN_COLD_UNTIL, "60", || plugin_startup_cold(Some(120.0))), "收窄也照走环境值（测试可注入）");
     }
 
-    // 预算分档：冷/热由注入参数决定，测试不依赖真实登录时刻。
+    // 预算分档（2.0.4 T-E）：一次尝试一个共享 deadline，旧激活键只作只读下限。
     #[test]
-    fn activate_budget_is_tiered_and_warm_keeps_the_original_value() {
+    fn start_budget_is_shared_per_attempt_and_old_keys_only_widen() {
         // 已持锁：走 with_env_locked，绝不在此再调 with_env（会重复取 ENV_LOCK）。
         let guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        // 热态：原值 5 s（环境覆盖照旧生效——那是既有键的既有语义）。
-        assert_eq!(plugin_activate_budget_of(false), Duration::from_secs(5));
-        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_ACTIVATE_SECS, "8", || plugin_activate_budget_of(false)), Duration::from_secs(8));
-        // 冷态：20 s 档；热态值更大时取热态值（分档只放宽，不收紧）。
-        assert_eq!(plugin_activate_budget_of(true), Duration::from_secs(20));
-        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_ACTIVATE_COLD_SECS, "45", || plugin_activate_budget_of(true)), Duration::from_secs(45));
-        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_ACTIVATE_SECS, "60", || plugin_activate_budget_of(true)), Duration::from_secs(60), "热态覆盖更大时冷态不得收窄");
+        // 新键默认：热态 10 s、冷态 60 s；生命周期 180 s；进程启动锚点 120 s。
+        assert_eq!(plugin_start_budget_of(false), Duration::from_secs(10));
+        assert_eq!(plugin_start_budget_of(true), Duration::from_secs(60));
+        assert_eq!(plugin_start_lifecycle(), Duration::from_secs(180));
+        assert_eq!(plugin_cold_after_start_secs(), 120);
+        // 旧键只放宽、不收紧：旧热态键对两档都参与 max()。
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_ACTIVATE_SECS, "60", || plugin_start_budget_of(false)), Duration::from_secs(60));
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_START_WARM_SECS, "20", || plugin_start_budget_of(false)), Duration::from_secs(20));
+        // 旧冷态键只在冷态参与 max()。
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_ACTIVATE_COLD_SECS, "90", || plugin_start_budget_of(true)), Duration::from_secs(90));
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_START_COLD_SECS, "45", || plugin_start_budget_of(true)), Duration::from_secs(45));
+        // 新键更大时就是新键（旧键不许把它压低）。
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_START_COLD_SECS, "45", || plugin_start_budget_of(true)), Duration::from_secs(45), "默认旧冷态下限 20 不抬高 45");
+        // 生命周期与进程启动锚点都可配。
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_START_LIFECYCLE_SECS, "240", || plugin_start_lifecycle()), Duration::from_secs(240));
+        assert_eq!(with_env_locked(&guard, ENV_PLUGIN_COLD_AFTER_START, "30", || plugin_cold_after_start_secs()), 30);
+    }
+
+    // 2.0.4 T-E：第二个冷态锚点（进程启动）与登录锚点是「或」的关系。
+    #[test]
+    fn the_process_start_anchor_also_counts_as_cold() {
+        let guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        assert!(plugin_startup_cold_of(Some(3600.0), Some(10.0)), "登录很久但进程刚起 10 s → 冷态");
+        assert!(plugin_startup_cold_of(Some(10.0), None), "登录锚点仍然有效");
+        assert!(!plugin_startup_cold_of(Some(3600.0), Some(3600.0)), "两个锚点都过期 → 热态");
+        assert!(!plugin_startup_cold_of(None, None), "两个都拿不到 → 热态，不 panic");
+        assert!(!plugin_startup_cold_of(Some(-1.0), Some(-1.0)), "负值按热态");
+        assert!(!with_env_locked(&guard, ENV_PLUGIN_COLD_AFTER_START, "60", || plugin_startup_cold_of(Some(3600.0), Some(90.0))));
+        assert!(plugin_startup_cold_of(Some(3600.0), Some(90.0)), "默认 120 s 锚点下 90 s 仍算冷态");
     }
 
     #[test]
-    fn host_call_timeout_derives_from_activate_budget_and_caps_at_sdk_limit() {
-        // 热态默认 5 s：宿主调用时限就是 5000——任务书/诊断 A4 的「热态超时值不变」，
-        // 与 SDK 的默认 requestTimeout 同一个数。
+    fn host_call_timeout_derives_from_the_shared_budget_and_caps_at_sdk_limit() {
+        // 热态默认 10 s：宿主调用时限就是 10000（仍在 SDK 上限内）。
+        assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_secs(10)), 10_000);
+        // 冷态默认 60 s：夹到 SDK 的 30000（requestTimeout 校验 ≤ 30000），不会握手即被拒。
+        assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_secs(60)), 30_000);
         assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_secs(5)), 5_000);
-        // 冷态默认 20 s：诊断 A4「默认仍是 5000，冷启时给 20000」，仍在 SDK 上限内。
-        assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_secs(20)), 20_000);
-        // 环境变量把预算放大到 600 s：夹到 SDK 的 30000（requestTimeout 校验 ≤ 30000），
-        // 不会握手即被拒。
-        assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_secs(600)), 30_000);
         assert_eq!(plugin_host_call_timeout_ms_of(Duration::from_millis(1)), 1, "下限保护：不为 0");
+    }
+
+    // 2.0.4 T-Q：资源目录与排障开关的新名优先、旧名只读兼容。
+    #[test]
+    fn resources_and_debug_prefer_the_fish_dock_names() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let new = std::env::temp_dir().join("fish-res-new");
+        let old = std::env::temp_dir().join("fish-res-old");
+        let saved_new = std::env::var_os(ENV_RESOURCES);
+        let saved_old = std::env::var_os("DSH_FISH_RESOURCES");
+        std::env::set_var(ENV_RESOURCES, &new);
+        std::env::set_var("DSH_FISH_RESOURCES", &old);
+        assert_eq!(resources_override().as_deref(), Some(new.as_path()), "FISH_DOCK_RESOURCES 优先");
+        std::env::remove_var(ENV_RESOURCES);
+        assert_eq!(resources_override().as_deref(), Some(old.as_path()), "没有新名时旧 DSH_FISH_RESOURCES 仍兼容");
+        std::env::set_var(ENV_RESOURCES, "   ");
+        assert_eq!(resources_override().as_deref(), Some(old.as_path()), "空白新名视为没设");
+        match saved_new { Some(v) => std::env::set_var(ENV_RESOURCES, v), None => std::env::remove_var(ENV_RESOURCES) }
+        match saved_old { Some(v) => std::env::set_var("DSH_FISH_RESOURCES", v), None => std::env::remove_var("DSH_FISH_RESOURCES") }
+        // 排障开关：只认 1，新名优先。
+        assert!(debug_enabled_of(Some("1"), Some("0")));
+        assert!(debug_enabled_of(None, Some("1")), "旧 WAKUWAKU_DEBUG 兼容");
+        assert!(!debug_enabled_of(Some("0"), Some("1")), "新名优先：设 0 就不开");
+        assert!(!debug_enabled_of(None, None));
+        assert!(!debug_enabled_of(Some("true"), None), "只认 1");
     }
 
     #[test]
@@ -557,6 +700,36 @@ mod tests {
         assert_eq!(port_of(Some("50000"), Some("40000")), 50000, "FISH_DOCK_PORT 优先");
         assert_eq!(port_of(None, Some("40000")), 40000, "旧 WAKUWAKU_PORT 兼容");
         assert_eq!(port_of(Some("bad"), Some("40000")), 40000, "坏值跳过用旧的");
+    }
+
+    // 2.0.4 T-F（resources）：四个镜像前缀默认必须是「没配」（空串），
+    // mirror.prefer 只认白名单，非法值回落 auto——坏配置不改行为。
+    #[test]
+    fn mirror_prefixes_default_to_empty_and_prefer_whitelists_or_falls_back() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // 默认：没有内置镜像，也没有内置 Gitee 仓库（方案 §7.2「配了才启用」）。
+        assert_eq!(raw_mirror(), "", "raw 镜像默认空");
+        assert_eq!(gh_proxy(), "", "Release 加速前缀默认空");
+        assert_eq!(gitee_repo(), "", "Gitee 仓库默认空");
+        assert_eq!(pet_mirror(), "", "宠物镜像默认空");
+        assert_eq!(mirror_prefer(), "auto", "择源偏好默认 auto");
+        // 设了就生效，且末尾 `/` 去掉（前缀要能直接拼路径）。
+        assert_eq!(with_env_locked(&_g, ENV_RAW_MIRROR, "https://raw.example/", raw_mirror), "https://raw.example");
+        assert_eq!(with_env_locked(&_g, ENV_GH_PROXY, "https://gh.example", gh_proxy), "https://gh.example");
+        assert_eq!(with_env_locked(&_g, ENV_GITEE_REPO, "https://gitee.com/o/r/", gitee_repo), "https://gitee.com/o/r");
+        assert_eq!(with_env_locked(&_g, ENV_PET_MIRROR, "https://pet.example/", pet_mirror), "https://pet.example");
+        // 空白视为没设：不能把一串空格当镜像前缀拼进 URL。
+        assert_eq!(with_env_locked(&_g, ENV_RAW_MIRROR, "   ", raw_mirror), "");
+        // 白名单：auto / domestic / overseas（大小写不敏感），其余回落 auto。
+        assert_eq!(mirror_prefer_of(None), "auto");
+        assert_eq!(mirror_prefer_of(Some("")), "auto");
+        assert_eq!(mirror_prefer_of(Some(" domestic ")), "domestic");
+        assert_eq!(mirror_prefer_of(Some("OVERSEAS")), "overseas");
+        for bad in ["cn", "auto-", "domesticc", "1"] {
+            assert_eq!(mirror_prefer_of(Some(bad)), "auto", "{bad} 应回落 auto");
+        }
+        assert_eq!(with_env_locked(&_g, ENV_MIRROR_PREFER, "domestic", mirror_prefer), "domestic");
+        assert_eq!(with_env_locked(&_g, ENV_MIRROR_PREFER, "不认识的", mirror_prefer), "auto");
     }
 
     // —— 5 个键「设 env 后行为改变」实测（串行） ——
@@ -689,6 +862,12 @@ mod tests {
                 "url.catalog_raw" => plugin_catalog_raw(),
                 "url.catalog_api" => plugin_catalog_api(),
                 "url.official_site" => official_site(),
+                // 2.0.4 T-F（resources）：前缀默认是空串（没有内置镜像）。KEYS 的
+                // default 只作文档，"空" 用 "(空)" 写；这里调用 getter 并信 default。
+                "url.raw_mirror" => { let _ = raw_mirror(); key.default.to_string() }
+                "url.gh_proxy" => { let _ = gh_proxy(); key.default.to_string() }
+                "url.gitee_repo" => { let _ = gitee_repo(); key.default.to_string() }
+                "url.pet_mirror" => { let _ = pet_mirror(); key.default.to_string() }
                 "timeout.net_connect_ms" => net_connect_timeout().as_millis().to_string(),
                 "timeout.net_head_ms" => net_head_timeout().as_millis().to_string(),
                 "timeout.pet_ms" => pet_timeout().as_millis().to_string(),
@@ -703,6 +882,10 @@ mod tests {
                 "timeout.plugin_event_secs" => plugin_event_timeout().as_secs().to_string(),
                 "timeout.plugin_cold_until_secs" => PLUGIN_COLD_UNTIL_SECS.to_string(),
                 "timeout.plugin_activate_cold_secs" => PLUGIN_ACTIVATE_COLD_SECS.to_string(),
+                "timeout.plugin_cold_after_start_secs" => plugin_cold_after_start_secs().to_string(),
+                "timeout.plugin_start_cold_secs" => plugin_start_budget_of(true).as_secs().to_string(),
+                "timeout.plugin_start_warm_secs" => plugin_start_budget_of(false).as_secs().to_string(),
+                "timeout.plugin_start_lifecycle_secs" => plugin_start_lifecycle().as_secs().to_string(),
                 "retry.plugin_redirect_hops" => plugin_redirect_hops().to_string(),
                 "retry.http_redirects" => http_redirects().to_string(),
                 "cache.gallery_keep" => gallery_cache_keep().to_string(),
@@ -726,6 +909,9 @@ mod tests {
                 "size.plugin_rollback_bytes" => plugin_rollback_limit().to_string(),
                 "text.browser_args" => { let _ = browser_args_extra(); key.default.to_string() }
                 "text.github_client_id" => { let _ = github_client_id_override(); key.default.to_string() }
+"text.debug" => { let _ = debug_enabled(); key.default.to_string() }
+                // 2.0.4 T-F（resources）：白名单外的值一律回落 auto。
+                "mirror.prefer" => mirror_prefer().to_string(),
                 other => panic!("KEYS 里新增了键 {other}，请同步加一条 getter 默认值断言"),
             };
             assert_eq!(actual, key.default, "键 {} 的 getter 默认值与 KEYS 登记不一致", key.name);

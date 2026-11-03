@@ -869,12 +869,16 @@ mod imp {
         let mut sent = Value::Null;
         let using = || Value::Object(tasks::in_use().into_iter().map(|(what, names)| (what.to_string(), json!(names))).collect());
         let (mut net, mut used, mut battery) = (tasks::net(), using(), crate::widgets::battery_state());
+        // Wi-Fi 信号格数（2.0.4 T-H）：和网络出口一起每 2 秒读一次，别在 250 ms 的
+        // 主循环里反复查 WLAN。
+        let mut bars = crate::tasks::wifi_bars();
         let (mut native, mut volume, mut front, mut shift_was) = (None, None, 0isize, false);
         let mut looks = 0u32;
         while !TASKS_STOP.load(Ordering::SeqCst) {
             looks += 1;
             if looks % 8 == 0 {
                 net = tasks::net();
+                bars = crate::tasks::wifi_bars();
                 used = using();
                 battery = crate::widgets::battery_state();
                 crate::inputs::set_size(icon_px(&sh));
@@ -893,7 +897,7 @@ mod imp {
                 volume = speakers.read().map(|(level, muted)| json!([level, muted]));
             }
             send_ime_icons(&sh, false);
-            let now = json!({ "lang": keys.lang, "native": native, "caps": keys.caps, "ime": crate::inputs::now(), "net": net, "use": used, "volume": volume, "battery": battery });
+            let now = json!({ "lang": keys.lang, "native": native, "caps": keys.caps, "ime": crate::inputs::now(), "net": net, "bars": bars, "use": used, "volume": volume, "battery": battery });
             if now != sent {
                 let _ = sh.app.emit_to("island", "taskbar:keys", now.clone());
                 *SENT_KEYS.lock().unwrap() = now.clone();
@@ -1070,8 +1074,9 @@ mod imp {
     // there as ever.
     fn mark_sessions(sh: &Shared) {
         let targets: Vec<(String, String, jump::Chain, Vec<String>)> = {
+            let details = sh.details();
             let pet = sh.pet.lock().unwrap();
-            let list = pet.list();
+            let list = pet.list(details);
             list.as_array()
                 .map(|all| {
                     all.iter()
@@ -1832,6 +1837,18 @@ mod imp {
         super::task_view_set(value)
     }
 
+    // Whether Windows shows seconds in its taskbar clock (2.0.4 T-G): read only,
+    // as its own taskbar does, so hers goes with it. Explorer\Advanced\
+    // ShowSecondsInSystemClock, a number; off unless 1 (Windows' own default).
+    pub fn show_seconds_in_system_clock() -> bool {
+        use winreg::enums::HKEY_CURRENT_USER;
+        let value = winreg::RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced")
+            .ok()
+            .and_then(|k| k.get_value::<u32, _>("ShowSecondsInSystemClock").ok());
+        super::seconds_set(value)
+    }
+
     // From outside (settings.rs, the wallpaper changed by her own settings:
     // Windows says nothing of that): the desktop looked at now.
     pub fn look_now() {
@@ -1861,6 +1878,9 @@ mod imp {
             // Whether Windows' Task view button is shown, so hers goes with it
             // (island.js drawTaskView, bar.js drawTaskView).
             "taskView": task_view_on(),
+            // Whether Windows' clock shows seconds (2.0.4 T-G): the page draws
+            // HH:mm:ss and ticks each second (island.js / bar.js tickClock).
+            "seconds": show_seconds_in_system_clock(),
         });
         let mut sent = LOOK.lock().unwrap();
         if *sent != look {
@@ -3231,6 +3251,10 @@ mod imp {
     pub fn task_view_on() -> bool {
         true
     }
+    // Not Windows: no clock setting of Windows' to follow; seconds stay off.
+    pub fn show_seconds_in_system_clock() -> bool {
+        false
+    }
     pub fn window(_what: &str, _hwnd: isize) -> bool {
         false
     }
@@ -3264,6 +3288,14 @@ fn end_task_set(value: Option<u32>) -> bool {
 #[cfg_attr(not(windows), allow(dead_code))]
 fn task_view_set(value: Option<u32>) -> bool {
     value != Some(0)
+}
+
+// Windows' "Show seconds in system clock" (Settings → Personalization → Taskbar →
+// Show seconds in system clock; Explorer\Advanced\ShowSecondsInSystemClock, a
+// number): off unless it is 1 — Windows' own default is off (2.0.4 T-G).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn seconds_set(value: Option<u32>) -> bool {
+    value == Some(1)
 }
 
 // RGBA pixels (sw × sh) made dw × dh smoothly: each pixel out the weighted
@@ -3332,7 +3364,16 @@ fn resize(src: &[u8], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{end_task_set, resize, task_view_set};
+    use super::{end_task_set, resize, seconds_set, task_view_set};
+
+    // 2.0.4 T-G：Windows' "Show seconds in system clock" (0/1/缺省) is off unless 1.
+    #[test]
+    fn seconds_only_when_windows_says_one() {
+        assert!(!seconds_set(None), "缺省 = 关（Windows 自己的默认）");
+        assert!(!seconds_set(Some(0)));
+        assert!(seconds_set(Some(1)));
+        assert!(!seconds_set(Some(2)), "只有 1 是开");
+    }
 
     #[test]
     fn end_task_only_once_turned_on() {

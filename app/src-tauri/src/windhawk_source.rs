@@ -48,7 +48,12 @@ fn flatten_settings(prefix:&str,value:&serde_yaml::Value,out:&mut std::collectio
  Y::Sequence(items)=>{for(i,item)in items.iter().enumerate(){let name=if item.is_mapping(){prefix.to_string()}else{format!("{prefix}[{i}]")};flatten_settings(&name,item,out,depth+1)?;}},
  Y::String(s)=>{if s.contains(['\0','\r','\n']){return Err("设置字符串含控制字符".into());}if out.insert(prefix.into(),serde_json::json!(s)).is_some(){return Err("重复设置键".into());}},
  Y::Number(n)=>{let n=n.as_i64().filter(|v|*v>=i32::MIN as i64&&*v<=u32::MAX as i64).ok_or("设置数值必须为 32 位整数")?;if out.insert(prefix.into(),serde_json::json!(n)).is_some(){return Err("重复设置键".into());}},
- _=>return Err("设置默认值应为字符串、整数或分组".into())
+ // 2.0.4 T-D（#65，审计 A11）：只补已证的 Bool 保真——true/false 落成 1/0，
+ // 与 Windhawk 自己的 INI（Disabled=1/0）和下游整型读取一致。
+ Y::Bool(b)=>{if out.insert(prefix.into(),serde_json::json!(u8::from(*b))).is_some(){return Err("重复设置键".into());}},
+ // Null 不静默变空串：缺省值要么写清楚、要么在源码里删掉这一项（审计 A11）。
+ Y::Null=>return Err(format!("设置 {prefix} 的默认值为空（Null 需显式取值）")),
+ _=>return Err("设置默认值应为字符串、整数、布尔或分组".into())
  }Ok(())
 }
 
@@ -67,5 +72,23 @@ fn flatten_settings(prefix:&str,value:&serde_yaml::Value,out:&mut std::collectio
   assert!(metadata(&text.replace("// @version 1.2.3\n","")).is_err());
   assert!(metadata(&text.replace("// @id test-mod","// @id test-mod\n// @id other")).is_err());
   assert!(metadata("// @id pretend\n// @name outside").is_err());
+ }
+ // 2.0.4 T-D / 审计 A11：只修已证的 Bool（true/false → 1/0）；Null 仍是显式错误，
+ // 不静默变空串。下游按整型读设置（INI 的 1/0），布尔必须保真。
+ #[test] fn bool_defaults_become_one_and_zero_while_null_stays_an_error(){
+  let with_settings=|settings:&str| format!("// ==WindhawkMod==\n// @id bool-mod\n// @name 布尔\n// @version 1.0\n// ==/WindhawkMod==\n// ==WindhawkModSettings==\n/*\n{settings}\n*/\n// ==/WindhawkModSettings==");
+  let on=compilation(&with_settings("- enabled: true\n- legacy: false\n- hidden: yes")).unwrap();
+  assert_eq!(on.settings.get("enabled"),Some(&serde_json::json!(1)),"true 应为 1（Bool 保真）");
+  assert_eq!(on.settings.get("legacy"),Some(&serde_json::json!(0)),"false 应为 0");
+  // YAML 1.1 的 yes 在 serde_yaml 里不是布尔；它是什么就按什么读，不猜。
+  assert_eq!(on.settings.get("hidden"),Some(&serde_json::json!("yes")),"非布尔的裸词仍按字符串");
+  // Null 显式报错：错误里带上键名，不静默写成空串。
+  let null=compilation(&with_settings("- missing: null")).err().unwrap();
+  assert!(null.contains("missing"),"Null 的错误要指出是哪个键：{null}");
+  assert!(!null.contains("空串"),"不把 Null 描述成空串");
+  // 表格类（映射里再有列表）照旧按分组展开，不因 Bool 分支放宽。
+  let group=compilation(&with_settings("- group:\n  - on: true\n  - name: x")).unwrap();
+  assert_eq!(group.settings.get("group.on"),Some(&serde_json::json!(1)));
+  assert_eq!(group.settings.get("group.name"),Some(&serde_json::json!("x")));
  }
 }

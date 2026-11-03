@@ -96,12 +96,18 @@ $env:CARGO_PROFILE_RELEASE_LTO = 'false'
 $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = '16'
 # 本机 cargo 的 TLS 栈取不到凭据（SEC_E_NO_CREDENTIALS），crates.io 连不上；
 # FISH_CARGO_VENDOR 指向一个本地 vendor 目录时改为纯离线解析，不再碰网络。
-$vendorArgs = @()
-if ($env:FISH_CARGO_VENDOR) {
-    $vendorArgs = @('--config', 'source.crates-io.replace-with="vendored"',
-                    '--config', "source.vendored.directory=`"$($env:FISH_CARGO_VENDOR -replace '\\','/')`"")
-}
-& $Cargo build --locked --offline --release --features installed @vendorArgs --manifest-path (Join-Path $app 'src-tauri/Cargo.toml')
+# 编译走 build-release.ps1：它给同一次 cargo 构建加 --remap-path-prefix，并在
+# 产物上扫 UTF-8/UTF-16LE 的本机路径残留（2.0.4 T-L）。vendor 目录由它转成参数。
+# 2.0.4 出包 F2：FISH_CARGO_VENDOR 未设置时不能传空的 -VendorDir —— PowerShell 会
+# 报「参数 'VendorDir' 缺少自变量」，编译一次都不开始（t22 的 Setup 连试 4 次全败）。
+# 只在变量非空时把这一条补进参数表；未设置时走 build-release.ps1 自己的默认值。
+$vendorArgs = @{}
+if ($env:FISH_CARGO_VENDOR) { $vendorArgs['VendorDir'] = $env:FISH_CARGO_VENDOR }
+& pwsh -NoProfile -File (Join-Path $PSScriptRoot 'build-release.ps1') `
+    -Cargo $Cargo `
+    -Manifest (Join-Path $app 'src-tauri/Cargo.toml') `
+    -Features installed `
+    @vendorArgs
 if ($LASTEXITCODE -ne 0) { throw "主程序编译失败：$LASTEXITCODE" }
 
 $stage = Join-Path (Split-Path $Output -Parent) 'stage'

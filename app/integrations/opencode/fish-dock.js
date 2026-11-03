@@ -1,7 +1,7 @@
-// wakuwaku-opencode-plugin
-// Wakuwaku's plugin for OpenCode 2: what OpenCode's sessions do, told to her
+// fish-dock-opencode-plugin
+// FISH Dock's plugin for OpenCode 2: what OpenCode's sessions do, told to her
 // on her port, and the permissions OpenCode asks for, put to the person on
-// her island too. Written into OpenCode's plugin folder by Wakuwaku (Connect
+// her island too. Written into OpenCode's plugin folder by FISH Dock (Connect
 // → OpenCode); Remove there takes it away. It needs nothing but fetch.
 //
 // OpenCode 2 runs a plugin in its background service, once for each folder
@@ -12,7 +12,7 @@
 // Each event goes to her as OpenCode gives it ({ type, ...data }), with
 // what only this side knows put in: the folder, the session's title, the
 // person's words for the turn, the tool a call is of, the last text of the
-// turn. Wakuwaku reads them (src-tauri/src/events_opencode.rs). One at a
+// turn. FISH Dock reads them (src-tauri/src/events_opencode.rs). One at a
 // time, in order; while she is not there (no answer), nothing is sent for a
 // few seconds, and nothing waits on her.
 //
@@ -22,7 +22,7 @@
 // Answered in OpenCode first, she is told (permission.replied) and lets hers go.
 
 const PORT = 47213
-const HOOK = `http://127.0.0.1:${PORT}/hook?from=wakuwaku&agent=opencode`
+const HOOK = `http://127.0.0.1:${PORT}/hook?from=fish-dock&agent=opencode`
 // How long one event may take to reach her, and a permission her answer
 // (she holds one up to 290 s).
 const SEND_MS = 2000
@@ -210,7 +210,7 @@ export function make(ctx) {
 }
 
 export default {
-  id: 'wakuwaku',
+  id: 'fish-dock',
   setup: async ctx => {
     const plugin = make(ctx)
     plugin.listen()

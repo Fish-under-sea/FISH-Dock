@@ -1,5 +1,11 @@
-// 设置页五个页签的分节顺序，逐条对桌面规格（C:\Users\Fish\Desktop\新建 文本文档.txt
-// 的仓库抄本：FISH-Dock-1029\规格-设置页排序.txt，36 行、5 个页签 24 节）。
+// 设置页五个页签的分节顺序，逐条对桌面规格。规格原文来自桌面文档
+// （C:\Users\Fish\Desktop\新建 文本文档.txt；旧检出 FISH-Dock-1029 的仓库抄本
+// 「规格-设置页排序.txt」，36 行、5 个页签 24 节）。
+//
+// 2.0.4（T-K/T-R）：那份抄本不在本工作区，本测试因此读不了 checkout 外的文件。
+// 现在改读仓内受管副本 app/test/fixtures/settings-order-spec.txt —— 它按测试里
+// 逐条引用的规格编号重建，来源与重建依据写在文件头，不取自本轮改动的实现。
+// 约束不变：页签与分节顺序变了即红，i18n 键改名同样红。
 //
 // 两种断言分工：
 //  · 通用页能单独渲染（它只调别的面包函数），所以看真的渲染输出；
@@ -16,7 +22,7 @@ const source = fs.readFileSync(path.join(__dirname, '../src/pet/settings.js'), '
 // 关于页那一段的起止（about-update.test.js 用的是同一对标记）。
 const ABOUT_FROM = '  const NOTES_TIMEOUT_MS ='
 const ABOUT_TO = '  // Her updates (updates.rs)'
-const SPEC_FILE = path.join(__dirname, '../../../规格-设置页排序.txt')
+const SPEC_FILE = path.join(__dirname, 'fixtures/settings-order-spec.txt')
 const spec = fs.readFileSync(SPEC_FILE, 'utf8')
 
 // 规格里那五行页签标题（「1. 通用（now）」…）的 key，按行序 —— 页签顺序由它说了算。

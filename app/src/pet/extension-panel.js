@@ -101,6 +101,13 @@
     let fxRaf = 0
     const fxParticles = new Map()
     let hits = [], thirdQuery = '', thirdNote = '', thirdSearched = false
+    // 第三方面板的分页状态（T-C）：累加结果、默认发现、迟到请求按 generation 丢弃。
+    let thirdBusy = false, thirdError = '', thirdAttempt = '', thirdTotal = 0, thirdFiltered = 0, thirdHasMore = false, thirdFrom = 0, thirdGeneration = 0
+    // 上一次真实请求的参数（失败重试回到同一页）与本轮是否发现式（空词翻页仍发现式）。
+    let thirdLast = null, thirdDiscovery = false
+    const THIRD_PAGE = 20
+    // 第一次进第三方页时用它做默认发现（与包名规范同一个前缀，不用先认识任何包名）。
+    const THIRD_DISCOVERY = 'fish-dock-plugin'
     const text = (zh, en) => lang() === 'en' ? en : zh
     const fail = e => typeof e === 'string' ? e : e?.message || text('插件操作失败，请重试。', 'Extension operation failed. Please retry.')
     // t45：把宿主的「一句人话 + 逐源详情」JSON 解析出来；不是结构化错误就退回纯文本。
@@ -370,33 +377,92 @@
       return run('runtime', async () => acceptView(await invoke('extension_manage', { action: 'runtime', id: null, enabled: null, nodePath: value.trim(), confirm: true })))
     }
     // 第三方插件：按 npm 包名检索与安装。来源是公开 registry，Dock 不审核其行为。
-    async function thirdparty(query = thirdQuery) {
+    // T-C：首次进入用 fish-dock-plugin 做默认发现；精确包名与普通关键字各走各的
+    // （后端决定的，前端只把词和 discovery 标志传过去）；分页按包名累加去重；
+    // 旧请求迟到一律丢弃——按 generation 判断，不靠「谁先返回」。
+    //
+    // t19 F1/F2/F6：把「发请求」和「清空/追加」拆开——参数是什么就发什么。
+    //  - discovery 随本轮检索记住：默认发现（空词）的第 2 页仍是发现式；
+    //  - 偏移用后端给的 nextFrom（registry 页长），不用可见条数；
+    //  - 失败重试回到**上一次真实请求**那一页，不把已翻的页清掉。
+    async function requestThird({ query, from, append, discovery }) {
+      const generation = ++thirdGeneration
+      thirdLast = { query, from, append, discovery }
+      thirdBusy = true; thirdError = ''; thirdSearched = true
+      if (!append) thirdNote = ''
+      redraw()
+      try {
+        const report = await invoke('extension_thirdparty', { action: 'search', query, from, size: THIRD_PAGE, discovery, confirm: false })
+        if (generation !== thirdGeneration) return       // 迟到的旧请求：丢弃，不覆盖新词
+        const rows = Array.isArray(report?.hits) ? report.hits : []
+        if (append) {
+          // 跨页去重按包名：同一包在别的页出现过就不重复追加，也不把页内重复当新条目。
+          const known = new Set(hits.map(hit => hit.name))
+          hits = hits.concat(rows.filter(hit => !known.has(hit.name)))
+        } else hits = rows
+        // 偏移由后端按 registry 页长给出；没有这个字段才退回一页，绝不用可见条数
+        // （被过滤的条目会让下一页重叠，整页被过滤时更会原地打转）。
+        // 后端给了却没前进（<= 当前页起点）＝没有下一页，宁可当到底。
+        const given = Number(report?.nextFrom)
+        const advanced = Number.isFinite(given) ? (given > from ? given : from) : from + THIRD_PAGE
+        thirdFrom = advanced
+        thirdTotal = Number(report?.total || 0)
+        thirdFiltered = Number(report?.filtered || 0)
+        // 没有前进就没有下一页：宁可当到底，也不让「加载更多」变成死循环。
+        thirdHasMore = report?.hasMore === true && advanced > from
+        const hidden = Number(report?.hidden || 0)
+        // 不合规包被过滤时把数量说出来，绝不静默变空列表（用户 2026-10-31）。
+        // 这个数是**本页**的，文案别让人以为是全局总数。
+        thirdNote = hidden > 0
+          ? text(`本页已隐藏 ${hidden} 个不符合 fish-dock-plugin-* 命名的包`, `Hidden ${hidden} package(s) on this page that do not match fish-dock-plugin-*`)
+          : ''
+      } catch (failure) {
+        if (generation !== thirdGeneration) return
+        thirdError = fail(failure); thirdHasMore = false
+      } finally {
+        if (generation === thirdGeneration) { thirdBusy = false; redraw() }
+      }
+    }
+
+    async function thirdparty(query = thirdQuery, options = {}) {
+      const append = options.append === true
+      const asked = String(query ?? '').trim()
+      const firstEntry = !thirdSearched
+      // 发现式只来自两处：调用方明确要求（进 tab 的默认发现），或**第一次**进来时
+      // 词就是空的。之后用户清空输入再点「检索」是「请给个词」，不是静默浏览全部。
+      const discovery = append ? thirdDiscovery : (options.discovery === true || (!asked && firstEntry))
       thirdQuery = query
       active = 'thirdparty'
-      const text_ = query.trim()
-      if (!text_) { thirdNote = text('请输入 npm 包名或关键字', 'Type an npm package name or keyword'); redraw(); return }
-      return run('third', async () => {
-        const report = await invoke('extension_thirdparty', { action: 'search', query: text_, confirm: false })
-        hits = report?.hits || []
-        const hidden = Number(report?.hidden || 0)
-        thirdSearched = true
-        // 不合规包被过滤时把数量说出来，绝不静默变空列表（用户 2026-10-31）。
-        thirdNote = hidden > 0
-          ? text(`已隐藏 ${hidden} 个不符合 fish-dock-plugin-* 命名的包`, `Hidden ${hidden} package(s) that do not match fish-dock-plugin-*`)
-          : (hits.length ? '' : text('没有找到可安装的包', 'No installable package found'))
-      })
+      if (!append) {
+        thirdAttempt = asked; thirdFrom = 0; hits = []; thirdHasMore = false; thirdTotal = 0; thirdFiltered = 0
+        thirdDiscovery = discovery
+      }
+      if (!asked && !discovery) { thirdNote = text('请输入 npm 包名或关键字', 'Type an npm package name or keyword'); redraw(); return }
+      return requestThird({ query: asked, from: append ? thirdFrom : 0, append, discovery })
+    }
+
+    // 用户点「重试」：回到上一次真实请求的那一页。首查失败重发第 0 页；
+    // 增量失败重发原来那一页（t19 F6：不把已加载的列表清空重来）。
+    function retryThird() {
+      const last = thirdLast
+      if (!last) return thirdparty(thirdAttempt, { discovery: thirdAttempt === '' })
+      if (last.append) return requestThird(last)
+      return thirdparty(last.query, { discovery: last.discovery })
     }
     async function installThird(spec) {
       if (busy || !spec) return
       if (!await confirm(text(`安装第三方插件 ${spec}？\n它会以插件身份在本机运行代码，Dock 不审核它的行为，请只装你信任的包。`, `Install third-party extension ${spec}?\nIt runs code on this machine as a plugin; Dock does not review it. Only install packages you trust.`))) return
       return run('third', async () => {
         acceptView(await invoke('extension_thirdparty', { action: 'install', query: spec, confirm: true }))
-        hits = []; thirdSearched = false; thirdNote = text('已安装：', 'Installed: ') + spec
+        // 装完回「已安装」：分页状态一起归零，别把上一条检索的页码留给下一次。
+        hits = []; thirdSearched = false; thirdFrom = 0; thirdHasMore = false; thirdTotal = 0; thirdFiltered = 0; thirdGeneration += 1
+        thirdLast = null; thirdDiscovery = false
+        thirdNote = text('已安装：', 'Installed: ') + spec
         active = 'installed'
       })
     }
     function render() {
-      const disabled = busy ? ' disabled' : ''
+      const disabled = busy || thirdBusy ? ' disabled' : ''
       const star = view?.star || {}, installed = view?.installed || [], entries = catalog?.plugins || []
       // 身份区只有一颗实心（T11）：没登录时是「登录」，登录了但还没验证时是
       // 「检查登录与 Star」；其余（去 Star / 解除锁定 / 取消 / 退出）都是次级。
@@ -487,10 +553,11 @@
           ? ' aria-disabled="true"'
           : ` data-extension-action="autostart" data-extension-id="${esc(m.id)}" aria-pressed="${hookState === 'on'}"`
         const hook = `<button type="button" class="pbtn sm hook" data-hook="${hookState}"${hookAction}${disabled} title="${esc(hookTitle)}">${esc(hookLabel)}</button>`
-        // 层级（T11）：唯一实心只给「更新」（唯一改变这一行版本的动作）；启停与
-        // 自启动是描边次级；卸载与打开日志收进「更多」，平时按次级文字色出现，
-        // 只有悬停/聚焦时才取危险色（extensions.css 的 .extension-danger）。
-        const more = `<details class="extension-more"><summary class="extension-more-toggle">${esc(text('更多', 'More'))}</summary><div class="extension-more-body">${button('uninstall', m.id, text('卸载', 'Uninstall'), 'extension-danger')}${button('logs', m.id, text('打开插件日志', 'Open logs'), 'extension-quiet')}</div></details>`
+        // 层级（T11）+ 行式动作列表（T-C / #63）：唯一实心只给「更新」；启停与
+        // 自启动是描边次级；「更多」展开后是一列整行可点的动作——「打开插件日志」
+        // 在上，发丝线隔 8px，「卸载」在下且**常态**就是危险色（不用悬停才知道）。
+        const moreRow = (action, label, variant = '') => `<button type="button" class="pbtn sm extension-more-row${variant ? ' ' + variant : ''}" data-extension-action="${action}" data-extension-id="${esc(m.id)}"${disabled}>${esc(label)}</button>`
+        const more = `<details class="extension-more"><summary class="extension-more-toggle">${esc(text('更多', 'More'))}</summary><div class="extension-more-body">${moreRow('logs', text('打开插件日志', 'Open logs'))}${moreRow('uninstall', text('卸载', 'Uninstall'), 'extension-danger')}</div></details>`
         const actions = `${canUpdate ? button('install', m.id, text('更新', 'Update'), 'al') : ''}${hook}${r.running || unlocked(m.id) ? button('enabled', m.id, r.running ? text('停用', 'Disable') : r.error ? text('重试启用', 'Retry') : text('启用', 'Enable')) : ''}${more}`
         // 功能页按钮不再按运行态禁用（#14-7）：插件没运行时点进去，页面自己显示
         // 「插件未运行」的错误态与「启动」按钮——标签页在、入口就在，不再忽隐忽现。
@@ -512,7 +579,18 @@
       // 检索（T11）：输入框与「检索」合成一个字段——按钮缩进字段里、按钮不再是
 // 与同排八颗按钮同权重的独立按钮；回车即搜（mount 里已经绑了 Enter）。
       // 输入框补了可访问名（aria-label），placeholder 只当提示，不当名字（WUI-02）。
-      const thirdPanel = `<div class="extension-third"><div class="extension-search" role="search"><input id="extension-third-query" class="extension-search-input" type="text" aria-label="${esc(text('npm 包名或关键字', 'npm package name or keyword'))}" placeholder="${esc(text('包名需为 fish-dock-plugin-<名字>，如 @acme/fish-dock-plugin-weather', 'Package must be fish-dock-plugin-<name>, e.g. @acme/fish-dock-plugin-weather'))}" value="${esc(thirdQuery)}" autocomplete="off" spellcheck="false"${disabled}><button type="button" class="pbtn sm extension-search-go" data-extension-third="search"${disabled}>${esc(text('检索', 'Search'))}</button></div>${thirdNote ? `<p role="status" class="note">${esc(thirdNote)}</p>` : ''}<p class="note">${esc(text('第三方插件来自公开 npm registry，由发布者维护；Dock 只校验包结构与摘要，不审核其行为。', 'Third-party extensions come from the public npm registry and are maintained by their publishers; Dock only checks structure and digests.'))}</p>${hits.map(hit => `<article class="extension-card"><header class="extension-card-header"><div class="extension-card-title"><strong>${esc(hit.name)}</strong><span class="extension-version">${esc(hit.version)}</span></div><div class="extension-card-actions"><button type="button" class="pbtn sm" data-extension-third="install" data-third="${esc(hit.name + '@' + hit.version)}"${disabled}>${esc(text('安装', 'Install'))}</button></div></header><p class="extension-description">${esc(hit.description || '')}</p><dl class="extension-meta"><div><dt>${esc(text('发布者', 'Publisher'))}</dt><dd>${esc(hit.publisher || '—')}</dd></div><div><dt>${esc(text('更新', 'Updated'))}</dt><dd>${esc(String(hit.updated || '').slice(0, 10) || '—')}</dd></div></dl></article>`).join('')}${thirdSearched && !hits.length && !thirdNote ? `<p class="note">${esc(text('可换一个包名再试。', 'Try another package name.'))}</p>` : ''}</div>`
+      // T-C / #63：placeholder 只留一句短话（整句命名规则原来在窄窗被截断），
+      // 规则改到下方 note；空结果、registry 报错、加载更多各有自己的位置。
+      const thirdRule = text('包名需为 fish-dock-plugin-<名字>（可带 @scope），如 @acme/fish-dock-plugin-weather', 'Package name is fish-dock-plugin-<name> (a scope is allowed), e.g. @acme/fish-dock-plugin-weather')
+      const thirdCount = thirdTotal > 0
+        ? `<p class="extension-third-count">${esc(text(`共 ${thirdTotal} 个结果，本页可用 ${thirdFiltered || hits.length} 个`, `${thirdTotal} result(s), ${thirdFiltered || hits.length} usable on this page`))}</p>`
+        : ''
+      // 三态各自可见：空结果 / 检索失败（带重试）/ 正在检索。失败不静默成空列表。
+      const thirdEmpty = thirdSearched && !thirdBusy && !thirdError && !hits.length && !thirdNote
+        ? `<p class="note">${esc(text('没有找到可安装的包。可换一个包名再试。', 'No installable package found. Try another package name.'))}</p>`
+        : ''
+      const thirdActions = `${thirdHasMore ? `<button type="button" class="pbtn sm" data-extension-third="more"${disabled}>${esc(text('加载更多', 'Load more'))}</button>` : ''}${thirdError ? `<button type="button" class="pbtn sm" data-extension-third="retry"${disabled}>${esc(text('重试', 'Retry'))}</button>` : ''}${thirdBusy ? `<span class="note" role="status">${esc(text('正在检索…', 'Searching…'))}</span>` : ''}`
+      const thirdPanel = `<div class="extension-third"><div class="extension-search" role="search"><input id="extension-third-query" class="extension-search-input" type="text" aria-label="${esc(text('npm 包名或关键字', 'npm package name or keyword'))}" placeholder="${esc(text('搜索 npm 包，如 fish-dock-plugin-weather', 'Search npm packages, e.g. fish-dock-plugin-weather'))}" value="${esc(thirdQuery)}" autocomplete="off" spellcheck="false"${disabled}><button type="button" class="pbtn sm extension-search-go" data-extension-third="search"${disabled}>${esc(text('检索', 'Search'))}</button></div><p class="note">${esc(thirdRule)}</p>${thirdNote ? `<p role="status" class="note">${esc(thirdNote)}</p>` : ''}${thirdError ? `<p class="bad" role="alert">${esc(thirdError)}</p>` : ''}${thirdCount}${hits.map(hit => `<article class="extension-card"><header class="extension-card-header"><div class="extension-card-title"><strong>${esc(hit.name)}</strong><span class="extension-version">${esc(hit.version)}</span></div><div class="extension-card-actions"><button type="button" class="pbtn sm" data-extension-third="install" data-third="${esc(hit.name + '@' + hit.version)}"${disabled}>${esc(text('安装', 'Install'))}</button></div></header><p class="extension-description">${esc(hit.description || '')}</p><dl class="extension-meta"><div><dt>${esc(text('发布者', 'Publisher'))}</dt><dd>${esc(hit.publisher || '—')}</dd></div><div><dt>${esc(text('更新', 'Updated'))}</dt><dd>${esc(String(hit.updated || '').slice(0, 10) || '—')}</dd></div></dl></article>`).join('')}${thirdEmpty}${thirdActions ? `<div class="extension-third-actions">${thirdActions}</div>` : ''}<p class="note">${esc(text('第三方插件来自公开 npm registry，由发布者维护；Dock 只校验包结构与摘要，不审核其行为。', 'Third-party extensions come from the public npm registry and are maintained by their publishers; Dock only checks structure and digests.'))}</p></div>`
       const runtime = view?.runtime
       const sourceLabel = source => ({ saved: text('手动配置', 'Manual override'), bundled: text('随包运行时', 'Bundled runtime'), path: text('系统 PATH', 'System PATH'), development: text('开发环境覆盖', 'Development override') })[source] || text('尚未找到', 'Not found')
       // 运行依赖：构建档与来源各占一段（T11 去掉了中点拼串），路径仍是 mono 小字。
@@ -556,8 +634,12 @@
       const showView = want => {
         if (busy) return
         if (want === 'store') void store()
-        else if (want === 'thirdparty') { active = 'thirdparty'; redraw() }
-        else { active = 'installed'; redraw() }
+        else if (want === 'thirdparty') {
+          active = 'thirdparty'
+          // 首次进来先做一次默认发现（T-C）：不再是一屏「请输入包名」的空白。
+          if (!thirdSearched && !thirdQuery.trim()) void thirdparty('', { discovery: true })
+          else redraw()
+        } else { active = 'installed'; redraw() }
       }
       const stepView = (from, key) => {
         const at = VIEWS.indexOf(from)
@@ -599,7 +681,14 @@
         thirdBox.oninput = () => { thirdQuery = thirdBox.value }
         thirdBox.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); void thirdparty() } }
       }
-      panel.querySelectorAll('[data-extension-third]').forEach(b => { b.onclick = () => b.dataset.extensionThird === 'search' ? thirdparty() : installThird(b.dataset.third) })
+      // 三个动作共用一个 data 属性：检索、加载更多、失败重试；其余是安装。
+      panel.querySelectorAll('[data-extension-third]').forEach(b => { b.onclick = () => {
+        const what = b.dataset.extensionThird
+        if (what === 'search') void thirdparty(thirdQuery)
+        else if (what === 'more') void thirdparty(thirdAttempt || thirdQuery, { append: true })
+        else if (what === 'retry') void retryThird()
+        else void installThird(b.dataset.third)
+      } })
       // t44：挂载时若进度弹窗已经在（例如切回本页），重新点燃粒子循环；轮询也会再点。
       // 2026-11-01 用户要求：去掉粒子动效，只保留最基本的进度条（不再启动 rAF）
       void load()
@@ -610,7 +699,7 @@
     // + 已启用 + 已解锁」；没运行也留着标签页，由页面自己显示错误态与「启动」按钮。
     // running/error 一起带出去，页面才知道该不该走「未运行」那条路。
     const pages = () => (view?.installed || []).filter(r => r.plugin.pending !== true && r.plugin.enabled !== false && Array.isArray(r.plugin.manifest.pages) && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, running: !!r.running, error: r.error || '', key: r.plugin.manifest.id + '/' + p.id })))
-    return { render, mount, load, store, action, runtime, auth, thirdparty, installThird, closeAuth, pages }
+    return { render, mount, load, store, action, runtime, auth, thirdparty, retryThird, installThird, closeAuth, pages }
   }
   window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, PHASE_WORDS, FLIGHT_WINDOW }
 })()

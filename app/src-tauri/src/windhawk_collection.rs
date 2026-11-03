@@ -49,9 +49,14 @@ pub fn prepare(manifest:&str,files:&[SourceFile],mut download:impl FnMut(&str)->
  }
  Ok(Prepared{id:collection.id,name:collection.name,mods:prepared})
 }
+// 2.0.4 T-D / 方案 §5（审计 A05）：远程源码不再自建 ureq agent，统一走
+// `sources`（原地址 + 镜像候选 + 每候选的代理路 + 一次总预算 + 手动重定向）。
+// 上限仍是 2 MiB，错误仍是一句人话（每候选原因由 sources 聚合）。
 pub fn download_source(value:&str)->Result<String,String>{
- let mut current=secure_url(value)?;let agent=ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(20))).max_redirects(0).http_status_as_error(false).build().new_agent();
- for _ in 0..5{let mut response=agent.get(current.as_str()).header("User-Agent","FISH-Dock-Windhawk").call().map_err(|_|"mod 源码下载失败，请检查网络")?;let status=response.status().as_u16();if matches!(status,301|302|303|307|308){let location=response.headers().get("Location").and_then(|v|v.to_str().ok()).ok_or("mod 下载跳转地址缺失")?;let next=current.join(location).map_err(|_|"mod 下载跳转地址无效")?;current=secure_url(next.as_str())?;continue;}if status!=200{return Err(format!("mod 下载失败（HTTP {status}）"));}let bytes=response.body_mut().with_config().limit(2*1024*1024).read_to_vec().map_err(|_|"mod 源码下载中断或超过 2 MiB")?;return String::from_utf8(bytes).map_err(|_|"mod 源码不是 UTF-8".into());}Err("mod 下载跳转次数超过限制".into())
+ secure_url(value).map_err(|e|format!("mod 源码地址无效：{e}"))?;
+ let bytes=crate::sources::fetch_bytes(value,crate::config::plugin_download_timeout(),2*1024*1024)
+  .map_err(|fail|format!("mod 源码下载失败：{}",fail.reason()))?;
+ String::from_utf8(bytes).map_err(|_|"mod 源码不是 UTF-8".into())
 }
 
 #[cfg(test)]mod tests {

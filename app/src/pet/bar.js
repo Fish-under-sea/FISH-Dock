@@ -29,6 +29,12 @@
   const clock = document.querySelector('.clock')
   let state = { windows: [], look: {}, edge: 'bottom', align: 'center', material: 'clear', lang: 'zh' }
 
+  // 2.0.4 T-G：时钟秒的纯函数来自 indicators.js（bar.html 在 bar.js 之前加载）；测试夹具
+  // 若只拼了 bar.js，用同语义兜底，免得整条带因缺一个全局而崩。
+  const INDICATORS = globalThis.FishIndicators || {
+    clockTime: (d, lang, seconds) => d.toLocaleTimeString(lang === 'zh' ? 'zh-CN' : undefined, seconds ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' }),
+  }
+
   const el = (tag, cls, text) => {
     const n = document.createElement(tag)
     if (cls) n.className = cls
@@ -72,8 +78,9 @@
 
   function tickClock() {
     const d = new Date()
+    // 2.0.4 T-G：跟随 Windows 的「显示秒」（bars.rs 的 look 带 seconds）。
+    const time = INDICATORS.clockTime(d, state.lang, state.look?.seconds === true)
     const zh = state.lang === 'zh' ? 'zh-CN' : undefined
-    const time = d.toLocaleTimeString(zh, { hour: '2-digit', minute: '2-digit' })
     const date = d.toLocaleDateString(zh, isSide() ? { month: 'numeric', day: 'numeric' } : { year: 'numeric', month: 'numeric', day: 'numeric' })
     if (clock.dataset.at !== time + date) {
       clock.dataset.at = time + date
@@ -439,8 +446,8 @@
     )
   }
 
-  // 时钟/日期刷新间隔（前端界面节奏，就地具名常量；与 island.js 各自 bundle 各留一份）。
-  const CLOCK_TICK_MS = 5000
+  // 时钟/日期刷新间隔：一秒一次（2.0.4 T-G）；tickClock 按文本去重，关秒时一分钟才重画。
+  const CLOCK_TICK_MS = 1000
   setInterval(tickClock, CLOCK_TICK_MS)
   addEventListener('resize', () => {
     startScale = 0

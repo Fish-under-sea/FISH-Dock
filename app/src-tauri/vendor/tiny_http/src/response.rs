@@ -426,15 +426,31 @@ where
             &self.status_code,
             &self.headers,
         )?;
+        // Wakuwaku（2.0.4，/v1 的 SSE）：响应头也立刻出去，不压在 BufWriter 里
+        // 等正文；不流式的时候这一下只是提前 flush。
+        writer.flush()?;
 
         // sending the body
         if !do_not_send_body {
             match transfer_encoding {
                 Some(TransferEncoding::Chunked) => {
-                    use chunked_transfer::Encoder;
-
-                    let mut writer = Encoder::new(writer);
-                    io::copy(&mut reader, &mut writer)?;
+                    // Wakuwaku（2.0.4，/v1 的 SSE）：写端是 1 KiB 的 BufWriter，
+                    // io::copy 只在结束时 flush，一帧小的事件会一直压在里面；
+                    // chunked_transfer 的 Encoder 也不转发 flush。这里自己按块
+                    // 编码并每块 flush，事件流才是实的。
+                    let mut buffer = [0u8; 8192];
+                    loop {
+                        let read = reader.read(&mut buffer)?;
+                        if read == 0 {
+                            break;
+                        }
+                        write!(writer, "{read:x}\r\n")?;
+                        writer.write_all(&buffer[..read])?;
+                        writer.write_all(b"\r\n")?;
+                        writer.flush()?;
+                    }
+                    writer.write_all(b"0\r\n\r\n")?;
+                    writer.flush()?;
                 }
 
                 Some(TransferEncoding::Identity) => {

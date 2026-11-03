@@ -1,7 +1,7 @@
 // The local HTTP port the Claude Code and Codex hooks report to.
 //
 //   GET  /health       { ok, app, runtime, state, ready: { pet, island }, waiting }; with
-//                      WAKUWAKU_DEBUG=1, the windows and settings too
+//                      FISH_DOCK_DEBUG=1 (old WAKUWAKU_DEBUG still read), the windows and settings too
 //   POST /hook         a Claude Code hook event; answers {}, or for a prompt the person's answer
 //                      ?agent=codex: a Codex one, handed on by this program (main.rs codex_hook)
 //                      ?agent=agy, ?agent=zcode, ?agent=reasonix: the same for
@@ -17,8 +17,8 @@
 //   POST /come-home    started again while running: back into sight
 //   POST /after-update { pid, version }: a new version she started (an update, a restart) is
 //                      up, and waits for her to go (updates.rs hand_over)
-//   POST /debug/eval   { page, code }: run code in her page or the island's (WAKUWAKU_DEBUG=1 only)
-//   POST /debug/walk   { dx, ms }: take a walk now (WAKUWAKU_DEBUG=1 only)
+//   POST /debug/eval   { page, code }: run code in her page or the island's (FISH_DOCK_DEBUG=1 only)
+//   POST /debug/walk   { dx, ms }: take a walk now (FISH_DOCK_DEBUG=1 only)
 //   POST /quit         quit, as the menu does: by choice, so no session's hook starts her
 //                      until she is started otherwise (data.rs Quit, #57); for a new build
 //                      replacing her, which starts her (and clears that), or a script (killing
@@ -106,7 +106,9 @@ fn first_time(said: &mut Vec<String>, line: &str) -> bool {
 }
 
 pub fn serve(sh: Arc<Shared>, server: Server) {
-    let is_debug = std::env::var("WAKUWAKU_DEBUG").as_deref() == Ok("1");
+    // 2.0.4 T-Q：排障日志开关统一走 config（新名 FISH_DOCK_DEBUG 优先，旧
+    // WAKUWAKU_DEBUG 只读兼容），不再在这里直接读环境变量。
+    let is_debug = crate::config::debug_enabled();
     // What tiny_http tells of a connection it dropped, where 0.12.0 panicked
     // (vendor/tiny_http/README.md), or of its accept thread ending, into her
     // log. Each thing is said once: a socket that a network filter will not
@@ -152,7 +154,7 @@ fn read_json(req: &mut Request) -> Option<Value> {
 // processes' list.
 fn chain_for(sh: &Shared, req: &Request, event: &Value, agent: Option<&str>) -> Option<jump::Chain> {
     if brings_chain(agent) {
-        let chain = jump::chain_from_json(event.get(jump::CODEX_CHAIN));
+        let chain = jump::chain_from_json(event.get(jump::CODEX_CHAIN).or_else(|| event.get(jump::LEGACY_CODEX_CHAIN)));
         return (!chain.is_empty()).then_some(chain);
     }
     let session = event.get("session_id").and_then(Value::as_str).unwrap_or("");
@@ -176,6 +178,15 @@ fn chain_for(sh: &Shared, req: &Request, event: &Value, agent: Option<&str>) -> 
 fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
     let path = req.url().split('?').next().unwrap_or("").to_string();
     let method = req.method().as_str().to_string();
+    // 2.0.4 T-B：`/v1` 自带的 Host/Origin/Bearer 校验与 SSE 线程（agent_hub.rs）。
+    // 在这里先分流，SSE 由它自己的线程跑，绝不挡住下面的 hook / health / 审批 / 退出。
+    if method == "GET" && path.starts_with("/v1/") {
+        let api = sh.agent_api.clone();
+        let port = sh.port;
+        let view = sh.clone();
+        crate::agent_hub::handle(&api, port, req, &move |filter| view.agent_snapshot(filter));
+        return;
+    }
     match (method.as_str(), path.as_str()) {
         ("POST", "/hook") => {
             let Some(mut event) = read_json(&mut req) else { return reply(req, 200, json!({})) };
@@ -332,7 +343,10 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
             // after it started has no page yet, as one that never gets them
             // (the test VM's two "starts with no page", 2026-10-16).
             let ready = json!({ "pet": pet::is_ready(sh), "island": island::is_ready(sh) });
-            let mut body = json!({ "ok": true, "app": "wakuwaku", "runtime": "tauri", "state": sh.pet.lock().unwrap().get(now_ms()), "ready": ready, "waiting": crate::taskbar::waiting() });
+// 2.0.4 合并：cleanup 的品牌 app=fish-dock + agents 的 details 投影（t21 语义合并）
+            let details = sh.details();
+            let state = sh.pet.lock().unwrap().get(now_ms(), details);
+            let mut body = json!({ "ok": true, "app": "fish-dock", "runtime": "tauri", "state": state, "ready": ready, "waiting": crate::taskbar::waiting() });
             if is_debug {
                 body["window"] = pet::where_(sh);
                 body["island"] = island::where_(sh);

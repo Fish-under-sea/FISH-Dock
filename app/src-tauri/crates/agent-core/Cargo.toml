@@ -1,0 +1,13 @@
+[package]
+# 2.0.4 T-A：中性事件与各 agent 可独立转换的纯逻辑。
+# 这里不依赖 tauri，也不依赖 windows：`cargo test -p agent-core` 在任何一台机器上都能跑。
+name = "agent-core"
+version = "2.0.3"
+edition = "2021"
+license = "MIT"
+authors = ["Pengjie Zhou"]
+description = "Neutral agent events, and the conversion each agent's adapter shares."
+
+[dependencies]
+# 事件的原始形状就是各 agent 自己的 JSON（hook、rollout、记录行），读它不需要别的。
+serde_json = "1"

@@ -283,7 +283,7 @@ fn service_guard(path: &Path) -> Result<Box<dyn std::any::Any>, String> {
     let canonical = canonical_for_guard(path)?;
     let digest = Sha256::digest(canonical.as_bytes());
     let suffix: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    let name: Vec<u16> = format!(r"\\.\pipe\ofm-service-lock-{suffix}").encode_utf16().chain(Some(0)).collect();
+    let name: Vec<u16> = format!(r"\\.\pipe\{}{suffix}", crate::legacy_ofm::LEGACY_SERVICE_LOCK).encode_utf16().chain(Some(0)).collect();
     let handle = unsafe { CreateNamedPipeW(name.as_ptr(), 0x3 | 0x0008_0000, 0, 1, 4096, 4096, 0, std::ptr::null_mut()) };
     if handle == -1 { return Err("旧 OFM 数据目录正在启动或被服务占用；请正常退出后重试".into()); }
     Ok(Box::new(ServiceGuard(handle)))
@@ -302,7 +302,7 @@ fn service_guard(path: &Path) -> Result<Box<dyn std::any::Any>, String> {
     let canonical = canonical_for_guard(path)?;
     let digest = Sha256::digest(canonical.as_os_str().as_bytes());
     let suffix: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    let name = format!("ofm-service-lock-{suffix}");
+    let name = format!("{}{suffix}", crate::legacy_ofm::LEGACY_SERVICE_LOCK);
     if name.len() + 1 > 108 { return Err("无法取得 OFM 服务互斥".into()); }
     let fd = unsafe { socket(1, 1 | 0x80000, 0) };
     if fd < 0 { return Err("无法取得 OFM 服务互斥".into()); }
@@ -340,7 +340,7 @@ fn service_lock_live_or_unknown(path: &Path) -> bool {
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > 16 * 1024 { return true; }
     let text = match fs::read(path) { Ok(text) => text, Err(_) => return true };
     let Ok(owner) = serde_json::from_slice::<serde_json::Value>(&text) else { return true };
-    if owner.get("product").and_then(serde_json::Value::as_str) != Some("our-free-model-standalone") { return true; }
+    if !crate::legacy_ofm::is_legacy_service_product(owner.get("product").and_then(serde_json::Value::as_str)) { return true; }
     let Some(pid) = owner.get("pid").and_then(serde_json::Value::as_u64).filter(|pid| *pid > 0 && *pid <= u32::MAX as u64) else { return true };
     process_alive(pid as u32) != Some(false)
 }

@@ -529,11 +529,13 @@ pub fn app_home() -> Result<PathBuf, String> {
 }
 
 /// Where the installer expanded Node, WebView2 and the local model service: the
-/// `resources` folder beside the program, unless `DSH_FISH_RESOURCES` points
-/// somewhere else (a development checkout).
+/// `resources` folder beside the program, unless `FISH_DOCK_RESOURCES` (or its
+/// read-only legacy alias `DSH_FISH_RESOURCES`) points somewhere else (a
+/// development checkout). 2.0.4 T-Q: the resolution lives in
+/// [`crate::config::resources_override`] only — no second copy of the env names.
 #[cfg(feature = "installed")]
 pub fn resources_directory() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("DSH_FISH_RESOURCES").filter(|p| !p.is_empty()) { return Ok(path.into()); }
+    if let Some(path) = crate::config::resources_override() { return Ok(path); }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     Ok(exe.parent().ok_or("找不到程序目录")?.join("resources"))
 }

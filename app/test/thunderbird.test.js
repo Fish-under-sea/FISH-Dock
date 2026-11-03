@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const tb = require('../integrations/thunderbird/wakuwaku-mail/background')
+const tb = require('../integrations/thunderbird/fish-dock-mail/background')
 
 // Thunderbird's API as the extension sees it: two accounts, one listed the
 // Thunderbird 115 way (.folders, .type) and one the later way (.rootFolder,

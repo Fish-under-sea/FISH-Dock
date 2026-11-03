@@ -1,0 +1,204 @@
+{
+  "comment": "npm 检索命令返回体的真实字段形状（t42）：Rust 契约测试断言键集合与本文件一致，Node 用例直接用本文件驱动分页",
+  "firstPage": {
+    "hits": [
+      {
+        "publisher": "fixture",
+        "version": "1.0.1",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p1",
+        "description": "page fixture 1"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.2",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p2",
+        "description": "page fixture 2"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.3",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p3",
+        "description": "page fixture 3"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.4",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p4",
+        "description": "page fixture 4"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.5",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p5",
+        "description": "page fixture 5"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.6",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p6",
+        "description": "page fixture 6"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.7",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p7",
+        "description": "page fixture 7"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.8",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p8",
+        "description": "page fixture 8"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.9",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p9",
+        "description": "page fixture 9"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.10",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p10",
+        "description": "page fixture 10"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.11",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p11",
+        "description": "page fixture 11"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.12",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p12",
+        "description": "page fixture 12"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.13",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p13",
+        "description": "page fixture 13"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.14",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p14",
+        "description": "page fixture 14"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.15",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p15",
+        "description": "page fixture 15"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.16",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p16",
+        "description": "page fixture 16"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.17",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p17",
+        "description": "page fixture 17"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.18",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p18",
+        "description": "page fixture 18"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.19",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p19",
+        "description": "page fixture 19"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.20",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p20",
+        "description": "page fixture 20"
+      }
+    ],
+    "hidden": 0,
+    "total": 41,
+    "filtered": 20,
+    "hasMore": true,
+    "nextFrom": 20
+  },
+  "secondPage": {
+    "hits": [
+      {
+        "publisher": "fixture",
+        "version": "1.0.21",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p21",
+        "description": "page fixture 21"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.22",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p22",
+        "description": "page fixture 22"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.23",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p23",
+        "description": "page fixture 23"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.24",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p24",
+        "description": "page fixture 24"
+      },
+      {
+        "publisher": "fixture",
+        "version": "1.0.25",
+        "updated": "2026-11-01",
+        "name": "fish-dock-plugin-p25",
+        "description": "page fixture 25"
+      }
+    ],
+    "hidden": 0,
+    "total": 41,
+    "filtered": 5,
+    "hasMore": true,
+    "nextFrom": 25
+  },
+  "lastPage": {
+    "hits": [],
+    "hidden": 0,
+    "total": 41,
+    "filtered": 0,
+    "hasMore": false,
+    "nextFrom": 41
+  }
+}

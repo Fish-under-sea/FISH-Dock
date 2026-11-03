@@ -13,70 +13,116 @@ const STDERR_CHUNK:u64=8192;
 // 缓存这么久不再重复探——设置页每次重绘都探一遍会把界面拖慢。
 const PROBE_TIMEOUT:Duration=Duration::from_secs(2);
 const PROBE_TTL:Duration=Duration::from_secs(2);
-// 测试用的尝试计数（t18）：证明冷态真的把 start_once 跑了两次、热态只跑一次。
-// 只在 cfg(test) 下存在，生产路径零影响（不改变任何对外行为）。
+// 业务服务探测的轮询间隔（T-E）：插件说「还没就绪」时最多歇这么久再看，整段仍在
+// 本次尝试的共享 deadline 之内。
+const HEALTH_POLL:Duration=Duration::from_millis(500);
+// 测试用的尝试计数（t18）：证明一次 Process::start 只尝试一次——重试由自启调度器
+// （plugin_start）负责，进程层不再自己重试，避免「重试次数 × 阶段预算」的乘法。
+// t46/F2-1：改为**线程本地**计数；默认并行 cargo test 下其他用例的 start 不会插进
+// 本用例的 before/after 窗口（以前是进程级 AtomicUsize，并行时 3 次里 2~3 次假红）。
 #[cfg(test)]
-static START_ATTEMPTS:std::sync::atomic::AtomicUsize=std::sync::atomic::AtomicUsize::new(0);
+thread_local! { static START_ATTEMPTS: std::cell::Cell<usize> = std::cell::Cell::new(0); }
 #[cfg(test)]
-fn start_attempts()->usize { START_ATTEMPTS.load(std::sync::atomic::Ordering::Relaxed) }
+fn start_attempts()->usize { START_ATTEMPTS.with(|cell|cell.get()) }
+#[cfg(test)]
+fn note_start_attempt() { START_ATTEMPTS.with(|cell|cell.set(cell.get()+1)); }
+
+// 一次启动尝试分阶段的耗时（A03）：日志按 verify / spawn / hello / activate / service
+// 分别落，出问题能看出卡在哪一步，而不是只看见「启动失败」。
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
+pub struct Stages { pub verify_ms:u64, pub spawn_ms:u64, pub hello_ms:u64, pub activate_ms:u64, pub service_ms:u64 }
+
+// 业务服务健康（A03 / T-E）：宿主实例存在不等于网关就绪，两者分开报。
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub enum Service {
+    /// 插件用 plugin.health 明确回了 ready:true。
+    Ready,
+    /// 插件没有 health 接口（UNKNOWN_METHOD）：服务状态未知，不当成健康。
+    Unknown(String),
+    /// 明确没就绪 / 探测失败。
+    Down(String),
+}
+impl Service {
+    pub fn as_str(&self)->&'static str { match self { Service::Ready=>"ready", Service::Unknown(_)=>"unknown", Service::Down(_)=>"down" } }
+    pub fn detail(&self)->Option<&str> { match self { Service::Ready=>None, Service::Unknown(text)|Service::Down(text)=>Some(text) } }
+}
+
+// 一次启动失败：阶段 + 人话原因 + 是否永久（身份/协议/摘要/配置错误不重试）。
+#[derive(Clone,Debug)]
+pub struct StartError { pub phase:crate::plugin_start::Phase, pub message:String, pub stages:Stages, pub permanent:bool }
+impl StartError {
+    fn new(phase:crate::plugin_start::Phase,message:impl Into<String>,stages:Stages,permanent:bool)->Self { Self{phase,message:message.into(),stages,permanent} }
+    /// 插件卡上的一句：先说是哪一步，再说原因。
+    pub fn text(&self)->String { format!("{}阶段：{}",self.phase.label(),self.message) }
+}
+impl std::fmt::Display for StartError { fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { f.write_str(&self.text()) } }
+
+// 一次成功的启动：进程 + 分阶段耗时 + 业务服务健康。
+pub struct Started { pub process:Process, pub stages:Stages, pub service:Service }
 pub struct Process { child:Child, owner:Option<crate::plugin_job::Owner>, output:Receiver<Result<Value,String>>, input:SyncSender<Value>, next:u64, namespace:Namespace, capabilities:Vec<String>, id:String, probe:Option<Instant> }
 // autostart_flag 是传给插件的那个环境变量值（#22）：只有 1 是「随 Dock 启动」，
 // 其余一律 0，插件据此决定要不要自己把服务拉起来。
 fn autostart_flag(autostart:bool)->&'static str { if autostart{"1"}else{"0"} }
 impl Process {
     // autostart：这次拉起是不是「随 Dock 启动」（#22）。宿主只在开机自启时传
-// true，安装、启用、回滚都传 false——插件读这个信号自己决定要不要把本机服务
-// 拉起来，宿主不再替它猜。
-    // T04（诊断 A4）冷态重试一次：开机自启那阵 I/O 与杀软最重，一次失败往往只是
-    // 暂时的——登录后 5 分钟内（config::plugin_startup_is_cold）退避 500 ms 后整段
-    // 重拉（旧实例在 start_once 失败路径的 Drop 里已停干净，失败多半是管道/超时
-    // 已废，复用只会原地再超时）；热态不重试。每个插件各自重试、各自返回，失败
-    // 的只是它自己（#38 的逐插件容错不变），不会拖住整批。
+    // true，安装、启用、回滚都传 false——插件读这个信号自己决定要不要把本机服务
+    // 拉起来，宿主不再替它猜。
+    //
+    // T-E / A02：一次调用只尝试一次，冷/热共用一个 deadline（见 start_with_budget）；
+    // 重试、退避与整轮生命周期由 plugin_start 的调度器统一管，进程层不再自己重试。
     pub fn start(manager:&Manager<'_>,row:&Installed,node:Option<&Path>,autostart:bool)->Result<Self,String> {
-        match Self::start_once(manager,row,node,autostart) {
-            Ok(process)=>Ok(process),
-            // 冷/热只在「已经失败」之后判一次（与改造前完全同序）：冷态交 retry_when_cold
-            // 退避后整段重拉，热态把首次错误原样交回。
-            Err(first)=>Self::retry_when_cold(crate::config::plugin_startup_is_cold(),first,||Self::start_once(manager,row,node,autostart)),
-        }
+        let budget=crate::config::plugin_start_budget();
+        Self::start_with_budget(manager,row,node,autostart,budget).map(|started|started.process).map_err(|error|{log_error(&row.manifest.id,budget,&error);error.text()})
     }
-    // retry_when_cold 是「冷态失败重试一次」的唯一实现点（T04 / 诊断 A4；t18 的用例
-    // 直接测它，不必真起插件进程）：热态原样返回首次错误、不退避；冷态先退避
-    // PLUGIN_COLD_RETRY_DELAY，再调一次 attempt，把首次原因收进「（冷启已重试一次，
-    // 首次：…）」。attempt 是注入进来的，生产路径传 start_once，测试传计数闭包。
-    fn retry_when_cold<T>(cold:bool,first:String,mut attempt:impl FnMut()->Result<T,String>)->Result<T,String> {
-        if !cold { return Err(first); }
-        std::thread::sleep(crate::config::PLUGIN_COLD_RETRY_DELAY);
-        attempt().map_err(|retry|format!("{retry}（冷启已重试一次，首次：{first}）"))
-    }
-    fn start_once(manager:&Manager<'_>,row:&Installed,node:Option<&Path>,autostart:bool)->Result<Self,String> {
-        #[cfg(test)] START_ATTEMPTS.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
-        manager.verify(row)?;
-        let namespace=manager.namespace(row)?;
-        let directory=manager.directory(row)?;
-        let entry=crate::plugin_manifest::package_path(&directory,&row.manifest.backend.entry)?;
+    // start_with_budget 是唯一实现点：hello、activate 与业务服务探测共用同一个 deadline。
+    // 以前两个阶段各拿一份 plugin_activate_budget()，四次重试的理论上限能到 487.5 s（A02）。
+    pub fn start_with_budget(manager:&Manager<'_>,row:&Installed,node:Option<&Path>,autostart:bool,budget:Duration)->Result<Started,StartError> {
+        use crate::plugin_start::Phase;
+        let began=Instant::now();
+        let deadline=began+budget;
+        let mut stages=Stages::default();
+        #[cfg(test)] note_start_attempt();
+        // —— verify：包校验 + 命名空间 + 入口文件（阻塞 I/O 也在这次尝试的预算里）——
+        let phase_verify=began;
+        manager.verify_kind(row).map_err(|fail|StartError::new(Phase::Verify,fail.text(),stages,fail.permanent()))?;
+        let namespace=manager.namespace(row).map_err(|error|StartError::new(Phase::Verify,error,stages,true))?;
+        let directory=manager.directory(row).map_err(|error|StartError::new(Phase::Verify,error,stages,true))?;
+        let entry=crate::plugin_manifest::package_path(&directory,&row.manifest.backend.entry).map_err(|error|StartError::new(Phase::Verify,error,stages,true))?;
+        stages.verify_ms=phase_verify.elapsed().as_millis() as u64;
+        // —— spawn：组命令、拉起进程、接管管道 ——
+        let phase_spawn=Instant::now();
         let mut command=match row.manifest.backend.runtime.as_str() {
-            "node"=> {let node=node.ok_or("插件需要 Node 运行时，请先在插件依赖设置中选择")?;crate::storage::safe(node)?;if !node.is_absolute()||!node.is_file(){return Err("插件 Node 运行时路径无效".into());}let mut c=Command::new(node);c.arg(&entry);c},
+            "node"=> {let node=node.ok_or_else(||StartError::new(Phase::Spawn,"插件需要 Node 运行时，请先在插件依赖设置中选择",stages,true))?;crate::storage::safe(node).map_err(|error|StartError::new(Phase::Spawn,error,stages,true))?;if !node.is_absolute()||!node.is_file(){return Err(StartError::new(Phase::Spawn,"插件 Node 运行时路径无效",stages,true));}let mut c=Command::new(node);c.arg(&entry);c},
             "native"=>Command::new(&entry),
-            _=>return Err("插件运行时不受支持".into()),
+            _=>return Err(StartError::new(Phase::Spawn,"插件运行时不受支持",stages,true)),
         };
         command.args(&row.manifest.backend.args).current_dir(&directory).env_remove("NODE_OPTIONS").env_remove("NODE_PATH").env_remove("ELECTRON_RUN_AS_NODE").env("FISH_PLUGIN_ID",&row.manifest.id).env("FISH_PLUGIN_AUTOSTART",autostart_flag(autostart)).env("FISH_PLUGIN_DATA",namespace.path()).env("TMP",namespace.path().join("tmp")).env("TEMP",namespace.path().join("tmp")).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
-        let mut child=command.spawn().map_err(|_|"插件启动失败，请检查运行时路径及系统权限")?;
-        let owner=match crate::plugin_job::Owner::attach(&child) {Ok(owner)=>owner,Err(error)=>{let _=child.kill();let _=child.wait();return Err(error)}};
-        let Some(stdout)=child.stdout.take() else{let _=child.kill();return Err("插件缺少输出管道".into())};
-        let Some(mut stdin)=child.stdin.take() else{let _=child.kill();return Err("插件缺少输入管道".into())};
-        let Some(stderr)=child.stderr.take() else{let _=child.kill();return Err("插件缺少错误输出管道".into())};
+        let mut child=command.spawn().map_err(|error|StartError::new(Phase::Spawn,format!("插件启动失败，请检查运行时路径及系统权限（{error}）"),stages,false))?;
+        let owner=match crate::plugin_job::Owner::attach(&child) {Ok(owner)=>owner,Err(error)=>{let _=child.kill();let _=child.wait();return Err(StartError::new(Phase::Spawn,error,stages,false))}};
+        let Some(stdout)=child.stdout.take() else{let _=child.kill();return Err(StartError::new(Phase::Spawn,"插件缺少输出管道",stages,false))};
+        let Some(mut stdin)=child.stdin.take() else{let _=child.kill();return Err(StartError::new(Phase::Spawn,"插件缺少输入管道",stages,false))};
+        let Some(stderr)=child.stderr.take() else{let _=child.kill();return Err(StartError::new(Phase::Spawn,"插件缺少错误输出管道",stages,false))};
         watch_stderr(row.manifest.id.clone(),stderr,manager.context.root.clone(),crate::plugin_runtime::log_file(manager.context,&row.manifest.id));
         let (tell,output)=mpsc::sync_channel(4);
         std::thread::spawn(move||{let mut reader=BufReader::new(stdout);loop{match crate::plugin_protocol::line(&mut reader){Ok(Some(value))=>{if tell.send(Ok(value)).is_err(){break}},Ok(None)=>break,Err(error)=>{let _=tell.send(Err(error));break}}}});
         let (input,read)=mpsc::sync_channel::<Value>(2);
         std::thread::spawn(move||{for value in read {let Ok(mut bytes)=serde_json::to_vec(&value) else{break};bytes.push(b'\n');if stdin.write_all(&bytes).and_then(|_|stdin.flush()).is_err(){break;}}});
+        stages.spawn_ms=phase_spawn.elapsed().as_millis() as u64;
         let mut process=Self{child,owner:Some(owner),output,input,next:0,namespace,capabilities:row.manifest.capabilities.clone(),id:row.manifest.id.clone(),probe:None};
-        let hello=process.request("host.hello",json!({"protocol":1,"pluginId":row.manifest.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":process.namespace.path(),"storage":process.namespace.identity(),"capabilities":row.manifest.capabilities,"hostCallTimeoutMs":crate::config::plugin_host_call_timeout_ms()}),crate::config::plugin_activate_budget())?;
-        if hello["type"]!="plugin.hello" || hello["protocol"]!=1 || hello["pluginId"]!=row.manifest.id {return Err("插件握手身份或协议不匹配".into());}
-        process.request("plugin.activate",json!({}),crate::config::plugin_activate_budget())?;
-        Ok(process)
+        // —— hello + activate：同一份 deadline，谁先花完谁就把后者挤掉 ——
+        let hello=json!({"protocol":1,"pluginId":row.manifest.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":process.namespace.path(),"storage":process.namespace.identity(),"capabilities":row.manifest.capabilities,"hostCallTimeoutMs":crate::config::plugin_host_call_timeout_ms_of(budget)});
+        handshake_with(&row.manifest.id,hello,deadline,Instant::now,&mut stages,|method,params,timeout|process.request(method,params,timeout))?;
+        // —— service：业务服务健康与「进程还在」分开判（A03）——
+        let phase_service=Instant::now();
+        let service=probe_service_with(deadline,Instant::now,|method,params,timeout|process.request(method,params,timeout));
+        stages.service_ms=phase_service.elapsed().as_millis() as u64;
+        if let Service::Down(reason)=&service {
+            process.stop();
+            return Err(StartError::new(Phase::Service,format!("{reason}（业务服务未就绪，宿主实例不算通过）"),stages,false));
+        }
+        log_stages(&row.manifest.id,budget,&stages,&service);
+        Ok(Started{process,stages,service})
     }
     fn send(&self,value:Value)->Result<(),String> {
         if serde_json::to_vec(&value).map_err(|_|"插件请求编码失败")?.len() as u64>crate::plugin_protocol::MAX_LINE-1 {return Err("插件请求超过协议限制".into());}
@@ -154,6 +200,61 @@ impl Process {
     }
 }
 impl Drop for Process {fn drop(&mut self){self.owner.take();let _=self.child.kill();let _=self.child.wait();}}
+// 一次握手 + 激活：**整段共享一个 deadline**（A02）。hello 用掉的时间从 activate 里扣，
+// 反之亦然；预算在握手之前或握手之后花完都明确报「哪一步没时间了」，不静默降级。
+fn handshake_with<C>(plugin_id:&str,hello:Value,deadline:Instant,mut now:impl FnMut()->Instant,stages:&mut Stages,mut call:C)->Result<(),StartError>
+where C: FnMut(&str,Value,Duration)->Result<Value,String> {
+    let phase_hello=now();
+    let left=deadline.saturating_duration_since(now());
+    if left.is_zero() { return Err(StartError::new(crate::plugin_start::Phase::Hello,"启动预算在握手之前就用完了（校验或进程创建耗时过长）",*stages,false)); }
+    let reply=call("host.hello",hello,left).map_err(|error|StartError::new(crate::plugin_start::Phase::Hello,error,*stages,false))?;
+    stages.hello_ms=now().saturating_duration_since(phase_hello).as_millis() as u64;
+    if reply["type"]!="plugin.hello" || reply["protocol"]!=1 || reply["pluginId"]!=plugin_id { return Err(StartError::new(crate::plugin_start::Phase::Hello,"插件握手身份或协议不匹配",*stages,true)); }
+    let phase_activate=now();
+    let left=deadline.saturating_duration_since(now());
+    if left.is_zero() { return Err(StartError::new(crate::plugin_start::Phase::Activate,"握手已用完本次启动预算，没有时间激活",*stages,false)); }
+    call("plugin.activate",json!({}),left).map_err(|error|StartError::new(crate::plugin_start::Phase::Activate,error,*stages,false))?;
+    stages.activate_ms=now().saturating_duration_since(phase_activate).as_millis() as u64;
+    Ok(())
+}
+// 业务服务健康探测（A03）：插件用 `plugin.health` 报 `{ready:true}`；没实现这个方法
+// （UNKNOWN_METHOD）就如实报「未知」，绝不把「实例在」当成「服务健康」。
+fn probe_service_with<C>(deadline:Instant,mut now:impl FnMut()->Instant,mut call:C)->Service
+where C: FnMut(&str,Value,Duration)->Result<Value,String> {
+    loop {
+        let left=deadline.saturating_duration_since(now());
+        if left.is_zero() { return Service::Down("业务服务未在启动预算内就绪".into()); }
+        let slice=left.min(HEALTH_POLL*2);
+        match call("plugin.health",json!({}),slice) {
+            Ok(reply) => match reply.get("ready").and_then(Value::as_bool) {
+                Some(true)=>return Service::Ready,
+                Some(false)=> {
+                    let detail=reply.get("detail").and_then(Value::as_str).unwrap_or("插件报告业务服务尚未就绪").to_string();
+                    let left=deadline.saturating_duration_since(now());
+                    if left.is_zero() { return Service::Down(detail); }
+                    std::thread::sleep(HEALTH_POLL.min(left));
+                }
+                // 回了结果却没有 ready 字段：协议上没有可判的结论，按未知处理而不是猜健康。
+                None=>return Service::Unknown("插件 health 结果缺少 ready 字段".into()),
+            },
+            Err(error) => {
+                return match crate::plugin_protocol::split_error(&error) {
+                    Some(("UNKNOWN_METHOD",_))=>Service::Unknown("插件未提供 plugin.health，业务服务状态未知".into()),
+                    _=>Service::Down(error),
+                };
+            }
+        }
+    }
+}
+fn log_stages(id:&str,budget:Duration,stages:&Stages,service:&Service) {
+    let detail=service.detail().map(|text|format!(" detail={text}")).unwrap_or_default();
+    eprintln!("FISH Dock: [plugin-start] id={id} budget_ms={} verify_ms={} spawn_ms={} hello_ms={} activate_ms={} service_ms={} service={}{detail}",
+        budget.as_millis(),stages.verify_ms,stages.spawn_ms,stages.hello_ms,stages.activate_ms,stages.service_ms,service.as_str());
+}
+fn log_error(id:&str,budget:Duration,error:&StartError) {
+    eprintln!("FISH Dock: [plugin-start] id={id} budget_ms={} failed_at={} permanent={} verify_ms={} spawn_ms={} hello_ms={} activate_ms={} service_ms={} error={}",
+        budget.as_millis(),error.phase.as_str(),error.permanent,error.stages.verify_ms,error.stages.spawn_ms,error.stages.hello_ms,error.stages.activate_ms,error.stages.service_ms,error.message);
+}
 // 插件 stderr 的落盘线程（#53-1/2）：读到一行就脱敏、截断、写一行。插件退出把
 // 管道关掉，循环随之结束；写不了就把 sink 丢掉，绝不因此拖住插件本体。
 fn watch_stderr(id:String,stderr:ChildStderr,data:PathBuf,log:PathBuf){
@@ -560,54 +661,12 @@ mod tests {
             assert_eq!(restore(&shielded,&held),text);
         }
     }
-    // —— t18：冷态失败重试一次（T04 分支的自动化证据；t13-F1 补测）——
-    // 两条都不依赖真实插件进程：一条直测 retry_when_cold 的判定与调用计数；另一条走真
-    // Process::start，但夹具注定在 verify 阶段失败（这一版根本没装进 packages/），
-    // 一个进程也不会 spawn，更不会真等 20 s 预算。环境变量只为强制冷/热；ENV_LOCK
-    // 全程持有但不重入——plugin_startup_is_cold / plugin_activate_budget_of 只读 env，
-    // 不取这把锁（config 测试里那把锁不可重入，别在这里再造一个死锁）。
-    struct ColdWindow(Option<std::ffi::OsString>);
-    impl ColdWindow {
-        fn force(value:&str)->Self {
-            let key=crate::config::ENV_PLUGIN_COLD_UNTIL;
-            let old=std::env::var_os(key);
-            std::env::set_var(key,value);
-            Self(old)
-        }
-    }
-    impl Drop for ColdWindow {
-        fn drop(&mut self) {
-            let key=crate::config::ENV_PLUGIN_COLD_UNTIL;
-            match &self.0 { Some(value)=>std::env::set_var(key,value), None=>std::env::remove_var(key) }
-        }
-    }
-    // 冷态：先退避 500 ms → 再调一次 attempt（这就是「重试一次」）→ 首次原因写进文案；
-    // 热态：attempt 一次都不再调、错误原样、不退避。这里数的是「重试」的执行次数；
-    // 「整次启动一共尝试了几次」（冷 2 / 热 1）由下面走真 Process::start 的用例用电计数器证明。
-    #[test] fn a_cold_failure_retries_exactly_once_and_a_warm_one_does_not() {
-        assert_eq!(crate::config::PLUGIN_COLD_RETRY_DELAY.as_millis(),500,"任务书写的退避就是 500 ms");
-        // 冷态：注定失败 → 重试恰好执行一次，两次的原因都留在终判文案里。
-        let mut retries=0usize;let started=Instant::now();
-        let error=Process::retry_when_cold(true,"合成失败 #1".into(),||{retries+=1;Err::<(),String>("合成失败 #2".into())}).expect_err("冷态失败必须报错");
-        assert_eq!(retries,1,"冷态必须重试一次（重试执行一次 ⇒ 整次启动共 2 次尝试）");
-        assert!(started.elapsed()>=crate::config::PLUGIN_COLD_RETRY_DELAY,"重试之前必须真的退避 500 ms：{:?}",started.elapsed());
-        assert!(error.contains("冷启已重试一次")&&error.contains("首次：合成失败 #1")&&error.contains("合成失败 #2"),"终判要带重试说明、首次原因与重试原因：{error}");
-        // 冷态 + 重试成功：重试执行一次、结果交回、照样先退避。
-        let mut retries=0usize;let started=Instant::now();
-        assert_eq!(Process::retry_when_cold(true,String::new(),||{retries+=1;Ok::<u8,String>(7)}).unwrap(),7);
-        assert_eq!(retries,1,"冷态成功路径的重试也只执行一次");
-        assert!(started.elapsed()>=crate::config::PLUGIN_COLD_RETRY_DELAY,"成功路径也要先退避：{:?}",started.elapsed());
-        // 热态：同样注定失败，但重试一次都不执行，错误原样返回、不退避。
-        let mut retries=0usize;let started=Instant::now();
-        let error=Process::retry_when_cold(false,"合成失败".into(),||{retries+=1;Err::<(),String>("第二次不该被调用".into())}).expect_err("热态失败同样要报错");
-        assert_eq!(retries,0,"热态不许重试");
-        assert_eq!(error,"合成失败","热态必须原样返回首次错误，不许加后缀");
-        assert!(started.elapsed()<crate::config::PLUGIN_COLD_RETRY_DELAY,"热态不许退避：{:?}",started.elapsed());
-    }
-    // 走真 Process::start：包没装 → start_once 第一句 verify 就失败（不 spawn、毫秒级），
-    // 总耗时几乎只剩那次 500 ms 退避，正好被「一次预算 + 500 ms + 一次预算」夹住。
-    #[test] fn a_cold_start_retries_once_and_a_warm_start_does_not() {
-        let root=std::env::temp_dir().join(format!("fish-cold-retry-{}-{}",std::process::id(),crate::now_ms())).join(".fish-dock");
+    // —— t18′（2.0.4 T-E）：重试搬到调度器；进程层一次调用只尝试一次 ——
+    // 冷态「重试一次」的旧行为（进程内退避 + 重拉）已由 plugin_start 的统一调度取代：
+    // 进程层不再自己重试，避免「重试次数 × 阶段预算」的乘法（A02）。这里锁定新契约：
+    // 一次 Process::start 只尝试一次、不退避，错误要能说清卡在哪一步。
+    #[test] fn a_process_start_is_one_bounded_attempt_without_the_old_cold_sleep() {
+        let root=std::env::temp_dir().join(format!("fish-one-attempt-{}-{}",std::process::id(),crate::now_ms())).join(".fish-dock");
         let host=t29_namespace(root.join("host"),"host","host","1.0.0");
         t29_namespace(root.join(".plugin.acme.weather"),"acme.weather",".plugin.acme.weather","1.0.0");
         let context=crate::storage_context::Context{root:root.clone(),host};
@@ -615,32 +674,96 @@ mod tests {
         let (package,digest)=t29_package("acme.weather","Weather",".plugin.acme.weather","1.0.0",false);
         let row=Installed{manifest:package.manifest,digest,official:false,enabled:true,autostart:true};
         assert!(manager.verify(&row).is_err(),"夹具必须注定失败——这一版还没装进 packages/");
-        let budget=crate::config::plugin_activate_budget_of(true);
-        let _env=crate::config::ENV_LOCK.lock().unwrap_or_else(|p|p.into_inner());
-        // 冷态：窗放到 31 年，必然判冷（不依赖本机真实登录时刻；WTS 可用这个前提与 logon.rs 既有用例相同）。
-        let window=ColdWindow::force("999999999");
-        assert!(crate::config::plugin_startup_is_cold(),"窗口设这么大必须判冷态");
         let before=start_attempts();
         let started=Instant::now();
         let error=Process::start(&manager,&row,None,true).err().expect("注定失败的 start 必须报错");
-        let elapsed=started.elapsed();
-        assert_eq!(start_attempts()-before,2,"冷态下 start_once 必须被调两次（调用计数）");
-        assert!(error.contains("冷启已重试一次")&&error.contains("首次："),"错误要带重试说明：{error}");
-        assert!(elapsed>=crate::config::PLUGIN_COLD_RETRY_DELAY,"必须真的退避 500 ms：{elapsed:?}");
-        assert!(elapsed<=budget*2+crate::config::PLUGIN_COLD_RETRY_DELAY,"总耗时必须 ≤ 一次预算 + 500 ms + 一次预算：{elapsed:?}");
-        assert!(elapsed<crate::config::PLUGIN_COLD_RETRY_DELAY+Duration::from_secs(2),"夹具在 verify 就失败，不该真的等预算：{elapsed:?}");
-        // 热态：窗设 0 秒（只有 since_logon==0.0 才算冷）→ 只调一次、不带重试说明、不退避。
-        drop(window);
-        let warm=ColdWindow::force("0");
-        assert!(!crate::config::plugin_startup_is_cold(),"窗口 0 秒必须判热态（登录秒数远大于 0）");
-        let before=start_attempts();
-        let started=Instant::now();
-        let error=Process::start(&manager,&row,None,true).err().expect("同样注定失败");
-        let elapsed=started.elapsed();
-        assert_eq!(start_attempts()-before,1,"热态下 start_once 只许调一次（调用计数）");
-        assert!(!error.contains("冷启已重试一次"),"热态不许带重试说明：{error}");
-        assert!(elapsed<crate::config::PLUGIN_COLD_RETRY_DELAY,"热态不许退避：{elapsed:?}");
-        drop(warm);
+        assert_eq!(start_attempts()-before,1,"一次 Process::start 只尝试一次（重试归调度器；before={before} after={}）",start_attempts());
+        assert!(started.elapsed()<Duration::from_millis(400),"进程层不再自己退避 500 ms：{:?}",started.elapsed());
+        assert!(error.contains("校验阶段"),"错误要说清卡在哪一步：{error}");
         let _=std::fs::remove_dir_all(root.parent().unwrap());
+    }
+    // t33/F4：清单/摘要类校验失败是永久错误（不重试），错误结构里要说清阶段与 permanent。
+    #[test] fn a_missing_package_is_a_permanent_verify_failure() {
+        let root=std::env::temp_dir().join(format!("fish-permanent-{}-{}",std::process::id(),crate::now_ms())).join(".fish-dock");
+        let host=t29_namespace(root.join("host"),"host","host","1.0.0");
+        t29_namespace(root.join(".plugin.acme.weather"),"acme.weather",".plugin.acme.weather","1.0.0");
+        let context=crate::storage_context::Context{root:root.clone(),host};
+        let manager=Manager{context:&context};
+        let (package,digest)=t29_package("acme.weather","Weather",".plugin.acme.weather","1.0.0",false);
+        let row=Installed{manifest:package.manifest,digest,official:false,enabled:true,autostart:true};
+        let error=Process::start_with_budget(&manager,&row,None,true,Duration::from_secs(5)).err().expect("没装进 packages/ 必须失败");
+        assert_eq!(error.phase,crate::plugin_start::Phase::Verify);
+        assert!(error.permanent,"清单/资源缺失属于永久错误，不该重试：{error:?}");
+        assert!(error.text().contains("校验阶段"),"{}",error.text());
+        let _=std::fs::remove_dir_all(root.parent().unwrap());
+    }
+    // A02：hello 与 activate 共用一个 deadline——hello 花掉 25 s，activate 只剩 35 s。
+    #[test] fn hello_and_activate_share_one_deadline() {
+        let base=Instant::now();
+        let deadline=base+Duration::from_secs(60);
+        let simulated=std::cell::Cell::new(0u64);
+        let mut calls:Vec<(String,Duration)>=Vec::new();
+        let mut stages=Stages::default();
+        handshake_with("acme.weather",json!({"protocol":1,"pluginId":"acme.weather"}),deadline,||base+Duration::from_secs(simulated.get()),&mut stages,|method,_params,timeout|{
+            calls.push((method.to_string(),timeout));
+            simulated.set(simulated.get()+25);
+            Ok(if method=="host.hello"{json!({"type":"plugin.hello","protocol":1,"pluginId":"acme.weather"})}else{json!({"active":true})})
+        }).expect("合成握手必须成功");
+        assert_eq!(calls[0],("host.hello".to_string(),Duration::from_secs(60)),"hello 拿整份预算");
+        assert_eq!(calls[1],("plugin.activate".to_string(),Duration::from_secs(35)),"activate 只剩 hello 之后的时间");
+        assert_eq!(stages.hello_ms,25_000);
+        assert_eq!(stages.activate_ms,25_000);
+    }
+    // A02：hello 把预算花完 → 不许再发 activate，且报「哪一步没时间了」。
+    #[test] fn a_hello_that_eats_the_budget_leaves_no_time_to_activate() {
+        let base=Instant::now();
+        let deadline=base+Duration::from_secs(10);
+        let simulated=std::cell::Cell::new(0u64);
+        let mut stages=Stages::default();
+        let error=handshake_with("acme.weather",json!({"protocol":1,"pluginId":"acme.weather"}),deadline,||base+Duration::from_secs(simulated.get()),&mut stages,|method,_params,_timeout|{
+            simulated.set(simulated.get()+10);
+            Ok(if method=="host.hello"{json!({"type":"plugin.hello","protocol":1,"pluginId":"acme.weather"})}else{json!({"active":true})})
+        }).expect_err("预算用完不许再发 activate");
+        assert_eq!(error.phase,crate::plugin_start::Phase::Activate);
+        assert!(error.text().contains("预算"),"{}",error.text());
+        assert!(!error.permanent,"超时是瞬时错误，可重试");
+    }
+    // A04：身份/协议不匹配是永久错误，调度器不会重试。
+    #[test] fn an_identity_mismatch_is_a_permanent_failure() {
+        let base=Instant::now();
+        let deadline=base+Duration::from_secs(10);
+        let mut stages=Stages::default();
+        let error=handshake_with("acme.weather",json!({"protocol":1,"pluginId":"acme.weather"}),deadline,Instant::now,&mut stages,|_method,_params,_timeout|{
+            Ok(json!({"type":"plugin.hello","protocol":1,"pluginId":"someone.else"}))
+        }).expect_err("身份不匹配必须失败");
+        assert_eq!(error.phase,crate::plugin_start::Phase::Hello);
+        assert!(error.permanent,"身份协议不匹配是永久错误");
+    }
+    // A03：插件没有 plugin.health → 业务服务状态「未知」，绝不当成健康。
+    #[test] fn a_service_without_a_health_method_is_unknown_not_healthy() {
+        let service=probe_service_with(Instant::now()+Duration::from_secs(5),Instant::now,|_method,_params,_timeout|{
+            Err(crate::plugin_protocol::business_error("UNKNOWN_METHOD","插件方法未注册"))
+        });
+        assert_eq!(service.as_str(),"unknown");
+        assert!(service.detail().unwrap().contains("plugin.health"),"{:?}",service.detail());
+    }
+    // A03：服务在预算内就绪 → ready，且每次「未就绪」之间会等一小段再看。
+    #[test] fn a_service_that_becomes_ready_inside_the_budget_passes() {
+        let deadline=Instant::now()+Duration::from_secs(5);
+        let mut calls=0;
+        let service=probe_service_with(deadline,Instant::now,|_method,_params,_timeout|{
+            calls+=1;
+            Ok(if calls<3{json!({"ready":false,"detail":"还在起"})}else{json!({"ready":true})})
+        });
+        assert_eq!(service,Service::Ready);
+        assert_eq!(calls,3);
+    }
+    // A03：预算内一直没就绪 → down（这次尝试按业务服务阶段失败，交给调度器重试）。
+    #[test] fn a_service_never_ready_fails_as_down() {
+        let deadline=Instant::now()+Duration::from_millis(600);
+        let service=probe_service_with(deadline,Instant::now,|_method,_params,_timeout|{
+            Ok(json!({"ready":false,"detail":"永远不"}))
+        });
+        assert_eq!(service.as_str(),"down","{}",service.detail().unwrap_or(""));
     }
 }

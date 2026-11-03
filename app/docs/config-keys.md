@@ -20,6 +20,10 @@
 | `url.catalog_raw` | `https://raw.githubusercontent.com/Fish-under-sea/FISH-DOCK-Plugins/main/catalog/stable.json` | `FISH_DOCK_PLUGIN_CATALOG_URL` | URL | 官方插件目录（raw 文本） |
 | `url.catalog_api` | `https://api.github.com/repos/Fish-under-sea/FISH-DOCK-Plugins/contents/catalog/stable.json?ref=main` | `FISH_DOCK_PLUGIN_CATALOG_API` | URL | 官方插件目录（GitHub contents API） |
 | `url.official_site` | `https://h5.metaapp.cn/online/h5/BUsvkkbBiAq2pF2Ttx4j/1.0.2/6/index.html` | `FISH_DOCK_OFFICIAL_SITE` | URL | 官网地址：关于页品牌图彩蛋点开的那一页。**当前默认值是临时落地页**，正式官网上线后只改 `config.rs` 的 `OFFICIAL_SITE_DEFAULT`（或设这个环境变量），前端不动 |
+| `url.raw_mirror` | `(空)` | `FISH_DOCK_RAW_MIRROR` | URL | 2.0.4 T-F：raw.githubusercontent.com 文件的前缀镜像（sources::picks 候选；空＝只走原站） |
+| `url.gh_proxy` | `(空)` | `FISH_DOCK_GH_PROXY` | URL | 2.0.4 T-F：GitHub Release 资产下载的前缀加速（sources::picks 候选；空＝不加） |
+| `url.gitee_repo` | `(空)` | `FISH_DOCK_GITEE_REPO` | URL | 2.0.4 T-F：Gitee 仓库地址（updates::endpoints 的更新检查候选；空＝不启用 Gitee） |
+| `url.pet_mirror` | `(空)` | `FISH_DOCK_PET_MIRROR` | URL | 2.0.4 T-F：宠物图库图片的前缀镜像（fetch 的预览候选；空＝保留原站） |
 | `timeout.net_connect_ms` | `15000` | `FISH_DOCK_NET_CONNECT_MS` | 超时 | 所有 web 请求的 TCP 连接层预算 |
 | `timeout.net_head_ms` | `30000` | `FISH_DOCK_NET_HEAD_MS` | 超时 | 所有 web 请求的响应头预算 |
 | `timeout.pet_ms` | `30000` | `FISH_DOCK_PET_TIMEOUT_MS` | 超时 | 宠物图库/贴图页整单预算 |
@@ -29,7 +33,13 @@
 | `timeout.proxy_connect_ms` | `300` | `FISH_DOCK_PROXY_CONNECT_MS` | 超时 | 代理端口监听探测连接等待 |
 | `timeout.proxy_test_ms` | `10000` | `FISH_DOCK_PROXY_TEST_MS` | 超时 | 设置页「测试代理」向 GitHub 发一次请求的预算 |
 | `timeout.plugin_download_secs` | `30` | `FISH_DOCK_PLUGIN_DOWNLOAD_TIMEOUT_SECS` | 超时 | 单次插件包/目录下载预算 |
-| `timeout.plugin_activate_secs` | `5` | `FISH_DOCK_PLUGIN_ACTIVATE_TIMEOUT_SECS` | 超时 | 插件激活 RPC 预算 |
+| `timeout.plugin_activate_secs` | `5` | `FISH_DOCK_PLUGIN_ACTIVATE_TIMEOUT_SECS` | 超时 | 插件停用 RPC 预算；2.0.4 起同时作启动预算的**只读下限**（旧用户配置只放宽不收紧） |
+| `timeout.plugin_cold_until_secs` | `300` | `FISH_DOCK_PLUGIN_COLD_UNTIL_SECS` | 超时 | T04 冷态判据：登录后多少秒内算冷启 |
+| `timeout.plugin_activate_cold_secs` | `20` | `FISH_DOCK_PLUGIN_ACTIVATE_COLD_TIMEOUT_SECS` | 超时 | T04 冷态激活预算；2.0.4 起降级为**只读下限**（与 `timeout.plugin_start_cold_secs` 取 max） |
+| `timeout.plugin_cold_after_start_secs` | `120` | `FISH_DOCK_PLUGIN_COLD_AFTER_START_SECS` | 超时 | 2.0.4 冷态判据第二锚点：进程启动后多少秒内也算冷启（与登录锚点取「或」） |
+| `timeout.plugin_start_cold_secs` | `60` | `FISH_DOCK_PLUGIN_START_COLD_SECS` | 超时 | 2.0.4 冷态一次启动尝试**共享**预算（hello+activate+服务探测）；旧激活键作只读下限 |
+| `timeout.plugin_start_warm_secs` | `10` | `FISH_DOCK_PLUGIN_START_WARM_SECS` | 超时 | 2.0.4 热态一次启动尝试共享预算（旧激活键作只读下限） |
+| `timeout.plugin_start_lifecycle_secs` | `180` | `FISH_DOCK_PLUGIN_START_LIFECYCLE_SECS` | 超时 | 2.0.4 一次自启生命周期总预算：排队/校验/退避/重试全计入，到期不再开新尝试 |
 | `timeout.plugin_rpc_secs` | `15` | `FISH_DOCK_PLUGIN_RPC_TIMEOUT_SECS` | 超时 | 插件通用 RPC 预算 |
 | `timeout.plugin_event_secs` | `10` | `FISH_DOCK_PLUGIN_EVENT_TIMEOUT_SECS` | 超时 | 插件事件投递预算 |
 | `retry.plugin_redirect_hops` | `5` | `FISH_DOCK_PLUGIN_REDIRECT_HOPS` | 重试 | 插件包下载最大重定向跳数 |
@@ -55,6 +65,8 @@
 | `size.plugin_rollback_bytes` | `8388608` | `FISH_DOCK_PLUGIN_ROLLBACK_LIMIT` | 体积阈值 | 插件升级回滚点导出上限（单文件与总量共用，8 MiB）；超限逐项跳过、不阻断更新（#37） |
 | `text.browser_args` | `(空=用内置)` | `FISH_DOCK_BROWSER_ARGS` | 字符串 | WebView2 额外启动参数（旧 WAKUWAKU_BROWSER_ARGS 兼容） |
 | `text.github_client_id` | `(见内置 DEFAULT_CLIENT_ID)` | `FISH_DOCK_GITHUB_CLIENT_ID` | 字符串 | GitHub OAuth 设备流 clientId 覆盖 |
+| `text.debug` | `(空=关)` | `FISH_DOCK_DEBUG` | 字符串 | 2.0.4 排障日志开关（只认 `1`）；旧 `WAKUWAKU_DEBUG` 只读兼容，新名优先 |
+| `mirror.prefer` | `auto` | `FISH_DOCK_MIRROR_PREFER` | 字符串 | 2.0.4 T-F：sources::picks 的候选排序（auto/domestic/overseas；非法值回落 auto） |
 
 ## 旧名兼容 / 弃用（t15 收口第二入口）
 
@@ -66,10 +78,12 @@
 | `FISH_DOCK_IDLE_HIDE_MS` | `WAKUWAKU_IDLE_HIDE_MS` | 空闲多久隐藏会话（0/未设=按 idleHideMin 设置） |
 | `FISH_DOCK_BROWSER_ARGS` | `WAKUWAKU_BROWSER_ARGS` | WebView2 额外启动参数（字符串） |
 | `FISH_DOCK_PORT` | `WAKUWAKU_PORT` | 宿主端口（t6 已收口） |
+| `FISH_DOCK_RESOURCES` | `DSH_FISH_RESOURCES` | 安装资源目录（2.0.4 T-Q 收口：`config::resources_override` 是唯一解析点） |
+| `FISH_DOCK_DEBUG` | `WAKUWAKU_DEBUG` | 排障日志开关（2.0.4 T-Q 收口到 `config::debug_enabled`，新名优先） |
 | `FISH_DOCK_APP_HOME` | —（无旧名） | 数据根（`config::app_home` 委托 runtime） |
 | `WAKUWAKU_USER_DATA` | 旧名沿用（无新名） | 移植/测试的数据目录覆盖，`config::user_data_override` 统一读取 |
 
-> `WAKUWAKU_DEBUG`、`FISH_TEST_*`/`FISH_DOCK_TEST_*`、`WAKUWAKU_REDACT_*` 是排障/测试开关，不进配置面（t15 明确不动）。
+> `FISH_TEST_*`/`FISH_DOCK_TEST_*`、`WAKUWAKU_REDACT_*` 是排障/测试开关，不进产品配置面（t15 明确不动）。`WAKUWAKU_DEBUG` 只读兼容，实际读取统一走 `config::debug_enabled`（2.0.4 T-Q）。
 
 ## 前端：只读默认，无覆盖通道（t20 诚实收缩）
 
@@ -86,9 +100,10 @@
 - 超时 `timeout.*`：`proxy.rs`（全部委托 config）、`plugin_store.rs`、`plugin_process.rs`/`plugin_runtime.rs`、`updates.rs`/`github_access.rs`/`fetch.rs` 经 proxy 生效。
 - 间隔 `interval.ticker_ms`/`fullscreen_ms`/`quiet_after_ms`/`idle_hide_ms`/`lhm_every(_quiet)_ms`：`main.rs`/`lhm.rs`。
 - 缓存 `cache.*`：`fetch.rs`/`crash.rs`/`updates.rs`/`plugin_store.rs`。体积 `size.*`：`crash.rs`/`plugin_store.rs`；`size.plugin_rollback_bytes` 由 `plugin_install.rs`（`write_rollback_point` → `storage_archive::export_rollback`）读取，作为升级回滚点的单文件/总量上限。
-- 字符串 `text.browser_args`（`main.rs` browser_args）、`text.github_client_id`（`github_access.rs` client）。
+- 字符串 `text.browser_args`（`main.rs` browser_args）、`text.github_client_id`（`github_access.rs` client）、`text.debug`（`server.rs` 排障日志开关，经 `config::debug_enabled`）。
+- 自启预算 `timeout.plugin_start_cold_secs`/`plugin_start_warm_secs`/`plugin_start_lifecycle_secs`/`plugin_cold_after_start_secs`：`plugin_start.rs`（调度器）、`plugin_process.rs`（一次尝试的共享 deadline）、`plugin_runtime.rs`（生命周期状态）；旧 `timeout.plugin_activate_*` 作只读下限。
 - 数据目录 `dir.user_data`（`data.rs`/`main.rs`/`connection.rs`/`runtime.rs` 统一走 `config::user_data_override`）。
 
 ## 证明生效的测试
 
-`cargo test -- config::` → 12 passed / 0 failed：五类键各一条（目录重定向/端口/超时/缓存上限/下载源）+ 间隔&体积 + 旧名兼容与优先级 + github clientId/用户数据目录 + 键表↔getter 一致性。
+`cargo test -- config::` 全部通过：五类键各一条（目录重定向/端口/超时/缓存上限/下载源）+ 间隔&体积 + 旧名兼容与优先级 + github clientId/用户数据目录 + 键表↔getter 一致性；2.0.4 另加：一次尝试共享预算与旧键只读下限、冷态双锚点、资源目录/排障开关新名优先。

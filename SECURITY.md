@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-The current maintained desktop line is **FISH Dock 1.1.x**. Earlier 1.0.x builds should be upgraded. Business plugins are versioned separately in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins).
+The current maintained desktop line is **FISH Dock 2.0.x** (2.0.4 in development). Earlier 1.x builds should be upgraded. Business plugins are versioned separately in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins).
 
 ## Reporting a Vulnerability
 

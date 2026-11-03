@@ -85,14 +85,24 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
     }).await.map_err(|_|"插件管理任务意外结束")?
 }
 // 第三方插件：按 npm 包名检索与安装。来源是公开 registry，身份按第三方命名空间登记。
+// 检索分页（T-C）：from/size 缺省即 2.0.3 的单页行为；discovery 是「发现式浏览」，
+// 查询串为空时用默认前缀——首次进入第三方页不再是一片空白。
+//
+// 检索结果 → 命令返回体：**字段只在这里定义一次**，handler 与契约测试共用。
+// t42 F-A：这里曾漏掉 nextFrom，前端只能退回「上一页 + 一页大小」，
+// registry 返回短页（对象数 < size 且 hasMore）时就会跳过中间偏移。
+pub(crate) fn search_json(report:&crate::plugin_thirdparty::SearchReport)->Value{
+    json!({"hits":report.hits,"hidden":report.hidden,"total":report.total,"filtered":report.filtered,"hasMore":report.has_more,"nextFrom":report.next_from})
+}
 #[tauri::command]
-pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:String,confirm:bool)->Result<Value,String>{
+pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:String,confirm:bool,from:Option<u32>,size:Option<u32>,discovery:Option<bool>)->Result<Value,String>{
     trusted(&window)?;
     crate::plugin_progress::set_app(&window.app_handle());
     if action=="search"{
         return tauri::async_runtime::spawn_blocking(move||{
-            let report=crate::plugin_thirdparty::search(&query)?;
-            Ok(json!({"hits":report.hits,"hidden":report.hidden}))
+            let page=crate::plugin_thirdparty::SearchPage{from:from.unwrap_or(0) as usize,size:size.map(|value|value as usize).unwrap_or(20),discovery:discovery.unwrap_or(false)};
+            let report=crate::plugin_thirdparty::search_page(&query,&page)?;
+            Ok(search_json(&report))
         }).await.map_err(|_|"npm 检索任务意外结束")?;
     }
     if action!="install"{return Err("第三方插件操作无效".into());}
@@ -160,12 +170,32 @@ pub fn resume(){
         if let Err(error)=runner.resume(&Manager{context},node){eprintln!("FISH Dock: 插件恢复失败：{error}");}
     });
 }
-pub fn shutdown(){if let Ok(mut runner)=crate::plugin_runtime::CURRENT.lock(){runner.stop_all();}}
+pub fn shutdown(){if let Ok(mut runner)=crate::plugin_runtime::CURRENT.lock(){runner.close();}}
+// 2.0.4 t33（F1）：身份导出/导入的「暂停」——停实例、取消调度，但随后的 resume 会复位；
+// 与最终退出的 shutdown 分开，导出/导入结束插件必须照常回来，而不是被永久留在停止态。
+pub fn pause(){if let Ok(mut runner)=crate::plugin_runtime::CURRENT.lock(){runner.pause_all();}}
 #[cfg(test)]mod tests{
     use super::*;
     #[test]fn management_is_bound_to_local_settings_window(){
         for (label,url) in [("plugin-fish-ofm","http://tauri.localhost/"),("island","https://example.test/"),("island","http://tauri.localhost:5000/"),("island","http://127.0.0.1.example.test/")] {assert!(!local_source(label,&tauri::Url::parse(url).unwrap()));}
         assert!(local_source("island",&tauri::Url::parse("http://tauri.localhost/").unwrap()));
         assert!(local_source("island",&tauri::Url::parse("tauri://localhost/").unwrap()));
+    }
+    // t42 F-A：命令返回体的字段集合必须与前端夹具（app/test/fixtures/thirdparty-search.json）
+    // 完全一致——这个文件就是 Node 用例喂给面板的真实形状。漏掉 nextFrom 时前端只能
+    // 退回「上一页 + 一页大小」，registry 短页（5 条 + hasMore）就会跳过 25..39。
+    #[test]fn the_search_command_carries_every_field_the_ui_reads(){
+        let fixture:Value=serde_json::from_str(include_str!("../../test/fixtures/thirdparty-search.json")).unwrap();
+        let report=|hits:usize,total:usize,filtered:usize,has_more:bool,next_from:usize| crate::plugin_thirdparty::SearchReport{
+            hits:(0..hits).map(|i|crate::plugin_thirdparty::Hit{name:format!("fish-dock-plugin-p{}",i+1),version:format!("1.0.{}",i+1),description:format!("page fixture {}",i+1),publisher:"fixture".into(),updated:"2026-11-01".into()}).collect(),
+            hidden:0,total,filtered,has_more,next_from};
+        for (got,want) in [(search_json(&report(20,41,20,true,20)),&fixture["firstPage"]),(search_json(&report(5,41,5,true,25)),&fixture["secondPage"])]{
+            let keys=|value:&Value|{let mut names:Vec<String>=value.as_object().expect("命令返回体是对象").keys().cloned().collect();names.sort();names};
+            assert_eq!(keys(&got),keys(want),"命令返回体与前端夹具的字段必须一一对应（t42 F-A：漏 nextFrom 会让前端退回 from+20）");
+            assert_eq!(got["nextFrom"],want["nextFrom"],"nextFrom 要与夹具一致");
+            assert!(got["nextFrom"].is_number(),"nextFrom 必须是数字，不是字符串");
+            assert_eq!(got["hasMore"],want["hasMore"]);
+        }
+        assert_eq!(search_json(&report(5,41,5,true,25))["nextFrom"],25,"短页按本页对象数前进，不是 +20");
     }
 }

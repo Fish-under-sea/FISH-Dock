@@ -40,6 +40,7 @@
 // in it: past the default 128 it no longer expands.
 #![recursion_limit = "256"]
 
+mod agent_hub;
 mod appbar;
 mod asks;
 mod audio;
@@ -91,6 +92,7 @@ mod plugin_job;
 mod plugin_process;
 mod plugin_events;
 mod plugin_runtime;
+mod plugin_start;
 mod plugin_development;
 mod plugin_store;
 mod plugin_failure;
@@ -108,6 +110,7 @@ mod inputs;
 mod island;
 mod jump;
 mod browser;
+mod legacy_ofm;
 mod lhm;
 mod lhm_setup;
 mod logon;
@@ -131,6 +134,8 @@ mod server;
 mod settings;
 mod shell;
 mod shortcuts;
+// 2.0.4 T-F（resources）：资源获取的单一入口（原地址 + 代理 + 镜像候选，见 sources.rs）。
+mod sources;
 mod starts;
 mod state;
 mod systray;
@@ -179,6 +184,8 @@ pub struct Shared {
     pub port: u16,
     pub settings: Mutex<Map<String, Value>>,
     pub pet: Mutex<state::Pet>,
+    // 2.0.4 T-B：/v1 的 token、事件环与订阅（agent_hub.rs）。
+    pub agent_api: std::sync::Arc<agent_hub::AgentApi>,
     pub win: Mutex<pet::Win>,
     pub island: Mutex<island::Island>,
     pub asks: Mutex<asks::Asks<Responder>>,
@@ -236,6 +243,22 @@ fn asks_answerable(visible: bool, hidden: bool, dnd: bool, fullscreen: bool, bar
 }
 
 impl Shared {
+    // 2.0.4 T-J：「显示具体内容」开关（settings.rs 的 details，默认开）。
+    // 关掉时后端的会话投影里就没有文件清单与最近步骤。
+    pub fn details(&self) -> bool {
+        self.setting("details") != false
+    }
+
+    // `/v1/sessions` 的快照：先持 pet 锁读接口投影，再在同一事件边界上取 epoch/seq/
+    // details（pet → room，与 apply 里「写 Pet 再 publish」的顺序一致），不会给出
+    // 「旧状态 + 新 seq」而漏掉事件；cwd 只在内部用于过滤，不写进响应（A1/A3）。
+    pub fn agent_snapshot(&self, filter: &agent_hub::Filter) -> agent_hub::Snapshot {
+        let pet = self.pet.lock().unwrap();
+        let (epoch, seq, details) = self.agent_api.boundary();
+        let sessions = pet.api_list(details, filter.agent.as_deref(), filter.cwd.as_deref());
+        agent_hub::Snapshot { sessions, epoch, seq, details }
+    }
+
     pub fn setting(&self, key: &str) -> Value {
         self.settings.lock().unwrap().get(key).cloned().unwrap_or(Value::Null)
     }
@@ -421,9 +444,10 @@ impl Shared {
 
     // Everything the pages draw from.
     pub fn payload(&self) -> Value {
+        let details = self.details();
         let (mut now, second, list) = {
             let pet = self.pet.lock().unwrap();
-            (pet.get(now_ms()), pet.second(), pet.list())
+            (pet.get(now_ms(), details), pet.second(), pet.list(details))
         };
         let settings = self.settings.lock().unwrap().clone();
         let id = settings.get("pet").and_then(Value::as_str).unwrap_or("");
@@ -547,7 +571,21 @@ impl Shared {
 
     // A message from the hooks (or a reaction of our own).
     pub fn apply(&self, msg: &Value) -> bool {
-        let out = self.pet.lock().unwrap().apply(msg, now_ms(), self.hold());
+        let now = now_ms();
+        let out = {
+            let mut pet = self.pet.lock().unwrap();
+            let out = pet.apply(msg, now, self.hold());
+            if out.is_some() {
+                // /v1/events：一条会话事件（中性），seq 在这里加一（T-B）。
+                if let Some(agent) = agent_core::Agent::of_id(msg["agent"].as_str().unwrap_or("")) {
+                    if let Some(event) = agent_core::AgentEvent::of_message(agent, msg, now) {
+                        // 关掉「显示具体内容」时的脱敏在 publish 的统一临界区里做（A3）。
+                        self.agent_api.publish(&event);
+                    }
+                }
+            }
+            out
+        };
         let Some(out) = out else { return false };
         if out.turns > 0 || out.worked_ms > 0 {
             // Antigravity's and Reasonix's approvals never come to her, nor
@@ -696,11 +734,17 @@ impl Shared {
         let touches_monitor = ["monitor", "monitorSource", "widgetsOff"].iter().any(|k| patch.contains_key(*k));
         let touches_stow = patch.contains_key("islandHideUnder");
         let touches_shortcuts = ["shortcutsEnabled", "shortcutApprove", "shortcutDeny", "shortcutIsland", "dnd"].iter().any(|k| patch.contains_key(*k));
+        // A3：关掉「显示具体内容」时先把 /v1 的镜像关掉（publish 先脱敏），再落盘；
+        // 打开时等设置落盘后再放开，避免「设置已开、事件仍按关处理」的空窗。
+        if patch.get("details").and_then(Value::as_bool) == Some(false) {
+            self.agent_api.set_details(false);
+        }
         {
             let mut settings = self.settings.lock().unwrap();
             settings.extend(patch);
             data::save(&self.dir, &settings);
         }
+        self.agent_api.set_details(self.details());
         if touches_monitor {
             wake_monitor();
         }
@@ -830,6 +874,8 @@ impl Shared {
     pub fn quit(self: &Arc<Self>, how: data::Quit, why: &str) {
         let first = !QUITTING.swap(true, Ordering::SeqCst);
         data::note_quit(&self.dir, how, first, why);
+        // /v1 的 SSE 流在这里结束：连接、队列与线程释放（T-B）。
+        self.agent_api.close();
         let after = match how {
             data::Quit::ByChoice => "by choice: no session's hook starts her until she is opened again",
             data::Quit::Wakeable => "a session may start her again",
@@ -1543,6 +1589,8 @@ fn reasonix_hook(port: u16, name: &str) {
 }
 
 fn main() {
+    // 2.0.4 T-E：进程入口的单调时钟（冷态判据的第二锚点，config::plugin_startup_cold_of）。
+    crate::plugin_start::mark_process_start();
     // Her exe again, as the taskbar's guard (shell.rs): it waits for her to
     // end, and gives Windows' taskbar back if she could not; and sees
     // whether she crashed (crash.rs; her data folder is the file's).
@@ -1943,8 +1991,11 @@ fn main() {
             });
 
             let today = widgets::Today::load(&dir, &widgets::local_date());
+            let details = settings.get("details").and_then(Value::as_bool).unwrap_or(true);
+            let agent_api = agent_hub::AgentApi::new(dir.clone(), details);
             let sh = Arc::new(Shared {
                 app: app.handle().clone(),
+                agent_api,
                 is_logging: dir.join("debug.on").exists(),
                 dir,
                 identity_dir: identity_directory,

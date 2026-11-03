@@ -133,6 +133,14 @@ impl RefinedTcpStream {
     pub(crate) fn peer_addr(&mut self) -> IoResult<Option<SocketAddr>> {
         self.stream.peer_addr()
     }
+    // Wakuwaku（2.0.4，/v1 的 SSE）：给宿主一个能设写超时的 socket 句柄（Arc 共享，不复制）。
+    pub(crate) fn tcp_handle(&self) -> Option<std::sync::Arc<Connection>> {
+        match &self.stream {
+            Stream::Http(connection) => Some(std::sync::Arc::clone(connection)),
+            #[cfg(any(feature = "ssl-openssl", feature = "ssl-rustls"))]
+            Stream::Https(_) => None,
+        }
+    }
 }
 
 impl Drop for RefinedTcpStream {

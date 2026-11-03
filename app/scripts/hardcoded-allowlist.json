@@ -49,11 +49,12 @@
     { "glob": "src-tauri/src/dsh_bridge.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "DSH 应用发现的环境变量名表（FISH_DOCK_DSH_APP / DSH_APP_DIR）：第三方工具路径探测，不是本软件部署旋钮" },
     { "glob": "src-tauri/src/github_access.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "option_env!(FISH_DOCK_GITHUB_CLIENT_ID) 是发布构建烘焙的默认 clientId（编译期）；运行期覆盖走 config::github_client_id_override" },
     { "glob": "src-tauri/src/identity.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "身份数据目录解析链（FISH_DOCK_DATA / 旧名 DSH_FISH_DATA），identity.rs 即解析处；属数据目录解析、非部署间隔/URL 旋钮" },
-    { "glob": "src-tauri/src/runtime.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "数据根 FISH_DOCK_APP_HOME 与安装资源 DSH_FISH_RESOURCES 的解析处；config::app_home / resources_override 都委托到这里，是数据根唯一来源" },
+    { "glob": "src-tauri/src/runtime.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "数据根 FISH_DOCK_APP_HOME 的解析处（app_home_from）；2.0.4 T-Q 起安装资源目录改由 config::resources_override 唯一解析，这里不再读资源变量" },
     { "glob": "src-tauri/src/storage_context.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "统一数据根 FISH_DOCK_HOME 的解析处（凭据/roster/keys 那套）" },
-    { "glob": "src-tauri/src/windhawk_bundle.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "开发期（非 installed 构建）资源目录回退，用 DSH_FISH_RESOURCES 指向 checkout，不是部署配置" },
+    { "glob": "src-tauri/src/windhawk_bundle.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "开发期（非 installed 构建）资源目录用 CARGO_MANIFEST_DIR 回退到 checkout；2.0.4 T-Q 起旧 DSH_FISH_RESOURCES 直读已移除，资源解析走 config::resources_override" },
     { "glob": "src-tauri/src/plugin_development.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "开发期插件目录覆盖 FISH_DOCK_DEV_PLUGINS（仅本地开发用，不是发布配置）" },
     { "glob": "src-tauri/src/plugin_dependencies.rs", "categories": ["ENV_SECOND_ENTRY"], "reason": "开发期 Node 路径覆盖 FISH_DOCK_DEV_NODE（仅 debug 构建）" },
+    { "glob": "src-tauri/src/sources.rs", "categories": ["HTTP_URL"], "reason": "2.0.4 T-F 镜像候选的固定公开源站（jsDelivr/npm registry/raw.githubusercontent）；镜像开关本身来自 config（url.* / mirror.prefer），模块内字面量只是候选标签与原站 URL，不是部署旋钮" },
     { "glob": "src-tauri/src/plugin_t30_acceptance.rs", "categories": ["HTTP_URL", "TIMEOUT_MAGIC", "LOOPBACK_PORT"], "reason": "t30 独立压力验收购建：真实官方 release 资产地址、外部下载等待、以及「断网」场景把 HTTP(S)_PROXY 指到 127.0.0.1:9 强制连接失败，属测试夹具（脚本只排除 *_tests.rs / *.test.*，这个文件是 t30 的验收块）" }
   ]
 }

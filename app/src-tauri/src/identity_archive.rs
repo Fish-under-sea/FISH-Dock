@@ -7,10 +7,10 @@ const LIMIT: usize = 32 * 1024 * 1024;
 const FILE_LIMIT: usize = 16 * 1024 * 1024;
 const README: &[u8] = include_bytes!("identity-backup-readme.md");
 pub struct Archive { pub bytes: Vec<u8>, pub missing: usize }
-pub struct Preview { pub format: String, pub ofm_accounts: usize, pub mail_accounts: Option<usize>, pub missing: usize, pub files: BTreeMap<String, Vec<u8>>, classified_changes: Option<crate::identity_store::Changes> }
+pub struct Preview { pub format: String, pub legacy_accounts: usize, pub mail_accounts: Option<usize>, pub missing: usize, pub files: BTreeMap<String, Vec<u8>>, classified_changes: Option<crate::identity_store::Changes> }
 fn sha(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
 fn allowed(name: &str) -> bool {
-    crate::identity_store::OFM_FILES.contains(&name) || ["README.md", "README.txt", "manifest.json", "mail-accounts.json", "mail-secrets.json", "channel-pack/accounts-backup.json"].contains(&name)
+    crate::legacy_ofm::LEGACY_IDENTITY_FILES.contains(&name) || ["README.md", "README.txt", "manifest.json", "mail-accounts.json", "mail-secrets.json", "channel-pack/accounts-backup.json"].contains(&name)
 }
 fn encoded(value: &Value) -> Result<Vec<u8>, String> { serde_json::to_vec_pretty(value).map_err(|_| "无法编码身份资料".into()) }
 fn document(files: &BTreeMap<String, Vec<u8>>, name: &str) -> Result<Option<Value>, String> {
@@ -23,10 +23,10 @@ fn document(files: &BTreeMap<String, Vec<u8>>, name: &str) -> Result<Option<Valu
 fn counts(files: &BTreeMap<String, Vec<u8>>, full: bool) -> Result<(usize, Option<usize>, usize), String> {
     for name in files.keys().filter(|name| name.ends_with(".json")) { document(files, name)?; }
     let state = document(files, "channel-pack/state.json")?.unwrap_or_else(|| json!({"accounts":[]}));
-    let accounts = state["accounts"].as_array().ok_or("OFM 账号索引格式无效")?;
-    if accounts.len() > 10000 || accounts.iter().any(|a| !a.is_object()) { return Err("OFM 账号索引超出限制或格式无效".into()); }
+    let accounts = state["accounts"].as_array().ok_or("旧业务账号索引格式无效")?;
+    if accounts.len() > 10000 || accounts.iter().any(|a| !a.is_object()) { return Err("旧业务账号索引超出限制或格式无效".into()); }
     let credentials = document(files, "channel-credentials.json")?.unwrap_or_else(|| json!({}));
-    if credentials.as_object().unwrap().iter().any(|(id, value)| !crate::mail_secrets::valid_id(id) || value.as_str().is_none_or(|s| s.len() > 1024 * 1024)) { return Err("OFM 凭据映射格式无效".into()); }
+    if credentials.as_object().unwrap().iter().any(|(id, value)| !crate::mail_secrets::valid_id(id) || value.as_str().is_none_or(|s| s.len() > 1024 * 1024)) { return Err("旧业务凭据映射格式无效".into()); }
     let mut missing = accounts.iter().filter(|a| a["credentialRef"].as_str().is_some_and(|id| credentials.get(id).is_none())).count();
     if let Some(eac) = document(files, "eac-user.json")? { if eac["token"].as_str().is_none_or(|s| s.is_empty() || s.len() > 1024 * 1024) { return Err("EAC 授权格式无效".into()); } }
     let mail_count = if full {
@@ -58,7 +58,7 @@ pub fn export(root: &Path) -> Result<Archive, String> {
     let _lock = crate::identity_store::EDIT.lock().map_err(|_| "身份操作锁不可用")?;
     crate::identity_store::recover_unlocked(root)?;
     let mut files = BTreeMap::from([("README.md".into(), README.to_vec())]);
-    for name in crate::identity_store::OFM_FILES.iter().chain(["mail-accounts.json"].iter()) {
+    for name in crate::legacy_ofm::LEGACY_IDENTITY_FILES.iter().chain(["mail-accounts.json"].iter()) {
         if let Some(bytes) = crate::identity_store::read_optional(&root.join(name))? { files.insert((*name).into(), bytes); }
     }
     let secrets = crate::mail_secrets::snapshot(root)?;
@@ -71,7 +71,7 @@ pub fn inspect(bytes: &[u8]) -> Result<Preview, String> {
     let files = unzip(bytes)?;
     let manifest = document(&files, "manifest.json")?.ok_or("备份缺少清单")?;
     let format = manifest["format"].as_str().ok_or("备份格式标识无效")?;
-    let full = match format { "fish-dock/identity-backup" => true, "fish-dock/ofm-backup" => false, _ => return Err("不支持的身份备份格式".into()) };
+    let full = match format { "fish-dock/identity-backup" => true, other if crate::legacy_ofm::is_legacy_format(other) => false, _ => return Err("不支持的身份备份格式".into()) };
     if manifest["version"] != 1 || manifest["encrypted"] != false { return Err("不支持的身份备份版本或加密格式".into()); }
     if !files.contains_key("README.md") && !files.contains_key("README.txt") { return Err("备份缺少说明文件".into()); }
     if !full && files.values().map(Vec::len).sum::<usize>() > FILE_LIMIT { return Err("旧 OFM 包超过 16 MiB".into()); }
@@ -84,8 +84,8 @@ pub fn inspect(bytes: &[u8]) -> Result<Preview, String> {
         let file = files.get(name).ok_or("备份清单引用了缺失文件")?;
         if row["bytes"].as_u64() != Some(file.len() as u64) || row["sha256"].as_str() != Some(sha(file).as_str()) { return Err("备份文件大小或 SHA-256 校验失败".into()); }
     }
-    let (ofm_accounts, mail_accounts, missing) = counts(&files, full)?;
-    Ok(Preview { format: format.into(), ofm_accounts, mail_accounts, missing, files, classified_changes: None })
+    let (legacy_accounts, mail_accounts, missing) = counts(&files, full)?;
+    Ok(Preview { format: format.into(), legacy_accounts, mail_accounts, missing, files, classified_changes: None })
 }
 pub fn inspect_for(root: &Path, bytes: &[u8]) -> Result<Preview, String> {
     let Some(namespace) = crate::storage_context::Namespace::existing(root)? else { return inspect(bytes); };
@@ -101,14 +101,14 @@ pub fn inspect_for(root: &Path, bytes: &[u8]) -> Result<Preview, String> {
         let mail = roster.as_ref().map(|v| crate::mail_identity::validate(&v["accounts"])).transpose()?;
         let secrets = document(&files, "credentials/mail-secrets.json")?;
         let missing = mail.as_ref().map(|accounts| accounts.iter().filter(|a| a["id"].as_str().is_some_and(|id| secrets.as_ref().and_then(|s| s["entries"].get(id)).is_none())).count()).unwrap_or(0);
-        return Ok(Preview { format: "fish-dock/plugin-backup".into(), ofm_accounts: 0, mail_accounts: mail.map(|a| a.len()), missing, files, classified_changes: Some(changes) });
+        return Ok(Preview { format: "fish-dock/plugin-backup".into(), legacy_accounts: 0, mail_accounts: mail.map(|a| a.len()), missing, files, classified_changes: Some(changes) });
     }
     let mut preview = inspect(bytes)?;
     if namespace.identity().plugin_id == "host" {
-        if crate::identity_store::OFM_FILES.iter().any(|name| preview.files.contains_key(*name)) {
-            return Err("此旧备份含 OFM 资料，请通过 OFM 插件的旧备份迁移入口导入；宿主目录只接收宿主资料".into());
+        if crate::legacy_ofm::LEGACY_IDENTITY_FILES.iter().any(|name| preview.files.contains_key(*name)) {
+            return Err("此备份含已退役的 OFM 业务资料，当前宿主不提供导入入口；旧插件自己的备份请仍由它管理，原有文件保持不变".into());
         }
-        preview.classified_changes = Some(preview.changes()?.into_iter().filter(|(name, _)| !crate::identity_store::OFM_FILES.contains(&name.as_str())).collect());
+        preview.classified_changes = Some(preview.changes()?.into_iter().filter(|(name, _)| !crate::legacy_ofm::LEGACY_IDENTITY_FILES.contains(&name.as_str())).collect());
     }
     Ok(preview)
 }
@@ -116,7 +116,7 @@ impl Preview {
     pub fn changes(&self) -> Result<crate::identity_store::Changes, String> {
         if let Some(changes) = &self.classified_changes { return Ok(changes.clone()); }
         // 完整包替换白名单范围；旧 OFM 包不触碰邮件。不存在的可选项只在本范围内删除。
-        let mut changes = crate::identity_store::OFM_FILES.iter().map(|name| ((*name).into(), self.files.get(*name).cloned())).collect::<crate::identity_store::Changes>();
+        let mut changes = crate::legacy_ofm::LEGACY_IDENTITY_FILES.iter().map(|name| ((*name).into(), self.files.get(*name).cloned())).collect::<crate::identity_store::Changes>();
         if self.mail_accounts.is_some() {
             let accounts = document(&self.files, "mail-accounts.json")?.ok_or("邮件账号缺失")?;
             let accounts = crate::mail_identity::validate(&accounts["accounts"])?;
@@ -232,7 +232,7 @@ mod tests {
         let archive = export(&root).unwrap();
         let parsed = inspect(&archive.bytes).unwrap();
         assert_eq!(parsed.format, "fish-dock/identity-backup");
-        assert_eq!(parsed.ofm_accounts, 1);
+        assert_eq!(parsed.legacy_accounts, 1);
         assert_eq!(parsed.mail_accounts, Some(1));
         assert!(parsed.files.contains_key("README.md"));
         assert!(parsed.files.contains_key("stats.json"));

@@ -1523,6 +1523,45 @@ body.home-taskbar {
   color: #1b1b1b;
 }
 
+/* Wi-Fi 信号格数（2.0.4 T-H）：图标右下角五格，亮几格由 Windows 的信号质量决定
+   （tasks.rs wifi_bars → island.js showNet）；非 Wi-Fi 或未知时整条隐藏，绝不用全亮伪装。 */
+#bar-rest .tquick .net {
+  position: relative;
+  display: block;
+}
+#bar-rest .tquick .net .netbars {
+  position: absolute;
+  right: -3px;
+  bottom: -1px;
+  display: flex;
+  gap: 1px;
+  align-items: flex-end;
+}
+#bar-rest .tquick .net .netbars[hidden] {
+  display: none;
+}
+#bar-rest .tquick .net .netbars i {
+  width: 1.5px;
+  height: 2px;
+  border-radius: 0.5px;
+  background: color-mix(in srgb, currentColor 30%, transparent);
+}
+#bar-rest .tquick .net .netbars i:nth-child(2) {
+  height: 3px;
+}
+#bar-rest .tquick .net .netbars i:nth-child(3) {
+  height: 4px;
+}
+#bar-rest .tquick .net .netbars i:nth-child(4) {
+  height: 5px;
+}
+#bar-rest .tquick .net .netbars i:nth-child(5) {
+  height: 6px;
+}
+#bar-rest .tquick .net .netbars i.on {
+  background: currentColor;
+}
+
 /* The volume: all three waves faint, those up to it over them solid. */
 #bar-rest .tquick .vol {
   position: relative;

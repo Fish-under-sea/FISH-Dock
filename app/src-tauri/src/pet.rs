@@ -598,7 +598,8 @@ pub fn hover(sh: &Shared, is_over: bool) {
     set_ignore(sh, ignore);
     if is_over {
         let shown = {
-            let now = sh.pet.lock().unwrap().get(now_ms());
+            let details = sh.details();
+            let now = sh.pet.lock().unwrap().get(now_ms(), details);
             let id = now["id"].as_str().unwrap_or("");
             (now["mood"] != "idle" && now["jump"] == true && !id.is_empty()).then(|| id.to_string())
         };

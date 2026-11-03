@@ -22,12 +22,26 @@ pub struct Hit { pub name: String, pub version: String, pub description: String,
 
 // 检索结果：合规包列表 + 被命名规范过滤掉的数量。hidden 必须回传前端，
 // 否则不合规包被静默丢弃，用户会以为「搜索坏了」（用户 2026-10-31 要求）。
+// 分页（T-C / A10）：total 是 registry 自己报的命中总数（未知时 0），filtered 是
+// **本页**通过命名规范、可展示的条数——两者不是一件事，不能只报一个数字；
+// hasMore 让前端知道「这一页不是终点」，不把一页空结果误当全部结束。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SearchReport { pub hits: Vec<Hit>, pub hidden: usize }
+pub struct SearchReport { pub hits: Vec<Hit>, pub hidden: usize, pub total: usize, pub filtered: usize, pub has_more: bool, pub next_from: usize }
+
+// 一页检索的参数。discovery=true 是「发现式浏览」：查询串为空时用默认前缀，
+// 且不做精确包名元数据查——用户没点名要某个包，不该先打一次元数据。
+#[derive(Clone, Debug)]
+pub struct SearchPage { pub from: usize, pub size: usize, pub discovery: bool }
+impl Default for SearchPage { fn default() -> Self { SearchPage { from: 0, size: 20, discovery: false } } }
+
+// 首次进入第三方页的默认发现词（与包名规范同一个前缀，用户不用先认识任何包名）。
+const DISCOVERY_QUERY: &str = "fish-dock-plugin";
+// 一页最多要多少条；npm /-/v1/search 的 size 上限是 250，这里取小值防止一次拉爆。
+const MAX_PAGE_SIZE: usize = 50;
 
 #[derive(Deserialize)]
-struct SearchAnswer { objects: Vec<SearchObject> }
+struct SearchAnswer { #[serde(default)] total: Option<u64>, objects: Vec<SearchObject> }
 #[derive(Deserialize)]
 struct SearchObject { package: SearchPackage }
 #[derive(Deserialize)]
@@ -168,9 +182,17 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
     Err(failures.join("；"))
 }
 
-// 一次对单一地址的 GET：各 Way 依次试（web_ways），错误按类别报——
-// DNS 解析失败、TLS、超时、HTTP 状态、读超限分开说，不笼统「连接失败」。
+// 2.0.4 T-F（resources，审计 A05/A07）：一次对「逻辑地址」的 GET。候选（原地址
+// + 镜像，见 sources::candidates）与每候选的代理路统一在 sources 里展开；这里只
+// 保留既有分块进度与取消，错误仍按类别说人话（每候选原因由 sources 聚合）。
 fn get_one(url: &str, limit: usize, progress: Option<&str>) -> Result<Vec<u8>, String> {
+    crate::sources::fetch_bytes_with(url, crate::config::pet_timeout(), limit as u64, |candidate, limit| single_get(candidate, limit as usize, progress))
+        .map_err(|fail| fail.reason())
+}
+
+// 单一候选的一次 GET：各 Way 依次试（web_ways），错误按类别报——
+// DNS 解析失败、TLS、超时、HTTP 状态、读超限分开说，不笼统「连接失败」。
+fn single_get(url: &str, limit: usize, progress: Option<&str>) -> Result<Vec<u8>, String> {
     let mut failures: Vec<String> = Vec::new();
     for way in crate::proxy::web_ways(url) {
         let Some(agent) = way.agent_with(crate::config::pet_timeout(), |config| config.max_redirects(crate::config::http_redirects() as u32).http_status_as_error(false)) else { continue };
@@ -206,52 +228,16 @@ fn http_status_words(status: u16) -> String {
 // TLS 类错误的人话：带一句可能原因，让人知道去查代理 / 端口 / 证书（t24 实测：
 // https 连明文 http 端口时 ureq 给 Io(InvalidData, InvalidMessage(InvalidContentType))，
 // 旧实现落到「网络 IO 失败」，既看不懂也没方向）。
+#[cfg(test)]
 fn tls_words(detail: &str) -> String {
     format!("TLS 握手失败（可能：代理拦截 / 端口不是 https / 证书不被信任）：{detail}")
 }
 
-// ureq 错误 → 一句话人话（保类别）。
+// ureq 错误 → 一句话人话（保类别）。2.0.4 T-F（resources）：实现只留在
+// `sources::net_words` 一处，第三方插件、官方商店、Windhawk 与 PawnIO 共用，
+// 不再各写一套正则或各留一个 match。
 fn npm_plain_error(e: &ureq::Error) -> String {
-    match e {
-        ureq::Error::HostNotFound => "域名解析失败（DNS）".into(),
-        ureq::Error::Timeout(_) => "连接或响应超时".into(),
-        ureq::Error::Tls(message) => tls_words(message),
-        ureq::Error::StatusCode(status) => format!("HTTP {status}"),
-        ureq::Error::Io(io) => {
-            let kind = io.kind();
-            let text = io.to_string();
-            let lower = text.to_ascii_lowercase();
-            // TLS 类 Io：rustls 把握手失败包成 Io(InvalidData ...)，底层文案是
-            // "received corrupt message of type InvalidContentType"——按类型或关键词认出来。
-            let tls_like = kind == std::io::ErrorKind::InvalidData
-                || lower.contains("invalidmessage")
-                || lower.contains("invalidcontenttype")
-                || lower.contains("corrupt message")
-                || lower.contains("tls")
-                || lower.contains("certificate")
-                || lower.contains("handshake");
-            if tls_like { tls_words(&text) }
-            // 本机实测：straight 连不存在的域名（.invalid）得到的是 Io(UnexpectedEof)，
-            // 而不是 HostNotFound（网络层把 DNS 失败吞成 EOF）。这里补一句人话提示；
-            // HostNotFound 分支仍保留——会明确报 DNS 失败的网络栈走那条。
-            else if kind == std::io::ErrorKind::UnexpectedEof { "连接被提前关闭（可能是 DNS 解析失败、代理拦截或对方拒绝）".into() }
-            else if kind == std::io::ErrorKind::TimedOut { "连接或响应超时".into() }
-            else if kind == std::io::ErrorKind::ConnectionRefused { "连接被拒绝".into() }
-            else if kind == std::io::ErrorKind::ConnectionReset { "连接被重置".into() }
-            else { format!("网络 IO 失败（{io}）") }
-        }
-        other => {
-            // rustls / native-tls 的具体错误（Tls 变体之外的证书类错误）也归到 TLS，
-            // 不让它们退回成一句笼统的「连接失败」。
-            let text = other.to_string();
-            let lower = text.to_ascii_lowercase();
-            if lower.contains("tls") || lower.contains("certificate") || lower.contains("handshake") || lower.contains("ssl") || lower.contains("invalidcontenttype") || lower.contains("corrupt message") {
-                tls_words(&text)
-            } else {
-                format!("连接失败（{text}）")
-            }
-        }
-    }
+    crate::sources::net_words(e)
 }
 
 fn segment(value: &str) -> bool {
@@ -311,9 +297,14 @@ fn spec(value: &str) -> Result<(String, Option<String>), String> {
 // 反而排不进前 20（用户 2026-10-31 实测）——所以合法包名先做一次元数据精确查并置顶，
 // 再并入 search 结果、按包名去重。非合法包名只走 search，不把任意输入拼进 URL。
 pub fn search(query: &str) -> Result<SearchReport, String> {
+    search_page(query, &SearchPage::default())
+}
+
+// 一页检索（T-C）：分页、发现式浏览与计数一起进来。默认页 = 2.0.3 的行为。
+pub fn search_page(query: &str, page: &SearchPage) -> Result<SearchReport, String> {
     let sources = NpmSources::from_config();
     let mut log = Vec::new();
-    let result = search_via(&sources, query, &mut log, |url, limit| get_one(url, limit, None));
+    let result = search_page_via(&sources, query, page, &mut log, |url, limit| get_one(url, limit, None));
     // 精确查与 search 两段、每一源各自的结局都打进日志，不吞。
     drain_log(&log);
     result
@@ -324,34 +315,52 @@ fn metadata_url(primary: &str, name: &str) -> String {
     format!("{}/{}", primary, urlencode(name).replace("%2F", "/").replace("%40", "@"))
 }
 
-// search 的注入版（测试用）：源链与单地址 GET 都注入，不读 config、不碰网络。
-fn search_via<F>(sources: &NpmSources, query: &str, log: &mut Vec<String>, mut fetch: F) -> Result<SearchReport, String>
+// search 的注入版（测试用，默认页）：源链与单地址 GET 都注入，不读 config、不碰网络。
+fn search_via<F>(sources: &NpmSources, query: &str, log: &mut Vec<String>, fetch: F) -> Result<SearchReport, String>
 where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
-    let text = query.trim();
-    if text.is_empty() || text.len() > 120 { return Err("请输入要检索的包名或关键字".into()); }
+    search_page_via(sources, query, &SearchPage::default(), log, fetch)
+}
+
+// 分页版的注入实现。第一页且非发现式时先做精确包名元数据查；分页只追加本页，
+// 不重复那条精确命中（from>0 时它就是上一页的事）。
+fn search_page_via<F>(sources: &NpmSources, query: &str, page: &SearchPage, log: &mut Vec<String>, mut fetch: F) -> Result<SearchReport, String>
+where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
+    let raw = query.trim();
+    if raw.len() > 120 { return Err("请输入要检索的包名或关键字".into()); }
+    let text = if raw.is_empty() {
+        if !page.discovery { return Err("请输入要检索的包名或关键字".into()); }
+        DISCOVERY_QUERY
+    } else { raw };
+    let size = page.size.clamp(1, MAX_PAGE_SIZE);
+    let from = page.from;
     let mut hits: Vec<Hit> = Vec::new();
     let mut hidden = 0usize;
+    // 本页通过命名规范、可展示的条数（去重前）——与 registry 的 total 区分开。
+    let mut filtered = 0usize;
     let mut seen: BTreeSet<String> = BTreeSet::new();
 
     // ① 精确包名优先：查询串本身是合法 npm 包名时先按元数据精确查（主源失败走镜像）。
     // 命中就置顶；404 / 网络失败都不致命——静默回退到 search（错误分类由 search 失败体现）。
-    if let Ok(name) = package_name(text) {
-        let url = metadata_url(&sources.primary, &name);
-        if let Ok(bytes) = get_via_with(sources, &url, META_LIMIT, log, &mut fetch) {
-            if let Ok(meta) = serde_json::from_slice::<Meta>(&bytes) {
-                if let Some(latest) = meta.dist_tags.get("latest").cloned() {
-                    if plugin_package_name(&name).is_ok() {
-                        hits.push(Hit {
-                            name: name.clone(),
-                            version: latest,
-                            description: truncate(&meta.description, 240),
-                            publisher: meta.maintainers.first().map(|m| m.name.clone()).unwrap_or_default(),
-                            updated: truncate(meta.time.get("modified").map(String::as_str).unwrap_or(""), 40),
-                        });
-                        seen.insert(name);
-                    } else {
-                        // 精确命中但不合规范：拒收，计入 hidden。
-                        hidden += 1;
+    // 发现式浏览与第二页起都不做：前者不是点名要包，后者那条命中已在第一页。
+    if !page.discovery && from == 0 {
+        if let Ok(name) = package_name(text) {
+            let url = metadata_url(&sources.primary, &name);
+            if let Ok(bytes) = get_via_with(sources, &url, META_LIMIT, log, &mut fetch) {
+                if let Ok(meta) = serde_json::from_slice::<Meta>(&bytes) {
+                    if let Some(latest) = meta.dist_tags.get("latest").cloned() {
+                        if plugin_package_name(&name).is_ok() {
+                            hits.push(Hit {
+                                name: name.clone(),
+                                version: latest,
+                                description: truncate(&meta.description, 240),
+                                publisher: meta.maintainers.first().map(|m| m.name.clone()).unwrap_or_default(),
+                                updated: truncate(meta.time.get("modified").map(String::as_str).unwrap_or(""), 40),
+                            });
+                            seen.insert(name);
+                        } else {
+                            // 精确命中但不合规范：拒收，计入 hidden。
+                            hidden += 1;
+                        }
                     }
                 }
             }
@@ -359,13 +368,25 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
     }
 
     // ② 并入 search；按包名去重（精确那条优先，同名不再出现第二条）。
-    let url = format!("{}/-/v1/search?text={}&size=20", sources.primary, urlencode(text));
+    // 第一页的 URL 与 2.0.3 逐字一致（不带 from），老回归可以照旧对照。
+    let url = if from > 0 {
+        format!("{}/-/v1/search?text={}&size={}&from={}", sources.primary, urlencode(text), size, from)
+    } else {
+        format!("{}/-/v1/search?text={}&size={}", sources.primary, urlencode(text), size)
+    };
     let bytes = get_via_with(sources, &url, SEARCH_LIMIT, log, &mut fetch)?;
     let answer: SearchAnswer = serde_json::from_slice(&bytes).map_err(|_| "npm 检索结果格式无效")?;
-    for object in answer.objects.into_iter().take(20) {
+    // registry 的页偏移按**本页实际展示的对象数**前进（过滤与去重都不改变它，
+    // 但也不能超过请求的 size）——这是前端翻页唯一正确的 next_from
+    // （t19 F2：用可见条数会把整页被过滤的页原地卡死；t42 F-B：registry 返回的
+    // 对象多于 size 时，按整个数组前进会跳过没展示给用户的那一段）。
+    let rows = answer.objects.len().min(size);
+    for object in answer.objects.into_iter().take(size) {
         let row = object.package;
         if plugin_package_name(&row.name).is_err() { hidden += 1; continue; }
+        // 去重后再计数：精确命中已置顶的同名包不会再算一次「本页可用」（t19 F5）。
         if !seen.insert(row.name.clone()) { continue; }
+        filtered += 1;
         hits.push(Hit {
             publisher: row.publisher.map(|p| p.username).unwrap_or_default(),
             description: truncate(&row.description, 240),
@@ -374,7 +395,11 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
             version: row.version,
         });
     }
-    Ok(SearchReport { hits, hidden })
+    let total = answer.total.map(|n| n as usize).unwrap_or(0);
+    let next_from = from.saturating_add(rows);
+    // registry 报了总数就按总数判；没报时只能看这一页有没有装满。
+    let has_more = if total > 0 { next_from < total } else { rows >= size };
+    Ok(SearchReport { hits, hidden, total, filtered, has_more, next_from })
 }
 
 fn truncate(value: &str, max: usize) -> String {
@@ -858,5 +883,146 @@ mod tests {
         assert_eq!(asked[1], "https://registry.npmmirror.com/fish-dock-plugin-filemgr");
         assert_eq!(report.hits[0].name, "fish-dock-plugin-filemgr");
         assert_eq!(report.hits[0].version, "1.0.5");
+    }
+
+    // ── 分页与发现式浏览（T-C / A10）────────────────────────────────
+    fn page(from: usize, size: usize, discovery: bool) -> SearchPage { SearchPage { from, size, discovery } }
+    fn paged_fixture(total: u64, count: usize) -> Vec<u8> {
+        let objects: Vec<serde_json::Value> = (0..count).map(|i| {
+            // 每 10 个里放 1 个不合规名字，用来验证 hidden/filtered 是两个数。
+            let name = if i % 10 == 9 { format!("lodash-{i:02}") } else { format!("fish-dock-plugin-p{i:02}") };
+            serde_json::json!({ "package": { "name": name, "version": "1.0.0", "description": "d", "date": "2026" } })
+        }).collect();
+        serde_json::json!({ "total": total, "objects": objects }).to_string().into_bytes()
+    }
+
+    // 发现式浏览：空查询用默认前缀，且不先打一次精确元数据（用户没点名要包）。
+    #[test]
+    fn discovery_uses_the_default_prefix_and_skips_the_exact_lookup() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let search = paged_fixture(1, 1);
+        let asked = std::cell::RefCell::new(Vec::<String>::new());
+        let mut log = Vec::new();
+        let report = search_page_via(&sources, "   ", &page(0, 20, true), &mut log, |url, _| {
+            asked.borrow_mut().push(url.to_string());
+            Ok(search.clone())
+        }).unwrap();
+        let asked = asked.into_inner();
+        assert_eq!(asked.len(), 1, "发现式浏览只该发 search 一次：{asked:?}");
+        assert!(asked[0].contains("/-/v1/search") && asked[0].contains("text=fish-dock-plugin&size=20"), "{}", asked[0]);
+        assert_eq!(report.hits[0].name, "fish-dock-plugin-p00");
+    }
+
+    // 非发现式的空查询仍然是错误：不是每个空输入都该变成「浏览全部」。
+    #[test]
+    fn an_empty_query_without_discovery_is_still_an_error() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let mut log = Vec::new();
+        let error = search_page_via(&sources, "", &page(0, 20, false), &mut log, |_, _| Ok(paged_fixture(0, 0))).unwrap_err();
+        assert!(error.contains("请输入要检索的包名或关键字"), "{error}");
+    }
+
+    // 第二页：带 from、不重复精确查（那条命中已在第一页），并夹住 size。
+    #[test]
+    fn a_later_page_asks_for_from_and_repeats_no_exact_lookup() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let asked = std::cell::RefCell::new(Vec::<String>::new());
+        let mut log = Vec::new();
+        search_page_via(&sources, "fish-dock-plugin-filemgr", &page(20, 0, false), &mut log, |url, _| {
+            asked.borrow_mut().push(url.to_string());
+            Ok(paged_fixture(41, 1))
+        }).unwrap();
+        let asked = asked.into_inner();
+        assert_eq!(asked.len(), 1, "第二页只发 search 一次（精确查属于第一页）：{asked:?}");
+        assert!(asked[0].contains("size=1&from=20"), "size 要夹到 ≥1：{}", asked[0]);
+    }
+
+    // registry 的总数、本页过滤后可展示的条数、还有没有下一页：三个数各归各。
+    #[test]
+    fn the_page_separates_registry_total_filtered_count_and_has_more() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let mut log = Vec::new();
+        let first = search_page_via(&sources, "fish-dock-plugin", &page(0, 20, true), &mut log, |_, _| Ok(paged_fixture(41, 20))).unwrap();
+        assert_eq!(first.total, 41, "registry 报的总数要原样带出");
+        assert_eq!(first.hidden, 2, "两条不合规名字");
+        assert_eq!(first.filtered, 18, "本页通过命名规范、去重后可展示的条数");
+        assert_eq!(first.hits.len(), 18);
+        assert!(first.has_more, "0+20 < 41，后面还有");
+        let last = search_page_via(&sources, "fish-dock-plugin", &page(40, 20, true), &mut log, |_, _| Ok(paged_fixture(41, 20))).unwrap();
+        assert!(!last.has_more, "40+20 ≥ 41，到底了");
+    }
+
+    // 整页名字都不合规的夹具：用来验证「整页被过滤时偏移仍前进」。
+    fn all_hidden_fixture(total: u64, count: usize) -> Vec<u8> {
+        let objects: Vec<serde_json::Value> = (0..count)
+            .map(|i| serde_json::json!({ "package": { "name": format!("lodash-{i:02}"), "version": "1.0.0", "description": "d", "date": "2026" } }))
+            .collect();
+        serde_json::json!({ "total": total, "objects": objects }).to_string().into_bytes()
+    }
+
+    // t19 F2：翻页偏移是 registry 的**对象**偏移，不是可见条数——
+    // 本页 20 个对象里有 2 个被过滤，下一页仍要从 20 开始；整页被过滤时更要前进，
+    // 否则「加载更多」永远返回同一页（前端已按 nextFrom 走，这里锁后端口径）。
+    #[test]
+    fn next_from_advances_by_registry_objects_not_by_visible_hits() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let mut log = Vec::new();
+        let paged = search_page_via(&sources, "fish-dock-plugin", &page(0, 20, true), &mut log, |_, _| Ok(paged_fixture(41, 20))).unwrap();
+        assert_eq!(paged.hits.len(), 18, "可见 18 条");
+        assert_eq!(paged.next_from, 20, "偏移按对象数前进：18 条可见也要从 20 接着翻");
+        // 整页都被过滤：可见 0 条，偏移照旧前进 20。
+        let hidden_page = all_hidden_fixture(41, 20);
+        let empty = search_page_via(&sources, "fish-dock-plugin", &page(0, 20, true), &mut log, |_, _| Ok(hidden_page.clone())).unwrap();
+        assert!(empty.hits.is_empty(), "整页过滤后没有可安装条目");
+        assert_eq!(empty.hidden, 20);
+        assert_eq!(empty.next_from, 20, "整页被过滤也必须前进，否则前端原地打转");
+        assert!(empty.has_more, "20 < 41，后面还有");
+    }
+
+    // t42 F-B：registry 返回的对象多于请求的 size 时，没展示给用户的那一段
+    // 不能被跳过——next_from 只按本页实际消费（=take(size)）的条数前进。
+    #[test]
+    fn next_from_never_advances_past_what_the_page_shows() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let mut log = Vec::new();
+        // 请求 20，registry 却给了 25 个对象：页面只消费 20 个（其中 2 个不合规 → 18 可见）。
+        let paged = search_page_via(&sources, "fish-dock-plugin", &page(0, 20, true), &mut log, |_, _| Ok(paged_fixture(41, 25))).unwrap();
+        assert_eq!(paged.hits.len(), 18, "只消费前 size=20 个对象（每 10 个有 1 个不合规）");
+        assert_eq!(paged.next_from, 20, "多余 5 个对象没展示，不能被跳过");
+        // 短页：本页只有 5 个对象，total 仍说后面还有，偏移只能前进 5。
+        let short = search_page_via(&sources, "fish-dock-plugin", &page(20, 20, true), &mut log, |_, _| Ok(paged_fixture(41, 5))).unwrap();
+        assert_eq!(short.hits.len(), 5);
+        assert_eq!(short.next_from, 25, "短页按实际 5 条前进（不是 40）");
+        assert!(short.has_more, "25 < 41，后面还有");
+    }
+
+    // t19 F5：filtered 是「去重后可展示」的条数，精确命中与 search 里同名的那条
+    // 不能算两次（旧实现把 filtered += 1 放在去重之前，多算 1）。
+    #[test]
+    fn filtered_counts_each_package_once_after_dedupe() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let search = search_fixture(serde_json::json!([
+            { "package": { "name": "fish-dock-plugin-filemgr", "version": "1.0.5", "description": "dup", "date": "2026-10-21" } },
+            { "package": { "name": "fish-dock-plugin-other", "version": "2.0.0", "description": "o", "date": "2026-10-01" } }
+        ]));
+        let meta = meta_fixture("fish-dock-plugin-filemgr", "1.0.5");
+        let mut log = Vec::new();
+        let report = search_via(&sources, "fish-dock-plugin-filemgr", &mut log, |url, _| {
+            if url.contains("/-/v1/search") { Ok(search.clone()) } else { Ok(meta.clone()) }
+        }).unwrap();
+        assert_eq!(report.hits.len(), 2, "置顶的 filemgr + other");
+        assert_eq!(report.filtered, 1, "search 段只有 other 是新条目：同名不许算两次");
+        assert_eq!(report.next_from, 2, "偏移仍按本页对象数（2）前进");
+    }
+
+    // registry 没报总数时只能看这一页有没有装满——装满就当还有，空页就结束。
+    #[test]
+    fn without_a_registry_total_a_full_page_still_suggests_more() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let mut log = Vec::new();
+        let full = search_page_via(&sources, "fish-dock-plugin", &page(0, 2, true), &mut log, |_, _| Ok(paged_fixture(0, 2))).unwrap();
+        assert!(full.has_more, "满页且无 total：按「可能还有」处理");
+        let short = search_page_via(&sources, "fish-dock-plugin", &page(0, 2, true), &mut log, |_, _| Ok(paged_fixture(0, 1))).unwrap();
+        assert!(!short.has_more, "不满一页：到底了");
     }
 }

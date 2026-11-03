@@ -100,6 +100,12 @@ fn download_timeout()->std::time::Duration{crate::config::plugin_download_timeou
 // 官方目录的三个读取口（raw / api / 环境覆盖）都在 crate::config 的 url.* 键里定，别处不许再写字面量。
 fn catalog_urls()->Vec<String>{vec![crate::config::plugin_catalog_raw(),crate::config::plugin_catalog_api()]}
 fn download(url:&str,limit:u64,id:Option<&str>)->Result<Vec<u8>,String>{
+    // 2.0.4 T-F（resources，审计 A05/A07）：原地址 + 镜像候选统一在 sources 展开，
+    // 每候选再按代理路走；错误聚合保留每来源的原因。
+    crate::sources::fetch_bytes_with(url,download_timeout(),limit,|candidate,limit|single_download(candidate,limit,id))
+        .map_err(|fail|format!("官方商店下载失败（每来源都未成）：{}",fail.reason()))
+}
+fn single_download(url:&str,limit:u64,id:Option<&str>)->Result<Vec<u8>,String>{
     let mut last="官方商店连接失败，请检查网络后重试".to_string();
     for way in crate::proxy::web_ways(url){
         let Some(agent)=way.agent_with(download_timeout(),|config|config.max_redirects(0).http_status_as_error(false))else{continue};

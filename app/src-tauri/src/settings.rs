@@ -46,9 +46,10 @@ pub fn snapshot(sh: &Shared) -> Value {
         .iter()
         .map(|p| json!({ "id": p.id, "name": p.name, "author": p.author, "url": data::asset_url(&p.sheet), "version": p.version, "codex": p.from_codex }))
         .collect();
+    let details = sh.details();
     let (now, sessions) = {
         let pet = sh.pet.lock().unwrap();
-        (pet.get(now_ms()), pet.list())
+        (pet.get(now_ms(), details), pet.list(details))
     };
     let (win_light, win_accent) = crate::wallpaper::look();
     // Whether any of them is connected, as the island tells it (connection.rs):
@@ -1103,7 +1104,7 @@ pub async fn settings_net_test(proxy: Option<Value>) -> Value {
 // (yes: sent from now on; no: never), sent now, or the last one's issue
 // opened (crash.rs). The snapshot as it is then.
 #[tauri::command]
-pub async fn settings_crash(app: AppHandle, what: String) -> Value {
+pub async fn settings_crash(app: AppHandle, window: WebviewWindow, what: String) -> Value {
     let sh = shared(&app);
     match what.as_str() {
         "yes" => crate::crash::answer(&sh, true),
@@ -1112,6 +1113,22 @@ pub async fn settings_crash(app: AppHandle, what: String) -> Value {
         "open" => {
             if let Some(url) = crate::crash::open_last(&sh) {
                 crate::jump::open_url(&url);
+            }
+        }
+        // 2.0.4 T-M（零部署）：预填 GitHub issue，或把脱敏报告导出成 .txt。
+        "issue" => {
+            if let Err(error) = crate::crash::open_issue(&sh) {
+                sh.log(&format!("crash: {error}"));
+            }
+        }
+        // 导出走宿主已有的系统保存对话框与导出目录选择（identity_dialog），
+        // 由用户选位置；取消不算失败。不再固定写死数据根。
+        "export" => {
+            let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+            match crate::crash::export_report_dialog(&sh, owner) {
+                Ok(Some(path)) => sh.log(&format!("crash: exported to {path}")),
+                Ok(None) => sh.log("crash: export cancelled"),
+                Err(error) => sh.log(&format!("crash: export failed: {error}")),
             }
         }
         _ => {}

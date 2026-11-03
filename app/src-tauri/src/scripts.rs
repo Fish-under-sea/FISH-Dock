@@ -1,5 +1,5 @@
 // Scripts she writes out or starts: waku, the command wrapper for the
-// terminal (examples/widgets/waku.ps1), written to <her folder>/plugins for
+// terminal (scripts/waku.ps1 in this crate), written to <her folder>/plugins for
 // the Plugins page to point at; and what starting a PowerShell script well
 // takes, for mail's agents (mail/agent.rs): its arguments quoted, and a job
 // object that takes what she started down with her.
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use crate::Shared;
 
 // waku is no plugin to switch on: a command wrapper, written out for the terminal.
-const WAKU: &[u8] = include_bytes!("../../examples/widgets/waku.ps1");
+const WAKU: &[u8] = include_bytes!("../scripts/waku.ps1");
 
 // A PowerShell string: in single quotes, which PowerShell also takes in
 // their curly forms, each doubled inside.

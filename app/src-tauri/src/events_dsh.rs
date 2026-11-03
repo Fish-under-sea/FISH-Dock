@@ -480,7 +480,7 @@ fn of_subagent(e: &Value, top: &str, home: &Path) -> Option<Value> {
 
 // The message for an event, or None for one that changes nothing.
 pub fn to_message(e: &Value, home: &std::path::Path) -> Option<Value> {
-    if !e.is_object() || s(e, "hook_event_name") == LOADED {
+    if !e.is_object() || matches!(s(e, "hook_event_name"), LOADED | LEGACY_LOADED) {
         return None;
     }
     match whose_of(e, home) {
@@ -490,12 +490,14 @@ pub fn to_message(e: &Value, home: &std::path::Path) -> Option<Value> {
 }
 
 // The plugin's word as DSH loads it (her log says it: log_line).
-const LOADED: &str = "WakuwakuLoaded";
+const LOADED: &str = "FishDockLoaded";
+// 2.0.3 及以前的插件发旧名：仍然认，日志用新名。
+const LEGACY_LOADED: &str = "WakuwakuLoaded";
 
 // That word: not anything a session did, so not what tells the bridge's way
 // working (server.rs leaves it out of when DSH was last heard).
 pub fn is_loaded(e: &Value) -> bool {
-    s(e, "hook_event_name") == LOADED
+    matches!(s(e, "hook_event_name"), LOADED | LEGACY_LOADED)
 }
 
 // The message for an event of a session of the person's.
@@ -571,7 +573,7 @@ fn short(id: &str) -> String {
 // telling why its window can't be reached; a subagent's, whose it is.
 pub fn log_line(e: &Value, found: Option<u32>, home: &Path) -> Option<String> {
     let name = s(e, "hook_event_name");
-    if name == LOADED {
+    if name == LOADED || name == LEGACY_LOADED {
         let profile = if s(e, "profile").is_empty() { String::new() } else { format!(", profile {}", s(e, "profile")) };
         return Some(format!("dsh: her plugin loaded (version {}{profile}, pid {})", e["version"].as_u64().unwrap_or(0), e["pid"].as_u64().unwrap_or(0)));
     }

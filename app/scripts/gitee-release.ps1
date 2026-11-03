@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# Copies a GitHub release of Wakuwaku to Gitee (gitee.com/zhoupengjie/Wakuwaku),
+# Copies a FISH Dock GitHub release to Gitee (default: gitee.com/Fish-under-sea/FISH-Dock),
 # for those in China: the same tag, title and notes; the same exe, taken from
 # GitHub's release (or given) and checked by GitHub's SHA-256; and
 # <exe>.sha256 beside it, put up after the exe: the updater takes a release
@@ -8,25 +8,35 @@
 # Gitee, as the updater does it (no account, no API), and checked again.
 #
 #   $env:GITEE_TOKEN = '<a Gitee private token, scope projects>'
-#   pwsh scripts/gitee-release.ps1 -Version 0.2.2 [-Exe <the exe>] [-DryRun]
+#   pwsh scripts/gitee-release.ps1 -Version 2.0.4 [-Asset FISH-Dock-Setup-2.0.4.exe] [-DryRun]
 #
-# The tag must be on Gitee first (git push <gitee remote> v0.2.2). Run again,
+# 2.0.4 起这是 FISH Dock 自己的发布入口：默认仓库是 Fish-under-sea/FISH-Dock，
+# 指向原项目（zhoupengjie/Wakuwaku）必须显式 -AllowUpstream，避免把新版本发到上游。
+# The tag must be on Gitee first (git push <gitee remote> v2.0.4). Run again,
 # it adds only what is missing. Without GITEE_TOKEN it writes nothing and
 # only checks what is there. -DryRun says what it would write, and checks
 # nothing after.
 param(
     [Parameter(Mandatory)][string]$Version,
+    [string]$Asset,
     [string]$Exe,
+    [string]$Owner = 'Fish-under-sea',
+    [string]$Repo = 'FISH-Dock',
+    [switch]$AllowUpstream,
     [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
 $Version = $Version.TrimStart('v', 'V')
 $tag = "v$Version"
-$name = "wakuwaku-v$Version-windows-x64.exe"
-$owner = 'zhoupengjie'
-$repo = 'Wakuwaku'
-$api = "https://gitee.com/api/v5/repos/$owner/$repo"
-$headers = @{ 'User-Agent' = 'wakuwaku-release' }
+if (-not $Asset) { $Asset = "FISH-Dock-Setup-$Version.exe" }
+$name = $Asset
+# 上游仓库只读归属，不作为默认发布目标；要发必须显式声明。
+$upstream = ($Owner -eq 'zhoupengjie' -and $Repo -eq 'Wakuwaku')
+if ($upstream -and -not $AllowUpstream) {
+    throw "拒绝向上游仓库发布：$Owner/$Repo 不是 FISH Dock 的发布目标（确需如此请显式加 -AllowUpstream）"
+}
+$api = "https://gitee.com/api/v5/repos/$Owner/$Repo"
+$headers = @{ 'User-Agent' = 'fish-dock-release' }
 $token = $env:GITEE_TOKEN
 # The token in a header, as Gitee takes it everywhere (an access_token field
 # in a multipart upload was refused: 40001, after the whole exe had gone).
@@ -41,7 +51,7 @@ if ($token -and -not $DryRun) {
 }
 
 # GitHub's release: its title, its notes, its exe's SHA-256.
-$gh = Invoke-RestMethod -Headers ($headers + @{ Accept = 'application/vnd.github+json' }) "https://api.github.com/repos/$owner/$repo/releases/tags/$tag"
+$gh = Invoke-RestMethod -Headers ($headers + @{ Accept = 'application/vnd.github+json' }) "https://api.github.com/repos/$Owner/$Repo/releases/tags/$tag"
 $asset = $gh.assets | Where-Object name -EQ $name
 if (-not $asset) { throw "GitHub's $tag has no $name" }
 $digest = "$($asset.digest)" -replace '^sha256:', ''
@@ -49,7 +59,7 @@ if ($digest -notmatch '^[0-9a-fA-F]{64}$') { throw "GitHub gives no SHA-256 for 
 $digest = $digest.ToLowerInvariant()
 
 # The exe, as GitHub has it, and its .sha256 as sha256sum writes it.
-$work = Join-Path ([IO.Path]::GetTempPath()) "wakuwaku-gitee-$Version"
+$work = Join-Path ([IO.Path]::GetTempPath()) "fish-dock-gitee-$Version"
 New-Item -ItemType Directory -Force $work | Out-Null
 $file = Join-Path $work $name
 if ($Exe) { Copy-Item -LiteralPath $Exe $file -Force }
@@ -60,7 +70,7 @@ $sums = "$file.sha256"
 "GitHub's $name`: SHA-256 $digest"
 
 # The tag on Gitee, and the commit it is on.
-$refs = git ls-remote --tags "https://gitee.com/$owner/$repo.git"
+$refs = git ls-remote --tags "https://gitee.com/$Owner/$Repo.git"
 $line = $refs | Where-Object { $_ -match "\trefs/tags/$([regex]::Escape($tag))\^\{\}$" } | Select-Object -First 1
 if (-not $line) { $line = $refs | Where-Object { $_ -match "\trefs/tags/$([regex]::Escape($tag))$" } | Select-Object -First 1 }
 if (-not $line) { throw "$tag is not on Gitee yet: push it first (git push <gitee remote> $tag)" }
@@ -102,7 +112,7 @@ if ($DryRun) { return }
 # Downloaded back as the updater does: no account, no API, from where Gitee
 # keeps a release's files (a moment's wait, should one just put up not be
 # there yet).
-$url = "https://gitee.com/$owner/$repo/releases/download/$tag/$name"
+$url = "https://gitee.com/$Owner/$Repo/releases/download/$tag/$name"
 $back = Join-Path $work "back-$name"
 "downloading $name back from Gitee to check it…"
 for ($i = 0; ; $i++) {
@@ -118,4 +128,4 @@ catch { throw "Gitee has no $name.sha256 for $tag ($($_.Exception.Message)): the
 $said = ((Get-Content -Raw -LiteralPath "$back.sha256") -split '\s+' | Where-Object { $_ })[0].ToLowerInvariant()
 if ($said -ne $digest) { throw "Gitee's $name.sha256 says $said, not $digest" }
 "checked: Gitee gives the same exe, and its .sha256 agrees"
-"https://gitee.com/$owner/$repo/releases/tag/$tag"
+"https://gitee.com/$Owner/$Repo/releases/tag/$tag"

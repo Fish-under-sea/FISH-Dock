@@ -1,7 +1,7 @@
-// wakuwaku-dsh-plugin
-// Wakuwaku's plugin for DeepSeek Harness (DSH): what DSH's sessions do, told
-// to her on her port. Written by Wakuwaku (Connect → DeepSeek Harness) into
-// DSH's own folder, <DSH home>/wakuwaku/, beside a package.json of its own,
+// fish-dock-dsh-plugin
+// FISH Dock's plugin for DeepSeek Harness (DSH): what DSH's sessions do, told
+// to her on her port. Written by FISH Dock (Connect → DeepSeek Harness) into
+// DSH's own folder, <DSH home>/fish-dock/, beside a package.json of its own,
 // and inserted by its path into DSH's home-level patch layer
 // (<DSH home>/cordis.patch.yml), which every profile applies: the desktop
 // app's and the command line's. A path, not a package name: nothing goes into
@@ -30,7 +30,7 @@
 // works for: parent_session, top_session), and a turn that ended without
 // finishing (stopped by the person, failed: stop_reason, StopFailure).
 //
-// As it is loaded it says so twice: to her port (WakuwakuLoaded), and in a
+// As it is loaded it says so twice: to her port (FishDockLoaded), and in a
 // small file beside itself (loaded-<profile>.json: this process, when, which
 // version and code), which her Connect page reads to tell whether DSH really
 // loaded it, and this version of it, she running or not; the file goes
@@ -70,7 +70,7 @@ import { fileURLToPath } from 'node:url'
 // until it restarts, so a file written again under the same name is not
 // what runs, and her Connect page compares the two.
 export const VERSION = 2
-export const name = 'wakuwaku'
+export const name = 'fish-dock'
 
 const DEFAULT_PORT = 47213
 // How long one event may take to reach her.
@@ -183,7 +183,7 @@ function takeOver(req, ours) {
 // default), for the tests.
 export function make(ctx, config = {}, options = {}) {
   const port = Number.isInteger(Number(config?.port)) && Number(config.port) > 0 ? Number(config.port) : DEFAULT_PORT
-  const path = '/hook?from=wakuwaku&agent=dsh'
+  const path = '/hook?from=fish-dock&agent=dsh'
   const titles = new Map()
   const replies = new Map()
   // The tool calls under way, by callId: whose, which tool, its input.
@@ -343,7 +343,7 @@ export function make(ctx, config = {}, options = {}) {
         const value = read(reply)
         if (value === undefined || !win(value, 'her')) return
         try {
-          ours.abort(new Error('answered on Wakuwaku'))
+          ours.abort(new Error('answered on FISH Dock'))
         } catch {}
         resolve(value)
       })
@@ -554,7 +554,7 @@ export function make(ctx, config = {}, options = {}) {
     const marker = dir ? join(dir, `loaded-${fileSafe(profile)}.json`) : ''
     const sha = options.sha ?? ownSha()
     if (marker) writeFile(marker, JSON.stringify({ pid: process.pid, at: Date.now(), version: VERSION, sha, profile, port })).catch(() => {})
-    send({ session_id: '', hook_event_name: 'WakuwakuLoaded', version: VERSION, pid: process.pid, profile })
+    send({ session_id: '', hook_event_name: 'FishDockLoaded', version: VERSION, pid: process.pid, profile })
     return () => {
       closed = true
       try {
@@ -571,6 +571,6 @@ export function apply(ctx, config) {
     const plugin = make(ctx, config)
     plugin.listen()
     const letGo = plugin.hello()
-    ctx.effect?.(() => letGo, 'wakuwaku: let go')
+    ctx.effect?.(() => letGo, 'fish-dock: let go')
   } catch {}
 }

@@ -928,7 +928,7 @@ fn testing() -> bool {
 // environment (ureq takes that by itself), then straight: proxy::web_ways,
 // as the updates and the crash reports.
 fn user_agent() -> String {
-    format!("wakuwaku/{}", crate::updates::current())
+    format!("fish-dock/{}", crate::updates::current())
 }
 
 fn latest() -> Result<Value, String> {
@@ -945,49 +945,39 @@ fn latest() -> Result<Value, String> {
 }
 
 // Downloaded to `to`, its SHA-256 as it comes; the progress for the settings.
+//
+// 2.0.4 T-F（审计 A07/A20）：这里不再自建 ureq、也不再每路 600 s；走 `sources`
+// 的候选（原地址 + 镜像）/代理路/一次总预算与流式落地。`to` 是调用方的私有暂存
+// （LibreHardwareMonitor.zip.part）：摘要与 zip 结构由调用方核过才发布成最终文件。
 fn download(sh: &Shared, url: &str, to: &Path) -> Result<String, String> {
-    let mut last = String::from("no way");
-    for way in crate::proxy::web_ways(url) {
-        let Some(agent) = way.agent(Duration::from_secs(600)) else { continue };
-        let mut res = match agent.get(url).header("user-agent", &user_agent()).call() {
-            Ok(res) => res,
-            Err(e) => {
-                last = format!("{}: {e}", way.name());
-                continue;
-            }
-        };
-        if let Some(total) = res.body().content_length() {
+    crate::sources::fetch_to_file_with_progress(url, Duration::from_secs(600), MAX_ZIP, to, |got, total| {
+        if let Some(total) = total {
             with(|s| s.job.iter_mut().for_each(|j| j.total = total));
         }
-        let mut reader = res.body_mut().with_config().limit(MAX_ZIP).reader();
-        let mut file = std::fs::File::create(to).map_err(|e| format!("{}: {e}", to.display()))?;
-        let mut hash = Sha256::new();
-        let mut buf = vec![0u8; 64 * 1024];
-        let mut got = 0u64;
-        loop {
-            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
+        let push = with(|s| {
+            s.job.iter_mut().for_each(|j| j.got = got);
+            let due = s.pushed.is_none_or(|t| t.elapsed() >= Duration::from_millis(250));
+            if due {
+                s.pushed = Some(Instant::now());
             }
-            file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-            hash.update(&buf[..n]);
-            got += n as u64;
-            let push = with(|s| {
-                s.job.iter_mut().for_each(|j| j.got = got);
-                let due = s.pushed.is_none_or(|t| t.elapsed() >= Duration::from_millis(250));
-                if due {
-                    s.pushed = Some(Instant::now());
-                }
-                due
-            });
-            if push {
-                sh.push_settings();
-            }
+            due
+        });
+        if push {
+            sh.push_settings();
         }
-        file.flush().map_err(|e| e.to_string())?;
-        return Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect());
+    })
+    .map_err(|fail| fail.reason())?;
+    let mut file = std::fs::File::open(to).map_err(|e| format!("{}: {e}", to.display()))?;
+    let mut hash = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buf[..n]);
     }
-    Err(last)
+    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 // The download's checks: the URL GitHub's own for LHM's releases (a test's

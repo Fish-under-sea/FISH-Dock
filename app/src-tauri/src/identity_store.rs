@@ -5,11 +5,6 @@ use sha2::{Digest, Sha256};
 
 pub static EDIT: Mutex<()> = Mutex::new(());
 pub type Changes = BTreeMap<String, Option<Vec<u8>>>;
-pub const OFM_FILES: &[&str] = &[
-    "settings.json", "stats.json", "availability.json", "catalog.json", "channel-credentials.json", "eac-user.json",
-    "channel-pack/state.json", "channel-pack/token-ledger.json", "channel-pack/permanent-locks.json",
-    "channel-pack/dead-models.json", "channel-pack/ui-preferences.json", "channel-pack/auto-checkin.json", "channel-pack/gemini-sigs.json",
-];
 pub const MAIL_FILES: &[&str] = &["mail-accounts.json", "mail-secrets.dpapi", "identity-state.json"];
 const JOURNAL: &str = "identity-transaction.json";
 const LIMIT: usize = 32 * 1024 * 1024;
@@ -20,7 +15,7 @@ struct Row { path: String, after: Option<String>, before: Option<String> }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Journal { version: u32, id: String, rows: Vec<Row> }
-fn allowed(name: &str) -> bool { OFM_FILES.contains(&name) || MAIL_FILES.contains(&name) }
+fn allowed(name: &str) -> bool { crate::legacy_ofm::is_legacy_identity_file(name) || MAIL_FILES.contains(&name) }
 pub fn classified_name(name: &str) -> Result<String, String> {
     if !allowed(name) { return Err("身份文件名不在兼容清单中".into()); }
     let category = match name {
@@ -32,7 +27,7 @@ pub fn classified_name(name: &str) -> Result<String, String> {
 }
 pub fn path(root: &Path, name: &str) -> Result<PathBuf, String> {
     if let Some(namespace) = crate::storage_context::Namespace::claimed(root)? {
-        if namespace.identity().plugin_id == "host" && !MAIL_FILES.contains(&name) { return Err("OFM 资料只属于 OFM 插件".into()); }
+        if namespace.identity().plugin_id == "host" && !MAIL_FILES.contains(&name) { return Err("该资料属于已退役的 OFM 业务，宿主身份目录只处理宿主资料".into()); }
         let name = classified_name(name)?;
         let (category, name) = name.split_once('/').ok_or("身份文件分类无效")?;
         namespace.file(category, name)
@@ -216,6 +211,18 @@ mod tests {
     fn root() -> PathBuf {
         let root = std::env::temp_dir().join(id());
         fs::create_dir_all(&root).unwrap(); root
+    }
+    #[test]
+    fn host_namespace_does_not_take_retired_business_files() {
+        // 已装退役插件的资料留在它自己的命名空间；宿主命名空间只收宿主资料。
+        let base = root(); let root = base.join("host");
+        crate::storage::initialize(&root, "host", "1.0.2", 1).unwrap();
+        let owner = crate::storage_context::Identity { plugin_id: "host".into(), directory: "host".into(), plugin_version: "1.0.2".into(), data_schema: 1 };
+        fs::write(root.join("storage.json"), serde_json::to_vec(&owner).unwrap()).unwrap();
+        let denied = apply(&root, BTreeMap::from([("channel-credentials.json".into(), Some(b"synthetic-token".to_vec()))]));
+        assert!(denied.unwrap_err().contains("已退役"));
+        assert!(!root.join("credentials/channel-credentials.json").exists());
+        fs::remove_dir_all(base).unwrap();
     }
     #[test]
     fn classified_host_keeps_roster_and_secrets_separate() {

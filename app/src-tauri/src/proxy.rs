@@ -396,7 +396,7 @@ pub fn test(via: &Via) -> Value {
         }
         let started = std::time::Instant::now();
         let Some(agent) = way.agent_with(crate::config::proxy_test_timeout(), |c| c.http_status_as_error(false).max_redirects(0)) else { continue };
-        match agent.get(URL).header("user-agent", &format!("wakuwaku/{}", crate::updates::current())).call() {
+        match agent.get(URL).header("user-agent", &format!("fish-dock/{}", crate::updates::current())).call() {
             Ok(_) => return json!({ "ok": true, "via": way.proxy_at(), "ms": started.elapsed().as_millis() as u64 }),
             Err(e) => failed = json!({ "ok": false, "via": way.proxy_at(), "error": e.to_string() }),
         }

@@ -10,16 +10,26 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
+// The source tree this was built in. Only the dev-only paths below ask for it
+// (`from_source`, `pet_dirs`): an installed build never does, and a release
+// binary must not carry this machine's absolute path — 2.0.4 T-L scans the exe
+// for it, and `--remap-path-prefix` cannot rewrite an `env!` literal. So it is
+// empty there, and `from_source` answers false, as a downloaded exe should.
+#[cfg(debug_assertions)]
 const SOURCE_TREE: &str = env!("CARGO_MANIFEST_DIR");
+#[cfg(not(debug_assertions))]
+const SOURCE_TREE: &str = "";
 
 // The sizes she comes in.
 pub const SCALES: [(&str, f64); 3] = [("small", 0.4), ("medium", 0.55), ("large", 0.75)];
 
 // The source tree's path this many levels up, then `rest`: no "..", which
-// the asset protocol's scope would not match.
-fn in_tree(up: usize, rest: &str) -> PathBuf {
+// the asset protocol's scope would not match. None in a release build, which
+// has no source tree (SOURCE_TREE is empty there).
+fn in_tree(up: usize, rest: &str) -> Option<PathBuf> {
+    if SOURCE_TREE.is_empty() { return None; }
     let tree = Path::new(SOURCE_TREE);
-    tree.ancestors().nth(up).unwrap_or(tree).join(rest)
+    Some(tree.ancestors().nth(up).unwrap_or(tree).join(rest))
 }
 
 pub fn folder() -> PathBuf {
@@ -33,7 +43,7 @@ pub fn folder() -> PathBuf {
     }
     #[cfg(not(feature = "installed"))]
     {
-        if from_source() { return in_tree(1, "data"); }
+        if from_source() { return in_tree(1, "data").unwrap_or_else(|| PathBuf::from("data")); }
         let exe = std::env::current_exe().unwrap_or_default();
         exe.parent().map(|p| p.join("wakuwaku-data")).unwrap_or_else(|| "wakuwaku-data".into())
     }
@@ -92,7 +102,9 @@ pub fn may_start(dir: &Path) -> bool {
 
 // Run from the source tree it was built in (its target folder), not a
 // downloaded exe: its data stays in the tree, and it updates by a build.
+// A release build has no source tree (SOURCE_TREE is empty), so never.
 pub fn from_source() -> bool {
+    if SOURCE_TREE.is_empty() { return false; }
     std::env::current_exe().unwrap_or_default().starts_with(Path::new(SOURCE_TREE).join("target"))
 }
 
@@ -352,9 +364,13 @@ pub fn codex_pets() -> PathBuf {
 }
 
 // Downloaded pets: <her folder>/pets, then the project's pets/ (from source),
-// then Codex's.
+// then Codex's. A release build has no project folder, so that entry is left out
+// rather than becoming a relative path that would resolve against her cwd.
 pub fn pet_dirs(dir: &Path) -> Vec<PathBuf> {
-    vec![dir.join("pets"), in_tree(1, "pets"), codex_pets()]
+    let mut dirs = vec![dir.join("pets")];
+    if let Some(tree) = in_tree(1, "pets") { dirs.push(tree); }
+    dirs.push(codex_pets());
+    dirs
 }
 
 // The pets, as last found, until one of their folders changes (a pet added

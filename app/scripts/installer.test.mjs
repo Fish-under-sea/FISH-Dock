@@ -13,7 +13,7 @@ import {
   installerScript, resourceDirectories, resourceFiles, scriptSource, writeOwnershipManifest, REQUIRED, findTool, stageMakensis,
   PRODUCT, INSTALL_ID, EXE_NAME, PUBLISHER, RUN_NAME, RUN_KEY, APPROVED_KEY, AT_LOGIN_ARGS, CLEANUP_FLAG,
   LEGACY_RUN_NAME, LEGACY_AT_LOGIN_ARGS, LEGACY_EXE_NAMES, LEGACY_INSTALL_IDS, LEGACY_DISPLAY_NAMES, LEGACY_HOME_DIRECTORY, HOME_DIRECTORY, MIGRATE_HOME_FLAG,
-  LEGACY_WORKER_DIRECTORY, LEGACY_WORKER_FILE,
+  LEGACY_WORKER_DIRECTORY, LEGACY_WORKER_FILE, LEGACY_PAYLOAD_PREFIXES,
 } from './installer.mjs'
 // install-update.cjs 是真正动 fs 的那一半（#27-D 的迁移与删旧）；require 它不会
 // 触发它的 CLI 主分支（require.main !== module），所以本机上任何目录都不会被碰。
@@ -25,6 +25,23 @@ test('安装器与运行资源必需清单一致且不预装业务插件', () =>
   assert.deepEqual(REQUIRED, RUNTIME_REQUIRED)
   assert.equal(REQUIRED.some(name => name.startsWith('ofm/')), false)
   assert.ok(REQUIRED.includes('windhawk/Compiler/bin/clang++.exe'))
+})
+// 2.0.4：退役业务载荷按三个前缀逐个拒绝。前缀表本身要能和宿主侧
+// src-tauri/src/legacy_ofm.rs 的 RETIRED_RESOURCE_PREFIXES 对上（宿主有同样的断言）。
+test('退役载荷前缀 ofm/、dsh-our-free-model/、our-free-model/ 逐个拒绝', async () => {
+  assert.deepEqual(LEGACY_PAYLOAD_PREFIXES, ['ofm/', 'dsh-our-free-model/', 'our-free-model/'])
+  for (const prefix of LEGACY_PAYLOAD_PREFIXES) {
+    const env = await fakeResources()
+    try {
+      const name = `${prefix}payload.bin`
+      await mkdir(path.dirname(path.join(env.resources, name)), { recursive: true })
+      await writeFile(path.join(env.resources, name), 'legacy payload')
+      const manifest = JSON.parse(await readFile(path.join(env.resources, 'manifest.json'), 'utf8'))
+      manifest.files.push({ path: name })
+      await writeFile(path.join(env.resources, 'manifest.json'), JSON.stringify(manifest))
+      await assert.rejects(resourceFiles(env.resources), /已下架的载荷/, prefix)
+    } finally { await rm(env.dir, { recursive: true, force: true }) }
+  }
 })
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // makensis 这棵工具树在 ASCII 路径下才写得动安装包（见 stageMakensis 的注释）；

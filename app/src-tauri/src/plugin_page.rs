@@ -54,8 +54,23 @@ fn checked(ticket:&str)->Result<(Grant,crate::plugin_install::Installed),String>
  let row=crate::plugin_install::Manager{context}.list()?.into_iter().find(|r|r.manifest.id==grant.id).ok_or("插件未安装")?;
  if !allowed(&grant,&row.manifest.id,&row.digest,row.enabled){return Err("页面票据与活动版本不匹配".into());}Ok((grant,row))
 }
+/// #67：`dock.open_external` 的参数判定（纯函数，不碰 FFI，可单测）。
+/// 只认网页地址；缺参/非字符串/危险协议都在这一步拒绝，绝不启动浏览器。
+fn external_target(params:&serde_json::Value)->Result<&str,String>{
+ let url=params.get("url").and_then(serde_json::Value::as_str).ok_or("缺少要打开的链接")?;
+ if !crate::browser::is_web_url(url){return Err("链接不是可打开的网页地址（只支持 http/https）".into());}
+ Ok(url)
+}
 pub fn call(ticket:&str,method:&str,params:serde_json::Value)->Result<serde_json::Value,String>{
  let (grant,installed)=checked(ticket)?;
+ // #67：插件页的外链只能走这条受控通道。iframe 沙箱只有 allow-scripts，页面里的
+ // <a href>/target=_blank/window.open 都打不开浏览器；这里在**票据/版本/启用状态**验过
+ // 之后，只把网页地址交给 crate::browser（同一套 http/https 判定），危险协议一律拒绝。
+ if method=="dock.open_external" {
+  let url=external_target(&params)?;
+  crate::browser::open_web(url)?;
+  return Ok(serde_json::json!({"opened":true}));
+ }
  // 宿主自己的小接口：插件页可读写「随 Dock 启动就拉起服务」这一项，不进插件后端。
  // 前缀用 dock.：页面桥按设计拒绝 host. 与 plugin. 开头的方法，那两类名字留给后端。
  if method=="dock.autostart" || method=="host.autostart" {
@@ -69,7 +84,8 @@ pub fn call(ticket:&str,method:&str,params:serde_json::Value)->Result<serde_json
  // T09：业务调用**不持 CURRENT 跑 RPC**。call_outside 借出实例句柄后放锁等回答，
  // 回答回来再拿一次短锁结账；等待期间这个插件被停用/卸载，结果按代次作废。
  if method=="gateway.open" {
-  if !["fish.ofm","fish.magpie"].contains(&grant.id.as_str()){return Err("该插件没有本机服务页面".into());}
+  // 已装退役插件仍可开自己的本机页面：特判集中在 legacy_ofm，不扩大成任意插件通行。
+  if !crate::legacy_ofm::is_legacy_gateway_plugin(&grant.id){return Err("该插件没有本机服务页面".into());}
   let state=crate::plugin_runtime::call_outside(&grant.id,"gateway.view",serde_json::json!({}))?;
   if state["state"]!="running"{return Err("请先启动服务".into());}
   let raw=state["url"].as_str().ok_or("服务尚未就绪")?;let url=tauri::Url::parse(raw).map_err(|_|"服务地址无效")?;
@@ -107,6 +123,18 @@ pub fn serve(label:&str,request:tauri::http::Request<Vec<u8>>)->tauri::http::Res
 }
 #[cfg(test)]mod tests {
  use super::*;
+ // #67：外链通道的参数判定。https 放行；file/javascript/data/vbscript、带 userinfo、含 NUL
+ // 全部拒绝（每个都断言），缺参也报错——任何一条都不该走到启动浏览器。
+ #[test]fn open_external_takes_only_web_urls(){
+  let with=|url:&str| serde_json::json!({"url":url});
+  assert_eq!(external_target(&with("https://example.com/a?b=1")).unwrap(),"https://example.com/a?b=1");
+  assert_eq!(external_target(&with("http://127.0.0.1:38080/x")).unwrap(),"http://127.0.0.1:38080/x");
+  assert_eq!(external_target(&serde_json::json!({})).unwrap_err(),"缺少要打开的链接");
+  assert_eq!(external_target(&serde_json::json!({"url":42})).unwrap_err(),"缺少要打开的链接");
+  for bad in ["file:///C:/Windows/notepad.exe","javascript:alert(1)","data:text/html,<b>x</b>","vbscript:msgbox(1)","https://user:pw@example.com/","https://example.com/\0evil"] {
+   assert_eq!(external_target(&with(bad)).unwrap_err(),"链接不是可打开的网页地址（只支持 http/https）","{bad} 必须拒绝");
+  }
+ }
  #[test]fn page_grants_bind_identity_version_enabled_state_and_lifetime(){
   let grant=Grant{id:"acme.weather".into(),digest:"1".repeat(64),entry:"page.html".into(),issued:Instant::now(),directory:PathBuf::from("packages/acme.weather"),files:BTreeMap::new(),stamps:BTreeMap::new()};
   assert!(allowed(&grant,"acme.weather",&"1".repeat(64),true));

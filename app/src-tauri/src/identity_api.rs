@@ -1,4 +1,4 @@
-//! 仅本地设置窗口可调用的身份文件操作；不向 OFM iframe 暴露邮件凭据。
+//! 仅本地设置窗口可调用的身份文件操作；不向插件 iframe 暴露邮件凭据。
 use std::{path::PathBuf,sync::{Arc,Mutex,atomic::Ordering}};
 use serde_json::{json,Value};
 use sha2::{Digest,Sha256};
@@ -28,7 +28,9 @@ impl Paused{
         if sh.identity_busy.swap(true,Ordering::SeqCst){return Err("另一个身份操作尚未完成".into())}
         sh.identity_generation.fetch_add(1,Ordering::SeqCst);
         crate::mail::stop_all(&sh);
-        crate::plugin_api::shutdown();
+        // t33/F1：导出/导入只**暂停**插件（暂停可复位），不是最终退出；Drop 里的 resume
+        // 会把 stopping 清掉并重新拉起，备份之后不会让所有插件永久停着。
+        crate::plugin_api::pause();
         Ok(Self{sh})
     }
     fn activate(&self)->Result<(),String>{
@@ -41,10 +43,12 @@ impl Paused{
 impl Drop for Paused{
     fn drop(&mut self){
         self.sh.identity_busy.store(false,Ordering::SeqCst);
+        // t33/F1：不论导入成功还是失败，都要恢复插件——失败时更不能把全部插件留在
+        // 暂停态（identity_error 只决定邮件是否按新快照 sync）。
         if self.sh.identity_error.lock().unwrap().is_none(){
-            crate::plugin_api::resume();
             crate::mail::sync(&self.sh);
         }
+        crate::plugin_api::resume();
         self.sh.redraw();
         let _=self.sh.app.emit_to("island","identity:changed",json!({"generation":self.sh.identity_generation.load(Ordering::SeqCst)}));
     }
@@ -90,7 +94,7 @@ pub async fn identity_preview(app:AppHandle,window:WebviewWindow)->Result<Value,
         let legacy=if configuration.is_none(){Some(crate::identity_archive::inspect_for(&sh.identity_dir,&bytes)?)}else{None};
         let digest=hash(&bytes);let at=crate::now_ms();
         let ticket=hash(format!("{digest}-{at}-{}",std::process::id()).as_bytes());
-        let view=json!({"ticket":ticket,"format":legacy.as_ref().map(|p|p.format.as_str()).unwrap_or("fish-dock/config-backup"),"ofmAccounts":legacy.as_ref().map_or(0,|p|p.ofm_accounts),"mailAccounts":legacy.as_ref().and_then(|p|p.mail_accounts),"missingCredentials":legacy.as_ref().map_or(0,|p|p.missing),"files":configuration.as_ref().map(|p|p.files).unwrap_or_else(||legacy.as_ref().map_or(0,|p|p.files.len())),"configuration":configuration,"name":path.file_name().unwrap_or_default().to_string_lossy()});
+        let view=json!({"ticket":ticket,"format":legacy.as_ref().map(|p|p.format.as_str()).unwrap_or("fish-dock/config-backup"),"legacyAccounts":legacy.as_ref().map_or(0,|p|p.legacy_accounts),"mailAccounts":legacy.as_ref().and_then(|p|p.mail_accounts),"missingCredentials":legacy.as_ref().map_or(0,|p|p.missing),"files":configuration.as_ref().map(|p|p.files).unwrap_or_else(||legacy.as_ref().map_or(0,|p|p.files.len())),"configuration":configuration,"name":path.file_name().unwrap_or_default().to_string_lossy()});
         *PENDING.lock().unwrap()=Some(Pending{path,hash:digest,ticket,at});
         Ok(view)
     }).await.map_err(|_|"身份预览任务意外结束")?

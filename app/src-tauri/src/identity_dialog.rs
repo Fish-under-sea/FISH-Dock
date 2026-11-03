@@ -29,7 +29,7 @@ pub fn downloads() -> Result<PathBuf, String> {
 pub fn downloads() -> Result<PathBuf,String> { Err("当前版本的身份文件选择仅支持 Windows，请手动指定已有导出目录".into()) }
 
 #[cfg(windows)]
-fn choose(owner:isize, directory:Option<&Path>, suggested:Option<&str>) -> Result<Option<PathBuf>,String> {
+fn choose(owner:isize, directory:Option<&Path>, suggested:Option<&str>, filter:&str, title:&str, extension:&str) -> Result<Option<PathBuf>,String> {
     use std::os::windows::ffi::OsStrExt;
     #[repr(C)]
     struct OpenFileName {
@@ -42,10 +42,10 @@ fn choose(owner:isize, directory:Option<&Path>, suggested:Option<&str>) -> Resul
     unsafe extern "system" { fn GetOpenFileNameW(form:*mut OpenFileName)->i32; fn GetSaveFileNameW(form:*mut OpenFileName)->i32; fn CommDlgExtendedError()->u32; }
     let mut file = vec![0u16;32768];
     if let Some(name) = suggested { for (to,c) in file.iter_mut().zip(name.encode_utf16()) { *to=c; } }
-    let filter:Vec<u16> = "ZIP 备份 (*.zip)\0*.zip\0\0".encode_utf16().collect();
+    let filter:Vec<u16> = filter.encode_utf16().collect();
     let initial:Vec<u16> = directory.map(|p|p.as_os_str().encode_wide().chain(Some(0)).collect()).unwrap_or_default();
-    let title:Vec<u16> = if suggested.is_some() { "保存 FISH Dock 配置备份 ZIP\0" } else { "选择 FISH Dock 配置备份 / 旧身份 ZIP\0" }.encode_utf16().collect();
-    let extension:Vec<u16> = "zip\0".encode_utf16().collect();
+    let title:Vec<u16> = title.encode_utf16().collect();
+    let extension:Vec<u16> = extension.encode_utf16().collect();
     let mut form:OpenFileName = unsafe { std::mem::zeroed() };
     form.size=std::mem::size_of::<OpenFileName>() as u32; form.owner=owner; form.filter=filter.as_ptr(); form.filter_index=1;
     form.file=file.as_mut_ptr(); form.max_file=file.len() as u32; form.directory=if initial.is_empty(){std::ptr::null()}else{initial.as_ptr()};
@@ -61,10 +61,15 @@ fn choose(owner:isize, directory:Option<&Path>, suggested:Option<&str>) -> Resul
     Ok(Some(path))
 }
 #[cfg(windows)]
-pub fn save(owner:isize,directory:&Path,name:&str)->Result<Option<PathBuf>,String>{choose(owner,Some(directory),Some(name))}
+pub fn save(owner:isize,directory:&Path,name:&str)->Result<Option<PathBuf>,String>{choose(owner,Some(directory),Some(name),"ZIP 备份 (*.zip)\0*.zip\0\0","保存 FISH Dock 配置备份 ZIP\0","zip\0")}
 #[cfg(windows)]
-pub fn open(owner:isize)->Result<Option<PathBuf>,String>{choose(owner,None,None)}
+pub fn open(owner:isize)->Result<Option<PathBuf>,String>{choose(owner,None,None,"ZIP 备份 (*.zip)\0*.zip\0\0","选择 FISH Dock 配置备份 / 旧身份 ZIP\0","zip\0")}
+/// 2.0.4 T-M：把脱敏崩溃报告存成 .txt 时复用同一个系统保存对话框（不另造选择器）。
+#[cfg(windows)]
+pub fn save_text(owner:isize,directory:&Path,name:&str)->Result<Option<PathBuf>,String>{choose(owner,Some(directory),Some(name),"文本文件 (*.txt)\0*.txt\0\0","保存 FISH Dock 崩溃报告\0","txt\0")}
 #[cfg(not(windows))]
 pub fn save(_owner:isize,_directory:&Path,_name:&str)->Result<Option<PathBuf>,String>{Err("身份文件选择仅支持 Windows".into())}
 #[cfg(not(windows))]
 pub fn open(_owner:isize)->Result<Option<PathBuf>,String>{Err("身份文件选择仅支持 Windows".into())}
+#[cfg(not(windows))]
+pub fn save_text(_owner:isize,_directory:&Path,_name:&str)->Result<Option<PathBuf>,String>{Err("身份文件选择仅支持 Windows".into())}

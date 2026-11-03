@@ -1,4 +1,4 @@
-# Wakuwaku Mail：Thunderbird 扩展
+# FISH Dock Mail：Thunderbird 扩展
 
 用 Thunderbird 收信的话，不用另外登录邮箱：这个扩展读 Thunderbird 自己的收件箱（它已经帮你登录好了，Gmail、Outlook 的 OAuth 也是），把未读数发到灵动岛；来了新邮件，岛会打开一次，说是谁发的、什么主题。
 
@@ -12,11 +12,11 @@
    pwsh integrations/thunderbird/build.ps1
    ```
 
-   得到 `integrations/thunderbird/wakuwaku-mail.xpi`。
+   得到 `integrations/thunderbird/fish-dock-mail.xpi`。
 
 2. Thunderbird → 菜单 → 附加组件和主题 → 右上角齿轮 → 从文件安装附加组件，选这个 `.xpi`，确认安装。
 
-要求 Thunderbird 115 或更新的版本。宠物的端口不是 47213 的话，改 `wakuwaku-mail/background.js` 开头的 `PORT` 再打包。
+要求 Thunderbird 115 或更新的版本。宠物的端口不是 47213 的话，改 `fish-dock-mail/background.js` 开头的 `PORT` 再打包。
 
 ## 它做什么
 
@@ -25,4 +25,4 @@
 
 ---
 
-**Wakuwaku Mail for Thunderbird.** Build with `pwsh integrations/thunderbird/build.ps1`, then in Thunderbird: Add-ons and Themes → gear → Install Add-on From File. It sums the unread mail in every account's inbox and tells the pet; a new letter opens the island once. No sign-in of its own: Thunderbird already has one.
+**FISH Dock Mail for Thunderbird.** Build with `pwsh integrations/thunderbird/build.ps1`, then in Thunderbird: Add-ons and Themes → gear → Install Add-on From File. It sums the unread mail in every account's inbox and tells the pet; a new letter opens the island once. No sign-in of its own: Thunderbird already has one.

@@ -66,6 +66,9 @@ export const LEGACY_WORKER_FILE = 'worker.json'
 /// 交给 install-update.cjs 的迁移开关：不带它，谁都不会动用户数据目录。
 export const MIGRATE_HOME_FLAG = '--migrate-home'
 
+/// 已下架业务载荷的资源前缀（2.0.4：OFM 退役）。宿主侧同一份清单在
+/// src-tauri/src/legacy_ofm.rs 的 RETIRED_RESOURCE_PREFIXES，两边必须同值。
+export const LEGACY_PAYLOAD_PREFIXES = ['ofm/', 'dsh-our-free-model/', 'our-free-model/']
 /// 卸载时让程序自己收掉「开机自动启动」的计划任务。
 /// 任务名带用户 SID，卸载器拼不出来；程序侧才知道名字，也能先确认任务指向的
 /// 正是本安装目录里的这个 exe，才动手删（别的安装、别的程序的任务不碰）。
@@ -97,8 +100,7 @@ export async function resourceFiles(resources) {
   // 但资源目录里那份 resources/ofm 曾被「照磁盘重算」的清单带进 2.0.1，装完就永久留在
   // 安装目录——因为它进了归属清单，后续版本按「旧清单有、新清单无」剪枝时也不会碰它。
   // 这里按路径前缀硬拒，把不再发行的东西挡在打包入口。
-  const LEGACY_PREFIXES = ['ofm/', 'dsh-our-free-model/', 'our-free-model/']
-  const legacy = listed.filter(name => LEGACY_PREFIXES.some(p => name.toLowerCase().startsWith(p)))
+  const legacy = listed.filter(name => LEGACY_PAYLOAD_PREFIXES.some(p => name.toLowerCase().startsWith(p)))
   if (legacy.length) {
     throw new Error(`安装资源里还有已下架的载荷（${legacy.length} 个，例如 ${legacy.slice(0, 3).join(', ')}）：` +
       '先从资源目录删掉再重算清单，否则它们会被装到用户机器上，而且以后不会再被清理')

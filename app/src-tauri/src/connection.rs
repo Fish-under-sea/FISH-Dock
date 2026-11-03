@@ -21,12 +21,16 @@ use serde_json::{json, Map, Value};
 pub const ENSURE_FLAG: &str = "--fish-dock-ensure-running";
 pub const CODEX_FLAG: &str = "--fish-dock-codex-hook";
 pub const AGY_FLAG: &str = "--fish-dock-agy-hook";
-const URL_MARK: &str = "from=wakuwaku";
+// 2.0.4：新写出用 from=fish-dock；旧 from=wakuwaku 仍被读（server.rs 双读）。
+const URL_MARK: &str = "from=fish-dock";
+const LEGACY_WAKUWAKU_URL_MARK: &str = "from=wakuwaku";
 // What the app wrote before it was called Wakuwaku (claude-pets).
 pub const LEGACY_ENSURE_FLAG: &str = "--claude-pets-ensure-running";
 const LEGACY_URL_MARK: &str = "from=claude-pets";
-pub const PLUGIN_ID: &str = "wakuwaku@wakuwaku";
-pub const PLUGIN_COMMANDS: [&str; 2] = ["/plugin marketplace add zhoupengjie/wakuwaku", "/plugin install wakuwaku@wakuwaku"];
+pub const PLUGIN_ID: &str = "wakuwaku@fish-dock";
+// 旧 marketplace 里的插件名：只读兼容，不再写新安装。
+pub const LEGACY_PLUGIN_ID: &str = "wakuwaku@wakuwaku";
+pub const PLUGIN_COMMANDS: [&str; 2] = ["/plugin marketplace add Fish-under-sea/FISH-Dock", "/plugin install wakuwaku@fish-dock"];
 
 // Each event Claude Code reports, and whether it takes a matcher; the prompt
 // waits for the person (up to 300 s) instead of the default 2.
@@ -340,7 +344,24 @@ pub fn hooks_status(port: u16) -> &'static str {
 }
 
 pub fn is_plugin_enabled() -> bool {
-    read_settings().is_ok_and(|s| s.get("enabledPlugins").and_then(|p| p.get(PLUGIN_ID)) == Some(&Value::Bool(true)))
+    read_settings().is_ok_and(|s| {
+        let enabled = s.get("enabledPlugins").and_then(Value::as_object);
+        enabled.is_some_and(|list| {
+            list.iter().any(|(key, value)| value == &Value::Bool(true) && plugin_key_is_ours(key))
+        })
+    })
+}
+
+// 插件键形如 `<插件>` 或 `<插件>@<marketplace>`。只认三种：
+//  · 本产品的确切键（PLUGIN_ID 原样比较）；
+//  · 旧 marketplace 的键（LEGACY_PLUGIN_ID，只读兼容，用户不必先卸载再装）；
+//  · `<名字>@<marketplace>` 且**名字段恰好是** `fish-dock`、marketplace 非空。
+// 不用后缀匹配：`my-fish-dock`、`acme-fish-dock@tools` 这类第三方插件不能被判成已连接（t20 F5）。
+fn plugin_key_is_ours(key: &str) -> bool {
+    if key == "fish-dock" || key == PLUGIN_ID || key == LEGACY_PLUGIN_ID {
+        return true;
+    }
+    matches!(key.rsplit_once('@'), Some((name, marketplace)) if name == "fish-dock" && !marketplace.is_empty())
 }
 
 // 'plugin', 'hooks' (written into settings.json), 'both' (every event twice), or 'none'.
@@ -954,9 +975,11 @@ pub fn write_agy_hooks(action: &str) -> Result<(), String> {
 // folder, as OpenCode 2.0.29 finds it: OPENCODE_CONFIG_DIR, else
 // $XDG_CONFIG_HOME/opencode, else ~/.config/opencode (on Windows too).
 
-const OPENCODE_PLUGIN: &str = include_str!("../../integrations/opencode/wakuwaku.js");
+const OPENCODE_PLUGIN: &str = include_str!("../../integrations/opencode/fish-dock.js");
 // The template's first line: ours, whatever port it was written with.
-const OPENCODE_MARK: &str = "// wakuwaku-opencode-plugin";
+const OPENCODE_MARK: &str = "// fish-dock-opencode-plugin";
+// 旧版同名插件的首行：仍是本产品写的，但按 stale 重写。
+const LEGACY_OPENCODE_MARK: &str = "// wakuwaku-opencode-plugin";
 const OPENCODE_PORT_LINE: &str = "const PORT = 47213";
 
 fn home_dir() -> PathBuf {
@@ -972,7 +995,7 @@ pub fn opencode_dir() -> PathBuf {
 }
 
 pub fn opencode_plugin_file() -> PathBuf {
-    opencode_dir().join("plugins").join("wakuwaku.js")
+    opencode_dir().join("plugins").join("fish-dock.js")
 }
 
 // Whether OpenCode is on this computer: its config folder, or its data
@@ -987,7 +1010,25 @@ pub fn opencode_plugin(port: u16) -> String {
 }
 
 fn is_our_plugin(text: &str) -> bool {
-    text.trim_start_matches('\u{feff}').starts_with(OPENCODE_MARK)
+    let text = text.trim_start_matches('\u{feff}');
+    text.starts_with(OPENCODE_MARK) || text.starts_with(LEGACY_OPENCODE_MARK)
+}
+
+// 旧版插件文件（2.0.4 之前的名字）：只读识别，确认是本产品写的才在写出新文件后移除，
+// 免得 OpenCode 把同一份逻辑加载两次。
+fn opencode_legacy_file() -> PathBuf {
+    opencode_dir().join("plugins").join("wakuwaku.js")
+}
+
+// 备份后移除旧名文件；不是我们的文件一律不动。
+fn retire_legacy_file(file: &Path, ours: impl Fn(&str) -> bool) -> Result<(), String> {
+    let Ok(text) = fs::read_to_string(file) else { return Ok(()) };
+    if !ours(&text) { return Ok(()); }
+    let backup = backup_of(file);
+    if !backup.exists() {
+        fs::copy(file, &backup).map_err(|e| e.to_string())?;
+    }
+    fs::remove_file(file).map_err(|e| e.to_string())
 }
 
 // How the file stands against what this copy would write: missing (none,
@@ -1012,7 +1053,10 @@ pub fn opencode_status(port: u16) -> &'static str {
     match fs::read_to_string(&file) {
         Ok(text) => opencode_status_of(Some(&text), port),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if opencode_here() {
+            // 旧名文件还在（2.0.3 及以前写的）：算 stale，连上即重写成新名。
+            if fs::read_to_string(opencode_legacy_file()).is_ok_and(|text| is_our_plugin(&text)) {
+                "stale"
+            } else if opencode_here() {
                 "missing"
             } else {
                 "absent"
@@ -1041,11 +1085,13 @@ pub fn write_opencode_plugin(action: &str, port: u16) -> Result<(), String> {
             if let Some(dir) = file.parent() {
                 fs::create_dir_all(dir).map_err(|e| e.to_string())?;
             }
-            fs::write(&file, opencode_plugin(port)).map_err(|e| e.to_string())
+            fs::write(&file, opencode_plugin(port)).map_err(|e| e.to_string())?;
+            retire_legacy_file(&opencode_legacy_file(), is_our_plugin)
         }
-        "remove" if theirs.is_some() || !file.exists() => Ok(()),
+        "remove" if theirs.is_some() || !file.exists() => retire_legacy_file(&opencode_legacy_file(), is_our_plugin),
         "remove" => {
             fs::remove_file(&file).map_err(|e| e.to_string())?;
+            retire_legacy_file(&opencode_legacy_file(), is_our_plugin)?;
             // Its plugins folder too, once nothing else is in it (as omp's).
             if let Some(dir) = file.parent() {
                 let _ = fs::remove_dir(dir);
@@ -1069,8 +1115,10 @@ pub fn write_opencode_plugin(action: &str, port: u16) -> Result<(), String> {
 // <name>, or OMP_PROFILE) has one of its own, ~/.omp/profiles/<name>/agent,
 // which she cannot tell from here: the extension goes into each one there is.
 
-pub const OMP_FILE: &str = "wakuwaku.ts";
-const OMP_SOURCE: &str = include_str!("../../integrations/omp/wakuwaku.ts");
+pub const OMP_FILE: &str = "fish-dock.ts";
+// 旧版扩展文件名：只读识别，安装时备份后移除，避免同一份被加载两次。
+pub const LEGACY_OMP_FILE: &str = "wakuwaku.ts";
+const OMP_SOURCE: &str = include_str!("../../integrations/omp/fish-dock.ts");
 
 fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from)
@@ -1106,6 +1154,23 @@ fn agent_dirs_in(root: &Path, agent_dir: Option<PathBuf>) -> Vec<PathBuf> {
 
 pub fn omp_files() -> Vec<PathBuf> {
     omp_agent_dirs().into_iter().map(|dir| dir.join("extensions").join(OMP_FILE)).collect()
+}
+
+// 旧版扩展文件：只读识别，安装/卸载后备份并移除，避免同一份被 omp 加载两次。
+pub fn omp_legacy_files() -> Vec<PathBuf> {
+    omp_agent_dirs().into_iter().map(|dir| dir.join("extensions").join(LEGACY_OMP_FILE)).collect()
+}
+
+// omp 扩展没有首行标记：按内容判定是不是本产品写的（报告路径 + 产品名）。
+fn is_our_omp(text: &str) -> bool {
+    text.contains("agent=omp") && (text.contains("fish-dock") || text.contains("wakuwaku") || text.contains("WAKUWAKU"))
+}
+
+fn retire_omp_legacy() -> Result<(), String> {
+    for file in omp_legacy_files() {
+        retire_legacy_file(&file, is_our_omp)?;
+    }
+    Ok(())
 }
 
 // Whether omp is on this computer: its folder (made as it first runs), or
@@ -1164,7 +1229,13 @@ pub fn omp_hooks_status(port: u16) -> &'static str {
     for file in omp_files() {
         match fs::read_to_string(&file) {
             Ok(text) => found.push(Some(text)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => found.push(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // 新名不在、旧名还在（2.0.3 及以前）：算 stale，连上即重写成新名。
+                if omp_legacy_files().iter().any(|legacy| fs::read_to_string(legacy).is_ok_and(|text| is_our_omp(&text))) {
+                    return "stale";
+                }
+                found.push(None)
+            }
             Err(_) => return "unreadable",
         }
     }
@@ -1178,7 +1249,8 @@ pub fn is_omp_connected(port: u16) -> bool {
 // Write the extension into every agent folder, or take it out of each (its
 // extensions folder too, once empty). action: install, remove.
 pub fn write_omp_hooks(action: &str, port: u16) -> Result<(), String> {
-    write_omp_files(&omp_files(), action, &omp_wanted(port))
+    write_omp_files(&omp_files(), action, &omp_wanted(port))?;
+    retire_omp_legacy()
 }
 
 fn write_omp_files(files: &[PathBuf], action: &str, want: &str) -> Result<(), String> {
@@ -1431,13 +1503,15 @@ pub fn write_zcode_hooks(action: &str) -> Result<(), String> {
 // layers (dsh-hmr), so a row added while it runs may load at once.
 
 pub const DSH_FLAG: &str = "--fish-dock-dsh-hook";
-const DSH_PLUGIN: &str = include_str!("../../integrations/dsh/wakuwaku.js");
+const DSH_PLUGIN: &str = include_str!("../../integrations/dsh/fish-dock.js");
 const DSH_PACKAGE: &str = include_str!("../../integrations/dsh/package.json");
 // Its folder in DSH's home, its file there, and the row's name for it: its
 // path beside the patch file.
-const DSH_DIR: &str = "wakuwaku";
-const DSH_PLUGIN_FILE: &str = "wakuwaku.js";
-const DSH_ROW_NAME: &str = "./wakuwaku/wakuwaku.js";
+const DSH_DIR: &str = "fish-dock";
+// 旧安装写出的目录：存在即视为旧安装，迁移前备份、新插件写入后移除（防双加载）。
+const LEGACY_DSH_DIR: &str = "wakuwaku";
+const DSH_PLUGIN_FILE: &str = "fish-dock.js";
+const DSH_ROW_NAME: &str = "./fish-dock/fish-dock.js";
 // The other way's rows insert DSH's own Claude Code hook bridge (and 0.3.2's did).
 const DSH_BRIDGE: &str = crate::dsh_bridge::HOOKS_PACKAGE;
 // The two ways' rows by ids of their own (the bridge's as 0.3.2 wrote it):
@@ -1445,11 +1519,15 @@ const DSH_BRIDGE: &str = crate::dsh_bridge::HOOKS_PACKAGE;
 // plugin it has and only gives it the new config, so a switch while DSH runs
 // went on with the way left (seen on 0.2.1-rc.2); a row gone and another
 // come, it lets the one go and loads the other.
-const DSH_PLUGIN_ID: &str = "wakuwaku-plugin";
-const DSH_BRIDGE_ID: &str = "wakuwaku";
+const DSH_PLUGIN_ID: &str = "fish-dock-plugin";
+const LEGACY_DSH_PLUGIN_ID: &str = "wakuwaku-plugin";
+const DSH_BRIDGE_ID: &str = "fish-dock";
+const LEGACY_DSH_BRIDGE_ID: &str = "wakuwaku";
 // Our rows in the patch file, between these lines.
-const DSH_BEGIN: &str = "# wakuwaku begin";
-const DSH_END: &str = "# wakuwaku end";
+const DSH_BEGIN: &str = "# fish-dock begin";
+const LEGACY_DSH_BEGIN: &str = "# wakuwaku begin";
+const DSH_END: &str = "# fish-dock end";
+const LEGACY_DSH_END: &str = "# wakuwaku end";
 // How long DSH may take from starting to loading its plugins before ours,
 // not loaded, is said to be so.
 const DSH_LOAD_GRACE_MS: u64 = 60_000;
@@ -1495,7 +1573,7 @@ pub fn dsh_plugin_version() -> u32 {
 // Our rows: the plugin inserted by its path, her port its config.
 fn dsh_block(port: u16) -> String {
     format!(
-        "{DSH_BEGIN}: Wakuwaku follows DeepSeek Harness through her own plugin in ./wakuwaku (remove it from her settings)\n\
+        "{DSH_BEGIN}: FISH Dock follows DeepSeek Harness through its own plugin in ./fish-dock (remove it from her settings)\n\
          - insert:\n    - id: {DSH_PLUGIN_ID}\n      name: '{DSH_ROW_NAME}'\n      config:\n        port: {port}\n{DSH_END}\n"
     )
 }
@@ -1528,13 +1606,13 @@ fn dsh_strip(text: &str) -> (String, DshRows) {
     let (mut inside, mut rows) = (false, DshRows::None);
     for line in text.split_inclusive('\n') {
         let bare = line.trim();
-        if !inside && bare.starts_with(DSH_BEGIN) {
+        if !inside && (bare.starts_with(DSH_BEGIN) || bare.starts_with(LEGACY_DSH_BEGIN)) {
             inside = true;
             rows = DshRows::Plugin { name: String::new(), port: None };
             continue;
         }
         if inside {
-            if bare.starts_with(DSH_END) {
+            if bare.starts_with(DSH_END) || bare.starts_with(LEGACY_DSH_END) {
                 inside = false;
             } else if let Some(value) = bare.strip_prefix("configPath:") {
                 rows = DshRows::Bridge { config_path: unquote(value) };
@@ -1542,7 +1620,7 @@ fn dsh_strip(text: &str) -> (String, DshRows) {
                 let given = unquote(value);
                 rows = match rows {
                     DshRows::Bridge { config_path } => DshRows::Bridge { config_path },
-                    _ if given == DSH_BRIDGE => DshRows::Bridge { config_path: String::new() },
+                    _ if given == DSH_BRIDGE || given == LEGACY_DSH_BRIDGE_ID => DshRows::Bridge { config_path: String::new() },
                     DshRows::Plugin { port, .. } => DshRows::Plugin { name: given, port },
                     other => other,
                 };
@@ -1570,7 +1648,7 @@ fn without_off_rows(text: &str) -> String {
     let mut item = String::new();
     let flush = |item: &mut String, out: &mut String| {
         let fields: Vec<&str> = item.lines().map(|l| l.trim().trim_start_matches("- ").trim()).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
-        let only_off = fields.len() == 2 && (row_disabled(item, DSH_PLUGIN_ID) || row_disabled(item, DSH_BRIDGE_ID));
+        let only_off = fields.len() == 2 && (row_disabled(item, DSH_PLUGIN_ID) || row_disabled(item, LEGACY_DSH_PLUGIN_ID) || row_disabled(item, DSH_BRIDGE_ID) || row_disabled(item, LEGACY_DSH_BRIDGE_ID));
         if !only_off {
             out.push_str(item);
         }
@@ -1729,7 +1807,7 @@ pub fn dsh_hooks(exe: &str) -> Value {
 // The bridge's rows, pointed at the hooks.json (0.3.2's, word for word).
 fn dsh_bridge_block(config_path: &str) -> String {
     format!(
-        "{DSH_BEGIN}: Wakuwaku follows DeepSeek Harness through its Claude Code hook bridge (remove it from her settings)\n\
+        "{DSH_BEGIN}: FISH Dock follows DeepSeek Harness through its Claude Code hook bridge (remove it from her settings)\n\
          - insert:\n    - id: {DSH_BRIDGE_ID}\n      name: '{DSH_BRIDGE}'\n      config:\n        configPath: '{}'\n{DSH_END}\n",
         config_path.replace('\'', "''")
     )
@@ -1953,7 +2031,7 @@ fn row_disabled(text: &str, id: &str) -> bool {
 // file is applied before the home one, and a row of it naming ours finds
 // none yet).
 fn dsh_turned_off() -> bool {
-    fs::read_to_string(dsh_patch_file()).is_ok_and(|text| row_disabled(&dsh_strip(&text).0, DSH_PLUGIN_ID))
+    fs::read_to_string(dsh_patch_file()).is_ok_and(|text| { let (rest, _) = dsh_strip(&text); row_disabled(&rest, DSH_PLUGIN_ID) || row_disabled(&rest, LEGACY_DSH_PLUGIN_ID) })
 }
 
 fn ms_of(time: std::time::SystemTime) -> u64 {
@@ -2007,7 +2085,33 @@ fn write_dsh_files(dir: &Path, all: bool) -> Result<(), String> {
             fs::write(&file, want).map_err(|e| format!("{}: {e}", file.display()))?;
         }
     }
+    // 只对真实安装位置动手：旧名目录确认是我们的插件才备份后移除，防止 DSH 双加载。
+    if dir == dsh_plugin_dir() {
+        retire_legacy_dsh();
+    }
     Ok(())
+}
+
+// 旧安装的插件目录（2.0.4 之前的 <DSH home>/wakuwaku/）：先备份 package.json，再移除
+// 目录里我们自己的文件。别人的同名目录一律不动。
+fn retire_legacy_dsh() {
+    let dir = dsh_home().join(LEGACY_DSH_DIR);
+    let package = dir.join("package.json");
+    let ours = fs::read_to_string(&package).is_ok_and(|text| text.contains("fish-dock-dsh-plugin") || text.contains("wakuwaku-dsh-plugin"));
+    if !ours {
+        return;
+    }
+    let backup = PathBuf::from(format!("{}.fish-dock.bak", package.display()));
+    if !backup.exists() {
+        let _ = fs::copy(&package, &backup);
+    }
+    for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let _ = fs::remove_file(&path);
+        }
+    }
+    let _ = fs::remove_dir(&dir);
 }
 
 // Take the plugin's files away (its markers too), and its folder once
@@ -2027,6 +2131,9 @@ fn remove_dsh_files(dir: &Path) -> Result<(), String> {
         }
     }
     let _ = fs::remove_dir(dir);
+    if dir == dsh_plugin_dir() {
+        retire_legacy_dsh();
+    }
     Ok(())
 }
 
@@ -3358,7 +3465,7 @@ mod tests {
         // Changing the process's environment: only here, and put back.
         let was = (std::env::var_os("OPENCODE_CONFIG_DIR"), std::env::var_os("XDG_CONFIG_HOME"));
         std::env::set_var("OPENCODE_CONFIG_DIR", "Z:\\oc-config");
-        assert_eq!(opencode_plugin_file(), PathBuf::from("Z:\\oc-config").join("plugins").join("wakuwaku.js"));
+        assert_eq!(opencode_plugin_file(), PathBuf::from("Z:\\oc-config").join("plugins").join("fish-dock.js"));
         std::env::remove_var("OPENCODE_CONFIG_DIR");
         std::env::set_var("XDG_CONFIG_HOME", "Z:\\xdg");
         assert_eq!(opencode_dir(), PathBuf::from("Z:\\xdg").join("opencode"));
@@ -3667,7 +3774,7 @@ mod tests {
         let theirs = "# Your patch layer\n- id: ui-chat\n  name: \"@deepseek-ai/dsh-client-ui-chat\"\n  config:\n    transcriptView: standard\n";
         let with = dsh_install(Some(theirs), 47213).unwrap();
         assert!(with.starts_with(theirs), "{with}");
-        assert!(with.contains("\n- insert:\n    - id: wakuwaku-plugin\n      name: './wakuwaku/wakuwaku.js'\n      config:\n        port: 47213\n# wakuwaku end\n"), "{with}");
+        assert!(with.contains("\n- insert:\n    - id: fish-dock-plugin\n      name: './fish-dock/fish-dock.js'\n      config:\n        port: 47213\n# fish-dock end\n"), "{with}");
         assert_eq!(dsh_strip(&with).1, DshRows::Plugin { name: DSH_ROW_NAME.into(), port: Some(47213) });
         // Installing twice replaces, never doubles; removing gives theirs back.
         let again = dsh_install(Some(&with), 47299).unwrap();
@@ -3680,7 +3787,7 @@ mod tests {
         assert_eq!(dsh_uninstall(&alone), None);
         let empty = "# comments\n[]\n";
         let filled = dsh_install(Some(empty), 47213).unwrap();
-        assert!(filled.starts_with("# comments\n# wakuwaku begin") && !filled.contains("[]"), "{filled}");
+        assert!(filled.starts_with("# comments\n# fish-dock begin") && !filled.contains("[]"), "{filled}");
         assert_eq!(dsh_uninstall(&filled).as_deref(), Some(empty));
         // A list written as [ … ] is not added to.
         assert_eq!(super::error_kind(&dsh_install(Some("[ { id: x, disabled: true } ]\n"), 47213).unwrap_err()), "flowList");
@@ -3699,11 +3806,11 @@ mod tests {
         assert_eq!(dsh_status_of(theirs, true, 47213), ("missing", ""));
         assert_eq!(dsh_status_of(&with, true, 47213), ("ok", ""));
         assert_eq!(dsh_status_of(&with, true, 47299), ("stale", "row"));
-        assert_eq!(dsh_status_of(&with.replace("./wakuwaku/wakuwaku.js", "D:/elsewhere/wakuwaku.js"), true, 47213), ("stale", "row"));
+        assert_eq!(dsh_status_of(&with.replace("./fish-dock/fish-dock.js", "D:/elsewhere/fish-dock.js"), true, 47213), ("stale", "row"));
         assert_eq!(dsh_status_of(&with, false, 47213), ("stale", "files"));
         // Quoted otherwise, or not at all: the same.
-        assert_eq!(dsh_status_of(&with.replace("'./wakuwaku/wakuwaku.js'", "\"./wakuwaku/wakuwaku.js\""), true, 47213), ("ok", ""));
-        assert_eq!(dsh_status_of(&with.replace("'./wakuwaku/wakuwaku.js'", "./wakuwaku/wakuwaku.js"), true, 47213), ("ok", ""));
+        assert_eq!(dsh_status_of(&with.replace("'./fish-dock/fish-dock.js'", "\"./fish-dock/fish-dock.js\""), true, 47213), ("ok", ""));
+        assert_eq!(dsh_status_of(&with.replace("'./fish-dock/fish-dock.js'", "./fish-dock/fish-dock.js"), true, 47213), ("ok", ""));
     }
 
     #[test]
@@ -3714,13 +3821,13 @@ mod tests {
         let with = dsh_install_bridge(Some(theirs), hooks).unwrap();
         assert_eq!(
             with,
-            format!("{theirs}# wakuwaku begin: Wakuwaku follows DeepSeek Harness through its Claude Code hook bridge (remove it from her settings)\n- insert:\n    - id: wakuwaku\n      name: '@deepseek-ai/dsh-hooks-claude-code'\n      config:\n        configPath: '{hooks}'\n# wakuwaku end\n")
+            format!("{theirs}# fish-dock begin: FISH Dock follows DeepSeek Harness through its Claude Code hook bridge (remove it from her settings)\n- insert:\n    - id: fish-dock\n      name: '@deepseek-ai/dsh-hooks-claude-code'\n      config:\n        configPath: '{hooks}'\n# fish-dock end\n")
         );
         assert_eq!(dsh_strip(&with).1, DshRows::Bridge { config_path: hooks.into() });
         // Switching: the plugin's rows in place of the bridge's, and back; theirs kept.
         // Each way's row an id of its own, so DSH running lets the one go and loads the other.
         let plugin = dsh_install(Some(&with), 47213).unwrap();
-        assert!(plugin.contains("- id: wakuwaku-plugin\n") && !plugin.contains("- id: wakuwaku\n"), "{plugin}");
+        assert!(plugin.contains("- id: fish-dock-plugin\n") && !plugin.contains("- id: wakuwaku\n"), "{plugin}");
         assert_eq!(dsh_install_bridge(Some(&plugin), hooks).unwrap(), with);
         assert_eq!(dsh_uninstall(&with).as_deref(), Some(theirs));
         // A quote in the path.
@@ -3799,7 +3906,7 @@ mod tests {
         let package: Value = serde_json::from_str(DSH_PACKAGE).unwrap();
         assert_eq!((package["type"].as_str(), package["main"].as_str()), (Some("module"), Some(DSH_PLUGIN_FILE)));
         assert!(package.get("engines").is_none() && package.get("peerDependencies").is_none() && package.get("dependencies").is_none());
-        assert!(DSH_PLUGIN.starts_with("// wakuwaku-dsh-plugin"));
+        assert!(DSH_PLUGIN.starts_with("// fish-dock-dsh-plugin"));
         assert!(dsh_plugin_version() >= 1);
         // Node's own modules alone.
         for line in DSH_PLUGIN.lines().filter(|l| l.starts_with("import ")) {
@@ -3887,7 +3994,7 @@ mod tests {
         assert!(!row_disabled("- insert:\n    - id: wakuwaku\n      disabled: true\n", "wakuwaku"));
         // In the home patch file, after our rows (dsh_turned_off reads it past them).
         let ours = dsh_install(None, 47213).unwrap();
-        let home = format!("{ours}- id: wakuwaku-plugin\n  disabled: true\n");
+        let home = format!("{ours}- id: fish-dock-plugin\n  disabled: true\n");
         assert!(row_disabled(&dsh_strip(&home).0, DSH_PLUGIN_ID));
         assert!(!row_disabled(&dsh_strip(&ours).0, DSH_PLUGIN_ID));
         // Repair takes a row that only turns ours off away (either way's); the person's rows stay.
@@ -4264,5 +4371,33 @@ mod tests {
         assert_eq!(said_by(started_by(&args(&format!("wakuwaku.exe {}", task_args())))), ", by her logon task");
         assert_eq!(said_by(Some(BY_RUN)), ", by the Run value");
         assert_eq!(said_by(None), "");
+    }
+}
+
+// t20 F5：插件键的归属判定只认身份，不做后缀匹配。
+#[cfg(test)]
+mod plugin_key_tests {
+    use super::{plugin_key_is_ours, LEGACY_PLUGIN_ID, PLUGIN_ID};
+    #[test]
+    fn plugin_keys_are_matched_by_identity_not_suffix() {
+        // 本产品：确切键、旧 marketplace 键、以及名字段恰为 fish-dock 的 marketplace 形态。
+        assert!(plugin_key_is_ours(PLUGIN_ID));
+        assert!(plugin_key_is_ours(LEGACY_PLUGIN_ID));
+        assert!(plugin_key_is_ours("fish-dock"));
+        assert!(plugin_key_is_ours("fish-dock@FISH-Dock"));
+        assert!(plugin_key_is_ours("fish-dock@fish-dock"));
+        // 第三方插件：名字只是带着同样的后缀，或 marketplace 为空，都不算已连接。
+        for key in [
+            "my-fish-dock",
+            "acme-fish-dock",
+            "my-fish-dock@tools",
+            "not-fish-dock@fish-dock",
+            "fish-dock@",
+            "@fish-dock",
+            "fish_dock",
+            "",
+        ] {
+            assert!(!plugin_key_is_ours(key), "{key} 不能被当成本产品");
+        }
     }
 }

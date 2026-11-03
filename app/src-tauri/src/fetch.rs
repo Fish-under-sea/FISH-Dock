@@ -65,6 +65,11 @@ pub struct PetError {
     pub code: &'static str,
     pub vars: Value,
 }
+impl std::fmt::Debug for PetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PetError({}: {})", self.code, self.vars)
+    }
+}
 
 fn err(code: &'static str, vars: Value) -> PetError {
     PetError { code, vars }
@@ -136,29 +141,46 @@ pub fn parse_pet_ref(input: &str) -> Result<String, PetError> {
 // netProxy and took the environment's proxy by itself, so a proxy env var
 // pointing at a dead port (the very case the person meets with a ladder
 // misconfigured) hung the gallery's every page.
+//
+// 2.0.4 T-F（审计 A06/A19）：宠物也走统一的 `sources` 候选——原地址 + 配置的
+// pet_mirror 前缀，每候选仍按代理路走、共用一次总预算。错误仍是宠物自己的
+// 词（未找到 / HTTP 状态 / 连不上）。
 fn get(url: &str) -> Result<Vec<u8>, PetError> {
-    let mut last = err("network", json!({ "message": "no way", "url": url }));
+    crate::sources::fetch_bytes_with(url, crate::proxy::pet_timeout(), 64 * 1024 * 1024, |candidate, limit| single_get(candidate, limit))
+        .map_err(|fail| pet_fail(url, &fail))
+}
+
+fn pet_fail(url: &str, fail: &crate::sources::Fail) -> PetError {
+    let reason = fail.reason();
+    if reason.contains("404") {
+        err("notFound", json!({ "url": url }))
+    } else if let Some(status) = http_status_in(&reason) {
+        err("http", json!({ "status": status, "url": url }))
+    } else {
+        err("network", json!({ "message": reason, "url": url }))
+    }
+}
+
+fn http_status_in(text: &str) -> Option<u16> {
+    text.split(|c: char| !c.is_ascii_digit()).filter(|part| part.len() == 3).find_map(|part| part.parse::<u16>().ok()).filter(|status| (100..600).contains(status))
+}
+
+// One candidate's GET, each way of the proxy in turn.
+fn single_get(url: &str, limit: u64) -> Result<Vec<u8>, String> {
+    let mut last = "no way".to_string();
     for way in crate::proxy::web_ways(url) {
         let Some(agent) = way.agent_with(crate::proxy::pet_timeout(), |c| c.http_status_as_error(false).max_redirects(0)) else { continue };
-        let called = agent.get(url).header("user-agent", "wakuwaku").call();
+        let called = agent.get(url).header("user-agent", "fish-dock").call();
         match called {
             Ok(mut response) => {
                 let status = response.status().as_u16();
                 if status != 200 {
-                    if status == 404 {
-                        return Err(err("notFound", json!({ "url": url })));
-                    }
-                    last = err("http", json!({ "status": status, "url": url }));
+                    last = format!("HTTP {status}");
                     continue;
                 }
-                return response
-                    .body_mut()
-                    .with_config()
-                    .limit(64 * 1024 * 1024)
-                    .read_to_vec()
-                    .map_err(|e| err("network", json!({ "message": e.to_string(), "url": url })));
+                return response.body_mut().with_config().limit(limit).read_to_vec().map_err(|e| e.to_string());
             }
-            Err(e) => last = http_err(url, e),
+            Err(e) => last = http_err(url, e).vars["message"].as_str().unwrap_or("网络失败").to_string(),
         }
     }
     Err(last)
@@ -169,6 +191,76 @@ fn http_err(url: &str, e: ureq::Error) -> PetError {
         ureq::Error::StatusCode(status) => err("http", json!({ "status": status, "url": url })),
         other => err("network", json!({ "message": other.to_string(), "url": url })),
     }
+}
+
+// --- 预览图：宿主取、宿主缓存，前端只拿本地 URL（审计 A19）-----------------------------
+// 站点给的 posterUrl/previewUrl 是原站图片地址。页面若直接放进 <img>，WebView 就绕开
+// 了 Rust 的代理与择源，也没有缓存与体积约束。这里一律由宿主取回、落在她的数据根
+// 下（`pets/.previews/`，随 pets 一起被 asset protocol 允许），再把本地 asset URL
+// 交给前端。站点不可达但缓存还在时，旧的预览图照常显示。
+fn preview_folder(dir: &Path) -> std::path::PathBuf {
+    dir.join("pets").join(".previews")
+}
+
+// 图片后缀按地址猜（webp/png/jpg/gif），猜不出就 webp——只影响文件名，不改内容。
+fn preview_ext(url: &str) -> &'static str {
+    let lower = url.to_ascii_lowercase();
+    for ext in ["webp", "png", "jpg", "jpeg", "gif"] {
+        if lower.split(['?', '#']).next().is_some_and(|path| path.ends_with(&format!(".{ext}"))) {
+            return match ext {
+                "jpg" | "jpeg" => "jpg",
+                "png" => "png",
+                "gif" => "gif",
+                _ => "webp",
+            };
+        }
+    }
+    "webp"
+}
+
+// 缓存名：地址的 FNV-1a 加后缀（同一张图永远是同一个文件，不同图不会撞）。
+fn preview_name(url: &str, ext: &str) -> String {
+    let mut hash = 2166136261u32;
+    for byte in url.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16777619);
+    }
+    format!("{hash:08x}.{ext}")
+}
+
+// 一张预览图的本地路径：命中缓存直接用；否则经 `sources` 取回（只认站点自身的
+// https 地址）、原子落到缓存目录。取不到就是 None（页面显示占位，不回退到原站）。
+fn preview_local_with<F>(dir: &Path, remote: &str, fetch: &mut F) -> Option<std::path::PathBuf>
+where
+    F: FnMut(&str, u64) -> Result<Vec<u8>, String>,
+{
+    if !remote.starts_with("https://") || !remote[8..].split('/').next().is_some_and(is_site_host) {
+        return None;
+    }
+    let folder = preview_folder(dir);
+    let path = folder.join(preview_name(remote, preview_ext(remote)));
+    if path.is_file() {
+        return Some(path);
+    }
+    let bytes = fetch(remote, 8 * 1024 * 1024).ok()?;
+    if bytes.is_empty() || bytes.len() > 8 * 1024 * 1024 {
+        return None;
+    }
+    std::fs::create_dir_all(&folder).ok()?;
+    let temp = folder.join(format!(".{}.part", path.file_name()?.to_string_lossy()));
+    std::fs::write(&temp, &bytes).ok()?;
+    std::fs::rename(&temp, &path).ok()?;
+    Some(path)
+}
+
+// 给前端的那一个 URL：本地 asset 地址（没有缓存文件时为空串）。
+fn preview_url(dir: &Path, remote: &str) -> String {
+    let Some(path) = preview_local_with(dir, remote, &mut |url, limit| {
+        crate::sources::fetch_bytes(url, crate::proxy::pet_timeout(), limit).map_err(|fail| fail.reason())
+    }) else {
+        return String::new();
+    };
+    crate::data::asset_url(&path)
 }
 
 // Downloads the pet into <dir>/<id>/. Returns { id, name, author, warning? }.
@@ -280,10 +372,20 @@ fn gallery_cache_write(dir: &Path, name: &str, page: &Value) {
 // The site out of reach: the page as last read, said as cached (`offline`
 // in the answer, so the page can say 离线/缓存, not a dead spinner).
 pub fn gallery(page: u64, sort: &str, query: &str, cache_dir: &Path) -> Result<Value, PetError> {
+    gallery_with(page, sort, query, cache_dir, |url, limit| {
+        crate::sources::fetch_bytes(url, crate::proxy::pet_timeout(), limit).map_err(|fail| fail.reason())
+    })
+}
+
+/// 注入版：列表与预览图都由 `fetch` 取（测试不碰真网），其余行为与 [`gallery`] 相同。
+pub fn gallery_with<F>(page: u64, sort: &str, query: &str, cache_dir: &Path, mut fetch: F) -> Result<Value, PetError>
+where
+    F: FnMut(&str, u64) -> Result<Vec<u8>, String>,
+{
     let url = gallery_url(page, sort, query);
     let cache_name = gallery_cache_name(page, sort, query);
-    let read = |body: &Value| {
-        let site = crate::config::pet_site();
+    let site = crate::config::pet_site();
+    let read = |body: &Value, fetch: &mut F| {
         let items: Vec<Value> = body["pets"]
             .as_array()
             .into_iter()
@@ -291,7 +393,9 @@ pub fn gallery(page: u64, sort: &str, query: &str, cache_dir: &Path) -> Result<V
             .filter(|p| p["id"].as_str().is_some_and(is_id))
             .map(|p| {
                 // The poster is one frame; the preview is a strip of them all.
-                let preview = ["posterUrl", "previewUrl"].iter().find_map(|k| p[*k].as_str().filter(|u| u.starts_with(&format!("{site}/")))).unwrap_or("");
+                let remote = ["posterUrl", "previewUrl"].iter().find_map(|k| p[*k].as_str().filter(|u| u.starts_with(&format!("{site}/")))).unwrap_or("");
+                // 审计 A19：前端只消费本地 URL；原站图片由宿主取回并缓存。
+                let preview = preview_local_with(cache_dir, remote, fetch).map(|path| crate::data::asset_url(&path)).unwrap_or_default();
                 json!({
                     "id": p["id"],
                     "name": p["displayName"].as_str().unwrap_or(p["id"].as_str().unwrap_or("")),
@@ -304,25 +408,31 @@ pub fn gallery(page: u64, sort: &str, query: &str, cache_dir: &Path) -> Result<V
             .collect();
         json!({ "items": items, "page": body["page"], "totalPages": body["totalPages"], "total": body["total"] })
     };
-    let asked = get(&url).and_then(|bytes| {
-        let body: Value = serde_json::from_slice(&bytes).map_err(|e| err("network", json!({ "message": e.to_string(), "url": url })))?;
-        let page = read(&body);
-        gallery_cache_write(cache_dir, &cache_name, &page);
-        Ok(page)
+    let asked = fetch(&url, 64 * 1024 * 1024).and_then(|bytes| {
+        let body: Value = serde_json::from_slice(&bytes).map_err(|e| format!("{url}: {e}"))?;
+        Ok(read(&body, &mut fetch))
     });
     match asked {
-        Ok(page) => Ok(page),
-        Err(e) => match gallery_cache_read(cache_dir, &cache_name) {
-            Some(page) => Ok(json!({ "items": page["items"], "page": page["page"], "totalPages": page["totalPages"], "total": page["total"], "offline": true, "error": describe_cached(&e) })),
-            None => Err(e),
+        Ok(page) => {
+            gallery_cache_write(cache_dir, &cache_name, &page);
+            Ok(page)
+        }
+        Err(reason) => match gallery_cache_read(cache_dir, &cache_name) {
+            Some(page) => Ok(json!({ "items": page["items"], "page": page["page"], "totalPages": page["totalPages"], "total": page["total"], "offline": true, "error": describe_cached_reason(&reason) })),
+            None if reason.contains("404") => Err(err("notFound", json!({ "url": url }))),
+            None => Err(err("network", json!({ "message": reason, "url": url }))),
         },
     }
 }
 
-// What the page says of a gallery answer served from the cache: the cache
-// is the reason it shows anything at all, so it names both facts, not just
-// the failure. (Words here, not in the page: the page renders what it is
-// given, in the person's language as describe does.)
+// 离线兜底的文案：缓存是它还能显示的唯一原因，两个事实都说（与 describe_cached 同款，
+// 只是这里拿到的是 sources 聚合后的一句话）。
+fn describe_cached_reason(reason: &str) -> String {
+    format!("离线，先用上次的图库（{reason}）")
+}
+
+/// 旧描述器（测试仍用）：把一次宠物错误说成一句话。
+#[cfg(test)]
 fn describe_cached(e: &PetError) -> String {
     match e.code {
         "network" => format!("离线，先用上次的图库（连不上：{}）", e.vars["message"].as_str().unwrap_or("")),
@@ -499,6 +609,49 @@ mod tests {
         // 具体是哪一档由 ureq 决定，不去钉死。
         assert!(got.is_err(), "代理拒了 CONNECT，图库不该有页面");
         let _ = fs::remove_dir_all(&cache);
+    }
+
+    // 审计 A19：图库的预览图由宿主取回并缓存，前端只拿本地 URL——不再直连原站。
+    // 第二次打开同一页时命中缓存，图片地址一次都不再请求。
+    #[test]
+    fn gallery_previews_are_served_from_the_host_cache_not_the_site() {
+        let dir = std::env::temp_dir().join(format!("fish-pet-preview-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let list = json!({
+            "pets": [{ "id": "p1", "displayName": "P", "ownerName": "A", "likeCount": 1, "spriteVersionNumber": 2,
+                       "posterUrl": "https://codex-pets.net/assets/pets/v/2/p1/poster.webp" }],
+            "page": 1, "totalPages": 1, "total": 1
+        });
+        let asked = std::cell::RefCell::new(Vec::new());
+        let first = gallery_with(1, "popular", "", &dir, |url, _limit| {
+            asked.borrow_mut().push(url.to_string());
+            if url.contains("/api/pets") {
+                Ok(serde_json::to_vec(&list).unwrap())
+            } else {
+                Ok(vec![b'R', b'I', b'F', b'F', 0, 0, 0, 0])
+            }
+        })
+        .unwrap();
+        let preview = first["items"][0]["preview"].as_str().unwrap();
+        assert!(preview.starts_with("http://asset.localhost/") || preview.starts_with("asset://localhost/"), "预览应是本地 asset URL：{preview}");
+        assert!(!preview.contains("codex-pets.net"), "预览 URL 不该指向原站：{preview}");
+        let cached = std::fs::read_dir(dir.join("pets").join(".previews")).unwrap().count();
+        assert_eq!(cached, 1, "预览图应缓存一份");
+        assert!(asked.borrow().iter().any(|u| u.contains("poster.webp")), "第一遍由宿主取原站图片");
+        // 第二遍：只请求列表，图片完全命中缓存（若再请求图片，这个闭包会 panic）。
+        let before = asked.borrow().len();
+        let _ = gallery_with(1, "popular", "", &dir, |url, _limit| {
+            asked.borrow_mut().push(url.to_string());
+            if url.contains("/api/pets") {
+                Ok(serde_json::to_vec(&list).unwrap())
+            } else {
+                panic!("缓存命中时不该再请求图片：{url}")
+            }
+        })
+        .unwrap();
+        assert_eq!(asked.borrow().len(), before + 1, "第二遍只该请求列表一次");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

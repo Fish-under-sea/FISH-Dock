@@ -15,7 +15,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { test } = require('node:test')
 
-const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'dsh', 'wakuwaku.js'), 'utf8')
+const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'dsh', 'fish-dock.js'), 'utf8')
 const load = () => import('data:text/javascript,' + encodeURIComponent(SOURCE))
 
 // Her port: what came, in order. answer(event): what she gives back for it
@@ -113,7 +113,7 @@ test('a turn as DSH runs it, told in the words of its Claude Code bridge', async
   await plugin.idle()
   await her.close()
 
-  assert.ok(her.got.every(g => g.url === '/hook?from=wakuwaku&agent=dsh'))
+  assert.ok(her.got.every(g => g.url === '/hook?from=fish-dock&agent=dsh'))
   const told = her.got.map(g => g.event)
   assert.deepEqual(told.map(e => e.hook_event_name), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'])
   const base = { session_id: 'session-6aa5a96d-33fc', transcript_path: '', cwd: WORKSPACE, origin: '', parent_session: '' }
@@ -184,7 +184,7 @@ test('its word as DSH loads it, and as it is let go', async () => {
   const word = await written(marker)
   assert.deepEqual([word.pid, word.version, word.sha, word.profile, word.port], [process.pid, VERSION, '0123456789abcdef', 'desktop', her.port])
   assert.ok(Math.abs(Date.now() - word.at) < 5000)
-  assert.deepEqual(her.got.map(g => g.event), [{ session_id: '', hook_event_name: 'WakuwakuLoaded', version: VERSION, pid: process.pid, profile: 'desktop' }])
+  assert.deepEqual(her.got.map(g => g.event), [{ session_id: '', hook_event_name: 'FishDockLoaded', version: VERSION, pid: process.pid, profile: 'desktop' }])
   letGo()
   assert.equal(fs.existsSync(marker), false)
   // Let go: nothing more told.
