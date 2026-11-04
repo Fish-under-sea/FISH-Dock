@@ -12,7 +12,7 @@
 </picture>
 
 <p>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.0.4" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.0"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.1.0" width="23%"></picture></a>
   <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
   <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
@@ -23,7 +23,7 @@
 
 <p>
   <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="app/docs/release-2.0.4.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
+  <a href="app/docs/release-2.1.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
@@ -65,6 +65,8 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器、插件管理与 Windhawk。
 
+2.1.0 功能版：宿主 2.1.0，兼容插件 2.x（官方目录当前 2.2.0：Clash / Magpie / 飞书）。这一版收了主仓四条 OPEN issue 与一条历史欠账：#68 插件下载在**三源全灭时按来源回退上一可用版本**（目录抢跑不再等于必失败，回退仍严格校验摘要）；#69 插件卡下半区压到 105px、标题 17px/600、**Dock 弹窗锁滚动**；#70 自启失败记录带阶段与耗时、手动启用补一次**锁外**退避重试；附加的国内镜像欠账落地为「配了才启用」的 Gitee 通道 + 一份**实测**来源矩阵。完整说明、安装包与已知限制见 [2.1.0 更新记录](app/docs/release-2.1.0.md)。
+
 2.0.4 修订版：宿主 2.0.4，兼容插件 2.1.x（Clash 与 Magpie 2.1.3、飞书 2.1.0）。这一版收了 #63、#65、#66、#67 四条 issue 并回归 #64：插件自启改为单一调度器（冷 60 秒／热 10 秒一次共用预算、整轮 180 秒、每插件单在途、最多两插件并发、迟到结果按代次丢弃），修掉备份暂停时的二次拉起；资源获取统一到择源层（原站优先、镜像候选、按代理路重试、一条总预算、唯一临时文件与原子落地），更新包下载同源，pet 的资源改由宿主取回缓存；检查到新版本时 pet 会弹提醒；插件页「更多」改整行动作列表、npm 检索支持短页续翻；插件页外链经宿主受控通道打开（只认 http/https）；OFM 业务彻底解耦、旧命名清理，Agent 会话 API（`/v1`）与 `agent-core` 就位。完整说明与已知限制见 [2.0.4 更新记录](app/docs/release-2.0.4.md)。
 
 2.0.3 补丁版：宿主 2.0.3，兼容插件 2.1.x（Clash 与 Magpie 2.1.3、飞书 2.1.0）。这一版把插件启动链路的任务书做完九项（T02 留 2.1.0）：资源校验判据改逐文件 size+mtime 指纹、全量哈希移出首启关键路径、WebView2 授权改为按需（T06/T07/T08）；插件校验加 size+mtime 快照缓存、插件页面入口不再持全局锁（T03/T09）；插件调用超时分冷/热两档（热 5 s、冷 20 s），冷态失败重试一次（T04）；维护线程与安装/卸载/启停收进同一把上层互斥，不再有「维护线程删掉正在写入的版本目录」这类竞态（t19）。插件页卡面同时重做：状态收成一条 `● 运行中 · v2.1.2 → v2.1.3`，卡内只留一颗实心「更新」，带功能页的卡从 4 行压到 3 行。完整说明与 12 条已知限制见 [2.0.3 更新记录](app/docs/release-2.0.3.md)。
@@ -79,14 +81,14 @@ FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、�
 
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark-v3.png"><img src="assets/readme/section-install-light-v3.png" alt="INSTALL · 安装" width="100%"></picture></h2>
 
-**FISH Dock 2.0.4** 提供完整安装包和精简更新包。本次修的是插件自启与取资源两条链路：自启收成单一调度器（一次尝试共用一份预算，冷启动 60 秒／热 10 秒、整轮 180 秒、每插件只有一次在途、最多两插件并发、迟到结果按代次丢弃），备份暂停期间不再二次拉起；取资源统一成一层——原站优先、镜像候选、按代理路重试、全部共用一条总预算，落地只经唯一临时文件与原子改名，更新包下载同样择源；pet 的列表、详情、立绘与预览改由宿主取回缓存。检查到新版本时 pet 会主动弹提醒。插件页「更多」改为整行可点的动作列表，npm 发现式检索支持短页与 `nextFrom` 续翻；插件页里的 http/https 外链改走宿主受控通道、可在系统浏览器打开，其余协议一律拒绝。下载及校验文件见 [v2.0.3 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4)。
+**FISH Dock 2.1.0** 提供完整安装包和精简更新包。本版三件事：① 插件下载在**三源全灭时按来源回退上一可用版本**——目录写了新版但制品还没上传时，不再一律报「检查网络或代理」（回退仍严格校验摘要，界面仍显示目录最新版，失败面板逐源打出 URL/状态码/阶段）；② 插件卡下半区从约 210px 压到 105px、标题 17px/600、**Dock 弹窗打开即锁住底层滚动**；③ 自启失败记录带阶段与耗时，手动启用补一次**锁外**退避重试。另把「国内镜像下载」这条欠账落成「配了才启用」的 Gitee 通道 + 一份实测来源矩阵（缺口如实标注）。下载及校验文件见 [v2.1.0 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.0)。
 
 | 安装包 | 使用场景 |
 | --- | --- |
-| `FISH-Dock-Setup-2.0.4.exe` | 首次安装、基础资源缺失或修复安装，包含完整离线运行时（约 312 MB）。 |
-| `FISH-Dock-Update-2.0.4.exe` | 已有版本且基础资源完整时使用，只下载本次变更（约 30 MB）；缺失或损坏时提示改用完整包。 |
+| `FISH-Dock-Setup-2.1.0.exe` | 首次安装、基础资源缺失或修复安装，包含完整离线运行时（约 312 MB）。 |
+| `FISH-Dock-Update-2.1.0.exe` | 已有版本且基础资源完整时使用，只含相对 **2.0.4** 的变更（约 30 MB）；缺失或损坏时提示改用完整包。 |
 
-1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
+1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.0) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源并展示运行时条款。
 3. 打开「插件」页，点击「GitHub 登录」。Dock 内弹窗显示验证码及实际复制结果；在系统浏览器中粘贴并确认，Dock 自动检查授权。等待期间可单独解除临时锁定／置顶，也可取消验证。旧版账号若未保存续期凭据，升级后需重新登录一次；新授权随后自动续期。
 4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
