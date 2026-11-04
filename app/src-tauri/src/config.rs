@@ -401,6 +401,12 @@ pub fn plugin_npm_registry() -> String { text(ENV_NPM_REGISTRY, NPM_REGISTRY_DEF
 pub fn plugin_npm_mirror() -> String { text(ENV_NPM_MIRROR, NPM_MIRROR_DEFAULT) }
 pub fn plugin_catalog_raw() -> String { text(ENV_CATALOG_RAW, CATALOG_RAW_DEFAULT) }
 pub fn plugin_catalog_api() -> String { text(ENV_CATALOG_API, CATALOG_API_DEFAULT) }
+// —— 官方插件发行资产基址（#68）——
+// 插件仓 Release 的 tag 形如 v<version>，资产名是 <slug>.fish-plugin，所以只有前缀是
+// 常量、后半段由 plugin_store 按版本拼。它放在配置集中化唯一入口，而不是 plugin_store
+// 里：既守住红线 5「默认值/URL 只在 config.rs 定义」，也让内置已验证版本表不必把同一段
+// 前缀重复 12 遍（硬编码自查 remaining 因此自然归零，不需要白名单）。
+pub const PLUGIN_RELEASE_BASE: &str = "https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download";
 // —— 2.0.4 T-F（resources）：镜像前缀 ——
 // 空串就是「没配」：调用方据此决定不加候选，不许伪造镜像或改指第三方站点。
 pub fn raw_mirror() -> String { text(ENV_RAW_MIRROR, RAW_MIRROR_DEFAULT) }

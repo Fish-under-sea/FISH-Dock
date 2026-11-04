@@ -19,7 +19,12 @@ struct Registry { schema: u32, entries: BTreeMap<String, Installed> }
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all="camelCase")]
 pub struct InstallNotice { pub version: String, pub reason: String, pub hint: String, pub at: u64,
-    #[serde(default)] pub cleanup: bool }
+    #[serde(default)] pub cleanup: bool,
+    // 【#68】目录里的新版暂不可用、这次按来源回退装了更早的版本：前端据此写
+    // 「已安装 X；目录最新 Y 暂不可用」，而不是「安装未完成」（包是真装上了）。
+    // cleanup 与 fellBack 互不重叠：前者说「旧文件没清干净」，后者说「装的不是最新版」。
+    #[serde(default)] pub fell_back: bool,
+    #[serde(default,skip_serializing_if="Option::is_none")] pub catalog_latest: Option<String> }
 pub fn platform() -> String { format!("{}-{}",std::env::consts::OS,std::env::consts::ARCH) }
 // npm_install_hint 是安装回滚后告诉用户「还能怎么装」：官方插件按 id 的最后一段
 // 对应 npm 单包（fish.magpie → @fish-under-sea/fish-dock-plugin-magpie）。
@@ -360,12 +365,19 @@ impl Manager<'_> {
     }
     // note_install_rollback 记一条「哪一版没装成、为什么、改用哪条路」。
     fn note_install_rollback(&self,id:&str,version:&str,reason:&str) -> Result<(),String> {
-        self.store_notice(id,InstallNotice{version:version.into(),reason:reason.into(),hint:npm_install_hint(id),at:crate::now_ms(),cleanup:false})
+        self.store_notice(id,InstallNotice{version:version.into(),reason:reason.into(),hint:npm_install_hint(id),at:crate::now_ms(),cleanup:false,..Default::default()})
+    }
+    // note_version_fallback 记一条「目录里的最新版暂不可用，已按来源回退装了上一可用版本」
+    // （#68）。它不是失败：包按目录摘要校验过、也装上了，只是不是目录里的那一版；
+    // 因此 cleanup=false（不是旧文件问题）、fellBack=true（前端按回退口径写文案），
+    // 并把目录里的最新版带上，卡片就能说「已安装 X；目录最新 Y 暂不可用」。
+    pub fn note_version_fallback(&self,id:&str,installed:&str,latest:&str) -> Result<(),String> {
+        self.store_notice(id,InstallNotice{version:installed.into(),reason:format!("目录最新 {latest} 暂不可用"),hint:format!("已安装 {installed}；目录修正后可在插件页更新到最新版。"),at:crate::now_ms(),cleanup:false,fell_back:true,catalog_latest:Some(latest.into())})
     }
     // note_cleanup_issue 记一条「这一版装上了，但旧文件没清干净」（#t8）。它是警告：
     // 清理失败不回滚升级，也不能让用户以为没装上。
     fn note_cleanup_issue(&self,id:&str,version:&str,reason:&str) -> Result<(),String> {
-        self.store_notice(id,InstallNotice{version:version.into(),reason:reason.into(),hint:String::new(),at:crate::now_ms(),cleanup:true})
+        self.store_notice(id,InstallNotice{version:version.into(),reason:reason.into(),hint:String::new(),at:crate::now_ms(),cleanup:true,..Default::default()})
     }
     fn store_notice(&self,id:&str,notice:InstallNotice) -> Result<(),String> {
         let mut notices=self.notices()?;
@@ -1296,8 +1308,8 @@ mod tests {
         let journal=serde_json::json!({"schema":1,"previous":null,"next":active});
         context.host.write("tmp","plugin-install-acme.weather.json",&serde_json::to_vec(&journal).unwrap()).unwrap();
         let mut records=crate::plugin_store::fetch_records(&context);
-        let attempt=crate::plugin_store::Attempt{origin:crate::plugin_store::Origin::NpmRegistry,url:"https://registry.npmjs.org/fixture".into(),ok:true,elapsed_ms:1,error:None};
-        records.insert("acme.weather".into(),crate::plugin_store::FetchRecord{id:"acme.weather".into(),version:"2.0.0".into(),origin:crate::plugin_store::Origin::NpmRegistry,url:"https://registry.npmjs.org/fixture".into(),elapsed_ms:1,at:1,attempts:vec![attempt]});
+        let attempt=crate::plugin_store::Attempt{origin:crate::plugin_store::Origin::NpmRegistry,url:"https://registry.npmjs.org/fixture".into(),ok:true,elapsed_ms:1,http_status:Some(200),phase:"完成".into(),error:None};
+        records.insert("acme.weather".into(),crate::plugin_store::FetchRecord{id:"acme.weather".into(),version:"2.0.0".into(),origin:crate::plugin_store::Origin::NpmRegistry,url:"https://registry.npmjs.org/fixture".into(),elapsed_ms:1,at:1,attempts:vec![attempt],catalog_latest:None});
         crate::plugin_store::save_records(&context,&records).unwrap();
         // 宿主生成的回滚点/版本记录/暂存：卸载时该清；用户自己放进 backups 的文件该留。
         let backups=ns.path().join("backups");
@@ -1417,6 +1429,30 @@ mod tests {
         assert!(notice.reason.contains("插件备份目录读取失败"),"{}",notice.reason);
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
+    // #68：回退装的是上一可用版本时，插件卡上那句话必须说清「已安装谁、目录最新是谁、
+    // 最新版为什么没装上」，而且不能写成「安装未完成」（包是真装上了）。
+    #[test] fn a_fallback_install_says_installed_and_how_new_the_catalog_is() {
+        let (root,context)=installed_fixture("fallback-notice","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        let (package,digest)=bundle("2.0.0",1);
+        manager.install(package,&digest,false).unwrap();
+        manager.note_version_fallback("acme.weather","2.0.0","2.1.7").unwrap();
+        let notice=manager.notice("acme.weather").expect("回退安装要留一条提示");
+        assert_eq!(notice.version,"2.0.0","version 是实际装上的版本");
+        assert!(notice.fell_back,"回退装必须标出来，前端才按回退口径写文案");
+        assert!(!notice.cleanup,"回退安装不是「旧文件没清干净」");
+        assert_eq!(notice.catalog_latest.as_deref(),Some("2.1.7"),"目录里的最新版必须带上");
+        assert!(notice.reason.contains("2.1.7"),"原因要说清是目录最新版没装上：{}",notice.reason);
+        assert!(notice.hint.contains("已安装 2.0.0"),"提示要写实际装上的版本：{}",notice.hint);
+        // 落盘 JSON 的键名就是前端读的那三个（camelCase）。
+        let saved: serde_json::Value=serde_json::from_slice(&context.host.read("config","plugin-install-notices.json").unwrap().expect("提示要落盘")).unwrap();
+        let row=&saved["acme.weather"];
+        assert_eq!(row["fellBack"],true);
+        assert_eq!(row["catalogLatest"],"2.1.7");
+        assert_eq!(row["version"],"2.0.0");
+        assert_eq!(row["cleanup"],false);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
     // t33/F4：校验失败必须按性质分类——缺失/摘要不符是永久错误；不是靠文案猜。
     #[test] fn verify_kind_separates_tampering_from_readable_files() {
         let (root,context)=installed_fixture("verify-kind","acme.weather",".plugin.acme.weather");
@@ -1521,9 +1557,9 @@ mod tests {
         let plugin_tmp=context.root.join(".plugin.acme.weather").join("tmp");
         std::fs::create_dir_all(plugin_tmp.join("txn-1-2-3")).unwrap();
         let mut records=crate::plugin_store::fetch_records(&context);
-        let attempt=crate::plugin_store::Attempt{origin:crate::plugin_store::Origin::NpmRegistry,url:"https://registry.npmjs.org/fixture".into(),ok:true,elapsed_ms:1,error:None};
+        let attempt=crate::plugin_store::Attempt{origin:crate::plugin_store::Origin::NpmRegistry,url:"https://registry.npmjs.org/fixture".into(),ok:true,elapsed_ms:1,http_status:Some(200),phase:"完成".into(),error:None};
         for (id,version) in [("acme.weather","2.0.0"),("gone.plugin","1.0.0")] {
-            records.insert(id.into(),crate::plugin_store::FetchRecord{id:id.into(),version:version.into(),origin:crate::plugin_store::Origin::NpmRegistry,url:"https://registry.npmjs.org/fixture".into(),elapsed_ms:1,at:1,attempts:vec![attempt.clone()]});
+            records.insert(id.into(),crate::plugin_store::FetchRecord{id:id.into(),version:version.into(),origin:crate::plugin_store::Origin::NpmRegistry,url:"https://registry.npmjs.org/fixture".into(),elapsed_ms:1,at:1,attempts:vec![attempt.clone()],catalog_latest:None});
         }
         crate::plugin_store::save_records(&context,&records).unwrap();
         let problems=manager.cleanup_staging();
@@ -1560,6 +1596,9 @@ mod tests {
     // #38 回归①：Dock 运行中把插件拨到「随 Dock 启动」，必须当场尝试拉起服务（而不是
     // 只写注册表等下次启动）；没有 Node 时拉起失败要可见、注册表仍同步为开。
     #[test] fn autostart_on_immediately_attempts_start_and_surfaces_failure() {
+        // t21：获取测试锁，确保 MANUAL_ENABLE_STARTER 等注入静态量为 None
+        let _guard = crate::plugin_runtime::acquire_manual_enable_test_lock();
+        
         let (root,context)=installed_fixture("autostart38","acme.weather",".plugin.acme.weather");
         let manager=Manager{context:&context};
         let (package,digest)=bundle("2.0.0",1);
@@ -1578,6 +1617,9 @@ mod tests {
     // #38 回归②：resume 逐插件容错。两个插件都因缺 Node 拉起失败，但 resume 必须把两个
     // 都走完并各自留下失败原因，绝不能第一个失败就让整批自启动跳过。
     #[test] fn resume_isolates_each_plugin_failure_instead_of_skipping_the_batch() {
+        // t21：获取测试锁，确保 MANUAL_ENABLE_STARTER 等注入静态量为 None
+        let _guard = crate::plugin_runtime::acquire_manual_enable_test_lock();
+        
         let (root,context)=installed_fixture("resume38","acme.weather",".plugin.acme.weather");
         let manager=Manager{context:&context};
         let (package,digest)=bundle("2.0.0",1); manager.install(package,&digest,false).unwrap();

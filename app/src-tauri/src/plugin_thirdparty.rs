@@ -118,7 +118,9 @@ impl NpmSources {
 //   3. 同站点域：源主机去掉最左一段后（registry.npmmirror.com → npmmirror.com），
 //      tarball 落在该站点域或其子域上（cdn.npmmirror.com 一类 registry 自有 cdn
 //      因此通过）。第 3 条只对 ≥3 段的源主机放宽，避免两段源主机被放宽到整个 TLD。
-fn host_within_site(host: &str, source_host: &str) -> bool {
+// pub(crate)：plugin_store::hop 的下载跳转判据复用同一套（#68 S2 / t18 F2），
+// 不许再写第二份走样的实现。
+pub(crate) fn host_within_site(host: &str, source_host: &str) -> bool {
     if host == source_host || host.ends_with(&format!(".{source_host}")) { return true; }
     let labels: Vec<&str> = source_host.split('.').filter(|label| !label.is_empty()).collect();
     if labels.len() >= 3 {

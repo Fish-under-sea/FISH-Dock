@@ -59,18 +59,31 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
         // 下载不占用实例锁，网络失败不阻塞已安装插件的停用。
         if action=="enabled"&&enabled==Some(true){crate::github_access::require_plugin(context,&id)?;}
         // 官方插件要 GitHub 登录与主仓 Star；第三方插件不经过这条授权，认证只约束官方。
-        let package=if action=="install"{
+        // 【#68】obtain_traced 带回「实际装到的版本 + 目录里的最新版」：三源全灭时它
+        // 已经按来源回退到上一可用版本，安装成功后据此在插件卡上写
+        // 「已安装 X；目录最新 Y 暂不可用」，而目录数据本身一个字都不改（界面保留新版）。
+        let download=if action=="install"{
             if !id.starts_with("fish."){return Err("第三方插件请从「第三方插件」页按包名安装".into());}
             crate::github_access::require_plugin(context,&id)?;
             // 文案分级（#37 / t45）：下载失败要能在面板上说清卡在「下载」这一步，而不是一句笼统报错。
             // fetch_from 已经返回结构化 JSON（一句人话 + 逐源短原因）；其余错误统一走 wrap 分级。
+            // t18 F3：wrap() 见到结构化 JSON 会原样透传、跳过它自己的 log()，所以结构化那条
+            // 必须在这里显式落一次 recent.log（整份 JSON 含 sources[].url/httpStatus/phase 与
+            // 逐次 attempts）——只记一次：非结构化的仍由 wrap() 记。
             let data=crate::data::folder();
-            Some(crate::plugin_store::obtain(context,&id).map_err(|error|crate::plugin_failure::wrap("download",error,&data))?)
+            Some(crate::plugin_store::obtain_traced(context,&id).map_err(|error|{
+                crate::plugin_failure::log_structured(&data,"download",&error);
+                crate::plugin_failure::wrap("download",error,&data)
+            })?)
         }else{None};
         let manager=Manager{context};let node=node(context)?;
         let mut runner=crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
         match action.as_str(){
-            "install"=>{let (package,digest)=package.ok_or("插件包尚未就绪")?;let official=package.manifest.id.starts_with("fish.");crate::plugin_progress::report(&id,"提交",0,None)?;runner.install(&manager,package,&digest,official,node.as_deref()).map_err(|error|crate::plugin_failure::wrap("verify",error,&crate::data::folder()))?;},
+            "install"=>{let (package,digest,record)=download.ok_or("插件包尚未就绪")?;let official=package.manifest.id.starts_with("fish.");crate::plugin_progress::report(&id,"提交",0,None)?;runner.install(&manager,package,&digest,official,node.as_deref()).map_err(|error|crate::plugin_failure::wrap("verify",error,&crate::data::folder()))?;
+                // 装上了，但装的不是目录里的最新版（新版制品还没发布）：留一条回退提示。
+                // 写不进去只是少一行说明，不该让已经装好的插件变成失败。
+                if let Some(latest)=record.fell_back(){if let Err(error)=manager.note_version_fallback(&id,&record.version,latest){eprintln!("FISH Dock: 插件回退安装提示写入失败（{id}）：{error}");}}
+            },
             "enabled"=>runner.set_enabled(&manager,&id,enabled.ok_or("插件启停操作缺少目标状态")?,node.as_deref())?,
             // 自启动开关（#38）：写注册表 + Dock 运行中就立即拉起/停止该插件服务。
             "autostart"=>{runner.set_autostart(&manager,&id,enabled.ok_or("插件自启动设置缺少目标状态")?,node.as_deref())?;},
