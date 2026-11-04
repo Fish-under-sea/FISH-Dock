@@ -333,7 +333,31 @@ fn allowed(url: &str) -> bool {
     }
     // 2.0.4 T-F：Gitee 的仓库地址来自配置（默认空＝不启用），不再读死常量。
     let repos = [GITHUB_REPO.to_string(), crate::config::gitee_repo()];
-    repos.iter().filter(|repo| !repo.is_empty()).any(|repo| url.get(..repo.len()).is_some_and(|p| p.eq_ignore_ascii_case(repo)))
+    repos.iter().filter(|repo| !repo.is_empty()).any(|repo| in_repo(url, repo))
+}
+
+// `url` 是不是就在 `repo` 这个仓库里：前缀比较（大小写不敏感）之后**还要求一个
+// 边界**（`/`、`?` 或 `#`）。
+//
+// 附加条目 A 的实测矩阵（`app/docs/domestic-mirror-matrix-2026-11-04.md` §4.2）
+// 撞到的正是纯前缀比较的坑：`config::gitee_repo()` 会去掉尾部 `/`，于是配了
+// `https://gitee.com/Fish-under-sea/FISH-Dock` 之后，`…/FISH-DOCK-Plugins`（插件仓，
+// 同名前缀）也会被判成「在放行范围内」——等于用户配了一个仓，白名单却悄悄覆盖了
+// 另一个仓。这里只**收窄**、不放宽：
+//
+// - 仓库地址到此为止（没有边界，如 `https://github.com/Fish-under-sea/FISH-Dock`）
+//   仍然不放行，与既有口径一致；
+// - `GITHUB_REPO` 自带尾部 `/`，去掉之后再要求边界，放行结果与改前逐条相同。
+fn in_repo(url: &str, repo: &str) -> bool {
+    let base = repo.trim_end_matches('/');
+    if base.is_empty() {
+        return false;
+    }
+    let Some(head) = url.get(..base.len()) else { return false };
+    if !head.eq_ignore_ascii_case(base) {
+        return false;
+    }
+    matches!(url[base.len()..].chars().next(), Some('/' | '?' | '#'))
 }
 
 // At most so many redirects (GitHub's exe: one, to release-assets.githubusercontent.com).
@@ -2163,8 +2187,263 @@ mod tests {
         assert!(matches!(super::get(&format!("http://127.0.0.1:{port}/x"), 5, None), Err(super::Miss::NotThere)));
     }
 
+    // —— 附加条目 A / S2：Gitee 更新候选与 Gitee 附件候选都「配了才启用」 ——
+    //
+    // 实测口径（2026-11-04，`app/docs/domestic-mirror-matrix-2026-11-04.md`）：
+    // Gitee 主仓 `https://gitee.com/Fish-under-sea/FISH-Dock` 匿名 API 200、tags 13 个
+    // （v1.0.0…v2.0.4），但 `/api/v5/.../releases` 返回 `[]`、`/releases` 页面里
+    // `releases/download` 与 `releases/tag` 命中 0 条、`releases/download/v2.0.4/<资产>`
+    // 全部 404 —— **没有发行版本、没有附件**。所以这两条候选配了也常落空，靠
+    // `sources::candidates` 的失败回落与 `install_installer` 的摘要比对兜住；
+    // 附件真的上线前不改产品默认值（`url.gitee_repo` 仍默认空）。
+
+    // —— 测试期的环境变量基础设施（t10 F1 / F2）——
+    //
+    // 这一组用例都要临时改「镜像类」环境变量，两件事必须同时成立：
+    //   1) 改同一批键的用例之间**串行**——只有一把锁（`crate::sources::MIRROR_ENV_LOCK`）。
+    //      t10 F1 实测：本模块原先另有一把 `UPDATE_ENV_LOCK`，两把锁互不相干，于是
+    //      「设 GH_PROXY 的用例」与「读当下 GH_PROXY 的用例」并行互踩，`candidates()`
+    //      多出「Release 加速」一条，并行 `cargo test -- updates` 5 次里 3 次红。
+    //   2) 断言 panic 也要把键**还原**——一律用 Drop 守卫。t5 已在 sources 里踩过
+    //      「设值 → f() → 还原」在 panic 时漏值的坑（sources.rs 的 EnvGuard 注释），
+    //      t10 F2 指出同一批改动里 `with_gitee` 却留了旧写法，这里补齐。
+    const GITEE_ENV: &str = "FISH_DOCK_GITEE_REPO";
+    const GH_PROXY_ENV: &str = "FISH_DOCK_GH_PROXY";
+    /// 四个镜像键：`with_empty_mirrors` 把它们清成「不存在」，新用例因此不依赖
+    /// 「跑测试时环境刚好干净」（t10 F1(b)）。
+    const MIRROR_ENVS: [&str; 4] = ["FISH_DOCK_GH_PROXY", "FISH_DOCK_RAW_MIRROR", "FISH_DOCK_PET_MIRROR", "FISH_DOCK_MIRROR_PREFER"];
+
+    /// 镜像类环境变量的**唯一**测试锁（与 `sources` 的用例共用同一把）。
+    fn mirror_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::sources::MIRROR_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// t10 F2 点名的形状：只装「原来那个值」，Drop 时还原；set/remove 由 `with_gitee` 做。
+    struct GiteeEnvGuard(Option<std::ffi::OsString>);
+    impl Drop for GiteeEnvGuard {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => std::env::set_var(GITEE_ENV, value),
+                None => std::env::remove_var(GITEE_ENV),
+            }
+        }
+    }
+
+    /// 同款守卫，给既有的 `with_gh_proxy` 用（它原先也是「设值 → f() → 还原」，panic 会漏）。
+    struct GhProxyEnvGuard(Option<std::ffi::OsString>);
+    impl Drop for GhProxyEnvGuard {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => std::env::set_var(GH_PROXY_ENV, value),
+                None => std::env::remove_var(GH_PROXY_ENV),
+            }
+        }
+    }
+
+    /// 多键守卫：`with_empty_mirrors` 用，逐个还原。
+    struct EmptyMirrorsGuard(Vec<(&'static str, Option<std::ffi::OsString>)>);
+    impl Drop for EmptyMirrorsGuard {
+        fn drop(&mut self) {
+            for (key, old) in self.0.drain(..) {
+                match old {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    /// 把 [`MIRROR_ENVS`] 四个键清成「不存在」，Drop 时逐个还原（t10 F1(b)）。
+    /// **不自取锁**：调用方必须已经在 `with_gitee` 一类持锁作用域里——同一把
+    /// 非可重入锁嵌套获取会自锁死。
+    fn with_empty_mirrors<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = EmptyMirrorsGuard(MIRROR_ENVS.iter().map(|key| (*key, std::env::var_os(key))).collect());
+        for key in MIRROR_ENVS {
+            std::env::remove_var(key);
+        }
+        f()
+    }
+
+    /// 临时改 `url.gitee_repo`（`FISH_DOCK_GITEE_REPO`）；None ＝ 该键不存在。
+    /// 取唯一那把镜像锁，还原交给 [`GiteeEnvGuard`]（panic 也还原）。
+    fn with_gitee<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _lock = mirror_env_lock();
+        let _guard = GiteeEnvGuard(std::env::var_os(GITEE_ENV));
+        match value {
+            Some(value) => std::env::set_var(GITEE_ENV, value),
+            None => std::env::remove_var(GITEE_ENV),
+        }
+        f()
+    }
+
+    /// 生产分支的前提：`WAKUWAKU_UPDATE_*` 两个夹具变量都不在（`testing()` 为 false）。
+    /// Drop 时原样还原，不影响 `--ignored` 的 live/fake 用例。
+    struct NoFixtureUrls(Option<String>, Option<String>);
+    impl Drop for NoFixtureUrls {
+        fn drop(&mut self) {
+            for (var, old) in [(super::GITHUB_TEST, &self.0), (super::GITEE_TEST, &self.1)] {
+                match old {
+                    Some(value) => std::env::set_var(var, value),
+                    None => std::env::remove_var(var),
+                }
+            }
+        }
+    }
+    fn production_urls() -> NoFixtureUrls {
+        let keep = NoFixtureUrls(std::env::var(super::GITHUB_TEST).ok(), std::env::var(super::GITEE_TEST).ok());
+        std::env::remove_var(super::GITHUB_TEST);
+        std::env::remove_var(super::GITEE_TEST);
+        keep
+    }
+
+    const GITEE_REPO: &str = "https://gitee.com/Fish-under-sea/FISH-Dock";
+
+    // endpoints() 的 Gitee 候选完全由 `url.gitee_repo` 决定：默认只有 GitHub 一条
+    // （与 2.0.4 现状逐条一致，不默认启用），配了才多一条，且 GitHub 仍在第一位
+    // （区域顺序由 `Release::ordered` / `gitee_first` 决定，不在 endpoints 里）。
+    #[test]
+    fn the_gitee_endpoint_appears_only_when_the_repo_is_configured() {
+        let _urls = production_urls();
+        with_gitee(None, || {
+            assert!(!super::testing(), "夹具变量清掉了才测得到生产分支");
+            assert_eq!(crate::config::gitee_repo(), "", "默认没配 Gitee");
+            let got = super::endpoints();
+            assert_eq!(got.len(), 1, "默认只有 GitHub 一条：{got:?}");
+            assert_eq!(got[0].0, Source::GitHub);
+            assert_eq!(got[0].1, crate::config::update_latest(), "地址仍是 GitHub 的 releases/latest");
+        });
+        with_gitee(Some(GITEE_REPO), || {
+            let got = super::endpoints();
+            assert_eq!(got.iter().map(|(s, _)| *s).collect::<Vec<_>>(), [Source::GitHub, Source::Gitee], "{got:?}");
+            assert_eq!(got[0].1, crate::config::update_latest());
+            assert_eq!(got[1].1, GITEE_REPO, "Gitee 候选就是用户自己配的那个仓库，不内置地址");
+        });
+        // 空串＝没配（`config.rs` 的口径）；写坏的地址也原样交给 `gitee_found` 去 404，
+        // endpoints 不替用户猜仓库。
+        with_gitee(Some(""), || assert_eq!(super::endpoints().len(), 1, "空串视为未配置"));
+        with_gitee(Some("   "), || assert_eq!(super::endpoints().len(), 1, "空白视为未配置"));
+    }
+
+    // AEGIS：Gitee 候选不是「放宽下载白名单」。`allowed()` 对它的判定与对原地址
+    // 同一口径（前缀就是用户配的 `gitee_repo`）；没配时任何 gitee.com 地址都进不来，
+    // 别人的仓（插件仓）也不会因为配了 Dock 的 Gitee 就被放行。
+    #[test]
+    fn the_gitee_candidate_stays_inside_the_same_allowance() {
+        let _urls = production_urls();
+        let asset = "https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4/FISH-Dock-Update-2.0.4.exe";
+        let gitee_asset = "https://gitee.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4/FISH-Dock-Update-2.0.4.exe";
+        let plugin_asset = "https://gitee.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.2.0/feishu.fish-plugin";
+        // t10 F1(b)：环境自己钉住——四个镜像键全清成「不存在」，所以候选表只可能是
+        // ［原地址］或［原地址, Gitee 附件］，不会因为同模块别处设了 GH_PROXY 而多出
+        // 「Release 加速」一条（那正是并行跑时这条用例随机红的原因）。
+        with_gitee(None, || {
+            with_empty_mirrors(|| {
+                // 先钉候选表，再谈白名单：候选表错了，后面的 allowed() 断言没有意义。
+                let got = crate::sources::candidates(asset);
+                assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "默认（四个镜像键全空）只有原地址：{got:?}");
+                assert_eq!(got[0].url, asset);
+                for pick in &got {
+                    assert!(allowed(&pick.url), "默认候选 {} 越界了", pick.url);
+                }
+                assert!(allowed(asset), "GitHub 官方发行地址本来就在放行范围内");
+                assert!(!allowed(gitee_asset), "没配 Gitee 时 gitee.com 地址不许被放行");
+                assert!(!allowed(plugin_asset));
+            });
+        });
+        with_gitee(Some(GITEE_REPO), || {
+            with_empty_mirrors(|| {
+                // 同上：先断言候选表＝［原地址, Gitee 附件］，再逐条断言 allowed()。
+                let got = crate::sources::candidates(asset);
+                assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"], "{got:?}");
+                assert_eq!(got[1].url, gitee_asset);
+                for pick in &got {
+                    assert!(allowed(&pick.url), "候选 {} 不在放行范围内（等于偷偷放宽了白名单）", pick.url);
+                }
+                // 插件仓不是同一个 repo：既不进候选，也不进白名单（插件三源不受污染）。
+                let plugin = crate::sources::candidates("https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.2.0/feishu.fish-plugin");
+                assert_eq!(plugin.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "{plugin:?}");
+                assert!(!allowed(plugin_asset));
+            });
+        });
+    }
+
+    // 白名单的边界：配一个仓不等于放行**同名前缀的别的仓**。实测矩阵 §4.2 撞到的
+    // 就是这个——`config::gitee_repo()` 去掉尾部 `/` 之后，`…/FISH-Dock` 是
+    // `…/FISH-DOCK-Plugins` 的前缀，纯前缀比较会把插件仓一起放行。`in_repo` 改成
+    // 「前缀 + 边界」，只收窄不放宽。
+    #[test]
+    fn the_allowance_stops_at_the_repository_boundary() {
+        let _urls = production_urls();
+        with_gitee(Some(GITEE_REPO), || {
+            for ok in [
+                "https://gitee.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4",
+                "https://gitee.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4/FISH-Dock-Setup-2.0.4.exe",
+                "https://gitee.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4/FISH-Dock-Setup-2.0.4.exe.sha256",
+                "https://gitee.com/fish-under-sea/fish-dock/releases/download/v2.0.4/x.exe",
+                "https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4/FISH-Dock-Update-2.0.4.exe",
+            ] {
+                assert!(allowed(ok), "{ok} 该放行");
+            }
+            for bad in [
+                // 同名前缀的别的仓：Gitee 侧与 GitHub 侧都不放行。
+                "https://gitee.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.2.0/feishu.fish-plugin",
+                "https://gitee.com/Fish-under-sea/FISH-Dock-Plugins/releases/tag/v2.2.0",
+                "https://gitee.com/Fish-under-sea/FISH-DockX/releases/download/v1/x.exe",
+                "https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.2.0/feishu.fish-plugin",
+                // 仓库地址到此为止（没有边界）：既有口径就是不放行。
+                "https://gitee.com/Fish-under-sea/FISH-Dock",
+                "https://github.com/Fish-under-sea/FISH-Dock",
+                // 主机名伪装与别的账号。
+                "https://gitee.com.evil.example/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4",
+                "https://gitee.com/someone-else/FISH-Dock/releases/tag/v2.0.4",
+                "https://gitee.com/zhoupengjie/Wakuwaku/releases/tag/v0.3.4",
+            ] {
+                assert!(!allowed(bad), "{bad} 不该放行");
+            }
+        });
+        // 没配 Gitee 时，Gitee 侧一条都不放行（默认不启用）。
+        with_gitee(None, || {
+            for bad in ["https://gitee.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4", "https://gitee.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.2.0/feishu.fish-plugin"] {
+                assert!(!allowed(bad), "{bad} 不该放行");
+            }
+        });
+    }
+
+    // 装的时候：`install_installer` 用 `installer_names` 拼地址（不是 `exe_name`
+    // 那个历史名），所以 Gitee 附件候选也要按这两个名字生效——实测 GitHub v2.0.4
+    // 的资产正是这两个名字，`wakuwaku-v2.0.4-windows-x64.exe` 在发行里 404。
+    #[test]
+    fn both_installer_names_get_the_gitee_candidate() {
+        let _urls = production_urls();
+        with_gitee(Some(GITEE_REPO), || {
+            // t10 F1(b)：先钉候选表再断言下标——环境里若残留 GH_PROXY，`got[1]` 会是
+            // 「Release 加速」而不是「Gitee 附件」，这条用例就会随机红。
+            with_empty_mirrors(|| {
+                for name in installer_names("2.0.4") {
+                    let url = super::asset_url(crate::config::update_repo().trim_end_matches('/'), "2.0.4", &name);
+                    let got = crate::sources::candidates(&url);
+                    assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"], "{name} → {got:?}");
+                    assert_eq!(got[0].url, url, "{name} 的第一条必须是原地址本身");
+                    assert_eq!(got[1].url, format!("{GITEE_REPO}/releases/download/v2.0.4/{name}"));
+                    assert!(allowed(&got[1].url), "{name} 的 Gitee 候选要在放行范围内");
+                    // 摘要文件同样能换源（`install_installer` 先取 `<url>.sha256` 才下载）。
+                    let sums = crate::sources::candidates(&format!("{url}.sha256"));
+                    assert_eq!(sums.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"], "{name}.sha256 → {sums:?}");
+                    assert_eq!(sums[1].url, format!("{GITEE_REPO}/releases/download/v2.0.4/{name}.sha256"));
+                }
+            });
+        });
+    }
+
     // —— t38 O2：更新包下载的「候选 × 代理路 × 单总 deadline」编排（注入 fetch，无 Shared/无网络）——
-    static UPDATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    //
+    // 这里原来是**另一把**锁（`static UPDATE_ENV_LOCK: Mutex<()>`）。t10 F1 实测两把锁
+    // 互不相干会让下面这批「设 FISH_DOCK_GH_PROXY」的用例与上面 Gitee 那批「读当下
+    // GH_PROXY」的用例并行互踩：`candidates()` 多出「Release 加速」一条，候选表长度
+    // 与 `[1].url` 的断言当场就错，并行 `cargo test -- updates` 5 次里 3 次红。
+    // 现在它退役成共享锁的一个**别名**（同一把 `crate::sources::MIRROR_ENV_LOCK`），
+    // 下面既有调用点一行不用改，但「设镜像类环境变量」的用例之间必然串行。
+    static UPDATE_ENV_LOCK: &std::sync::Mutex<()> = &crate::sources::MIRROR_ENV_LOCK;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("fish-update-dl-{tag}-{}-{}", std::process::id(), crate::now_ms()));
@@ -2173,18 +2452,16 @@ mod tests {
         dir
     }
 
+    /// 临时改 `url.gh_proxy`；None ＝ 该键不存在。还原交给 [`GhProxyEnvGuard`]，
+    /// 断言 panic 也不会把 `https://gh.example` 留给同进程后面的用例（t10 F2 同类）。
+    /// 锁由调用方持（`UPDATE_ENV_LOCK`，即共享的那把），本函数不自取，避免自锁死。
     fn with_gh_proxy<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
-        let old = std::env::var_os("FISH_DOCK_GH_PROXY");
+        let _guard = GhProxyEnvGuard(std::env::var_os(GH_PROXY_ENV));
         match value {
-            Some(value) => std::env::set_var("FISH_DOCK_GH_PROXY", value),
-            None => std::env::remove_var("FISH_DOCK_GH_PROXY"),
+            Some(value) => std::env::set_var(GH_PROXY_ENV, value),
+            None => std::env::remove_var(GH_PROXY_ENV),
         }
-        let got = f();
-        match old {
-            Some(value) => std::env::set_var("FISH_DOCK_GH_PROXY", value),
-            None => std::env::remove_var("FISH_DOCK_GH_PROXY"),
-        }
-        got
+        f()
     }
 
     const RELEASE_URL: &str = "https://github.com/o/r/releases/download/v1/x.exe";

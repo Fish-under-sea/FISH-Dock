@@ -6,6 +6,19 @@
 //!
 //! - [`picks`] 只回答「这个地址有哪些镜像映射」，空 vec 表示没有镜像，**不是**
 //!   「不用下载」；[`candidates`] 才是一次下载真正要试的完整顺序（原地址在内）。
+//! - 「Gitee 附件」这一条映射（附加条目 A / S2）**只在 `url.gitee_repo` 配了、
+//!   且目标资产属于同一个项目**（GitHub 的 `owner/repo` 与配置的 Gitee 仓库同名）
+//!   时才产生：默认空配置下候选表逐条与 2.0.4 现状一致。插件仓是**另一个 repo**，
+//!   因此 `.fish-plugin` 永远不会被改指到 Dock 的 Gitee 仓——插件三源仍是
+//!   npm 官方 / npmmirror / GitHub Release（工作区 `AGENTS.md` §八硬约束）。
+//!   Gitee 侧目前只有 tags、没有发行版本（`releases` API 返回 `[]`，
+//!   `releases/download/<tag>/<file>` 实测 404），所以这条映射**配了也常落空**，
+//!   靠 [`candidates`] 的失败回落兜住；实测证据见
+//!   `app/docs/domestic-mirror-matrix-2026-11-04.md`。
+//! - 缺口如实标注，不伪造镜像：pet 图库（`codex-pets.net`，实测 DNS 污染级不可达）、
+//!   Windhawk、LHM 都**没有已确认的免费国内镜像**，它们只有原地址 + 系统代理这一路；
+//!   `url.pet_mirror` / `url.gh_proxy` 默认空就是空，不拿第三方站点冒充官方镜像，
+//!   也不为此放宽 CSP 或下载域名白名单（`secure_url` 的判据不变）。
 //! - 一次调用只有一个 [`Duration`] 总预算，跨全部候选与全部代理路共用，换源不
 //!   重置（方案 §7.3.2）；每次请求前都按剩余预算夹一次连接/响应预算。
 //! - 重定向手动跟（`max_redirects(0)`），逐跳要求标准 HTTPS，跳数取自
@@ -139,6 +152,50 @@ fn prefixed(prefix: &str, url: &str) -> String {
     format!("{}/{}", prefix.trim_end_matches('/'), url)
 }
 
+/// 配置里的 Gitee 仓库拆成 `(owner, repo)`：只认 `https://gitee.com/<owner>/<repo>`
+/// 这一形态（尾部斜杠可有）。拆不出来就是「没配好」＝不产生候选，不猜、不兜底。
+fn gitee_parts(configured: &str) -> Option<(&str, &str)> {
+    let rest = configured.strip_prefix("https://gitee.com/")?;
+    let mut parts = rest.trim_end_matches('/').splitn(3, '/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    // 第三段还有内容（子路径）就不是仓库根地址，不当配置用。
+    if parts.next().is_some() {
+        return None;
+    }
+    (!owner.is_empty() && !repo.is_empty()).then_some((owner, repo))
+}
+
+/// GitHub Release 资产 → **同一个项目**在 Gitee 上的同名附件（附加条目 A / S2）。
+///
+/// 只在 `url.gitee_repo` 配了、且 `owner/repo` 与它同名（大小写不敏感，Gitee 会
+/// 规范化仓名）时给出 `<gitee_repo>/releases/download/<tag>/<file>`；其余一律 None。
+/// 三条硬约束：
+///
+/// 1. **不改指别的项目**：插件仓（`FISH-DOCK-Plugins`）与 Dock 仓不是同一个 repo，
+///    所以插件包的三源不会多出 Gitee 这一路；
+/// 2. **不放宽地址判据**：产物仍是标准 HTTPS，`secure_url` / `updates::allowed`
+///    对它的判定与对原地址一致（前缀就是用户自己配的 `gitee_repo`）；
+/// 3. **不伪造摘要**：候选只是「多试一条地址」，字节仍由调用方按官方摘要核验
+///    （`updates.rs` 的 `digest` 比对、`plugin_store` 的 catalog `sha256`）。
+fn gitee_asset(url: &str) -> Option<String> {
+    let configured = crate::config::gitee_repo();
+    let (owner, repo) = gitee_parts(&configured)?;
+    let rest = url.strip_prefix("https://github.com/")?;
+    let mut parts = rest.splitn(4, '/');
+    let (got_owner, got_repo, releases, tail) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    if !got_owner.eq_ignore_ascii_case(owner) || !got_repo.eq_ignore_ascii_case(repo) || releases != "releases" {
+        return None;
+    }
+    let after = tail.strip_prefix("download/")?;
+    let (tag, file) = after.split_once('/')?;
+    // 只认 `<tag>/<file>` 这一层：嵌套路径不是 Release 资产的形状。
+    if tag.is_empty() || file.is_empty() || file.contains('/') {
+        return None;
+    }
+    Some(format!("{}/releases/download/{tag}/{file}", configured.trim_end_matches('/')))
+}
+
 /// 这个地址的镜像候选：**只含有明确映射的**，不含原地址（原地址在 [`candidates`]）。
 /// 空 vec 表示没有镜像映射——调用方仍必须走原地址。
 pub fn picks(url: &str) -> Vec<Pick> {
@@ -162,6 +219,11 @@ pub fn picks(url: &str) -> Vec<Pick> {
         if !prefix.is_empty() {
             out.push(Pick { label: "Release 加速", url: prefixed(&prefix, url) });
         }
+    }
+    // 附加条目 A / S2：Gitee 附件候选。**追加在最后**，既有候选的相对顺序不动；
+    // 未配置 `url.gitee_repo` 时 `gitee_asset` 恒为 None，默认候选表与现状逐条一致。
+    if let Some(gitee) = gitee_asset(url) {
+        out.push(Pick { label: "Gitee 附件", url: gitee });
     }
     if let Some(rest) = url.strip_prefix(crate::config::PET_SITE_DEFAULT) {
         let prefix = crate::config::pet_mirror();
@@ -520,25 +582,49 @@ where
     })
 }
 
+/// 镜像类配置（`FISH_DOCK_GITEE_REPO` / `FISH_DOCK_GH_PROXY` / `FISH_DOCK_MIRROR_PREFER` …）
+/// 的测试互斥锁。`sources` 与 `updates` 的用例都要临时改这些环境变量，跨模块共用
+/// 一把，避免并行跑时一个用例读到另一个用例设的值（附加条目 A / S2 的新用例）。
+#[cfg(test)]
+pub(crate) static MIRROR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: Mutex<()> = Mutex::new(());
-        LOCK.lock().unwrap_or_else(|p| p.into_inner())
+        MIRROR_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// 临时改一个环境变量，**panic 也要还原**（Drop 守卫）。
+    /// 早先的写法在闭包里断言失败时会把改过的值留在进程环境里，
+    /// 后面并行/串行跑到的用例就读到脏值（本批实测踩过：一个用例把
+    /// `FISH_DOCK_MIRROR_PREFER=domestic` 泄漏出去，连累另外四条用例失败）。
+    struct EnvGuard {
+        key: String,
+        old: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.old {
+                Some(value) => std::env::set_var(&self.key, value),
+                None => std::env::remove_var(&self.key),
+            }
+        }
     }
 
     fn with_env<T>(key: &str, value: &str, f: impl FnOnce() -> T) -> T {
-        let old = std::env::var_os(key);
+        let _guard = EnvGuard { key: key.to_string(), old: std::env::var_os(key) };
         std::env::set_var(key, value);
-        let got = f();
-        match old {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
-        }
-        got
+        f()
+    }
+
+    /// 与 [`with_env`] 相反：这一段时间里该键**不存在**（模拟「默认没配」）。
+    fn without_env<T>(key: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = EnvGuard { key: key.to_string(), old: std::env::var_os(key) };
+        std::env::remove_var(key);
+        f()
     }
 
     // 没有镜像映射就不许伪造镜像：picks 只回答「有明确映射的候选」。
@@ -717,5 +803,182 @@ mod tests {
         for bad in ["http://example.com/a", "https://user:pw@example.com/a", "https://example.com/a#frag", "not a url"] {
             assert!(secure_url(bad).is_err(), "{bad} 不该通过");
         }
+    }
+
+    // —— 附加条目 A / S2：Gitee 附件候选（配了才启用，且只映射同一个项目）——
+
+    /// Dock 自己的发行资产（`updates::installer_names` 的真实形状）。
+    const DOCK_ASSET: &str = "https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4/FISH-Dock-Setup-2.0.4.exe";
+    /// 配好之后期望的 Gitee 附件地址（`AGENTS.md` §八的双仓路径）。
+    const DOCK_GITEE: &str = "https://gitee.com/Fish-under-sea/FISH-Dock";
+    const DOCK_GITEE_ASSET: &str = "https://gitee.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4/FISH-Dock-Setup-2.0.4.exe";
+    /// 插件仓的资产：另一个 repo，永远不该被改指到 Dock 的 Gitee 仓。
+    const PLUGIN_ASSET: &str = "https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.2.0/feishu.fish-plugin";
+
+    // 「配了才启用」：默认（`url.gitee_repo` 空）一条 Gitee 候选都没有；配了就有，
+    // 且 auto/domestic/overseas 的排序语义与原地址兜底都不变。
+    #[test]
+    fn the_gitee_attachment_candidate_needs_the_repo_configured() {
+        let _g = env_lock();
+        without_env("FISH_DOCK_GITEE_REPO", || {
+            assert_eq!(crate::config::gitee_repo(), "", "默认没配 Gitee");
+            assert!(picks(DOCK_ASSET).is_empty(), "默认不许冒出 Gitee 候选：{:?}", picks(DOCK_ASSET));
+            assert_eq!(candidates(DOCK_ASSET).iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "默认只有原地址");
+        });
+        with_env("FISH_DOCK_GITEE_REPO", DOCK_GITEE, || {
+            // 显式钉住 auto：不依赖跑测试时的进程环境（别的用例曾泄漏过 domestic）。
+            with_env("FISH_DOCK_MIRROR_PREFER", "auto", || {
+                let got = picks(DOCK_ASSET);
+                assert_eq!(got.len(), 1, "{got:?}");
+                assert_eq!(got[0].label, "Gitee 附件");
+                assert_eq!(got[0].url, DOCK_GITEE_ASSET, "只换仓库前缀，tag 与文件名原样");
+                // auto：原地址优先、Gitee 兜底；domestic：Gitee 优先但原地址仍在（不是删掉回退）。
+                assert_eq!(candidates(DOCK_ASSET).iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"]);
+                let domestic = with_env("FISH_DOCK_MIRROR_PREFER", "domestic", || candidates(DOCK_ASSET));
+                assert_eq!(domestic.iter().map(|p| p.label).collect::<Vec<_>>(), ["Gitee 附件", "原地址"]);
+                let overseas = with_env("FISH_DOCK_MIRROR_PREFER", "overseas", || candidates(DOCK_ASSET));
+                assert_eq!(overseas.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"]);
+                // 候选地址本身仍要过 `secure_url`（不放宽地址判据）。
+                assert!(secure_url(DOCK_GITEE_ASSET).is_ok());
+            });
+        });
+    }
+
+    // 只映射同一个项目：插件仓、LHM、Windhawk、PawnIO 都是别的 repo，配了 Dock 的
+    // Gitee 也不许多出这一路（`AGENTS.md` §八：插件三源仍是 npm 官方 / npmmirror / GitHub）。
+    #[test]
+    fn the_gitee_candidate_never_repoints_another_project() {
+        let _g = env_lock();
+        with_env("FISH_DOCK_GITEE_REPO", DOCK_GITEE, || {
+            for other in [
+                PLUGIN_ASSET,
+                "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases/download/v0.9.6/LibreHardwareMonitor.zip",
+                "https://github.com/ramensoftware/windhawk/releases/download/v1.7.3/windhawk_setup_offline.exe",
+                "https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe",
+            ] {
+                assert!(picks(other).is_empty(), "{other} 不该被映射到 Dock 的 Gitee 仓：{:?}", picks(other));
+                assert_eq!(candidates(other).len(), 1, "{other} 仍只有原地址");
+            }
+            // 插件包的 npm 双源同理：Gitee 不参与（三源不变）。npm 地址本来就默认
+            // 映射到 npmmirror，所以这里断言的是「没有多出 Gitee 附件这一条」。
+            let npm = picks("https://registry.npmjs.org/@fish-under-sea/fish-dock-plugin-feishu/-/fish-dock-plugin-feishu-2.1.5.tgz");
+            assert!(!npm.iter().any(|p| p.label == "Gitee 附件"), "{npm:?}");
+            assert_eq!(npm.iter().map(|p| p.label).collect::<Vec<_>>(), ["npm 镜像"], "{npm:?}");
+        });
+    }
+
+    // 配置写坏＝没配：不猜、不兜底、不产生候选；仓名大小写与尾部斜杠按 Gitee 的规范化容忍。
+    #[test]
+    fn a_malformed_gitee_repo_yields_no_candidate() {
+        let _g = env_lock();
+        for bad in ["", "   ", "gitee.com/Fish-under-sea/FISH-Dock", "http://gitee.com/Fish-under-sea/FISH-Dock", "https://github.com/Fish-under-sea/FISH-Dock", "https://gitee.com/Fish-under-sea", "https://gitee.com/Fish-under-sea/FISH-Dock/extra", "https://gitee.com//FISH-Dock"] {
+            with_env("FISH_DOCK_GITEE_REPO", bad, || assert!(picks(DOCK_ASSET).is_empty(), "{bad:?} 不该产生候选：{:?}", picks(DOCK_ASSET)));
+        }
+        // 非 Release 资产的形状（tag 页、API、缺文件名、嵌套路径）也不映射。
+        for shape in ["https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4", "https://api.github.com/repos/Fish-under-sea/FISH-Dock/releases/latest", "https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4", "https://github.com/Fish-under-sea/FISH-Dock/releases/download/v2.0.4/a/b.exe"] {
+            with_env("FISH_DOCK_GITEE_REPO", DOCK_GITEE, || assert!(picks(shape).is_empty(), "{shape} 不该产生候选：{:?}", picks(shape)));
+        }
+        // Gitee 会规范化仓名（`AGENTS.md` §八），所以大小写不敏感、尾部斜杠可有。
+        for good in ["https://gitee.com/fish-under-sea/FISH-Dock", "https://gitee.com/Fish-under-sea/FISH-Dock/", "https://gitee.com/FISH-UNDER-SEA/fish-dock"] {
+            let got = with_env("FISH_DOCK_GITEE_REPO", good, || picks(DOCK_ASSET));
+            assert_eq!(got.len(), 1, "{good:?} → {got:?}");
+        }
+    }
+
+    // 默认状态（四个镜像键一个都没配）候选表逐条锁定：新增 Gitee 分支不许改动
+    // 任何一类资源的默认下载顺序（附加条目 A 的硬验收）。
+    #[test]
+    fn default_candidates_are_locked_without_any_mirror_key() {
+        let _g = env_lock();
+        without_env("FISH_DOCK_GITEE_REPO", || {
+            without_env("FISH_DOCK_GH_PROXY", || {
+                without_env("FISH_DOCK_RAW_MIRROR", || {
+                    without_env("FISH_DOCK_PET_MIRROR", || {
+                        without_env("FISH_DOCK_MIRROR_PREFER", || {
+                            assert_eq!(crate::config::mirror_prefer(), "auto", "择源偏好默认 auto");
+                            // 分两类锁：一类**没有任何镜像映射**（默认只有原地址，
+                            // 新增的 Gitee 分支不许给它凭空造候选）；一类有既有映射
+                            // （jsDelivr / npm 镜像，顺序与内容都按 2.0.4 现状）。
+                            let plain: &[&str] = &[
+                                "https://example.com/whatever.json",
+                                DOCK_ASSET,
+                                PLUGIN_ASSET,
+                                "https://codex-pets.net/api/pets",
+                                "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases/download/v0.9.6/LibreHardwareMonitor.zip",
+                                "https://github.com/ramensoftware/windhawk/releases/download/v1.7.3/windhawk_setup_offline.exe",
+                            ];
+                            let mirrored: &[(&str, &[&str])] = &[
+                                ("https://raw.githubusercontent.com/o/r/main/a/b.json", &["原地址", "jsDelivr"]),
+                                ("https://registry.npmjs.org/@scope/name", &["原地址", "npm 镜像"]),
+                            ];
+                            for url in plain {
+                                let got = candidates(url);
+                                assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "{url} 默认只该有原地址");
+                                assert_eq!(got[0].url, *url, "{url} 默认第一条必须是原地址本身");
+                            }
+                            for (url, labels) in mirrored {
+                                let got = candidates(url);
+                                assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), labels.to_vec(), "{url} 的默认候选被改动了");
+                                assert_eq!(got[0].url, *url, "{url} 默认第一条必须是原地址本身");
+                            }
+                            // domestic 只改顺序、不增不减：没有映射的仍只有原地址（自然回落）；
+                            // 有映射的镜像提前、原地址兜底（不是删掉回退）。
+                            with_env("FISH_DOCK_MIRROR_PREFER", "domestic", || {
+                                for url in plain {
+                                    assert_eq!(candidates(url).iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "domestic 下 {url} 多了或少了候选");
+                                }
+                                for (url, labels) in mirrored {
+                                    let got = candidates(url);
+                                    assert_eq!(got.len(), labels.len(), "domestic 下 {url} 候选条数变了：{got:?}");
+                                    assert_eq!(got.last().map(|p| p.label), Some("原地址"), "domestic 下 {url} 的原地址要兜底");
+                                    let mut sorted = got.iter().map(|p| p.label).collect::<Vec<_>>();
+                                    let mut want = labels.to_vec();
+                                    sorted.sort_unstable();
+                                    want.sort_unstable();
+                                    assert_eq!(sorted, want, "domestic 只许改顺序：{url}");
+                                }
+                            });
+                        })
+                    })
+                })
+            })
+        });
+    }
+
+    // Gitee 附件参与同一次 walk：原地址失败就换它，两个都失败则两条原因都在，
+    // 且共用一次 deadline（不因多了一个候选而各算一份预算）。
+    #[test]
+    fn the_gitee_attachment_takes_part_in_the_same_walk() {
+        let _g = env_lock();
+        with_env("FISH_DOCK_GITEE_REPO", DOCK_GITEE, || {
+            // 显式钉住 auto：候选顺序不依赖跑测试时的进程环境。
+            with_env("FISH_DOCK_MIRROR_PREFER", "auto", || {
+                let began = Instant::now();
+                let fail = fetch_bytes_with(DOCK_ASSET, Duration::from_millis(120), 32, |_, _| {
+                    std::thread::sleep(Duration::from_millis(90));
+                    Err("连接或响应超时".to_string())
+                })
+                .err()
+                .unwrap();
+                assert_eq!(fail.tried.len(), 2, "{:?}", fail.tried);
+                assert!(fail.timeout, "两个候选共用一次 deadline：整体必然标超时");
+                assert!(began.elapsed() < Duration::from_millis(240), "总时长受一次预算约束：{:?}", began.elapsed());
+                let reason = fail.reason();
+                assert!(reason.contains("原地址") && reason.contains("Gitee 附件"), "两边原因都要留下：{reason}");
+                // 第一条失败第二条成功：Gitee 附件接手（Gitee 侧 404 时正是这条回落救场）。
+                let mut seen = Vec::new();
+                let got = fetch_bytes_with(DOCK_ASSET, Duration::from_secs(5), 32, |url, _| {
+                    seen.push(url.to_string());
+                    if url.starts_with("https://github.com/") {
+                        Err("HTTP 404（不存在）".to_string())
+                    } else {
+                        Ok(vec![9, 9])
+                    }
+                })
+                .unwrap();
+                assert_eq!(got, vec![9, 9]);
+                assert_eq!(seen, vec![DOCK_ASSET.to_string(), DOCK_GITEE_ASSET.to_string()], "顺序：原地址 → Gitee 附件");
+            });
+        });
     }
 }
