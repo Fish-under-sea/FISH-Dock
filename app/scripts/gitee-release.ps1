@@ -52,9 +52,12 @@ if ($token -and -not $DryRun) {
 
 # GitHub's release: its title, its notes, its exe's SHA-256.
 $gh = Invoke-RestMethod -Headers ($headers + @{ Accept = 'application/vnd.github+json' }) "https://api.github.com/repos/$Owner/$Repo/releases/tags/$tag"
-$asset = $gh.assets | Where-Object name -EQ $name
-if (-not $asset) { throw "GitHub's $tag has no $name" }
-$digest = "$($asset.digest)" -replace '^sha256:', ''
+# 不能叫 $asset：它与参数 $Asset 是同一个变量（PowerShell 变量不区分大小写），
+# 而 [string]$Asset 声明了类型，赋值对象会被强制转成字符串 → $asset.digest 恒为空。
+# 2.1.0 首发踩到：GitHub 明明返回 sha256:…，脚本却报 "GitHub gives no SHA-256"。
+$ghAsset = $gh.assets | Where-Object name -EQ $name
+if (-not $ghAsset) { throw "GitHub's $tag has no $name" }
+$digest = "$($ghAsset.digest)" -replace '^sha256:', ''
 if ($digest -notmatch '^[0-9a-fA-F]{64}$') { throw "GitHub gives no SHA-256 for $name" }
 $digest = $digest.ToLowerInvariant()
 
@@ -63,7 +66,7 @@ $work = Join-Path ([IO.Path]::GetTempPath()) "fish-dock-gitee-$Version"
 New-Item -ItemType Directory -Force $work | Out-Null
 $file = Join-Path $work $name
 if ($Exe) { Copy-Item -LiteralPath $Exe $file -Force }
-else { Invoke-WebRequest -Headers $headers $asset.browser_download_url -OutFile $file }
+else { Invoke-WebRequest -Headers $headers $ghAsset.browser_download_url -OutFile $file }
 if ((Sha256 $file) -ne $digest) { throw "$name is not the one GitHub gives (SHA-256 $digest)" }
 $sums = "$file.sha256"
 [IO.File]::WriteAllText($sums, "$digest  $name`n", [Text.UTF8Encoding]::new($false))
