@@ -80,7 +80,7 @@
     const want = String(entry.sha256 || '').toLowerCase(), have = String(plugin.digest || '').toLowerCase()
     return !!want && !!have && want !== have
   }
-  function create({ invoke, confirm, lang, redraw, openPage = () => {}, syncAuthFocus = async () => {}, deviceDialog = () => {} }) {
+  function create({ invoke, confirm, lang, redraw, openPage = () => {}, syncAuthFocus = async () => {}, deviceDialog = () => {}, lockScroll = () => {}, unlockScroll = () => {} }) {
     let view = null, catalog = null, cached = false, storeError = '', error = '', busy = '', loaded = false, active = 'installed', node = '', checked = false
     // T11：三个视图是真 tablist（role=tablist/tab）。roving tabindex 由 render 按 active
     // 算出来；键盘换视图之后 redraw() 会把整棵 DOM 换掉，所以记下该还给哪个 tab，
@@ -98,6 +98,9 @@
     // progressItems() 已经会合成卸载进度卡 —— 所以再加一道 actionStarted 闸。
     let actionStarted = false
     const progressSeen = new Map()
+    // #69 S3：进度弹窗（aria-modal）是第二类浮层，出现即锁底层滚动、消失即解锁。
+    // render() 会被高频调用，所以这里记上一次的锁状态，只在边沿上加减引用计数。
+    let overlayLocked = false
     let fxRaf = 0
     const fxParticles = new Map()
     let hits = [], thirdQuery = '', thirdNote = '', thirdSearched = false
@@ -118,26 +121,63 @@
       try { const obj = JSON.parse(trimmed); return obj && obj.fishFailure ? obj : null } catch { return null }
     }
     const failureOf = e => parseFailure(e) || fail(e)
-    const stageText = stage => ({ download: text('下载失败', 'Download failed'), verify: text('校验失败', 'Verification failed'), uninstall: text('卸载失败', 'Uninstall failed') })[stage] || text('操作失败', 'Operation failed')
-    const defaultHint = stage => ({ download: text('检查网络或代理后重试。', 'Check your network or proxy, then retry.'), verify: text('包可能损坏，请重试。', 'The package may be damaged; please retry.'), uninstall: text('请稍后重试。', 'Please retry later.') })[stage] || text('请稍后重试。', 'Please retry later.')
+    const stageText = stage => ({ download: text('下载失败', 'Download failed'), verify: text('校验失败', 'Verification failed'), uninstall: text('卸载失败', 'Uninstall failed'), catalog: text('目录里的版本暂不可用', 'Catalog version unavailable') })[stage] || text('操作失败', 'Operation failed')
+    // #68 S4：`catalog` 这一档说的是「目录抢跑、制品还没发布」，与网络无关 —— 默认
+    // 文案必须明说「不用改网络/代理」，否则用户还是去查代理（正是这个 issue 的原始症状）。
+    const defaultHint = stage => ({ download: text('检查网络或代理后重试。', 'Check your network or proxy, then retry.'), verify: text('包可能损坏，请重试。', 'The package may be damaged; please retry.'), uninstall: text('请稍后重试。', 'Please retry later.'), catalog: text('目录里的新版还没发布资源，已自动回退到上一可用版本；不用改网络或代理。', 'The catalog lists a version whose files are not published yet; Dock fell back to the last working version. No network or proxy change is needed.') })[stage] || text('请稍后重试。', 'Please retry later.')
     const countText = n => n === 3 ? text('三个来源都没成功', 'All three sources failed') : text(`${n} 个来源都没成功`, `${n} sources failed`)
-    // 失败块：一句人话 + 可展开详情（逐源一行，详情在 title / 再展开里），最高 40vh 滚动。
+    // #68 的 fishFailure 同时给两个维度：`stage` 是**阶段**（下载/校验/卸载），`kind` 是
+    // **归类**（t7 F2：后端在三源全 404 时写 kind:"catalog" 而 stage 仍是 "download"）。
+    // 归类比阶段更具体时才用归类做标题：catalog＝目录抢跑、mismatch＝包与目录对不上；
+    // 其余（含老宿主没有 kind）仍按阶段，标题文案与 2.0.4 逐条一致。
+    const kindText = kind => ({ catalog: text('目录里的版本暂不可用', 'Catalog version unavailable'), mismatch: text('包与目录对不上', 'Package does not match the catalog') })[kind]
+    const failureTitle = (kind, stage) => kindText(kind) || stageText(stage)
+    // #68 S3（t7 F2）：回退装成的「成功 + 提醒」。宿主 InstallNotice 给 fellBack=true、
+    // version（实际装上的那版）、catalogLatest（目录里的最新版）。catalogLatest 缺失时
+    // 退回宿主给的 reason（plugin_install.rs 写「目录最新 X 暂不可用」）——两处都不编造
+    // 版本号；用 .note.ok（settings.css 既有的绿色成功字色）+ role=status，不套 .bad/alert。
+    const fellBackNotice = notice => {
+      const installed = String(notice.version ?? '')
+      const latest = typeof notice.catalogLatest === 'string' && notice.catalogLatest ? notice.catalogLatest : ''
+      const line = latest
+        ? text(`已安装 v${installed}；目录最新 ${latest} 暂不可用`, `Installed v${installed}; the catalog’s ${latest} is not available yet`)
+        : text(`已安装 v${installed}；${notice.reason || '目录里的新版暂不可用'}`, `Installed v${installed}; ${notice.reason || 'the catalog’s newest version is not available yet'}`)
+      return `<p class="note ok extension-card-notice" role="status" data-notice="fellback">${esc(line)}${notice.hint ? `<br><span class="note">${esc(notice.hint)}</span>` : ''}</p>`
+    }
+    // 失败块：一句人话 + 可展开详情（逐源一行），最高 40vh 滚动。
+    // #68 S4：逐源那行从「来源 · 结论」扩成「来源 · 结论 · HTTP 状态码 · 阶段 · URL」——
+    // 宿主的 SourceFailure 现在带 url / httpStatus / phase，用户才看得见「到底是哪个地址的
+    // 哪一步坏了」。原始技术串进整行 title；字段缺了就少那一段（老宿主/老记录照旧能读），
+    // 不写「未知」，也不占位。
     const failureHtml = f => {
       if (!f) return ''
       if (typeof f === 'string') return `<p class="bad" role="alert">${esc(f)}</p>`
       const stage = f.stage || 'other'
-      const sentence = f.hint || f.message || defaultHint(stage)
+      // t7 F2：标题按 kind 映射（catalog / mismatch），stage 仅作回退——后端在
+      // 「三源全 404」时 stage 仍写 download，只读 stage 会让 catalog 标题永远不可达。
+      const kind = typeof f.kind === 'string' ? f.kind : ''
+      // 目录类失败给的是目录（不是网络）的说法：宿主没给 hint 时也别退回「检查代理」。
+      const sentence = f.hint || f.message || defaultHint(kind === 'catalog' ? 'catalog' : stage)
       const sources = Array.isArray(f.sources) ? f.sources : []
       const detail = f.detail || ''
-      const head = `<p class="extension-failure-main" role="alert"><strong>${esc(stageText(stage))}</strong>${esc(sentence)}</p>`
+      const head = `<p class="extension-failure-main" role="alert"><strong>${esc(failureTitle(kind, stage))}</strong>${esc(sentence)}</p>`
       let more = ''
       if (sources.length) {
-        const rows = sources.map(s => `<li><span class="extension-failure-origin">${esc(s.origin || '')}</span> · <span class="extension-failure-short">${esc(s.short || '')}</span>${s.error ? `<span class="extension-failure-raw" title="${esc(s.error)}"></span>` : ''}</li>`).join('')
+        const rows = sources.map(s => {
+          // httpStatus 可能是 null（探活没走到 HTTP 那一步）——null 与 '' 都不渲染。
+          const status = s.httpStatus == null || s.httpStatus === '' ? '' : `HTTP ${s.httpStatus}`
+          const phase = typeof s.phase === 'string' && s.phase ? s.phase : ''
+          const url = typeof s.url === 'string' ? s.url : ''
+          const copy = text('点击复制下载地址', 'Click to copy this URL')
+          // 原始技术串放在行内那层 span 的 title 上（不是隐藏元素）：悬停整行就能看到
+          // 「插件下载跳转不属于官方发行资源服务」这类原始串，而正文仍只有一句人话。
+          return `<li><span class="extension-failure-line"${s.error ? ` title="${esc(s.error)}"` : ''}><span class="extension-failure-origin">${esc(s.origin || '')}</span> · <span class="extension-failure-short">${esc(s.short || '')}</span>${status ? `<span class="extension-failure-status">${esc(status)}</span>` : ''}${phase ? `<span class="extension-failure-phase">${esc(text('阶段：', 'Phase: '))}${esc(phase)}</span>` : ''}${url ? `<button type="button" class="extension-failure-url mono" data-extension-copy-url="${esc(url)}" title="${esc(copy + '：' + url)}">${esc(url)}</button>` : ''}</span></li>`
+        }).join('')
         more = `<details class="extension-failure-more"><summary><span class="extension-failure-count">${esc(countText(sources.length))}</span><span class="extension-failure-toggle">${esc(text('详情', 'Details'))}</span></summary><ul class="extension-failure-sources">${rows}</ul></details>`
       } else if (detail) {
         more = `<details class="extension-failure-more"><summary><span class="extension-failure-count">${esc(text('技术细节', 'Technical details'))}</span><span class="extension-failure-toggle">${esc(text('详情', 'Details'))}</span></summary><p class="extension-failure-detail">${esc(detail)}</p></details>`
       }
-      return `<div class="extension-failure" role="group" data-stage="${esc(stage)}">${head}${more}</div>`
+      return `<div class="extension-failure" role="group" data-stage="${esc(stage)}"${kind ? ` data-kind="${esc(kind)}"` : ''}>${head}${more}</div>`
     }
     const unlocked = id => !official(id) || (view?.star?.authenticated === true && view?.star?.verified === true)
     let authTimer, deviceCodeCopied = false, authGeneration = 0, authRetryAt = 0, authNotice = '', maintenancePaused = false
@@ -497,12 +537,19 @@
         // 所以它既不能启用也不能卸载，只能重试安装。不显示就等于「装完了，列表里
         // 什么都没有」，连一句话都没有。
         const pending = r.plugin.pending === true
-        // 两种提示别混：notice.cleanup=true 是「这一版装上了，只是旧文件没清干净」
-        // （#t8 的清理警告），写成「安装未完成」就是骗人；其余才是安装真的没走完。
+        // 三种提示别混（#68 S3 / t7 F2）：
+        //   notice.fellBack=true  → **装成功了**，只是照来源回退到上一可用版本
+        //     （plugin_install.rs:372-376 明写 cleanup=false、fellBack=true）。这是
+        //     「成功 + 提醒」：绿色 .note.ok + role=status，文案「已安装 X；目录最新 Y
+        //     暂不可用」，绝不能套红色「安装未完成」——那会让 #68 的自动回退看起来像失败。
+        //   notice.cleanup=true   → 这一版装上了，只是旧文件没清干净（#t8 的清理警告）。
+        //   其余                   → 安装真的没走完（红 + role=alert）。
         const notice = r.notice
-          ? (r.notice.cleanup
-            ? `<p class="note" role="status">${esc(text(`v${r.notice.version} 已安装，但旧版本文件没清干净：${r.notice.reason}`, `v${r.notice.version} is installed, but old files were not fully removed: ${r.notice.reason}`))}</p>`
-            : `<p class="extension-card-error bad" role="alert">${esc(text(`安装 v${r.notice.version} 未完成：${r.notice.reason}`, `Installing v${r.notice.version} did not finish: ${r.notice.reason}`))}${r.notice.hint ? `<br><span class="note">${esc(r.notice.hint)}</span>` : ''}</p>`)
+          ? (r.notice.fellBack
+            ? fellBackNotice(r.notice)
+            : r.notice.cleanup
+              ? `<p class="note" role="status">${esc(text(`v${r.notice.version} 已安装，但旧版本文件没清干净：${r.notice.reason}`, `v${r.notice.version} is installed, but old files were not fully removed: ${r.notice.reason}`))}</p>`
+              : `<p class="extension-card-error bad" role="alert">${esc(text(`安装 v${r.notice.version} 未完成：${r.notice.reason}`, `Installing v${r.notice.version} did not finish: ${r.notice.reason}`))}${r.notice.hint ? `<br><span class="note">${esc(r.notice.hint)}</span>` : ''}</p>`)
           : ''
         // 这一版是从哪条源装上的（plugin_store.rs: FetchRecord）：npm 官方源 →
         // npm 镜像 → GitHub 发行包，带耗时。用户要求 UI 上能看到当前用的是哪条源；
@@ -517,10 +564,15 @@
           ? text('安装来源：', 'Installed from: ') + originName + ' ' + (Number(fetched.elapsedMs || 0) / 1000).toFixed(1) + 's'
           : ''
         const metaLine = (directory, source) => `<p class="extension-card-meta"><span class="extension-location mono">${esc(directory)}</span>${source ? `<span class="extension-source" role="status">${esc(source)}</span>` : ''}</p>`
+        // #69 S1：路径与功能页入口合成**同一行**（.extension-card-foot：左路径右入口，
+        // 两侧 min-width:0，路径单行省略、点一下即复制）。原来 metaLine 独占一行、
+        // .extension-pages 又独占一行 —— 那两行就是 issue 量到 210px 的一大半。
+        // 没有功能页（或未解锁）时这一格为空，foot 只有路径那一行，不留空壳。
+        const foot = (directory, source, entryRow) => `<div class="extension-card-foot">${metaLine(directory, source)}${entryRow}</div>`
         if (pending) {
           const retry = unlocked(m.id) ? button('install', m.id, text('重试安装', 'Retry install'), 'al') : `<span class="note">${esc(text('登录并验证 Star 后解锁', 'Sign in and verify your star to unlock'))}</span>`
           const waiting = `<span class="extension-signal" data-signal="waiting"><span class="extension-led" aria-hidden="true"></span><span class="extension-state">${esc(text('安装未完成', 'Install did not finish'))}</span><span class="extension-version">${esc('v' + m.version)}</span></span>`
-          return `<article class="extension-card"><header class="extension-card-header"><div class="extension-card-title"><strong>${esc(m.name)}</strong>${waiting}</div><div class="extension-card-actions">${retry}</div></header>${metaLine(m.storage.directory, sourceText)}${r.error ? `<p class="extension-card-error bad" role="alert">${esc(r.error)}</p>` : ''}${notice}</article>`
+          return `<article class="extension-card" data-kind="installed"><header class="extension-card-header"><div class="extension-card-title"><strong>${esc(m.name)}</strong>${waiting}</div><div class="extension-card-actions">${retry}</div></header>${foot(m.storage.directory, sourceText, '')}${r.error ? `<p class="extension-card-error bad" role="alert">${esc(r.error)}</p>` : ''}${notice}</article>`
         }
         // 「未响应」是这一轮探针没应答，不是失败（T01）：插件进程还在，下一轮
         // 重绘自己会好，所以不覆盖 r.running，也不冒充「启动失败」。
@@ -564,7 +616,8 @@
         // T11：它不再是长得像标签的小胶囊——32px 高、自带 ›、悬停抬底色、聚焦描边，
         // 自成一行的「打开这一页」入口。
         const pages = unlocked(m.id) ? m.pages.map(p => `<button type="button" class="extension-page-entry" data-extension-page="${esc(m.id + '/' + p.id)}"${disabled}${r.running ? '' : ` title="${esc(text('插件未运行：打开后会显示错误态与「启动」按钮', 'Extension not running: open it to see the error state and Start'))}"`}><span class="extension-page-title">${esc(p.title)}</span><span class="extension-page-go" aria-hidden="true">›</span></button>`).join('') : `<span class="note">${esc(text('主仓 Star 验证后解锁功能页', 'Verify your repository star to unlock pages'))}</span>`
-        return `<article class="extension-card"><header class="extension-card-header"><div class="extension-card-title"><strong>${esc(m.name)}</strong>${signalHtml}</div><div class="extension-card-actions">${actions}</div></header>${metaLine(m.storage.directory, sourceText)}${r.error ? `<p class="extension-card-error bad" role="alert">${esc(r.error)}</p>` : ''}${notice}${m.pages.length ? `<div class="extension-pages" role="group" aria-label="${esc(text('功能页', 'Pages'))}">${pages}</div>` : ''}</article>`
+        const entryRow = m.pages.length ? `<div class="extension-pages" role="group" aria-label="${esc(text('功能页', 'Pages'))}">${pages}</div>` : ''
+        return `<article class="extension-card" data-kind="installed"><header class="extension-card-header"><div class="extension-card-title"><strong>${esc(m.name)}</strong>${signalHtml}</div><div class="extension-card-actions">${actions}</div></header>${foot(m.storage.directory, sourceText, entryRow)}${r.error ? `<p class="extension-card-error bad" role="alert">${esc(r.error)}</p>` : ''}${notice}</article>`
       }).join('')
       const storeCards = entries.map(p => {
         const existing = installed.find(r => r.plugin.manifest.id === p.id && r.plugin.pending !== true), update = existing && outdated(p, existing.plugin)
@@ -623,8 +676,36 @@
         return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div></div><div class="detail">${p.local === 'out' ? `${pct == null ? 0 : pct}%` : `${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}`}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
       }
       const items = progressItems()
+      // #69 S3：模态进度浮层的开关是边沿事件，不是每帧事件（render 一轮里会被调很多次）。
+      // lockScroll/unlockScroll 由 settings.js 传进来（引用计数、记 scrollTop），默认空实现，
+      // 单测里 create() 不传也不会炸。
+      const overlay = items.length > 0
+      if (overlay !== overlayLocked) {
+        overlayLocked = overlay
+        if (overlay) lockScroll()
+        else unlockScroll()
+      }
       const progressHTML = items.length ? `<div class="ext-progress-backdrop" role="dialog" aria-modal="true" aria-label="${esc(text('插件下载进度', 'Extension download progress'))}">${items.map(progressCard).join('')}</div>` : ''
       return `<section class="extension-panel" aria-labelledby="extension-heading" aria-busy="${!!busy}"><h3 id="extension-heading">${esc(text('可安装扩展', 'Installable extensions'))}</h3>${starNotice}<div class="extension-viewbar"><div class="extension-views" role="tablist" aria-label="${esc(text('扩展视图', 'Extension views'))}">${VIEWS.map(view => `<button type="button" role="tab" class="extension-view" id="extension-tab-${view}" aria-controls="extension-view-panel" aria-selected="${active === view}" tabindex="${active === view ? 0 : -1}" data-extension-view="${view}"${disabled}>${esc({ installed: text('已安装', 'Installed'), store: text('官方插件', 'Official plugins'), thirdparty: text('第三方插件', 'Third-party plugins') }[view])}</button>`).join('')}</div><button type="button" class="pbtn sm extension-check" data-extension-refresh${disabled}>${esc(text('检查更新', 'Check for updates'))}</button></div>${result}${storeError ? `<p class="bad" role="alert">${esc(storeError)}</p>` : ''}<div class="extension-list" id="extension-view-panel" role="tabpanel" aria-labelledby="extension-tab-${active}">${active === 'thirdparty' ? thirdPanel : active === 'installed' ? cards || `<p class="note">${esc(text('尚未安装扩展。可从官方商店按需选择，现有小工具仍在下方。', 'No extensions installed. Choose from the official store. Existing widgets remain below.'))}</p>` : `${cached ? `<p role="status">${esc(text('当前使用缓存目录', 'Using cached catalog'))}</p>` : ''}${storeCards || `<p class="note">${esc(busy === 'store' ? text('正在读取官方目录…', 'Loading official catalog…') : text('暂无可用目录，请检查更新重试。', 'No catalog available. Check for updates to retry.'))}</p>`}${!entries.length && cards ? `<h4>${esc(text('已安装扩展', 'Installed extensions'))}</h4>${cards}` : ''}`}</div><details><summary>${esc(text('运行依赖', 'Runtime dependencies'))}</summary>${runtimeStatus}<label for="extension-node">${esc(text('Node 可执行文件路径', 'Node executable path'))}</label><input id="extension-node" class="extension-node" type="text" value="${esc(node)}" spellcheck="false"${disabled}><button type="button" class="pbtn" data-extension-runtime${disabled}>${esc(text('保存依赖路径', 'Save runtime path'))}</button><p class="note">${esc(text('Node 插件使用已校验的宿主 Node。开发环境可指定完整路径；留空恢复宿主运行资源。', 'Extensions use the verified host Node. Development builds can specify a full path. Leave empty to restore the host runtime.'))}</p></details>${progressHTML}${busy && !progressHTML ? `<p role="status">${esc(text('正在执行，请稍候…', 'Working, please wait…'))}</p>` : ''}${failureHtml(error)}</section>`
+    }
+    // #69：复制位（目录路径、失败块的下载地址）。失败只返回 false，不弹提示——
+    // 剪贴板被拒是环境问题，不该把插件卡变成错误现场。
+    const copyText = async value => {
+      try { await window.navigator.clipboard.writeText(String(value ?? '')); return true } catch { return false }
+    }
+    // 不是 <button> 的元素（.extension-location 是 <p> 里的小字）要能点、能聚焦、能按回车：
+    // 这里补 role/tabindex/title 与键盘通路。换视图重绘后 mount 会再绑一次。
+    const bindCopy = (el, value, hint) => {
+      const target = String(value ?? el.textContent ?? '')
+      el.setAttribute('role', 'button')
+      el.tabIndex = 0
+      el.title = hint
+      el.onclick = () => { void copyText(target) }
+      el.onkeydown = event => {
+        if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
+        event.preventDefault()
+        void copyText(target)
+      }
     }
     function mount(root) {
       const panel = root.querySelector('.extension-panel'); if (!panel) return
@@ -689,17 +770,28 @@
         else if (what === 'retry') void retryThird()
         else void installThird(b.dataset.third)
       } })
+      // #69 S1：目录路径点一下即复制（12px 次级色的小字，行为上是个复制位）。
+      // #68 S4：失败块里逐源的 URL 本来就是按钮，直接绑。
+      panel.querySelectorAll('.extension-card-meta .extension-location').forEach(el => bindCopy(el, el.textContent, text('点击复制目录路径', 'Click to copy the directory path')))
+      panel.querySelectorAll('[data-extension-copy-url]').forEach(b => { b.onclick = () => { void copyText(b.dataset.extensionCopyUrl) } })
       // t44：挂载时若进度弹窗已经在（例如切回本页），重新点燃粒子循环；轮询也会再点。
       // 2026-11-01 用户要求：去掉粒子动效，只保留最基本的进度条（不再启动 rAF）
       void load()
     }
     const closeAuth = () => { maintenancePaused = true; ++authGeneration; clearTimeout(authTimer); stopFx(); return view?.star?.pending ? auth('cancel') : Promise.resolve() }
+    // #69 S3：设置面板关掉时由 settings.js 调一次，把进度浮层拿走的那把滚动锁还回去
+    // （关掉之后 draw() 不再跑，render 也就没机会走「overlay 变空 → 解锁」那条边沿）。
+    const releaseScroll = () => {
+      if (!overlayLocked) return
+      overlayLocked = false
+      unlockScroll()
+    }
     // 标签页与运行态解耦（#14-7 / T05）：以前的过滤条件是 `r.running`，插件进程一退出
     // 标签页就跟着消失——Dock 重开设置面板时忽隐忽现的正是这么来的。现在只看「已安装
     // + 已启用 + 已解锁」；没运行也留着标签页，由页面自己显示错误态与「启动」按钮。
     // running/error 一起带出去，页面才知道该不该走「未运行」那条路。
     const pages = () => (view?.installed || []).filter(r => r.plugin.pending !== true && r.plugin.enabled !== false && Array.isArray(r.plugin.manifest.pages) && unlocked(r.plugin.manifest.id)).flatMap(r => r.plugin.manifest.pages.map(p => ({ ...p, plugin: r.plugin.manifest.id, digest: r.plugin.digest, running: !!r.running, error: r.error || '', key: r.plugin.manifest.id + '/' + p.id })))
-    return { render, mount, load, store, action, runtime, auth, thirdparty, retryThird, installThird, closeAuth, pages }
+    return { render, mount, load, store, action, runtime, auth, thirdparty, retryThird, installThird, closeAuth, releaseScroll, pages }
   }
   window.ExtensionPanel = { create, formatBytes, mergeProgress, particleFlight, PHASE_WORDS, FLIGHT_WINDOW }
 })()

@@ -2,7 +2,70 @@
    层级顺序是「谁在跑 → 要不要动 → 动哪个」：左边名字 + 一盏 LED 的合并状态行
    （v2.1.2 → v2.1.3 写在同一条里），右边唯一实心主操作（更新），启停/自启动是
    描边次级，卸载与打开日志收进「更多」，最底一行小字是服务标签（路径 + 安装来源）。
-   颜色一律走 settings.css 的主题变量：不新增色系，红色只留给悬停/聚焦时的卸载。 */
+   颜色一律走 settings.css 的主题变量：不新增色系，红色只留给卸载（常态）与危险提示。 */
+
+/* ── 插件卡与浮层视觉规范（#69，2026-11-04）──────────────────────────────────
+   这份注释是**契约**，不是建议：改下方任何数值前，先读这一节并把测量方式对齐。
+
+   ① 字号阶梯（四档基线 + 一个具名例外，不许出现第六档）
+      17px/600  已安装卡的插件名（.extension-card[data-kind='installed'] strong）
+      13px/600  目录卡与第三方卡的名字，以及面板正文（.extension-panel 继承）
+      12px      次级信息：状态文案、版本号、目录路径、安装来源、菜单动作、失败详情
+      28px      GitHub 设备验证码（.s-device-code，settings.css）
+      12.5px    **具名例外**：只给两个 32px 高的点击目标文字——「更多」里的行式动作
+                （.extension-more-row，见下方 ④）与功能页入口（.extension-page-entry）。
+                它们比 12px 的次级信息高一档、比正文 13px 低一点，是「按钮里的字」而不是
+                「说明里的字」；除这两处外不许再用 12.5px（t7 F3：原先这一节自称「只四档」，
+                与那两条规则对不上）。
+
+   ② 标题行（S2）
+      已安装卡名字 17px / 行高 1.3；名字与状态信号同一基线（.extension-card-title 用
+      baseline 对齐），状态信号与右侧按钮整行居中（header 用 center）。
+      行内有且只有三处间距：名字↔状态信号 10px、状态点↔状态文案 6px、
+      状态文案↔版本号 8px（后两者用 margin 表达，不用 gap，才量得准）。
+      标题行上下内衬 ≈10px（上：.extension-card 的 padding-block-start 10px；
+      下：卡内 8px 行间距）。按钮高度仍由 .pbtn.sm 的 min-height 决定，
+      不许用内衬把行撑高。
+
+   ③ 下半区（S1）：一张卡最多三行「塞得下的」内容
+      第 1 行 动作行：唯一实心（更新）+ 描边（自启动 / 启停）+「更多」胶囊。
+      第 2 行 服务标签：目录路径（12px 次级色、单行省略、点一下即复制）+ 功能页入口，
+        左路径右入口同处一行（.extension-card-foot）；窄于 480px 才允许入口换到下一行。
+      第 3 行 展开的「更多」：整块不超过 120px。算式：summary 26px（24px + 上下各 1px
+        描边）+ 列表上内衬 6px + 「打开插件日志」32px + 分隔线（margin-top 8px + 1px）
+        + 「卸载」32px = 105px；再留 15px 余量给字体回退与 DPI 取整，上限仍是 120px。
+        因此 details 自身的内衬必须是 0（覆盖 .extension-panel details 的 10px）。
+
+   ④ 菜单动作（行式列表，T-C / #63 的口径继续有效）
+      行高 32px（min-height，高度交还内容）、整行可点、文字左对齐、左侧 16px 图标位、
+      平时透明底色（悬停才抬 --g2）、组内只一条 1px --g3 发丝线（第二行起 border-top，
+      上方留 8px）。组内动作顺序固定：日志在前，卸载在组末。
+
+   ⑤ 危险色
+      卸载常态就是 --bad-ink（悬停只补 8% 同色底，不换色相，尺寸不变、聚焦描边照旧）；
+      卸载禁用仍保持 --bad-ink（opacity .55）。除此以外不许给插件卡任何元素上红色。
+      红 .bad / role=alert 只留给真正的失败；**安装回退成功的提示（InstallNotice.fellBack）
+      走 .note.ok 的成功色 + role=status**，文案「已安装 X；目录最新 Y 暂不可用」——
+      #68 的自动回退是成功不是失败，写成红字就是把功能做反（t7 F2）。
+
+   ⑥ 滚动锁口径（S3，实现见 settings.js lockScroll / settings.css）
+      任何模态浮层（确认弹窗、GitHub 设备验证、插件下载进度）打开期间，底层列表不许动：
+      滚动容器加 .scroll-locked（overflow hidden + overscroll-behavior contain），
+      进锁记住 scrollTop、出锁还原，引用计数支持嵌套；wheel / touchmove /
+      PageUp PgDown 方向键 Home End Space 在锁定期拦下。
+      **放行判据是一张具名清单**（settings.js 的 UNLOCKED_SCROLLERS，t7 F1）：
+      .s-confirm-dialog / .ext-progress-backdrop / .extension-failure —— 这三处自己会滚、
+      又浮在锁住的底层面板上面，逐条对应「弹窗自身可滚」「进度卡可滚」「失败详情可滚」。
+      往清单里加新浮层时才改这一处；不要把判据写回「只认确认弹窗」，那会让进度卡与
+      失败块在锁定期滚不动、连空格都按不下去。
+
+   ⑦ 量法（真机 WebView2 或 Chromium 里跑，取 getBoundingClientRect）
+      展开区     = document.querySelector('.extension-more').getBoundingClientRect().height
+      动作行     = document.querySelectorAll('.extension-more-row').map(el 的同名矩形 height)
+      间距       = 相邻两行矩形的 bottom 与 top 之差；状态点与状态文案取
+      getComputedStyle(el).marginInlineEnd 加 .extension-signal 的 gap（此处为 0）。
+      本仓库没有可用的浏览器时（沙盒禁命名管道），这些数值只有静态算式与 CSS 断言，
+      必须在真机上补量一次，别把注释当实测。 */
 #island-settings .extension-panel { margin-block: 12px 20px; overflow-wrap: anywhere; }
 #island-settings .extension-panel h3 { margin-block: 0 10px; font-size: 14px; }
 #island-settings .extension-panel :is(button, input, summary) { touch-action: manipulation; }
@@ -19,47 +82,70 @@
 #island-settings .extension-list { display: grid; align-content: start; gap: 8px; min-width: 0; }
 
 /* —— 服务卡 —— */
-#island-settings .extension-card { display: grid; align-content: start; gap: 8px; min-width: 0; margin: 0; padding: 12px 16px; border: 1px solid transparent; border-radius: 12px; background: var(--g1); }
+/* 标题行上下内衬各 10px（规范 ②）：卡自身只留上 10px，下沿 12px 给卡片收口；
+   行高由字号决定，按钮高度仍归 .pbtn.sm 的 min-height —— 内衬不许把行撑高。 */
+#island-settings .extension-card { display: grid; align-content: start; gap: 8px; min-width: 0; margin: 0; padding: 10px 16px 12px; border: 1px solid transparent; border-radius: 12px; background: var(--g1); }
 #island-settings .extension-card:hover { border-color: var(--g3); }
-#island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
-#island-settings .extension-card-title { display: flex; flex: 1 1 220px; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+#island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; min-width: 0; padding-block: 0; }
+/* 名字与状态信号同一基线（规范 ②）：17px 的名字不再和 12px 的信号各浮一半。 */
+#island-settings .extension-card-title { display: flex; flex: 1 1 220px; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 #island-settings .extension-card-title strong { color: var(--fg); font-size: 13px; font-weight: 600; }
+/* 已安装卡的插件名是这一页的主语（S2 / #69）：17px/600、行高 1.3。
+   目录卡与第三方卡是「列表里的条目」，保持 13px —— 一屏十几张卡时不靠字号抢读。 */
+#island-settings .extension-card[data-kind='installed'] .extension-card-title strong { font-size: 17px; font-weight: 600; line-height: 1.3; }
 
 /* 状态信号：一盏 LED + 一句话。版本与「有更新」合成同一条文案
-   （v2.1.2 → v2.1.3）；LED 只是装饰，语义全在文字里。 */
-#island-settings .extension-signal { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 1.4; }
-#island-settings .extension-led { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--g4); }
+   （v2.1.2 → v2.1.3）；LED 只是装饰，语义全在文字里。
+   间距不用 gap 而用 margin（规范 ②）：状态点↔文案 6px、文案↔版本 8px，
+   静态断言与 getComputedStyle 都能量到具体是哪一段。 */
+#island-settings .extension-signal { display: inline-flex; align-items: center; gap: 0; min-width: 0; font-size: 12px; line-height: 1.4; }
+#island-settings .extension-led { flex: none; width: 6px; height: 6px; margin-inline-end: 6px; border-radius: 50%; background: var(--g4); }
 #island-settings .extension-signal[data-signal='running'] .extension-led { background: var(--ok-ink); }
 #island-settings .extension-signal[data-signal='unresponsive'] .extension-led { background: var(--warn-ink); }
 #island-settings .extension-signal[data-signal='failed'] .extension-led { background: var(--bad-ink); }
 #island-settings .extension-signal[data-signal='off'] .extension-led { background: transparent; box-shadow: inset 0 0 0 1px var(--g4); }
 #island-settings .extension-state { color: var(--fg); font-weight: 600; }
 #island-settings .extension-signal[data-signal='off'] .extension-state { color: var(--g4); font-weight: 500; }
-#island-settings .extension-version { color: var(--g4); font-size: 12px; font-variant-numeric: tabular-nums; }
+#island-settings .extension-version { margin-inline-start: 8px; color: var(--g4); font-size: 12px; font-variant-numeric: tabular-nums; }
 #island-settings .extension-version[data-update='1'] { color: var(--ok-ink); font-weight: 600; }
 #island-settings .extension-card-actions, #island-settings .extension-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 /* 按钮文字不折行：窄了换整行，而不是把「打开插件日志」挤成两行。 */
 #island-settings .extension-card-actions .pbtn { white-space: nowrap; }
 
-/* 服务标签：路径 + 安装来源合成一行。面板正文是 13px，这里降一档到 12px 并换次级色
-   （--g4）：两行正文级信息收成一行小字，卡片不再被它们撑高。 */
-#island-settings .extension-card-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; padding: 0; min-width: 0; font-size: 12px; color: var(--g4); }
-#island-settings .extension-card-meta > span { min-width: 0; overflow-wrap: anywhere; }
-#island-settings .extension-location { color: var(--g4); }
+/* 服务标签 + 功能页入口合成一行（S1 / #69）：左路径、右入口，两侧都能收。
+   路径 12px 次级色、单行省略（.extension-location 的 ellipsis）、点一下即复制
+   （行为在 extension-panel.js mount 里绑，视觉上它仍是小字，不是按钮）；来源跟在
+   路径后面，同样单行省略。只有窄于 480px（下方 media query）才允许入口换行。 */
+#island-settings .extension-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; min-width: 0; }
+#island-settings .extension-card-meta { display: flex; flex: 1 1 auto; flex-wrap: nowrap; align-items: baseline; gap: 2px 12px; margin: 0; padding: 0; min-width: 0; font-size: 12px; color: var(--g4); }
+#island-settings .extension-card-meta > span { min-width: 0; }
+#island-settings .extension-card-meta .extension-location { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--g4); font-size: 12px; cursor: copy; }
+#island-settings .extension-card-meta .extension-location:hover { color: var(--fg); }
+#island-settings .extension-card-meta .extension-location:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; border-radius: 4px; }
+#island-settings .extension-source { flex: 0 1 auto; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#island-settings .extension-card-foot .extension-pages { flex: 0 0 auto; }
 
-/* 「更多」：卸载与打开日志降级到这里。打开时整块占满一行，主操作那一行不动。 */
-#island-settings .extension-more { position: relative; }
+/* 「更多」：卸载与打开日志降级到这里。打开时整块占满一行，主操作那一行不动。
+   details 自身的上下内衬必须是 0：`.extension-panel details` 的 10px 会让展开区
+   直接多出 20px（#69 量的 210px 里有一部分就是它）。 */
+#island-settings .extension-more { position: relative; padding: 0; }
 #island-settings .extension-more[open] { flex: 1 1 100%; }
 #island-settings .extension-more > summary { display: flex; align-items: center; gap: 4px; width: fit-content; min-height: 24px; padding: 0 10px; border: 1px solid var(--g3); border-radius: 12px; background: transparent; color: var(--g4); font-size: 12px; font-weight: 600; list-style: none; cursor: pointer; }
 #island-settings .extension-more > summary::-webkit-details-marker { display: none; }
 #island-settings .extension-more > summary:hover { background: var(--g2); color: var(--fg); }
 #island-settings .extension-more > summary:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 #island-settings .extension-more[open] > summary { color: var(--fg); }
-/* 行式动作列表（T-C / #63）：不再是两颗挤在一行的裸灰字胶囊。
+/* 行式动作列表（T-C / #63 的口径，#69 S1 收紧）
    column、无间隙；每行整行可点（按钮撑满、文字左对齐），32px 高；
-   第二行起 1px 发丝线（--g3）隔 8px；禁用/空态不塌陷（min-height 保住）。 */
-#island-settings .extension-more-body { display: flex; flex-direction: column; gap: 0; padding-block: 8px 0; }
+   第二行起 1px 发丝线（--g3）隔 8px；禁用/空态不塌陷（min-height 保住）。
+   展开区总高：summary 26 + 上内衬 6 + 32 + (8 + 1 + 32) = 105px ≤ 120px。
+   左侧 16px 图标位用伪元素（不占一列、不进 textContent）：
+   日志 ≡、卸载 ⌫；图标不跟着危险色走，卸载那格取 inherit。 */
+#island-settings .extension-more-body { display: flex; flex-direction: column; gap: 0; padding-block: 6px 0; }
 #island-settings .extension-more-row { display: flex; align-items: center; width: 100%; min-height: 32px; margin: 0; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--g4); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
+#island-settings .extension-more-row::before { flex: none; display: inline-block; width: 16px; margin-inline-end: 8px; color: var(--g5); font-size: 13px; font-weight: 400; line-height: 1; text-align: center; }
+#island-settings .extension-more-row[data-extension-action='logs']::before { content: '≡'; }
+#island-settings .extension-more-row[data-extension-action='uninstall']::before { content: '⌫'; color: inherit; }
 #island-settings .extension-more-row + .extension-more-row { margin-top: 8px; border-top: 1px solid var(--g3); border-radius: 0 0 8px 8px; }
 #island-settings .extension-more-row:hover:not(:disabled) { background: var(--g2); color: var(--fg); }
 #island-settings .extension-more-row:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
@@ -76,6 +162,8 @@
 #island-settings .extension-page-entry:hover:not(:disabled) { border-color: var(--g4); background: var(--g3); }
 #island-settings .extension-page-entry:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 #island-settings .extension-page-go { color: var(--g4); font-weight: 400; }
+/* 入口标题单行省略：和路径同处一行时，长页名收窄自己，而不是把路径挤走或撑出卡片。 */
+#island-settings .extension-page-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #island-settings .extension-card p { margin: 0; padding: 0; line-height: 1.45; }
 #island-settings .extension-card .extension-description { font-size: 12px; }
 #island-settings .extension-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 12px; margin: 0; padding: 0; font-size: 12px; line-height: 1.45; color: var(--g4); }
@@ -253,7 +341,9 @@
   #island-settings .ext-progress .bar i { transition: none; }
 }
 
-/* 失败提示（t45）：一句人话 + 可展开详情（逐源一行），原始技术串留在 title/折叠区。
+/* 失败提示（t45 + #68 S4）：一句人话 + 可展开详情。
+   一行一源：来源 · 一句话结论 · HTTP 状态码 · 可复制的 URL；原始技术串放整行 title
+   （宿主没给 url/status/phase 时那一段直接不出现，不写「未知」占位）。
    整个失败块最高 40vh、超出滚动——不许占满弹窗。颜色只走 settings.css 的主题变量：
    --fg 用于正文与来源名（与 --g1 卡片底是既有对比对），--g5 用于小字与细节。 */
 #island-settings .extension-failure {
@@ -295,9 +385,18 @@
   color: var(--fg);
 }
 #island-settings .extension-failure-sources li { overflow-wrap: anywhere; }
+#island-settings .extension-failure-line { display: block; }
 #island-settings .extension-failure-origin { font-weight: 600; }
 #island-settings .extension-failure-short { color: var(--g5); }
-#island-settings .extension-failure-raw { display: none; }
+/* HTTP 状态码与失败阶段各一格小字：状态码用 --bad-ink（404/5xx 是坏消息），
+   阶段留在次级色（它是位置信息，不是结论）。中间用 · 与前面的结论分开。 */
+#island-settings .extension-failure-status { margin-inline-start: 6px; color: var(--bad-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+#island-settings .extension-failure-phase { margin-inline-start: 6px; color: var(--g5); }
+/* URL 是复制位：看起来像小字（12px、次级色、单行省略），行为上是一个按钮
+   （整段可点、聚焦描边、title 写明「点击复制」）。超长 URL 不撑破失败块。 */
+#island-settings .extension-failure-url { display: block; max-width: 100%; margin-block-start: 2px; padding: 0; border: 0; background: transparent; color: var(--g5); font: inherit; font-size: 12px; text-align: left; text-decoration: underline; text-underline-offset: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: copy; }
+#island-settings .extension-failure-url:hover { color: var(--fg); }
+#island-settings .extension-failure-url:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; border-radius: 4px; }
 #island-settings .extension-failure-detail {
   margin: 6px 0 0;
   font-size: 12px;
@@ -308,12 +407,17 @@
 }
 
 /* 窄窗（≤480px，T11）：按钮整行换行、标签栏横向滚动，绝不横向溢出；
-   每个按钮的文字都不折行（要换行的是行，不是按钮里的字）。 */
+   每个按钮的文字都不折行（要换行的是行，不是按钮里的字）。
+   #69：这里也不拆「路径 + 入口」那一行——436px 的卡宽必须还是一行。
+   路径与来源各自单行省略，入口按内容宽（不再吃满整行）；真窄到放不下时
+   由 .extension-card-foot 的 flex-wrap 让入口整块换到下一行，而不是挤成半列。 */
 @media (max-width: 480px) {
   #island-settings .extension-card { padding: 8px 12px; }
   #island-settings .extension-card-title { flex-basis: 100%; }
   #island-settings .extension-card-actions { width: 100%; }
   #island-settings .extension-views { overflow-x: auto; }
   #island-settings .extension-card-meta { font-size: 12px; }
-  #island-settings .extension-page-entry { width: 100%; justify-content: space-between; }
+  #island-settings .extension-card-foot { gap: 4px 8px; }
+  #island-settings .extension-card-foot .extension-pages { flex: 0 1 auto; min-width: 0; }
+  #island-settings .extension-page-entry { max-width: 100%; }
 }

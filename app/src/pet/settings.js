@@ -101,7 +101,7 @@
   } })
   let confirmActive = null
   const confirmQueue = []
-  const extensionPanel = window.ExtensionPanel.create({ deviceDialog: showDeviceDialog, syncAuthFocus: async () => { const revision = openRevision; const got = await window.pet.settings.get(); if (isOpen && revision === openRevision) { snap = got; draw() } }, invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw(), openPage: key => open(key) })
+  const extensionPanel = window.ExtensionPanel.create({ deviceDialog: showDeviceDialog, syncAuthFocus: async () => { const revision = openRevision; const got = await window.pet.settings.get(); if (isOpen && revision === openRevision) { snap = got; draw() } }, invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw(), openPage: key => open(key), lockScroll, unlockScroll })
   const identityPanel = window.IdentityPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), confirm: message => confirmInDock(message), lang: () => lang, redraw: () => draw() })
   // The crash report shown, as it would be sent (pageCrash).
   let crashShown = false
@@ -250,6 +250,70 @@
   const CONFIRM_ARM_MS = 350
   let confirmArmedAt = 0
   const confirmTooSoon = () => Date.now() < confirmArmedAt
+
+  // —— 滚动锁（#69 S3）——
+  // 口径（视觉规范见 extensions.css 文件头）：任何模态浮层打开期间，底层列表不许动。
+  //   • 滚动容器（设置页正文 .s-body、岛内行列表 #island-expanded > .lines）加
+  //     .scroll-locked —— overflow:hidden + overscroll-behavior:contain（settings.css）；
+  //   • 进锁记住每个容器的 scrollTop，出锁还原；
+  //   • 引用计数：确认弹窗、GitHub 设备验证、插件进度弹窗可能前后嵌套，只有最后一个
+  //     关掉才真解锁（showDeviceDialog 是先 finishConfirm 再 pumpConfirm，计数不会中途归零）；
+  //   • 事件矩阵：wheel / touchmove 在锁定期 preventDefault（非被动监听才拦得住），
+  //     键盘只拦翻页与方向键（PageUp PageDown ArrowUp ArrowDown Home End 空格），
+  //     并且**弹窗内部一律放行**——弹窗自己（.s-confirm-dialog，overflow:auto）还能滚，
+  //     里面的按钮/输入框也照常响应。Escape、点背景、取消都走 finishConfirm，全部解锁。
+  // 这一段必须留在 confirmDialog ~ body 之间（浏览器测试只切这一段代码运行）。
+  const scrollLock = { count: 0, saved: [] }
+  const scrollLockTargets = () => {
+    const found = [
+      layer.querySelector('.s-body'),
+      document.getElementById('island-expanded')?.querySelector(':scope > .lines'),
+    ]
+    return found.filter((el, i) => !!el && found.indexOf(el) === i)
+  }
+  function lockScroll() {
+    if (scrollLock.count++ > 0) return
+    scrollLock.saved = scrollLockTargets().map(el => ({ el, top: el.scrollTop }))
+    for (const { el } of scrollLock.saved) el.classList.add('scroll-locked')
+  }
+  function unlockScroll() {
+    if (scrollLock.count === 0) return
+    if (--scrollLock.count > 0) return
+    const saved = scrollLock.saved
+    scrollLock.saved = []
+    for (const { el, top } of saved) {
+      el.classList.remove('scroll-locked')
+      // 元素可能已随重绘换掉：只还原还连着文档的那一个，别把位置写进孤儿节点。
+      if (el.isConnected && el.scrollTop !== top) el.scrollTop = top
+    }
+  }
+  // 面板整个关掉时的兜底交给 extensionPanel.releaseScroll()（见 close()）：
+  // 进度浮层的锁属于它自己的渲染循环，这里不跨组件数它攒了几次。
+  const LOCK_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' ', 'Spacebar'])
+  // 锁定期要**放行**的地方（t7 F1）：判据不能只认确认弹窗那一头。这三处都是自己会滚、
+  // 而且就浮在锁住的底层面板上面，被拦掉就等于「看得到、滚不动」：
+  //   .s-confirm-dialog     —— 确认 / GitHub 设备验证弹窗（top layer，overflow:auto）
+  //   .ext-progress-backdrop —— 插件下载进度浮层（它的卡片 .ext-progress 才是滚动体，
+  //                             事件目标常在遮罩上，所以认遮罩这一层）
+  //   .extension-failure     —— 失败详情块（extensions.css 的 max-height:40vh + overflow:auto）
+  // 只放宽「事件落点」的判据，不改锁的计数与 scrollTop 还原；弹窗里的按钮/输入框
+  // （空格、回车、方向键）仍然照常响应。
+  const UNLOCKED_SCROLLERS = '.s-confirm-dialog, .ext-progress-backdrop, .extension-failure'
+  const insideScroller = target => !!(target && typeof target.closest === 'function' && target.closest(UNLOCKED_SCROLLERS))
+  function lockWheel(event) {
+    if (!scrollLock.count || event.defaultPrevented || insideScroller(event.target)) return
+    if (event.cancelable) event.preventDefault()
+  }
+  function lockKeys(event) {
+    if (!scrollLock.count || event.defaultPrevented) return
+    if (!LOCK_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return
+    if (insideScroller(event.target)) return
+    event.preventDefault()
+  }
+  // 三个监听统一挂在文件后段（onIdentityChanged 之后，见那里的注释）：
+  // 拦截器本身住在这段代码里，是因为浏览器测试只切 confirmDialog ~ body 这一段单独跑
+  //（dialog-browser.test.mjs）。
+
   function pumpConfirm() {
     if (confirmActive || !confirmQueue.length || !isOpen) return
     confirmActive = confirmQueue.shift()
@@ -264,6 +328,9 @@
     confirmDialog.querySelector('[data-device-actions]').hidden = !device
     confirmDialog.querySelector('[data-device-error]').hidden = true
     confirmDialog.showModal()
+    // 先锁底层滚动、再摆位置：锁会改滚动容器的 overflow（可能少一条滚动条），
+    // 摆位置读的是岛的矩形，顺序反了会按旧宽度摆一次再被 ResizeObserver 掰回来。
+    lockScroll()
     // 弹窗落在岛内（dialog-anchor.js 记着为什么 UA 会把它钉在屏幕正中），
     // 并跟着岛继续变形（长高、换侧）。
     seatDialog(confirmDialog)
@@ -294,6 +361,8 @@
     const current = confirmActive
     confirmActive = null
     if (confirmDialog.open) confirmDialog.close()
+    // 取消 / 确认 / Escape / 点背景都汇聚到这里：解锁并还原 scrollTop，一条路都不漏。
+    unlockScroll()
     current.resolve(result)
     requestAnimationFrame(() => {
       if (isOpen && current.focus && current.focus.isConnected) current.focus.focus()
@@ -346,6 +415,9 @@
   confirmCancel.onclick = () => { if (confirmTooSoon()) return; finishConfirm(false) }
   confirmDialog.addEventListener('cancel', event => { event.preventDefault(); finishConfirm(false) })
   confirmDialog.addEventListener('click', event => { if (event.target === confirmDialog && !confirmTooSoon()) finishConfirm(false) })
+  // 兜底（#69 S3）：弹窗只要真的关掉了，滚动就不该还锁着。finishConfirm 已经解锁，
+  // 这里只补「绕过 finishConfirm 关窗」的那条路；有新的确认正开着就跳过，别把新锁减掉。
+  confirmDialog.addEventListener('close', () => { if (!confirmActive) unlockScroll() })
   const body = layer.querySelector('.s-body')
   const foot = layer.querySelector('.s-foot')
   // The new markup, changed in place: only what differs is touched, so a
@@ -3589,6 +3661,8 @@
     setRecording(null)
     shortcutToast = ''
     void extensionPanel.closeAuth?.()
+    // #69 S3：插件进度浮层自己拿的滚动锁由它自己还（这里不数它攒了几次）。
+    extensionPanel.releaseScroll?.()
     if (confirmActive) finishConfirm(false)
     while (confirmQueue.length) confirmQueue.shift().resolve(false)
     void window.pet.settings.set({ settingsLastTab: tab }).catch(error => console.log('[settings memory]', error))
@@ -4714,6 +4788,12 @@
     extensionPage.sync([])
     void extensionPanel.load().then(() => { if (isOpen) draw() })
   })
+  // #69 S3：滚动锁的三个监听挂在这里（拦截器定义在 confirmDialog 那一段里）。
+  // 为什么分开挂：settings-focus.test.js 从**第一处** document.addEventListener('keydown'
+  // 切到 onIdentityChanged 单独跑，锁的注册比设置页自己的键盘处理更早出现就会把那段切歪。
+  document.addEventListener('wheel', lockWheel, { passive: false })
+  document.addEventListener('touchmove', lockWheel, { passive: false })
+  document.addEventListener('keydown', lockKeys, true)
   window.pet.onSettings(({ tab: next } = {}) => open(next))
   window.pet.onSettingsChanged(got => {
     if (!isOpen) return

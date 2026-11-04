@@ -382,6 +382,17 @@
   padding-right: 6px;
 }
 
+/* 滚动锁（#69 S3，settings.js 的 lockScroll / unlockScroll）：
+   模态浮层（确认弹窗 / GitHub 设备验证 / 插件下载进度）打开期间，底层列表不许跟着滚。
+   这里只改 overflow，不动高度与内衬（解锁后 scrollTop 由脚本还原）；overscroll 再断一层
+   滚动链，滚轮/触控/翻页键由 settings.js 的 wheel/touchmove/keydown 兜底。
+   岛内开着的行列表同样锁（style.css 的 .home-taskbar … .lines 用 id 优先级更高，能被这条压住）。 */
+.s-body.scroll-locked,
+#island-expanded .lines.scroll-locked {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
 .s-body::-webkit-scrollbar {
   width: 6px;
 }
