@@ -16,6 +16,7 @@
 //! 用注入时钟单测，不必真起插件进程，也不必 sleep。
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -604,8 +605,9 @@ pub fn is_current_round(round: u64) -> bool {
 /// 跑完整轮调度：至多两槽并发，结果回填后再排下一次。
 ///
 /// `attempt` 在锁外执行（可以校验、spawn、握手），只有「取任务/回填」拿短锁。
-pub fn drive(attempt: impl Fn(&Assignment) -> Outcome + Sync) {
-    drive_in(&SCHEDULER, attempt);
+/// t14 repair F3：`host` 用于终态落盘（ready/stopped 写 plugin-failures.log）。
+pub fn drive(host: Option<&Path>, attempt: impl Fn(&Assignment) -> Outcome + Sync) {
+    drive_in(&SCHEDULER, host, attempt);
 }
 
 /// worker 的一层兜底（F5）：`attempt` panic 也必须在**槽位回收并回填失败**之后才退出，
@@ -619,7 +621,8 @@ fn guarded_outcome(attempt: &impl Fn(&Assignment) -> Outcome, assignment: &Assig
 }
 
 /// `drive` 的真实循环：调度器由调用方给（生产是全局 SCHEDULER，测试用本地实例）。
-fn drive_in(slot: &Mutex<Option<Scheduler>>, attempt: impl Fn(&Assignment) -> Outcome + Sync) {
+/// t14 repair F3：`host` 用于终态落盘（ready/stopped 写 plugin-failures.log）。
+fn drive_in(slot: &Mutex<Option<Scheduler>>, host: Option<&Path>, attempt: impl Fn(&Assignment) -> Outcome + Sync) {
     // 一个 scope 罩住整轮循环：两槽 worker 与调度循环同时活着，每轮的 join 在整轮结尾。
     std::thread::scope(|scope| {
         let (tell, heard) = std::sync::mpsc::channel::<(Assignment, Outcome)>();
@@ -678,7 +681,7 @@ fn drive_in(slot: &Mutex<Option<Scheduler>>, attempt: impl Fn(&Assignment) -> Ou
                         // 到期之后才登记成功的实例：结果已按到期失败记账，进程也要收掉。
                         crate::plugin_runtime::discard_late(&assignment.token.id, assignment.token.generation);
                     }
-                    log_finish(&assignment, state);
+                    log_finish(host, &assignment, state);
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
@@ -692,7 +695,10 @@ fn drive_in(slot: &Mutex<Option<Scheduler>>, attempt: impl Fn(&Assignment) -> Ou
     eprintln!("FISH Dock: 插件自启一轮结束 {summary}");
 }
 
-fn log_finish(assignment: &Assignment, state: State) {
+// t14 repair F3：终态落盘。failed 已在 scheduled_attempt 的失败分支写过（带 phase/elapsed），
+// 这里补 ready/stopped/late 三种终态，让 plugin-failures.log 成为完整的启动事件日志。
+// state 字段区分成功与失败：state="ready" 表示启动成功，state="stopped"/"failed" 表示失败/取消。
+fn log_finish(host: Option<&Path>, assignment: &Assignment, state: State) {
     eprintln!(
         "FISH Dock: [plugin-start] id={} attempt={}/{} state={}",
         assignment.token.id,
@@ -700,6 +706,33 @@ fn log_finish(assignment: &Assignment, state: State) {
         MAX_ATTEMPTS,
         state.as_str()
     );
+    // failed 已经在 scheduled_attempt 的失败分支通过 record_standalone_failure 写过，不重复。
+    if state == State::Failed {
+        return;
+    }
+    // ready/stopped 也落一条，复用 append_failure_row 同一结构。
+    if let Some(host) = host {
+        let state_str = state.as_str().to_string();
+        let budget_cold = Some(crate::config::plugin_startup_is_cold());
+        let raw = match state {
+            State::Ready => "启动成功",
+            State::Stopped => "启动取消",
+            _ => "启动终态",
+        };
+        crate::plugin_runtime::record_standalone_failure(
+            host,
+            &assignment.token.id,
+            &assignment.token.version,
+            "启动",
+            None,
+            Some(assignment.attempt),
+            None,
+            Some(state_str),
+            budget_cold,
+            None,
+            raw,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1023,7 +1056,7 @@ mod tests {
             let mut locked = slot.lock().unwrap();
             locked.as_mut().unwrap().enqueue(token("fish.magpie", 0), Instant::now());
         }
-        drive_in(&slot, |_assignment| {
+        drive_in(&slot, None, |_assignment| {
             std::thread::sleep(Duration::from_millis(250));
             Outcome::Ready { service: "ready" }
         });
@@ -1052,7 +1085,7 @@ mod tests {
         }
         let calls = std::sync::atomic::AtomicU32::new(0);
         let began = Instant::now();
-        drive_in(&slot, |_assignment| {
+        drive_in(&slot, None, |_assignment| {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             panic!("合成 worker 崩溃");
         });
@@ -1062,5 +1095,67 @@ mod tests {
         let scheduler = locked.as_ref().unwrap();
         assert!(!scheduler.pending(), "panic 之后不许永远「启动中」");
         assert_eq!(scheduler.state_of("fish.clash"), Some(State::Failed));
+    }
+    // t14 repair F3：终态落盘测试。验证 ready/stopped 状态写入 plugin-failures.log。
+    #[test]
+    fn log_finish_writes_ready_and_stopped_to_failure_log() {
+        use std::io::Read;
+        let temp_dir = std::env::temp_dir().join(format!("fish-log-finish-test-{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let host_path = temp_dir.as_path();
+        // 测试 ready 状态落盘。
+        let assignment = Assignment {
+            token: Token {
+                id: "test.ready".into(),
+                generation: 1,
+                version: "1.0.0".into(),
+                digest: "test-digest".into(),
+            },
+            attempt: 1,
+            round: 1,
+            budget: Duration::from_secs(60),
+        };
+        log_finish(Some(host_path), &assignment, State::Ready);
+        // 验证文件存在且包含 ready 状态。
+        let log_file = host_path.join("plugin-failures.log");
+        assert!(log_file.exists(), "plugin-failures.log 必须存在");
+        let mut content = String::new();
+        std::fs::File::open(&log_file).unwrap().read_to_string(&mut content).unwrap();
+        assert!(content.contains("\"state\":\"ready\""), "必须包含 state=ready：{}", content);
+        assert!(content.contains("\"plugin\":\"test.ready\""), "必须包含 plugin id：{}", content);
+        // 测试 stopped 状态落盘。
+        let assignment2 = Assignment {
+            token: Token {
+                id: "test.stopped".into(),
+                generation: 1,
+                version: "1.0.0".into(),
+                digest: "test-digest".into(),
+            },
+            attempt: 1,
+            round: 1,
+            budget: Duration::from_secs(60),
+        };
+        log_finish(Some(host_path), &assignment2, State::Stopped);
+        content.clear();
+        std::fs::File::open(&log_file).unwrap().read_to_string(&mut content).unwrap();
+        assert!(content.contains("\"state\":\"stopped\""), "必须包含 state=stopped：{}", content);
+        // 测试 failed 状态不重复写入（已在 scheduled_attempt 写过）。
+        let assignment3 = Assignment {
+            token: Token {
+                id: "test.failed".into(),
+                generation: 1,
+                version: "1.0.0".into(),
+                digest: "test-digest".into(),
+            },
+            attempt: 1,
+            round: 1,
+            budget: Duration::from_secs(60),
+        };
+        let before_len = std::fs::metadata(&log_file).unwrap().len();
+        log_finish(Some(host_path), &assignment3, State::Failed);
+        let after_len = std::fs::metadata(&log_file).unwrap().len();
+        assert_eq!(before_len, after_len, "failed 状态不应重复写入");
+        // 清理。
+        std::fs::remove_dir_all(&temp_dir).ok();
     }
 }

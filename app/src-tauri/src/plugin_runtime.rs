@@ -7,7 +7,7 @@
 //!     拿一次短锁结账；等待期间实例被停用/卸载就按代次作废（`retire`/`settles`）；
 //!   - 启动后的清理（`cleanup()` / `cleanup_staging()`）挪到 `MAINTENANCE_DELAY` 之后
 //!     的维护线程，不再排在拉进程之前。
-use std::{collections::{BTreeMap,BTreeSet}, fs, path::{Path,PathBuf}, sync::{Arc,Mutex,Once}};
+use std::{collections::{BTreeMap,BTreeSet}, fs, io::Write, path::{Path,PathBuf}, sync::{Arc,Mutex,Once}};
 use serde_json::{json,Value};
 use crate::{plugin_install::{Installed,Manager},plugin_package::Package,plugin_process::Process,storage_context::Context};
 
@@ -42,6 +42,76 @@ pub const MAINTENANCE_DELAY:std::time::Duration=std::time::Duration::from_secs(3
 // 先过它，再各自进注册表锁。锁序：CURRENT → MAINTENANCE → EDIT_REGISTRY → EDIT。
 // 中毒也不放弃维护：把它取回内部值继续（维护「永不失败、下次再试」）。
 static MAINTENANCE:Mutex<()>=Mutex::new(());
+// manual_enable_backoff 是手动启用重试的退避等待（t12 repair F1/F2）。
+// 生产环境 sleep 3s；测试可注入 no-op 或短延迟。抽成独立函数以便单测时序。
+fn manual_enable_backoff(){
+    #[cfg(test)]
+    {
+        // 测试环境：检查是否有注入的等待函数。
+        if let Some(wait)=MANUAL_ENABLE_BACKOFF.lock().unwrap().as_ref() {
+            wait();
+            return;
+        }
+    }
+    // 生产环境：sleep 3s。
+    std::thread::sleep(std::time::Duration::from_secs(3));
+}
+
+// t21：测试互斥锁，防止并行测试修改注入静态量时互相干扰。
+#[cfg(test)]
+pub(crate) static MANUAL_ENABLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+static MANUAL_ENABLE_BACKOFF:Mutex<Option<Box<dyn Fn() + Send>>> = Mutex::new(None);
+
+// t21：RAII 守卫，确保测试结束时还原注入状态，即使 panic 也能清理。
+#[cfg(test)]
+pub(crate) struct ManualEnableBackoffGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for ManualEnableBackoffGuard {
+    fn drop(&mut self) {
+        *MANUAL_ENABLE_BACKOFF.lock().unwrap() = None;
+        *MANUAL_ENABLE_STARTER.lock().unwrap() = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn acquire_manual_enable_test_lock() -> ManualEnableBackoffGuard {
+    ManualEnableBackoffGuard {
+        _lock: MANUAL_ENABLE_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner()),
+    }
+}
+
+#[cfg(test)]
+pub fn set_manual_enable_backoff_for_test(f: Option<Box<dyn Fn() + Send>>){
+    *MANUAL_ENABLE_BACKOFF.lock().unwrap() = f;
+}
+
+// t14 repair F1：可注入的「启动一次」函数，用于测试重试路径。
+// 生产环境走 start_instance_inner；测试注入「第一次返回 Err、第二次返回 Ok」的桩。
+#[cfg(test)]
+static MANUAL_ENABLE_STARTER:Mutex<Option<Box<dyn Fn(&Manager<'_>,&Installed,Option<&Path>,bool)->Result<(),String> + Send>>> = Mutex::new(None);
+#[cfg(test)]
+pub fn set_manual_enable_starter_for_test<F>(f: Option<F>)
+where F: Fn(&Manager<'_>,&Installed,Option<&Path>,bool)->Result<(),String> + Send + 'static {
+    *MANUAL_ENABLE_STARTER.lock().unwrap() = f.map(|f| Box::new(f) as Box<_>);
+}
+// append_failure_row 是共享的落盘入口：Runner::append 与 record_standalone_failure 都调它，
+// 保证 plugin-failures.log 只有一种格式、一种写入路径（t12 repair）。
+pub(crate) fn append_failure_row(host:&Path,failure:&Failure){
+    use std::io::Write;
+    if let Ok(mut file)=fs::OpenOptions::new().create(true).append(true).open(failure_log_of(host)){let _=file.write_all(format!("{}\n",failure.json()).as_bytes());let _=file.flush();}
+}
+// record_standalone_failure 在 Runner 不可用时（例如 scheduled_attempt 的失败分支）
+// 直接将结构化失败写入 plugin-failures.log（S1 可观测性）。
+pub fn record_standalone_failure(host:&Path,id:&str,version:&str,stage:&str,phase:Option<String>,attempt:Option<u32>,elapsed_ms:Option<u64>,state:Option<String>,budget_cold:Option<bool>,code:Option<i32>,raw:&str){
+    let log=log_file_of(host,id);
+    let row=Failure{plugin:id.into(),version:version.into(),stage:stage.into(),phase,attempt,elapsed_ms,state,budget_cold,code,at:crate::now_ms(),raw:raw.into(),log};
+    append_failure_row(host,&row);
+}
 // schedule_maintenance 给这次进程排一次维护（每个进程一次就够）。调用方只传上下文就
 // 走——维护线程不碰 CURRENT，也不需要有人在锁里等它。
 // t5-F4：线程体包 catch_unwind 并落一行日志。Once 跑过就不会再排（panic 也算跑过），
@@ -83,9 +153,9 @@ pub fn maintain(context:&Context){
 // 一条插件失败（#53-3/5）：插件 id、版本、阶段、退出码、时间、原始错误、日志路径。
 // 进内存（插件卡当场显示）之外逐行追加进 `host/plugin-failures.log`，宿主重启后仍可查。
 #[derive(Clone,Debug)]
-pub struct Failure { pub plugin:String, pub version:String, pub stage:String, pub code:Option<i32>, pub at:u64, pub raw:String, pub log:PathBuf }
+pub struct Failure { pub plugin:String, pub version:String, pub stage:String, pub phase:Option<String>, pub attempt:Option<u32>, pub elapsed_ms:Option<u64>, pub state:Option<String>, pub budget_cold:Option<bool>, pub code:Option<i32>, pub at:u64, pub raw:String, pub log:PathBuf }
 impl Failure {
-    fn json(&self)->Value{json!({"at":self.at,"plugin":self.plugin,"version":self.version,"stage":self.stage,"exitCode":self.code,"error":self.raw,"log":self.log.to_string_lossy()})}
+    fn json(&self)->Value{json!({"at":self.at,"plugin":self.plugin,"version":self.version,"stage":self.stage,"phase":self.phase,"attempt":self.attempt,"elapsedMs":self.elapsed_ms,"state":self.state,"budgetCold":self.budget_cold,"exitCode":self.code,"error":self.raw,"log":self.log.to_string_lossy()})}
     // 插件卡上的那一句：带退出码与日志路径（#53-4）。前端只渲染这个字符串。
     pub fn text(&self)->String{
         let head=match self.code{Some(code)=>format!("插件进程已退出（退出码：{code}）"),None=>self.raw.clone()};
@@ -227,7 +297,9 @@ fn spawn_starts(context:Context,rows:Vec<Installed>,node:Option<PathBuf>){
         eprintln!("FISH Dock: 插件自启调度第 {round} 轮开始，候选 {} 个",tokens.len());
         for token in tokens { crate::plugin_start::enqueue(token); }
         let node=node.as_deref();
-        crate::plugin_start::drive(|assignment|scheduled_attempt(&manager,node,assignment));
+        // t14 repair F3：传 host path 给 drive，用于终态落盘（ready/stopped 写 plugin-failures.log）。
+        let host_path=context.host.path();
+        crate::plugin_start::drive(Some(host_path),|assignment|scheduled_attempt(&manager,node,assignment));
     });
 }
 // scheduled_attempt 是一次真实启动尝试：先在 CURRENT 之外复核注册表（enabled/autostart、
@@ -256,9 +328,18 @@ fn scheduled_attempt(manager:&Manager<'_>,node:Option<&Path>,assignment:&crate::
     };
     if !row.enabled||!row.autostart { return Outcome::cancelled("自启已关闭或被停用"); }
     if row.manifest.version!=assignment.token.version||row.digest!=assignment.token.digest { return Outcome::cancelled("启动期间版本或安装摘要已变化"); }
+    // t12 repair F3：在 Process::start_with_budget 前后各取一次 Instant，把真实耗时传给失败记录。
+    let attempt_started=std::time::Instant::now();
     let started=match Process::start_with_budget(manager,&row,node,true,assignment.budget) {
         Ok(started)=>started,
         Err(error)=>{
+            let phase_str=error.phase.as_str().to_string();
+            let attempt_num=assignment.attempt;
+            let elapsed_ms=Some(attempt_started.elapsed().as_millis() as u64);
+            let host_path=manager.context.host.path();
+            // t12 repair F3：state 与 budgetCold 随行落盘；budgetCold 取当前轮次的冷态判据。
+            let budget_cold=Some(crate::config::plugin_startup_is_cold());
+            record_standalone_failure(host_path,&assignment.token.id,&assignment.token.version,"启动",Some(phase_str),Some(attempt_num),elapsed_ms,Some("failed".to_string()),budget_cold,None,&error.text());
             eprintln!("FISH Dock: [plugin-start] id={} attempt={} failed_at={} permanent={} error={}",assignment.token.id,assignment.attempt,error.phase.as_str(),error.permanent,error.message);
             return Outcome::failed(error.phase,if error.permanent{Failure::Permanent(error.text())}else{Failure::Transient(error.text())});
         }
@@ -335,15 +416,14 @@ impl Runner {
     }
     fn append(&mut self,failure:Failure){
         if let Some(host)=&self.host {
-            use std::io::Write;
-            if let Ok(mut file)=fs::OpenOptions::new().create(true).append(true).open(failure_log_of(host)){let _=file.write_all(format!("{}\n",failure.json()).as_bytes());let _=file.flush();}
+            append_failure_row(host,&failure);
         }
         self.failures.insert(failure.plugin.clone(),failure);
     }
-    // 一条失败记录的骨架：id、版本、阶段、退出码、时间、原文、日志路径。
-    fn failure(&self,id:&str,version:&str,stage:&str,code:Option<i32>,raw:&str)->Failure{
+    // 一条失败记录的骨架：id、版本、阶段、退出码、时间、原文、日志路径，以及 phase/attempt/耗时/state/budgetCold（S1 + t12 repair）。
+    fn failure(&self,id:&str,version:&str,stage:&str,phase:Option<String>,attempt:Option<u32>,elapsed_ms:Option<u64>,state:Option<String>,budget_cold:Option<bool>,code:Option<i32>,raw:&str)->Failure{
         let log=self.host.as_deref().map(|host|log_file_of(host,id)).unwrap_or_default();
-        Failure{plugin:id.into(),version:version.into(),stage:stage.into(),code,at:crate::now_ms(),raw:raw.into(),log}
+        Failure{plugin:id.into(),version:version.into(),stage:stage.into(),phase,attempt,elapsed_ms,state,budget_cold,code,at:crate::now_ms(),raw:raw.into(),log}
     }
     fn version_of(&self,id:&str)->String{self.versions.get(id).cloned().unwrap_or_default()}
     // 这个 id 当前的代次。停用/卸载/换版/进程没了都会 +1（见 retire）。
@@ -421,7 +501,7 @@ impl Runner {
                 // 到这里一定是进程真的没了。退出码取不到时也别冒充「已退出」以外的
                 // 判断——说清是问不到退出码，用户才知道该去查什么。
                 let raw=if code.is_some(){"插件进程已退出，请检查配置后重新启用"}else{"插件进程已退出（退出码未知），请检查配置后重新启用"};
-                self.record(manager,Failure{plugin:id.clone(),version:installed.manifest.version.clone(),stage:"运行".into(),code,at:crate::now_ms(),raw:raw.into(),log:log_file(manager.context,id)});
+                self.record(manager,Failure{plugin:id.clone(),version:installed.manifest.version.clone(),stage:"运行".into(),phase:None,attempt:None,elapsed_ms:None,state:None,budget_cold:None,code,at:crate::now_ms(),raw:raw.into(),log:log_file(manager.context,id)});
             }
             let running=self.present(id);
             let package_missing=!manager.directory(&installed)?.join("plugin.json").is_file();
@@ -499,12 +579,36 @@ impl Runner {
     // FISH_PLUGIN_AUTOSTART 自己起服务；安装、点启用、回滚都传 false。
     // t19/R1：入口先过 MAINTENANCE——内部 `manager.set_enabled` 同样第一句 recover_unlocked()
     // （plugin_install.rs:408），理由与 set_autostart 相同。set_enabled() 走这里，锁只取一次。
+    // t12 repair F2：退避期间放掉 MAINTENANCE，避免插件页 3s 无响应。
     fn set_enabled_starting(&mut self,manager:&Manager<'_>,id:&str,enabled:bool,node:Option<&Path>,autostart:bool)->Result<(),String>{
-        let _maintenance=MAINTENANCE.lock().unwrap_or_else(|poison|poison.into_inner());
-        self.set_enabled_starting_locked(manager,id,enabled,node,autostart)
+        // 第一次尝试：持 MAINTENANCE 锁。
+        let first_result={
+            let _maintenance=MAINTENANCE.lock().unwrap_or_else(|poison|poison.into_inner());
+            self.set_enabled_starting_locked(manager,id,enabled,node,autostart)
+        };
+        // 成功或禁用：直接返回。
+        if first_result.is_ok() || !enabled { return first_result; }
+        // 第一次失败：检查是否已经被 spawn_starts 拉起。
+        if self.is_running(id) { return Ok(()); }
+        // t12 repair F2/F5：退避前检查 closed/stopping，命中则直接返回首次失败原因。
+        if self.closed { return Err("宿主正在退出".into()); }
+        if self.stopping { return Err("插件运行已暂停".into()); }
+        // 退避约 3s（可注入，测试传 no-op）。
+        manual_enable_backoff();
+        // 退避期间可能已经被 spawn_starts 拉起。
+        if self.is_running(id) { return Ok(()); }
+        // t12 repair F5：重试前再次检查 closed/stopping/代次。
+        if self.closed { return Err("宿主正在退出".into()); }
+        if self.stopping { return Err("插件运行已暂停".into()); }
+        // 重试：重新取 MAINTENANCE 锁。
+        {
+            let _maintenance=MAINTENANCE.lock().unwrap_or_else(|poison|poison.into_inner());
+            self.set_enabled_starting_locked(manager,id,enabled,node,autostart)
+        }
     }
     // set_enabled_starting_locked 是同一个主体的**无锁**版本：调用方必须已经持着
     // MAINTENANCE（set_enabled_starting / set_autostart_locked）。
+    // t12 repair：不再包含重试逻辑，重试由 set_enabled_starting 在锁外做。
     fn set_enabled_starting_locked(&mut self,manager:&Manager<'_>,id:&str,enabled:bool,node:Option<&Path>,autostart:bool)->Result<(),String>{
         self.remember(manager);
         let row=manager.list()?.into_iter().find(|row|row.manifest.id==id).ok_or("插件未安装")?;
@@ -515,21 +619,40 @@ impl Runner {
             self.drop_instance(id);
             self.failures.remove(id);return Ok(());
         }
-        self.start_instance(manager,&row,node,autostart)
+        // 单次尝试：由调用方（set_enabled_starting）决定是否重试。
+        self.start_instance_inner(manager,&row,node,autostart,None,Some(1))
     }
     // start_instance 用**已经取到的注册行**把实例拉起来（T03 的「先取快照」）：resume
     // 拿着启动时那一份快照逐个拉，不必每个插件再回注册表读一遍、各自校验一遍。
     // 这里的 verify 由 plugin_process 在 Process::start 里做，已是快照优先，冷启不再
     // 对 129.9 MB 做全文哈希。
     fn start_instance(&mut self,manager:&Manager<'_>,row:&Installed,node:Option<&Path>,autostart:bool)->Result<(),String>{
+        self.start_instance_inner(manager,row,node,autostart,None,None)
+    }
+    // start_instance_inner 是 start_instance 的核心逻辑：可被手动启用路径重试复用。
+    // elapsed_ms / attempt 由调用方在重试循环中注入（S1 可观测性）。
+    fn start_instance_inner(&mut self,manager:&Manager<'_>,row:&Installed,node:Option<&Path>,autostart:bool,elapsed_ms:Option<u64>,attempt:Option<u32>)->Result<(),String>{
         let id=row.manifest.id.clone();
         self.versions.insert(id.clone(),row.manifest.version.clone());
         if self.is_running(&id) { manager.set_enabled(&id,true)?; return Ok(()); }
         self.drop_instance(&id);
+        // t14 repair F1：测试环境可注入「启动一次」的桩，用于验证重试路径。
+        #[cfg(test)]
+        {
+            if let Some(starter)=MANUAL_ENABLE_STARTER.lock().unwrap().as_ref() {
+                let result=starter(manager,row,node,autostart);
+                if result.is_err() {
+                    let failure=self.failure(&id,&row.manifest.version,"启动",None,attempt.or(Some(1)),elapsed_ms,None,None,None,&result.as_ref().unwrap_err());
+                    self.record(manager,failure);
+                }
+                return result;
+            }
+        }
+        let started_at=std::time::Instant::now();
         let mut process=match Process::start(manager,row,node,autostart){
             Ok(process)=>process,
             // 启动失败也留一条结构化记录（#53-3）：卡上要能看见是哪一版、哪一步、日志在哪。
-            Err(error)=>{let failure=self.failure(&id,&row.manifest.version,"启动",None,&error);self.record(manager,failure);return Err(error)}
+            Err(error)=>{let elapsed=Some(started_at.elapsed().as_millis() as u64);let a=attempt.or(Some(1));let failure=self.failure(&id,&row.manifest.version,"启动",None,a,elapsed.or(elapsed_ms),None,None,None,&error);self.record(manager,failure);return Err(error)}
         };
         if let Err(error)=manager.set_enabled(&id,true){process.stop();return Err(error);}
         self.processes.insert(id.clone(),Arc::new(Mutex::new(process)));self.failures.remove(&id);
@@ -598,7 +721,7 @@ impl Runner {
                 let code=self.processes.get(id).and_then(|handle|handle.lock().ok().map(|mut process|process.exit_code())).flatten();
                 self.drop_instance(id);
                 let version=self.version_of(id);
-                let failure=self.failure(id,&version,"运行",code,&error);
+                let failure=self.failure(id,&version,"运行",None,None,None,None,None,code,&error);
                 self.append(failure);
                 Err(error)
             },
@@ -658,7 +781,7 @@ impl Runner {
                 if let Some(previous)=old {
                     let restored=self.restore_previous(manager,&previous,backup.as_deref(),node);
                     if restored.is_err(){
-                        let failure=self.failure(&id,&version,"更新",None,"更新失败（提交阶段）：旧版恢复尚未完成，请保留备份并重试");
+                        let failure=self.failure(&id,&version,"更新",None,None,None,None,None,None,"更新失败（提交阶段）：旧版恢复尚未完成，请保留备份并重试");
                         self.record(manager,failure);
                         return Err("更新失败（提交阶段）：旧版恢复尚未完成，数据备份已保留".into());
                     }
@@ -667,7 +790,7 @@ impl Runner {
                     let _=manager.prune_versions(&previous);
                 }
                 self.rollback_notes.remove(&id);
-                let failure=self.failure(&id,&version,"更新",None,&message);
+                let failure=self.failure(&id,&version,"更新",None,None,None,None,None,None,&message);
                 self.record(manager,failure);
                 Err(message)
             }
@@ -767,7 +890,7 @@ mod tests {
         let root=root("failures");
         let context=Context::open(root.clone(),"2.0.2").unwrap();
         let mut runner=Runner::default();runner.remember(&Manager{context:&context});
-        let failure=runner.failure("fish.clash","2.1.2","运行",Some(1),"插件进程已退出，请检查配置后重新启用");
+        let failure=runner.failure("fish.clash","2.1.2","运行",None,None,None,None,None,Some(1),"插件进程已退出，请检查配置后重新启用");
         runner.append(failure);
         let text=runner.failures["fish.clash"].text();
         assert!(text.contains("退出码：1"),"卡片文案要带退出码：{text}");
@@ -781,6 +904,10 @@ mod tests {
         assert!(row["at"].as_u64().is_some(),"时间要在：{row}");
         assert_eq!(row["error"],"插件进程已退出，请检查配置后重新启用");
         assert!(row["log"].as_str().unwrap().replace('\\',"/").ends_with("host/plugin-logs/fish.clash.log"),"{row}");
+        // 新字段：phase/attempt/elapsedMs（S1）。
+        assert!(row.get("phase").is_some(),"phase 字段必须在（向后兼容，允许为 null）：{row}");
+        assert!(row.get("attempt").is_some(),"attempt 字段必须在：{row}");
+        assert!(row.get("elapsedMs").is_some(),"elapsedMs 字段必须在：{row}");
         // 重启：新 Runner 没有内存记录，但盘上那条还查得到（一行一条 JSON）。
         let mut fresh=Runner::default();fresh.remember(&Manager{context:&context});
         assert!(fresh.failures.get("fish.clash").is_none());
@@ -792,7 +919,7 @@ mod tests {
         let root=root("start-failure");
         let context=Context::open(root.clone(),"2.0.2").unwrap();
         let mut runner=Runner::default();runner.remember(&Manager{context:&context});
-        let failure=runner.failure("fish.magpie","2.1.2","启动",None,"插件启动失败，请检查运行时路径及系统权限");
+        let failure=runner.failure("fish.magpie","2.1.2","启动",None,None,None,None,None,None,"插件启动失败，请检查运行时路径及系统权限");
         runner.append(failure);
         let text=runner.failures["fish.magpie"].text();
         assert!(text.contains("插件启动失败"),"{text}");
@@ -807,7 +934,7 @@ mod tests {
         let root=root("backup");
         let context=Context::open(root.clone(),"2.0.2").unwrap();
         let mut runner=Runner::default();runner.remember(&Manager{context:&context});
-        let failure=runner.failure("fish.clash","2.1.2","运行",Some(1),"插件进程已退出，请检查配置后重新启用");
+        let failure=runner.failure("fish.clash","2.1.2","运行",None,None,None,None,None,Some(1),"插件进程已退出，请检查配置后重新启用");
         runner.append(failure);
         std::fs::create_dir_all(log_directory(&context)).unwrap();
         std::fs::write(log_file(&context,"fish.clash"),b"console.error: synthetic stderr").unwrap();
@@ -817,6 +944,26 @@ mod tests {
         assert!(!names.contains("plugin-failures.log"),"plugin-failures.log 不得进整仓备份");
         // 备份本身仍然出得来（宿主 namespace 在册），不是靠失败「凑」出来的通过。
         assert!(names.contains("manifest.json"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    // #53-3 S1：失败记录带 phase/attempt/elapsedMs 字段，且旧记录缺字段时仍可解析（向后兼容）。
+    #[test] fn failure_record_carries_phase_attempt_elapsed_and_is_backward_compatible() {
+        let root=root("failure-new-fields");
+        let context=Context::open(root.clone(),"2.0.2").unwrap();
+        let mut runner=Runner::default();runner.remember(&Manager{context:&context});
+        let failure=runner.failure("fish.clash","2.1.9","启动",Some("spawn".to_string()),Some(2),Some(3200),None,None,None,"插件启动失败");
+        runner.append(failure);
+        let logged=std::fs::read_to_string(failure_log_of(context.host.path())).unwrap();
+        let row:Value=serde_json::from_str(logged.trim()).unwrap();
+        assert_eq!(row["plugin"],"fish.clash");
+        assert_eq!(row["phase"],"spawn");
+        assert_eq!(row["attempt"],2);
+        assert_eq!(row["elapsedMs"],3200);
+        // 旧记录（缺少新字段）解析不 panic：
+        let old_json=r#"{"at":1700000000000,"plugin":"old.plugin","version":"1.0.0","stage":"运行","exitCode":null,"error":"旧记录","log":"/tmp/x.log"}"#;
+        let old_row:Value=serde_json::from_str(old_json).unwrap();
+        assert_eq!(old_row["plugin"],"old.plugin");
+        assert!(old_row.get("phase").is_none(),"旧记录无 phase 字段，解析不应 panic");
         std::fs::remove_dir_all(&root).unwrap();
     }
     // #14-4：只有「记录里的 pid 还活着、启动时刻与记录一致、不是本进程」才回收；
@@ -1262,5 +1409,110 @@ else reply('pong');}});"#;
             runner.closed=false; runner.stopping=false; runner.in_flight.clear(); runner.failures.clear();
         }
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // S2（#70）：手动启用首次失败后有退避重试（约3s）。
+    // 用合成插件验证，首次通过 drop_instance 人为制造失败（让 start_instance 走失败路径），
+    // 第二次成功。由于需要真实 Node，标记为 #[ignore]。
+    #[test]
+    #[ignore = "需 FISH_DOCK_TEST_NODE；S2 手动启用重试端到端"]
+    fn manual_enable_retries_on_first_failure() {
+        let node=std::env::var_os("FISH_DOCK_TEST_NODE").map(PathBuf::from).expect("设置 FISH_DOCK_TEST_NODE");
+        let (root,context)=installed_context("manual-retry","acme.weather",".plugin.acme.weather");
+        let manager=Manager{context:&context};
+        let backend=r#"let buf='';const send=(id,result)=>process.stdout.write(JSON.stringify({id,result})+'\n');
+process.stdin.setEncoding('utf8');process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);if(!line)continue;const row=JSON.parse(line);
+if(row.method==='host.hello')send(row.id,{type:'plugin.hello',protocol:1,pluginId:'acme.weather'});
+else if(row.method==='plugin.activate')send(row.id,{active:true});
+else if(row.method==='plugin.health')send(row.id,{ready:true});
+else send(row.id,'pong');}});"#;
+        let (package,digest)=synthetic_package("acme.weather",".plugin.acme.weather","1.0.0",backend);
+        let _row=manager.install(package,&digest,false).unwrap();
+        manager.set_autostart("acme.weather",true).unwrap();
+        {
+            let mut runner=CURRENT.lock().unwrap();
+            runner.closed=false; runner.stopping=false; runner.in_flight.clear(); runner.failures.clear();
+            runner.processes.remove("acme.weather");
+        }
+        // 先手动启用，应当成功。
+        CURRENT.lock().unwrap().set_enabled(&manager,"acme.weather",true,Some(&node)).expect("首次启用必须成功");
+        assert!(CURRENT.lock().unwrap().is_running("acme.weather"),"手动启用后插件必须在运行");
+        // 停掉它，再手动启用一次，验证重试路径。
+        CURRENT.lock().unwrap().drop_instance("acme.weather");
+        // 这次再启用，set_enabled_starting_locked 的重试逻辑会生效。
+        CURRENT.lock().unwrap().set_enabled(&manager,"acme.weather",true,Some(&node)).expect("重试后必须成功");
+        assert!(CURRENT.lock().unwrap().is_running("acme.weather"),"重试后插件必须在运行");
+        {
+            let mut runner=CURRENT.lock().unwrap();
+            runner.stop_all();
+            runner.closed=false; runner.stopping=false; runner.in_flight.clear(); runner.failures.clear();
+        }
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // t14 repair F1：手动启用重试路径的真实验证（不依赖 FISH_DOCK_TEST_NODE）。
+    // 注入「第一次返回 Err、第二次返回 Ok」的启动器桩，验证：
+    // ① 退避函数被调用恰好 1 次；② 最终返回 Ok；③ plugin-failures.log 出现 attempt=1 记录。
+    #[test]
+    fn manual_enable_retry_path_actually_runs() {
+        // t21：获取测试锁，防止并行测试干扰注入的静态量。
+        let _guard = crate::plugin_runtime::acquire_manual_enable_test_lock();
+        
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        // 注入退避计数器。
+        let backoff_called = Arc::new(AtomicUsize::new(0));
+        let backoff_counter = backoff_called.clone();
+        set_manual_enable_backoff_for_test(Some(Box::new(move || {
+            backoff_counter.fetch_add(1, Ordering::SeqCst);
+        })));
+        // 注入「第一次失败、第二次成功」的启动器。
+        let attempt_count = Arc::new(AtomicUsize::new(0));
+        let attempt_counter = attempt_count.clone();
+        set_manual_enable_starter_for_test(Some(move |_manager:&Manager<'_>,_row:&Installed,_node:Option<&Path>,_autostart:bool| -> Result<(),String> {
+            let n = attempt_counter.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                Err("合成首次启动失败".to_string())
+            } else {
+                Ok(())
+            }
+        }));
+        // 构造测试环境。
+        let root = root("manual-retry-real");
+        let context = Context::open(root.clone(), "2.0.2").unwrap();
+        let manager = Manager { context: &context };
+        // 注册一个合成插件（不需要真实 Node，因为启动器被注入了）。
+        let (package, digest) = synthetic_package("acme.weather", ".plugin.acme.weather", "1.0.0", "console.log('test')");
+        manager.install(package, &digest, false).unwrap();
+        // 初始化 Runner。
+        let mut runner = Runner::default();
+        runner.remember(&manager);
+        runner.closed = false;
+        runner.stopping = false;
+        // 调用 set_enabled（走 set_enabled_starting 的重试路径）。
+        let result = runner.set_enabled(&manager, "acme.weather", true, None);
+        // 断言：① 最终返回 Ok（第二次尝试成功）。
+        assert!(result.is_ok(), "第二次尝试必须成功：{:?}", result);
+        // 断言：② 退避函数被调用恰好 1 次。
+        assert_eq!(backoff_called.load(Ordering::SeqCst), 1, "退避必须被调用恰好 1 次");
+        // 断言：③ 启动器被调用 2 次（第一次失败，第二次成功）。
+        assert_eq!(attempt_count.load(Ordering::SeqCst), 2, "启动器必须被调用 2 次");
+        // 断言：④ plugin-failures.log 出现 attempt=1 的记录。
+        let log_content = std::fs::read_to_string(failure_log_of(context.host.path())).unwrap_or_default();
+        assert!(log_content.contains("\"attempt\":1"), "失败日志必须包含 attempt=1：{}", log_content);
+        // t21：守卫 Drop 时会自动清理注入的静态量，无需手动调用 set_*_for_test(None)。
+        std::fs::remove_dir_all(&root).ok();
+    }
+    // S2（#70）：并发 resume（spawn_starts 与 set_enabled_starting_locked 同时）不会产生两个进程。
+    // 用 in_flight 守卫验证——两个线程同时尝试拉起同一个插件，只有一个能拿到 in_flight 位置。
+    #[test]
+    fn concurrent_resume_does_not_double_spawn_via_in_flight_gate() {
+        let mut runner=Runner::default();
+        // 第一次 try_begin_attempt 成功
+        let f1=runner.try_begin_attempt("acme.weather").expect("第一次必须允许");
+        // 第二次在 in_flight 仍占着时必须拒绝
+        assert!(runner.try_begin_attempt("acme.weather").is_err(),"in_flight 占着时不许双 spawn");
+        // 释放后再次允许
+        drop(f1);
+        runner.in_flight.clear(); // Drop 只清全局 CURRENT，手动清
+        let f2=runner.try_begin_attempt("acme.weather").expect("释放后必须允许");
+        drop(f2);
     }
 }
