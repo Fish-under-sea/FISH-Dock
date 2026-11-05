@@ -22,7 +22,7 @@
 | `url.official_site` | `https://h5.metaapp.cn/online/h5/BUsvkkbBiAq2pF2Ttx4j/1.0.2/6/index.html` | `FISH_DOCK_OFFICIAL_SITE` | URL | 官网地址：关于页品牌图彩蛋点开的那一页。**当前默认值是临时落地页**，正式官网上线后只改 `config.rs` 的 `OFFICIAL_SITE_DEFAULT`（或设这个环境变量），前端不动 |
 | `url.raw_mirror` | `(空)` | `FISH_DOCK_RAW_MIRROR` | URL | 2.0.4 T-F：raw.githubusercontent.com 文件的前缀镜像（sources::picks 候选；空＝只走原站） |
 | `url.gh_proxy` | `(空)` | `FISH_DOCK_GH_PROXY` | URL | 2.0.4 T-F：GitHub Release 资产下载的前缀加速（sources::picks 候选；空＝不加） |
-| `url.gitee_repo` | `(空)` | `FISH_DOCK_GITEE_REPO` | URL | 2.0.4 T-F：Gitee 仓库地址（`updates::endpoints` 的更新检查候选；空＝不启用 Gitee）。附加条目 A（2026-11-04）：同一个键还驱动 `sources::picks` 的「Gitee 附件」候选（`<gitee_repo>/releases/download/<tag>/<file>`，**只映射同名项目**——插件仓是另一个 repo，不会被改指过来），并决定 `updates::allowed` 的放行边界（前缀 + 边界字符，同名前缀的别的仓不放行）。只认 `https://gitee.com/<owner>/<repo>` 这一形态，写坏＝没配。实测口径与缺口见 `app/docs/domestic-mirror-matrix-2026-11-04.md` |
+| `url.gitee_repo` | `https://gitee.com/Fish-under-sea/FISH-Dock` | `FISH_DOCK_GITEE_REPO` | URL | **2.1.1（#72）：默认启用**主仓 Gitee 镜像（Gitee 侧已有 `FISH-Dock-Update-<ver>.exe` + `.sha256`，实测摘要与 GitHub 逐字相同），自动检查更新因此会同时问 GitHub 与 Gitee；写 `off` / `none` / `0` 关掉（空白＝没覆盖，仍是默认仓库）。附加条目 A（2026-11-04）：同一个键还驱动 `sources::picks` 的「Gitee 附件」候选（`<gitee_repo>/releases/download/<tag>/<file>`，**只映射同名项目**——插件仓是另一个 repo，不会被改指过来），并决定 `updates::allowed` 的放行边界（前缀 + 边界字符，同名前缀的别的仓不放行）。只认 `https://gitee.com/<owner>/<repo>` 这一形态，写坏＝没配。实测口径与缺口见 `app/docs/domestic-mirror-matrix-2026-11-04.md` |
 | `url.pet_mirror` | `(空)` | `FISH_DOCK_PET_MIRROR` | URL | 2.0.4 T-F：宠物图库图片的前缀镜像（fetch 的预览候选；空＝保留原站） |
 | `timeout.net_connect_ms` | `15000` | `FISH_DOCK_NET_CONNECT_MS` | 超时 | 所有 web 请求的 TCP 连接层预算 |
 | `timeout.net_head_ms` | `30000` | `FISH_DOCK_NET_HEAD_MS` | 超时 | 所有 web 请求的响应头预算 |
@@ -109,9 +109,9 @@
 - **双仓路径**（与工作区 `AGENTS.md` §八同源；实测证据见 `app/docs/domestic-mirror-matrix-2026-11-04.md`）：
   - Dock 宿主：GitHub `https://github.com/Fish-under-sea/FISH-Dock`（发行与摘要权威）／Gitee `https://gitee.com/Fish-under-sea/FISH-Dock`（国内仓库入口）。
   - 官方插件：GitHub `https://github.com/Fish-under-sea/FISH-DOCK-Plugins`（`catalog/stable.json` 的 `url` 全部指向它的 Release）／Gitee `https://gitee.com/Fish-under-sea/FISH-DOCK-Plugins`。⚠️ 2026-11-04 实测该 Gitee 仓**匿名 API 404、raw 403**（`AGENTS.md` §八记的「200」已不成立，需人工确认可见性），**不作为 `.fish-plugin` 下载源**。
-- **默认值口径**：`url.raw_mirror` / `url.gh_proxy` / `url.gitee_repo` / `url.pet_mirror` 四个镜像键默认全空，空＝「没配」＝**不加候选**，getter 不以任何内置地址兜底（`config.rs` 的 `RAW_MIRROR_DEFAULT=""` 与三个 `text(ENV_*, "")`）。`mirror.prefer` 默认 `auto`（原地址优先、镜像兜底），无候选时 `domestic` 自然回落原地址。
+- **默认值口径**（2.1.1 起有一条例外）：`url.raw_mirror` / `url.gh_proxy` / `url.pet_mirror` 默认全空，空＝「没配」＝**不加候选**，getter 不以任何内置地址兜底（`RAW_MIRROR_DEFAULT=""` 与 `text(ENV_*, "")`）。**`url.gitee_repo` 是例外**：它自 2.1.1（#72）起有内置默认值 `GITEE_REPO_DEFAULT`（主仓 Gitee 镜像），关闭用 `off` / `none` / `0`——空串在这套 getter 里的既定语义是「没覆盖，用默认」，不能兼作开关。`mirror.prefer` 默认 `auto`（原地址优先、镜像兜底），无候选时 `domestic` 自然回落原地址。
 - **不内置第三方镜像**：实测确认可用的公开前缀加速（`ghfast.top` / `gh-proxy.com`，字节与官方摘要一致）只作为用户可自行填入 `url.gh_proxy` 的参考值记在矩阵 §6，**产品默认值保持空**——第三方前缀会看到完整目标地址且随时可能停服或换字节，这个决定不替用户做。
-- **缺口如实标注**：pet 图库（`codex-pets.net` 实测 DNS 污染级不可达）、Windhawk、LHM **均无已确认的免费国内镜像**；Dock 更新 exe 的 Gitee 附件**当前全 404**（Gitee 主仓只有 tags、没有发行版本）。缺口如实标注，不拿默认空前缀算作已完成，也不要求用户自建服务。
+- **缺口如实标注**：pet 图库（`codex-pets.net` 实测 DNS 污染级不可达）、Windhawk、LHM **均无已确认的免费国内镜像**。Dock 更新 exe 的 Gitee 附件**已经可用**（2026-11-05 实测 v2.1.0：`FISH-Dock-Update-2.1.0.exe` 与它的 `.sha256`，摘要 `5513ee…4406` 与 GitHub `assets[].digest` 逐字相同），但 Gitee 侧**只有 Update 包**：只传 Setup 的发行不参与「有新版本」的判断（探针按 `FISH-Dock-Update-<ver>.exe.sha256`）。其余缺口不拿默认空前缀算作已完成，也不要求用户自建服务。
 - **AEGIS**：接镜像候选不改 CSP、不放宽下载域名白名单（`updates::allowed` 反而按「前缀 + 边界」收窄了）、不伪造镜像地址与摘要；任何镜像来的字节仍要过既有摘要校验（`updates.rs` 的 `digest` 比对、`plugin_store` 的 catalog `sha256`）才落地。
 
 ## 证明生效的测试
@@ -120,8 +120,8 @@
 
 镜像四键与 `mirror.prefer` 的「配了才启用 / 默认不变形」由择源层与更新器的用例锁住（附加条目 A，2026-11-04）：
 
-- `cargo test -- sources`（27 passed）：`default_candidates_are_locked_without_any_mirror_key` 逐条锁定四键全空时的默认候选表；`the_gitee_attachment_candidate_needs_the_repo_configured`、`the_gitee_candidate_never_repoints_another_project`、`a_malformed_gitee_repo_yields_no_candidate`、`the_gitee_attachment_takes_part_in_the_same_walk` 锁 `url.gitee_repo` 的开关语义、同名项目限定、坏配置＝没配、共用一次 deadline。
-- `cargo test -- updates`（35 passed）：`the_gitee_endpoint_appears_only_when_the_repo_is_configured` 锁 `endpoints()` 的开关；`the_gitee_candidate_stays_inside_the_same_allowance`、`the_allowance_stops_at_the_repository_boundary` 锁放行边界不因配置 Gitee 而放宽；`both_installer_names_get_the_gitee_candidate` 锁两个真实安装器名与它们的 `.sha256` 都能换源。
+- `cargo test -- sources`：`default_candidates_are_locked_with_the_gitee_channel_off` 逐条锁定「镜像键全空 + Gitee 显式 off」时的候选表；`the_gitee_attachment_candidate_is_on_by_default_and_off_switches_it_away`（2.1.1 改写：默认就带 Gitee 候选、`off` 才关）、`the_gitee_candidate_never_repoints_another_project`、`a_malformed_gitee_repo_yields_no_candidate`（空串已不是「没配」）、`the_gitee_attachment_takes_part_in_the_same_walk` 锁 `url.gitee_repo` 的开关语义、同名项目限定、坏配置＝没配、共用一次 deadline。
+- `cargo test -- updates`：`the_gitee_endpoint_is_on_by_default_and_switches_off_explicitly`（2.1.1 改写）锁 `endpoints()` 默认带 Gitee、`off` 才关；`github_read` 锁「摘要取安装器载荷（Gitee 侧同一份文件），便携载荷不掺和」；`the_gitee_candidate_stays_inside_the_same_allowance`、`the_allowance_stops_at_the_repository_boundary` 锁放行边界不因配置 Gitee 而放宽；`both_installer_names_get_the_gitee_candidate` 锁两个真实安装器名与它们的 `.sha256` 都能换源。
 
 > 这批用例的**测试环境基础设施**（t10 复审后收口）：镜像类环境变量（`FISH_DOCK_GITEE_REPO` / `FISH_DOCK_GH_PROXY` / `FISH_DOCK_RAW_MIRROR` / `FISH_DOCK_PET_MIRROR` / `FISH_DOCK_MIRROR_PREFER`）在 `sources` 与 `updates` 两个测试模块之间**只有一把锁** `crate::sources::MIRROR_ENV_LOCK`（`updates` 里原来的 `UPDATE_ENV_LOCK` 已退役成它的别名，既有调用点不用改），所以「设镜像键」的用例之间必然串行；改键一律走 Drop 守卫（`GiteeEnvGuard` / `GhProxyEnvGuard` / `EmptyMirrorsGuard` / `sources` 的 `EnvGuard`），断言 panic 也会还原，不会把脏值留给同进程后面的用例；读「当下候选表」的用例再用 `with_empty_mirrors` 把四个镜像键显式清成不存在，不依赖环境刚好干净。少任何一条，`cargo test -- updates` 都会在并行下随机红。
 

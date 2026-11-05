@@ -815,15 +815,30 @@ mod tests {
     /// 插件仓的资产：另一个 repo，永远不该被改指到 Dock 的 Gitee 仓。
     const PLUGIN_ASSET: &str = "https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.2.0/feishu.fish-plugin";
 
-    // 「配了才启用」：默认（`url.gitee_repo` 空）一条 Gitee 候选都没有；配了就有，
-    // 且 auto/domestic/overseas 的排序语义与原地址兜底都不变。
+    // 「默认启用、可显式关掉」（2.1.1 / #72：Gitee 侧已经有发行资产）：默认就带一条
+    // Gitee 候选，`off` 之后一条都没有；auto/domestic/overseas 的排序语义与原地址
+    // 兜底都不变。
     #[test]
-    fn the_gitee_attachment_candidate_needs_the_repo_configured() {
+    fn the_gitee_attachment_candidate_is_on_by_default_and_off_switches_it_away() {
         let _g = env_lock();
+        with_env("FISH_DOCK_GITEE_REPO", "off", || {
+            assert_eq!(crate::config::gitee_repo(), "", "off 表示关掉");
+            assert!(picks(DOCK_ASSET).is_empty(), "关掉之后不许冒出 Gitee 候选：{:?}", picks(DOCK_ASSET));
+            assert_eq!(candidates(DOCK_ASSET).iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "关掉之后只有原地址");
+        });
         without_env("FISH_DOCK_GITEE_REPO", || {
-            assert_eq!(crate::config::gitee_repo(), "", "默认没配 Gitee");
-            assert!(picks(DOCK_ASSET).is_empty(), "默认不许冒出 Gitee 候选：{:?}", picks(DOCK_ASSET));
-            assert_eq!(candidates(DOCK_ASSET).iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "默认只有原地址");
+            with_env("FISH_DOCK_MIRROR_PREFER", "auto", || {
+                let got = picks(DOCK_ASSET);
+                assert_eq!(got.len(), 1, "默认就带一条 Gitee 候选：{got:?}");
+                assert_eq!(got[0].label, "Gitee 附件");
+                assert_eq!(got[0].url, DOCK_GITEE_ASSET, "只换仓库前缀，tag 与文件名原样");
+                assert_eq!(candidates(DOCK_ASSET).iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"]);
+                let domestic = with_env("FISH_DOCK_MIRROR_PREFER", "domestic", || candidates(DOCK_ASSET));
+                assert_eq!(domestic.iter().map(|p| p.label).collect::<Vec<_>>(), ["Gitee 附件", "原地址"]);
+                let overseas = with_env("FISH_DOCK_MIRROR_PREFER", "overseas", || candidates(DOCK_ASSET));
+                assert_eq!(overseas.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"]);
+                assert!(secure_url(DOCK_GITEE_ASSET).is_ok());
+            });
         });
         with_env("FISH_DOCK_GITEE_REPO", DOCK_GITEE, || {
             // 显式钉住 auto：不依赖跑测试时的进程环境（别的用例曾泄漏过 domestic）。
@@ -871,7 +886,8 @@ mod tests {
     #[test]
     fn a_malformed_gitee_repo_yields_no_candidate() {
         let _g = env_lock();
-        for bad in ["", "   ", "gitee.com/Fish-under-sea/FISH-Dock", "http://gitee.com/Fish-under-sea/FISH-Dock", "https://github.com/Fish-under-sea/FISH-Dock", "https://gitee.com/Fish-under-sea", "https://gitee.com/Fish-under-sea/FISH-Dock/extra", "https://gitee.com//FISH-Dock"] {
+        // 注意：空串/空白**不再**是「没配」——2.1.1 起它们是「没覆盖，用默认仓库」。
+        for bad in ["off ", "gitee.com/Fish-under-sea/FISH-Dock", "http://gitee.com/Fish-under-sea/FISH-Dock", "https://github.com/Fish-under-sea/FISH-Dock", "https://gitee.com/Fish-under-sea", "https://gitee.com/Fish-under-sea/FISH-Dock/extra", "https://gitee.com//FISH-Dock"] {
             with_env("FISH_DOCK_GITEE_REPO", bad, || assert!(picks(DOCK_ASSET).is_empty(), "{bad:?} 不该产生候选：{:?}", picks(DOCK_ASSET)));
         }
         // 非 Release 资产的形状（tag 页、API、缺文件名、嵌套路径）也不映射。
@@ -885,12 +901,14 @@ mod tests {
         }
     }
 
-    // 默认状态（四个镜像键一个都没配）候选表逐条锁定：新增 Gitee 分支不许改动
-    // 任何一类资源的默认下载顺序（附加条目 A 的硬验收）。
+    // 基线状态（四个镜像键一个都没配、且 Gitee 通道显式关掉）候选表逐条锁定：
+    // 没有任何一类资源在这里被悄悄换源（附加条目 A 的硬验收）。Gitee 的默认候选
+    // 另由 `the_gitee_attachment_candidate_is_on_by_default_and_off_switches_it_away`
+    // 与 `updates::the_gitee_candidate_stays_inside_the_same_allowance` 锁住。
     #[test]
-    fn default_candidates_are_locked_without_any_mirror_key() {
+    fn default_candidates_are_locked_with_the_gitee_channel_off() {
         let _g = env_lock();
-        without_env("FISH_DOCK_GITEE_REPO", || {
+        with_env("FISH_DOCK_GITEE_REPO", "off", || {
             without_env("FISH_DOCK_GH_PROXY", || {
                 without_env("FISH_DOCK_RAW_MIRROR", || {
                     without_env("FISH_DOCK_PET_MIRROR", || {

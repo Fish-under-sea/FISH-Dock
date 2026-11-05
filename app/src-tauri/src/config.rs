@@ -99,6 +99,13 @@ const ENV_GITEE_REPO: &str = "FISH_DOCK_GITEE_REPO";
 const ENV_PET_MIRROR: &str = "FISH_DOCK_PET_MIRROR";
 /// raw.githubusercontent.com 的前缀镜像（sources::picks 的 raw 候选）。
 pub const RAW_MIRROR_DEFAULT: &str = "";
+/// 主仓在 Gitee 的镜像仓库（更新检查候选 + 发行资产候选，`AGENTS.md` §8.1）。
+///
+/// 2.1.1 / #72：Gitee 侧已经有发行资产（`FISH-Dock-Update-<ver>.exe` 与它的
+/// `.sha256`），所以这条通道改成**默认启用**——国内不配代理也能从 Gitee 拉更新。
+/// 关掉的办法是显式写 `off`（也认 `none` / `0`），因为「空串」在这里已经是
+/// 「没覆盖，用默认」的意思（`text_of` 的既有口径）。
+pub const GITEE_REPO_DEFAULT: &str = "https://gitee.com/Fish-under-sea/FISH-Dock";
 
 // —— 超时（Timeout，毫秒除非注明）——
 const ENV_NET_CONNECT_MS: &str = "FISH_DOCK_NET_CONNECT_MS";
@@ -252,7 +259,7 @@ pub const KEYS: &[Key] = &[
     // 2.0.4 T-F（resources）：镜像前缀，默认空＝不加候选（方案 §7.2）
     Key { name: "url.raw_mirror", env: ENV_RAW_MIRROR, default: "(空)", category: Category::Url, impact: "raw.githubusercontent.com 文件的前缀镜像（sources::picks 候选；空＝只走 jsDelivr 与原站）" },
     Key { name: "url.gh_proxy", env: ENV_GH_PROXY, default: "(空)", category: Category::Url, impact: "GitHub Release 资产下载的前缀加速（sources::picks 候选；空＝不加）" },
-    Key { name: "url.gitee_repo", env: ENV_GITEE_REPO, default: "(空)", category: Category::Url, impact: "Gitee 仓库地址（updates::endpoints 的更新检查候选；空＝不启用 Gitee）" },
+    Key { name: "url.gitee_repo", env: ENV_GITEE_REPO, default: GITEE_REPO_DEFAULT, category: Category::Url, impact: "Gitee 仓库地址（更新检查与发行资产候选；默认主仓镜像，写 off 关闭）" },
     Key { name: "url.pet_mirror", env: ENV_PET_MIRROR, default: "(空)", category: Category::Url, impact: "宠物图库图片的前缀镜像（fetch 的预览候选；空＝保留原站）" },
     // 超时
     Key { name: "timeout.net_connect_ms", env: ENV_NET_CONNECT_MS, default: "15000", category: Category::Timeout, impact: "所有 web 请求的 TCP 连接层预算" },
@@ -409,9 +416,21 @@ pub fn plugin_catalog_api() -> String { text(ENV_CATALOG_API, CATALOG_API_DEFAUL
 pub const PLUGIN_RELEASE_BASE: &str = "https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download";
 // —— 2.0.4 T-F（resources）：镜像前缀 ——
 // 空串就是「没配」：调用方据此决定不加候选，不许伪造镜像或改指第三方站点。
+// 2.1.1 起唯一的例外是 `url.gitee_repo`：它有内置默认值（主仓的 Gitee 镜像），
+// 关闭用 `off` 表达——见 `GITEE_REPO_DEFAULT`。
 pub fn raw_mirror() -> String { text(ENV_RAW_MIRROR, RAW_MIRROR_DEFAULT) }
 pub fn gh_proxy() -> String { text(ENV_GH_PROXY, "") }
-pub fn gitee_repo() -> String { text(ENV_GITEE_REPO, "") }
+/// 「关掉 Gitee 通道」的三种写法，大小写不敏感。默认启用之后必须留一条明路：
+/// 不想走镜像的人不该只能被动接受默认值。
+fn gitee_off(raw: Option<&str>) -> bool {
+    matches!(raw.map(str::trim).map(str::to_ascii_lowercase).as_deref(), Some("off" | "none" | "0"))
+}
+pub fn gitee_repo() -> String {
+    match var(ENV_GITEE_REPO) {
+        Some(raw) if gitee_off(Some(raw.as_str())) => String::new(),
+        raw => text_of(raw.as_deref(), GITEE_REPO_DEFAULT),
+    }
+}
 pub fn pet_mirror() -> String { text(ENV_PET_MIRROR, "") }
 
 // —— 超时 ——
@@ -713,10 +732,10 @@ mod tests {
     #[test]
     fn mirror_prefixes_default_to_empty_and_prefer_whitelists_or_falls_back() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        // 默认：没有内置镜像，也没有内置 Gitee 仓库（方案 §7.2「配了才启用」）。
+        // 默认：没有内置镜像；Gitee 自 2.1.1（#72）起有内置默认仓库。
         assert_eq!(raw_mirror(), "", "raw 镜像默认空");
         assert_eq!(gh_proxy(), "", "Release 加速前缀默认空");
-        assert_eq!(gitee_repo(), "", "Gitee 仓库默认空");
+        assert_eq!(gitee_repo(), GITEE_REPO_DEFAULT, "Gitee 仓库默认指向主仓镜像");
         assert_eq!(pet_mirror(), "", "宠物镜像默认空");
         assert_eq!(mirror_prefer(), "auto", "择源偏好默认 auto");
         // 设了就生效，且末尾 `/` 去掉（前缀要能直接拼路径）。
@@ -726,6 +745,11 @@ mod tests {
         assert_eq!(with_env_locked(&_g, ENV_PET_MIRROR, "https://pet.example/", pet_mirror), "https://pet.example");
         // 空白视为没设：不能把一串空格当镜像前缀拼进 URL。
         assert_eq!(with_env_locked(&_g, ENV_RAW_MIRROR, "   ", raw_mirror), "");
+        // Gitee 通道的关闭方式（默认启用之后的唯一明路）：off / none / 0，大小写不敏感。
+        for off in ["off", " OFF ", "none", "0"] {
+            assert_eq!(with_env_locked(&_g, ENV_GITEE_REPO, off, gitee_repo), "", "{off:?} 应关掉 Gitee 通道");
+        }
+        assert_eq!(with_env_locked(&_g, ENV_GITEE_REPO, "   ", gitee_repo), GITEE_REPO_DEFAULT, "空白＝没覆盖，仍是默认仓库");
         // 白名单：auto / domestic / overseas（大小写不敏感），其余回落 auto。
         assert_eq!(mirror_prefer_of(None), "auto");
         assert_eq!(mirror_prefer_of(Some("")), "auto");

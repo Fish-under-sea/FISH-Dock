@@ -252,6 +252,20 @@ fn exe_name(version: &str) -> String {
     format!("wakuwaku-v{version}-windows-x64.exe")
 }
 
+// 应用内更新真正下载的那份载荷（`installer_names` 的第一项：先用增量 Update 包）。
+//
+// 2.1.1 / #72 修的是这里「拿历史名去核对当前发行」的错位：检查器一直按
+// `exe_name`（便携 exe 的历史名）去发行里找资产与 `<exe>.sha256`，而 2.0.x 起的
+// 发行只有 `FISH-Dock-Setup-<ver>.exe` / `FISH-Dock-Update-<ver>.exe`——于是
+// GitHub 侧的 `exe/digest` 恒为 None、Gitee 侧连 `.sha256` 都探不到，整条
+// 「另一处也有发行」的判断等于没做（`AGENTS.md` §8.1 记的上游缺陷①）。
+//
+// 摘要两侧必须核对**同一个文件**才谈得上「两边一致」：更新检查统一用这份
+// Update 载荷的摘要（Gitee 侧 2.1.0 起放的正是它）。
+fn update_asset_name(version: &str) -> String {
+    format!("FISH-Dock-Update-{version}.exe")
+}
+
 // A release's version by its tag, if it counts (no draft, no prerelease).
 fn version_of(v: &Value) -> Option<String> {
     if v["draft"] == true || v["prerelease"] == true {
@@ -273,16 +287,23 @@ pub fn sums_of(text: &str) -> Option<String> {
 }
 
 // GitHub's release JSON: its exe by name with the SHA-256 given for it.
+//
+// exe = 便携载荷（历史上按 `exe_name` 命名；当前发行不再提供便携 exe，所以是
+// None，便携版「换掉自己的 exe」这条入口保持不可用，而不是拿安装器去顶替）。
+// digest = **安装器载荷**（`update_asset_name`）的摘要：与 Gitee 侧探的是同一
+// 份文件，两个来源的摘要因此可以逐字比对（`merge` 的 conflict）。
 pub fn github_release(v: &Value) -> Option<Found> {
     let version = version_of(v)?;
-    let name = exe_name(&version);
-    let asset = v["assets"].as_array().and_then(|all| all.iter().find(|a| a["name"].as_str() == Some(name.as_str())));
+    let assets = v["assets"].as_array();
+    let asset = |name: String| assets.and_then(|all| all.iter().find(|a| a["name"].as_str() == Some(name.as_str())));
+    let portable = asset(exe_name(&version));
+    let installer = asset(update_asset_name(&version));
     Some(Found {
         source: Source::GitHub,
         page: v["html_url"].as_str().unwrap_or("").to_string(),
-        exe: asset.and_then(|a| a["browser_download_url"].as_str()).map(str::to_string),
-        digest: asset.and_then(|a| a["digest"].as_str()).and_then(|d| d.strip_prefix("sha256:")).and_then(sha256_hex),
-        size: asset.and_then(|a| a["size"].as_u64()).unwrap_or(0),
+        exe: portable.and_then(|a| a["browser_download_url"].as_str()).map(str::to_string),
+        digest: installer.and_then(|a| a["digest"].as_str()).and_then(|d| d.strip_prefix("sha256:")).and_then(sha256_hex),
+        size: portable.and_then(|a| a["size"].as_u64()).unwrap_or(0),
         version,
     })
 }
@@ -300,17 +321,26 @@ pub fn newest_tag(refs: &str) -> Option<String> {
         .reduce(|a, b| if newer(&b, &a) { b } else { a })
 }
 
-// Gitee: its newest tag, and that tag's release by where Gitee keeps its
-// files (<repo>releases/download/<tag>/<file>): its <exe>.sha256 there,
-// put up after the exe, so the release is whole; or none of it yet (404).
+// Gitee：最新的 tag，和那个 tag 的发行里 Gitee 真正放上去的文件。
+//
+// 2.1.1 / #72：Gitee 侧现在有资产了（`FISH-Dock-Update-<ver>.exe` 与紧挨着它的
+// `.sha256`，见 `app/scripts/gitee-release.ps1`），所以这条通道**默认启用**。
+// 探针名的错位也在这里修掉：原先按 `exe_name`（便携 exe 的历史名）拼路径，
+// Gitee 上永远 404，等于「配了也没用」。
+//
+// 只认安装器载荷（Update 包）那一份：
+//   - 它正是应用内更新先下载的文件，与 GitHub 侧摘要口径逐字一致（能比对）；
+//   - 发行里没有它的 `.sha256` 时返回 None——Gitee 只传了 Setup 的那种半份发行
+//     不拿来做「有新版本」的依据，也不制造与 GitHub 的假摘要冲突。
+// exe 恒为 None：Gitee 侧不放便携载荷，「换掉自己的 exe」这条路不该指到这里。
 fn gitee_found(repo: &str) -> Result<Option<Found>, String> {
     let repo = format!("{}/", repo.trim_end_matches('/'));
     let refs = get_text(&format!("{}.git/info/refs?service=git-upload-pack", repo.trim_end_matches('/')), 1 << 20)?.unwrap_or_default();
     let Some(tag) = newest_tag(&refs) else { return Ok(None) };
     let version = tag.trim_start_matches(['v', 'V']).to_string();
-    let exe = format!("{repo}releases/download/{tag}/{}", exe_name(&version));
-    let Some(sums) = get_text(&format!("{exe}.sha256"), 4096)? else { return Ok(None) };
-    Ok(Some(Found { source: Source::Gitee, page: format!("{repo}releases/tag/{tag}"), exe: Some(exe), digest: sums_of(&sums), size: 0, version }))
+    let sums_url = format!("{repo}releases/download/{tag}/{}.sha256", update_asset_name(&version));
+    let Some(sums) = get_text(&sums_url, 4096)? else { return Ok(None) };
+    Ok(Some(Found { source: Source::Gitee, page: format!("{repo}releases/tag/{tag}"), exe: None, digest: sums_of(&sums), size: 0, version }))
 }
 
 // The newest either place has: the places that have it, and its SHA-256.
@@ -1754,31 +1784,45 @@ mod tests {
 
     #[test]
     fn github_read() {
-        let asset = |name: &str, digest: &str| json!({ "name": name, "size": 7, "digest": digest, "browser_download_url": format!("https://github.com/zhoupengjie/Wakuwaku/releases/download/x/{name}") });
+        let asset = |name: &str, digest: &str| json!({ "name": name, "size": 7, "digest": digest, "browser_download_url": format!("https://github.com/Fish-under-sea/FISH-Dock/releases/download/x/{name}") });
+        let update_digest = format!("sha256:{}", "AB".repeat(32));
+        let update = asset("FISH-Dock-Update-0.2.1.exe", &update_digest);
         let good = json!({
             "tag_name": "v0.2.1", "draft": false, "prerelease": false,
-            "html_url": "https://github.com/zhoupengjie/Wakuwaku/releases/tag/v0.2.1",
-            "assets": [asset("notes.txt", ""), asset("wakuwaku-v0.2.1-windows-x64.exe", &format!("sha256:{}", "AB".repeat(32)))],
+            "html_url": "https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v0.2.1",
+            "assets": [asset("notes.txt", ""), update.clone(), asset("FISH-Dock-Setup-0.2.1.exe", "")],
         });
         let r = github_release(&good).unwrap();
         assert_eq!(r.source, Source::GitHub);
         assert_eq!(r.version, "0.2.1");
+        // #72：摘要取**安装器载荷**（Gitee 侧放的是同一份文件），不再是便携 exe 的历史名。
         assert_eq!(r.digest.as_deref(), Some("ab".repeat(32).as_str()));
-        assert!(r.exe.unwrap().ends_with("wakuwaku-v0.2.1-windows-x64.exe"));
+        // 当前发行没有便携载荷：exe 为 None，不拿安装器顶替「换掉自己的 exe」。
+        assert_eq!(r.exe, None);
         let mut draft = good.clone();
         draft["draft"] = json!(true);
         assert!(github_release(&draft).is_none());
         let mut pre = good.clone();
         pre["prerelease"] = json!(true);
         assert!(github_release(&pre).is_none());
+        // 便携载荷真出现时 exe 才带上它；摘要仍只算安装器那份（跨来源比的是同一个文件，
+        // 便携 exe 的摘要掺进来只会制造假冲突）。
+        let mut portable = good.clone();
+        portable["assets"] = json!([update.clone(), asset("wakuwaku-v0.2.1-windows-x64.exe", &format!("sha256:{}", "CD".repeat(32)))]);
+        let r = github_release(&portable).unwrap();
+        assert!(r.exe.unwrap().ends_with("wakuwaku-v0.2.1-windows-x64.exe"));
+        assert_eq!(r.digest.as_deref(), Some("ab".repeat(32).as_str()), "摘要只认安装器载荷");
         // No SHA-256 given, or not one: none to check by.
         let mut bare = good.clone();
-        bare["assets"] = json!([asset("wakuwaku-v0.2.1-windows-x64.exe", "md5:xyz")]);
+        bare["assets"] = json!([asset("FISH-Dock-Update-0.2.1.exe", "md5:xyz")]);
         assert_eq!(github_release(&bare).unwrap().digest, None);
-        // The exe by another name: none to install.
-        let mut other = good;
-        other["assets"] = json!([asset("wakuwaku.exe", "")]);
-        assert_eq!(github_release(&other).unwrap().exe, None);
+        // 旧发行只有便携 exe（没有安装器载荷）：摘要同样是 None——Gitee 侧没有那份文件，
+        // 拿便携 exe 的摘要去比只会得到一条假的「两边不一致」。
+        let mut legacy = good;
+        legacy["assets"] = json!([asset("wakuwaku-v0.2.1-windows-x64.exe", &update_digest)]);
+        let r = github_release(&legacy).unwrap();
+        assert!(r.exe.unwrap().ends_with("wakuwaku-v0.2.1-windows-x64.exe"));
+        assert_eq!(r.digest, None, "没有安装器载荷就没有可比对的摘要");
     }
 
     // A repo's tags as git's info/refs gives them (as Gitee's does): the
@@ -2298,35 +2342,38 @@ mod tests {
 
     const GITEE_REPO: &str = "https://gitee.com/Fish-under-sea/FISH-Dock";
 
-    // endpoints() 的 Gitee 候选完全由 `url.gitee_repo` 决定：默认只有 GitHub 一条
-    // （与 2.0.4 现状逐条一致，不默认启用），配了才多一条，且 GitHub 仍在第一位
-    // （区域顺序由 `Release::ordered` / `gitee_first` 决定，不在 endpoints 里）。
+    // endpoints() 的 Gitee 候选：2.1.1（#72）起**默认启用**主仓镜像（Gitee 侧已经有
+    // 发行资产），`off`/`none`/`0` 明确关掉；写坏的地址原样交给 `gitee_found` 去 404，
+    // endpoints 不替用户猜仓库。GitHub 永远在第一位——区域顺序由 `Release::ordered`
+    // 与 `gitee_first` 决定，不在这里。
     #[test]
-    fn the_gitee_endpoint_appears_only_when_the_repo_is_configured() {
+    fn the_gitee_endpoint_is_on_by_default_and_switches_off_explicitly() {
         let _urls = production_urls();
+        let both = |got: Vec<(Source, String)>| {
+            assert_eq!(got.iter().map(|(s, _)| *s).collect::<Vec<_>>(), [Source::GitHub, Source::Gitee], "{got:?}");
+            assert_eq!(got[0].1, crate::config::update_latest(), "GitHub 的 releases/latest 不许被改");
+            assert_eq!(got[1].1, GITEE_REPO, "Gitee 候选就是主仓镜像");
+        };
         with_gitee(None, || {
             assert!(!super::testing(), "夹具变量清掉了才测得到生产分支");
-            assert_eq!(crate::config::gitee_repo(), "", "默认没配 Gitee");
-            let got = super::endpoints();
-            assert_eq!(got.len(), 1, "默认只有 GitHub 一条：{got:?}");
-            assert_eq!(got[0].0, Source::GitHub);
-            assert_eq!(got[0].1, crate::config::update_latest(), "地址仍是 GitHub 的 releases/latest");
+            assert_eq!(crate::config::gitee_repo(), GITEE_REPO, "默认就指向主仓镜像，不用用户先配");
+            both(super::endpoints());
         });
-        with_gitee(Some(GITEE_REPO), || {
-            let got = super::endpoints();
-            assert_eq!(got.iter().map(|(s, _)| *s).collect::<Vec<_>>(), [Source::GitHub, Source::Gitee], "{got:?}");
-            assert_eq!(got[0].1, crate::config::update_latest());
-            assert_eq!(got[1].1, GITEE_REPO, "Gitee 候选就是用户自己配的那个仓库，不内置地址");
-        });
-        // 空串＝没配（`config.rs` 的口径）；写坏的地址也原样交给 `gitee_found` 去 404，
-        // endpoints 不替用户猜仓库。
-        with_gitee(Some(""), || assert_eq!(super::endpoints().len(), 1, "空串视为未配置"));
-        with_gitee(Some("   "), || assert_eq!(super::endpoints().len(), 1, "空白视为未配置"));
+        // 不想要镜像的人必须有一条明路：off / none / 0（大小写不敏感）。
+        for off in ["off", "none", "0", "OFF"] {
+            with_gitee(Some(off), || {
+                assert_eq!(crate::config::gitee_repo(), "", "{off:?} 应关掉 Gitee 通道");
+                assert_eq!(super::endpoints().len(), 1, "{off:?} 之后只剩 GitHub 一条");
+            });
+        }
+        // 显式配一个仓：照用，不内置地址；空白＝没覆盖（仍是默认仓库）。
+        with_gitee(Some(GITEE_REPO), || both(super::endpoints()));
+        with_gitee(Some("   "), || assert_eq!(super::endpoints().len(), 2, "空白视为没覆盖，仍是默认仓库"));
     }
 
     // AEGIS：Gitee 候选不是「放宽下载白名单」。`allowed()` 对它的判定与对原地址
-    // 同一口径（前缀就是用户配的 `gitee_repo`）；没配时任何 gitee.com 地址都进不来，
-    // 别人的仓（插件仓）也不会因为配了 Dock 的 Gitee 就被放行。
+    // 同一口径（前缀就是 `gitee_repo` 的值）；2.1.1 起它默认指向主仓镜像，所以
+    // 「默认放行 gitee.com」只限**同一个 repo**：插件仓与别人的仓照样进不来。
     #[test]
     fn the_gitee_candidate_stays_inside_the_same_allowance() {
         let _urls = production_urls();
@@ -2336,18 +2383,30 @@ mod tests {
         // t10 F1(b)：环境自己钉住——四个镜像键全清成「不存在」，所以候选表只可能是
         // ［原地址］或［原地址, Gitee 附件］，不会因为同模块别处设了 GH_PROXY 而多出
         // 「Release 加速」一条（那正是并行跑时这条用例随机红的原因）。
+        //
+        // 显式关掉（off）：候选表回到只有原地址，gitee.com 一条都不放行——用户明确
+        // 说了不走镜像，就不该还留一条偷偷能被用上的下载路。
+        with_gitee(Some("off"), || {
+            with_empty_mirrors(|| {
+                let got = crate::sources::candidates(asset);
+                assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "关掉 Gitee 后只有原地址：{got:?}");
+                assert_eq!(got[0].url, asset);
+                assert!(allowed(asset), "GitHub 官方发行地址本来就在放行范围内");
+                assert!(!allowed(gitee_asset), "关掉 Gitee 时 gitee.com 地址不许被放行");
+                assert!(!allowed(plugin_asset));
+            });
+        });
+        // 默认（#72）：Gitee 候选在，且只对同一个 repo 放行。
         with_gitee(None, || {
             with_empty_mirrors(|| {
-                // 先钉候选表，再谈白名单：候选表错了，后面的 allowed() 断言没有意义。
                 let got = crate::sources::candidates(asset);
-                assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址"], "默认（四个镜像键全空）只有原地址：{got:?}");
-                assert_eq!(got[0].url, asset);
+                assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"], "默认带 Gitee 候选：{got:?}");
+                assert_eq!(got[1].url, gitee_asset);
                 for pick in &got {
-                    assert!(allowed(&pick.url), "默认候选 {} 越界了", pick.url);
+                    assert!(allowed(&pick.url), "候选 {} 越界了", pick.url);
                 }
-                assert!(allowed(asset), "GitHub 官方发行地址本来就在放行范围内");
-                assert!(!allowed(gitee_asset), "没配 Gitee 时 gitee.com 地址不许被放行");
-                assert!(!allowed(plugin_asset));
+                assert!(allowed(gitee_asset), "同一个 repo 的 Gitee 资产放行");
+                assert!(!allowed(plugin_asset), "插件仓是另一个 repo，默认也不放行");
             });
         });
         with_gitee(Some(GITEE_REPO), || {
@@ -2401,8 +2460,8 @@ mod tests {
                 assert!(!allowed(bad), "{bad} 不该放行");
             }
         });
-        // 没配 Gitee 时，Gitee 侧一条都不放行（默认不启用）。
-        with_gitee(None, || {
+        // 显式关掉 Gitee（off）时，Gitee 侧一条都不放行。
+        with_gitee(Some("off"), || {
             for bad in ["https://gitee.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4", "https://gitee.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v2.2.0/feishu.fish-plugin"] {
                 assert!(!allowed(bad), "{bad} 不该放行");
             }
