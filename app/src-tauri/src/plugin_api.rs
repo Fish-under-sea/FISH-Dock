@@ -104,8 +104,9 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
 // 检索结果 → 命令返回体：**字段只在这里定义一次**，handler 与契约测试共用。
 // t42 F-A：这里曾漏掉 nextFrom，前端只能退回「上一页 + 一页大小」，
 // registry 返回短页（对象数 < size 且 hasMore）时就会跳过中间偏移。
+// #72：另带回 official——本页被排除的官方插件条数（前端要说明「不是搜不到」）。
 pub(crate) fn search_json(report:&crate::plugin_thirdparty::SearchReport)->Value{
-    json!({"hits":report.hits,"hidden":report.hidden,"total":report.total,"filtered":report.filtered,"hasMore":report.has_more,"nextFrom":report.next_from})
+    json!({"hits":report.hits,"hidden":report.hidden,"official":report.official,"total":report.total,"filtered":report.filtered,"hasMore":report.has_more,"nextFrom":report.next_from})
 }
 #[tauri::command]
 pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:String,confirm:bool,from:Option<u32>,size:Option<u32>,discovery:Option<bool>)->Result<Value,String>{
@@ -201,7 +202,7 @@ pub fn pause(){if let Ok(mut runner)=crate::plugin_runtime::CURRENT.lock(){runne
         let fixture:Value=serde_json::from_str(include_str!("../../test/fixtures/thirdparty-search.json")).unwrap();
         let report=|hits:usize,total:usize,filtered:usize,has_more:bool,next_from:usize| crate::plugin_thirdparty::SearchReport{
             hits:(0..hits).map(|i|crate::plugin_thirdparty::Hit{name:format!("fish-dock-plugin-p{}",i+1),version:format!("1.0.{}",i+1),description:format!("page fixture {}",i+1),publisher:"fixture".into(),updated:"2026-11-01".into()}).collect(),
-            hidden:0,total,filtered,has_more,next_from};
+            hidden:0,official:0,total,filtered,has_more,next_from};
         for (got,want) in [(search_json(&report(20,41,20,true,20)),&fixture["firstPage"]),(search_json(&report(5,41,5,true,25)),&fixture["secondPage"])]{
             let keys=|value:&Value|{let mut names:Vec<String>=value.as_object().expect("命令返回体是对象").keys().cloned().collect();names.sort();names};
             assert_eq!(keys(&got),keys(want),"命令返回体与前端夹具的字段必须一一对应（t42 F-A：漏 nextFrom 会让前端退回 from+20）");

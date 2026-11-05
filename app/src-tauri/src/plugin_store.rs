@@ -15,6 +15,11 @@ pub const MAX_DOWNLOAD:u64=crate::plugin_package::TOTAL_LIMIT as u64;
 // 装、明天从 GitHub 装，落地的摘要完全一样：重装幂等、不会多出一份版本目录。
 // 地址/超时默认值与 env 覆盖都在 crate::config 的 url.* / timeout.* 键里。
 pub const NPM_PACKAGE_PREFIX:&str="@fish-under-sea/fish-dock-plugin-";
+// ── 官方身份白名单（唯一一份字面量）──────────────────────────────────────
+// 目录里允许出现的身份就是这三个：插件仓目前维护的三个官方插件。目录校验读它，
+// 第三方页的「排除官方」也读它（#72）——两处各抄一份数组就等于把「官方」定义了
+// 两次，迟早有一天不一致。
+pub const OFFICIAL_IDS:[&str;3]=["fish.feishu","fish.clash","fish.magpie"];
 /// 一条下载来源的记录：哪条路成了、每条路花了多久、失败的那条为什么失败。
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
@@ -97,7 +102,7 @@ pub fn parse(bytes:&[u8])->Result<Catalog,String>{
     if catalog.schema!=1||catalog.plugins.len()>100{return Err("官方目录版本或条目数无效".into());}
     let mut seen=HashSet::new();
     for row in &catalog.plugins{
-        if !["fish.feishu","fish.clash","fish.magpie"].contains(&row.id.as_str())||!seen.insert((&row.id,&row.platform)){return Err("官方目录身份无效或重复".into());}
+        if !OFFICIAL_IDS.contains(&row.id.as_str())||!seen.insert((&row.id,&row.platform)){return Err("官方目录身份无效或重复".into());}
         crate::plugin_manifest::version(&row.version)?;
         if row.host_api!=crate::plugin_manifest::API||row.platform.len()>40||!row.platform.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'-'||b==b'_'){return Err("官方目录兼容版本或平台无效".into());}
         if [&row.name,&row.description].iter().any(|s|s.trim().is_empty()||s.len()>2048||s.chars().any(char::is_control))||row.authors.is_empty()||row.authors.len()>16||row.authors.iter().any(|s|s.trim().is_empty()||s.len()>2048||s.chars().any(char::is_control))||row.note.as_ref().is_some_and(|s|s.len()>2048||s.chars().any(char::is_control))||row.dependencies.len()>16||row.dependencies.iter().any(|s|s.is_empty()||s.len()>200||s.chars().any(char::is_control)){return Err("官方条目说明或依赖无效".into());}
@@ -231,8 +236,9 @@ pub fn refresh(context:&crate::storage_context::Context)->Result<serde_json::Val
     }
 }
 // npm 单包名：官方插件 fish.magpie → @fish-under-sea/fish-dock-plugin-magpie
-// （plugins/tools/build-npm-packages.mjs 发布的就是这个名字）。
-fn npm_package(id:&str)->String{
+// （plugins/tools/build-npm-packages.mjs 发布的就是这个名字）。第三方页的「官方
+// 包排除」也调这一处（#72）：同一份构造，不另数一份前缀。
+pub(crate) fn npm_package(id:&str)->String{
     let slug=id.rsplit('.').next().filter(|slug|!slug.is_empty()).unwrap_or(id);
     format!("{NPM_PACKAGE_PREFIX}{slug}")
 }

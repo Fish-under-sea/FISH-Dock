@@ -453,9 +453,13 @@
         const hidden = Number(report?.hidden || 0)
         // 不合规包被过滤时把数量说出来，绝不静默变空列表（用户 2026-10-31）。
         // 这个数是**本页**的，文案别让人以为是全局总数。
-        thirdNote = hidden > 0
-          ? text(`本页已隐藏 ${hidden} 个不符合 fish-dock-plugin-* 命名的包`, `Hidden ${hidden} package(s) on this page that do not match fish-dock-plugin-*`)
-          : ''
+        // #72：官方插件在 npm 上也有合规包名，第三方通道一律排除——同样要说出来，
+        // 否则用户只会以为「官方插件不见了 / 搜索坏了」。
+        const official = Number(report?.official || 0)
+        const notes = []
+        if (hidden > 0) notes.push(text(`本页已隐藏 ${hidden} 个不符合 fish-dock-plugin-* 命名的包`, `Hidden ${hidden} package(s) on this page that do not match fish-dock-plugin-*`))
+        if (official > 0) notes.push(text(`本页另有 ${official} 个官方插件的 npm 包：官方插件请到「官方插件」页安装或更新`, `Also ${official} official plugin package(s) on this page: install or update them from Official plugins`))
+        thirdNote = notes.join(' · ')
       } catch (failure) {
         if (generation !== thirdGeneration) return
         thirdError = fail(failure); thirdHasMore = false
@@ -634,7 +638,7 @@
       // 输入框补了可访问名（aria-label），placeholder 只当提示，不当名字（WUI-02）。
       // T-C / #63：placeholder 只留一句短话（整句命名规则原来在窄窗被截断），
       // 规则改到下方 note；空结果、registry 报错、加载更多各有自己的位置。
-      const thirdRule = text('包名需为 fish-dock-plugin-<名字>（可带 @scope），如 @acme/fish-dock-plugin-weather', 'Package name is fish-dock-plugin-<name> (a scope is allowed), e.g. @acme/fish-dock-plugin-weather')
+      const thirdRule = text('包名需为 fish-dock-plugin-<名字>（可带 @scope），如 @acme/fish-dock-plugin-weather；官方插件不在本页，请到「官方插件」页安装或更新', 'Package name is fish-dock-plugin-<name> (a scope is allowed), e.g. @acme/fish-dock-plugin-weather; official plugins are not listed here — install or update them from Official plugins')
       const thirdCount = thirdTotal > 0
         ? `<p class="extension-third-count">${esc(text(`共 ${thirdTotal} 个结果，本页可用 ${thirdFiltered || hits.length} 个`, `${thirdTotal} result(s), ${thirdFiltered || hits.length} usable on this page`))}</p>`
         : ''

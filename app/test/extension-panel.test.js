@@ -971,3 +971,23 @@ test('registry 总数、本页可用数与空结果三态各写各的', async ()
   await empty.panel.load(); await empty.panel.thirdparty('fish-dock-plugin')
   assert.match(empty.panel.render(), /没有找到可安装的包。可换一个包名再试。/, '空结果单独一句')
 })
+
+// #72：官方三个插件在 npm 上的包被后端排除，前端要把「被排除了几个、去哪儿装」说出来，
+// 不能让人以为「官方插件不见了 / 搜索坏了」；两种计数同时出现时两句都要在。
+test('被排除的官方插件数量单独提示，并指回官方插件页', async () => {
+  const { panel } = make({ third: () => ({ hits: [{ name: 'fish-dock-plugin-a', version: '1.0.0' }], hidden: 0, official: 3, total: 4, filtered: 1, hasMore: false, nextFrom: 4 }) })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin')
+  const html = panel.render()
+  assert.match(html, /本页另有 3 个官方插件的 npm 包/, 'official 数量要单独说')
+  assert.match(html, /请到「官方插件」页安装或更新/, '要指回去哪儿装')
+  assert.doesNotMatch(html, /不符合 fish-dock-plugin-\* 命名的包/, '官方包不是「命名不合规」，不许混进 hidden 文案')
+  assert.match(html, /官方插件不在本页/, '规则行也要说明官方插件不在这页')
+})
+
+test('官方插件与命名不合规同时出现时，两句提示都在', async () => {
+  const { panel } = make({ third: () => ({ hits: [], hidden: 2, official: 1, total: 3, filtered: 0, hasMore: false, nextFrom: 3 }) })
+  await panel.load(); await panel.thirdparty('fish-dock-plugin')
+  const html = panel.render()
+  assert.match(html, /本页已隐藏 2 个不符合/)
+  assert.match(html, /本页另有 1 个官方插件的 npm 包/)
+})

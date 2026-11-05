@@ -1,5 +1,5 @@
 {
-  "comment": "npm 检索命令返回体的真实字段形状（t42）：Rust 契约测试断言键集合与本文件一致，Node 用例直接用本文件驱动分页",
+  "comment": "npm 检索命令返回体的真实字段形状（t42）：Rust 契约测试断言键集合与本文件一致，Node 用例直接用本文件驱动分页；official 是 #72 在第三方页排除掉的官方插件条数",
   "firstPage": {
     "hits": [
       {
@@ -144,6 +144,7 @@
       }
     ],
     "hidden": 0,
+    "official": 0,
     "total": 41,
     "filtered": 20,
     "hasMore": true,
@@ -188,6 +189,7 @@
       }
     ],
     "hidden": 0,
+    "official": 0,
     "total": 41,
     "filtered": 5,
     "hasMore": true,
@@ -196,6 +198,7 @@
   "lastPage": {
     "hits": [],
     "hidden": 0,
+    "official": 0,
     "total": 41,
     "filtered": 0,
     "hasMore": false,

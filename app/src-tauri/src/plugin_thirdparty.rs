@@ -20,14 +20,17 @@ const ARCHIVE_LIMIT: u64 = crate::plugin_package::TOTAL_LIMIT as u64;
 #[serde(rename_all = "camelCase")]
 pub struct Hit { pub name: String, pub version: String, pub description: String, pub publisher: String, pub updated: String }
 
-// 检索结果：合规包列表 + 被命名规范过滤掉的数量。hidden 必须回传前端，
-// 否则不合规包被静默丢弃，用户会以为「搜索坏了」（用户 2026-10-31 要求）。
+// 检索结果：合规包列表 + 被命名规范过滤掉的数量 + 被判定为官方插件排除掉的数量。
+// hidden 必须回传前端，否则不合规包被静默丢弃，用户会以为「搜索坏了」（用户
+// 2026-10-31 要求）。official 同理（#72）：官方三个插件在 npm 上也有包名，
+// 默认发现词 `fish-dock-plugin` 会把它们排在前面；它们不是第三方，必须排除，
+// 但也要**说出来**被排除了几个，不能让人以为「官方插件不见了」。
 // 分页（T-C / A10）：total 是 registry 自己报的命中总数（未知时 0），filtered 是
 // **本页**通过命名规范、可展示的条数——两者不是一件事，不能只报一个数字；
 // hasMore 让前端知道「这一页不是终点」，不把一页空结果误当全部结束。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SearchReport { pub hits: Vec<Hit>, pub hidden: usize, pub total: usize, pub filtered: usize, pub has_more: bool, pub next_from: usize }
+pub struct SearchReport { pub hits: Vec<Hit>, pub hidden: usize, pub official: usize, pub total: usize, pub filtered: usize, pub has_more: bool, pub next_from: usize }
 
 // 一页检索的参数。discovery=true 是「发现式浏览」：查询串为空时用默认前缀，
 // 且不做精确包名元数据查——用户没点名要某个包，不该先打一次元数据。
@@ -280,6 +283,28 @@ pub(crate) fn plugin_package_name(value: &str) -> Result<String, String> {
         None => Err(format!("第三方插件包名必须是 `fish-dock-plugin-<名字>`（可带 `@scope/`），`{value}` 不符合")),
     }
 }
+
+// #72：官方插件在 npm 上也有合规包名（`@fish-under-sea/fish-dock-plugin-<slug>`），
+// 默认发现词 `fish-dock-plugin` 一搜就把这三个排在前面。它们**不是**第三方：
+// 身份由官方目录授予（`Source::OfficialCatalog` + 主仓 Star），走 npm 这条通道会被
+// 登记成第三方身份、装完也和商店条目对不上；搜索结果里重复出现更会让用户以为
+// 「商店和 npm 是两套东西」。所以第三方页与安装口一律排除。
+//
+// 判据只认官方那份包名：`@fish-under-sea/fish-dock-plugin-magpie`。无 scope 的
+// `fish-dock-plugin-magpie` 或 `@acme/fish-dock-plugin-magpie` 不是官方包，照常按
+// 第三方处理——排除的依据是「官方身份」，不是「名字里带 magpie」。
+// 官方身份与包名构造都取自 plugin_store（`OFFICIAL_IDS` / `npm_package`），
+// 这里不另抄一份数组或前缀。
+fn official_package(name: &str) -> Option<&'static str> {
+    let name = name.trim();
+    crate::plugin_store::OFFICIAL_IDS.iter().copied()
+        .find(|id| crate::plugin_store::npm_package(id).eq_ignore_ascii_case(name))
+}
+
+// 命中官方包时说给人听的理由：检索计数与安装拒绝共用一句，不各写一份。
+fn official_words(id: &str) -> String {
+    format!("`{id}` 是官方插件：请到「官方插件」页安装或更新；第三方页只收第三方包")
+}
 // `name` 或 `name@1.2.3`；版本交给 registry 解析。
 fn spec(value: &str) -> Result<(String, Option<String>), String> {
     let raw = value.trim();
@@ -337,6 +362,9 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
     let from = page.from;
     let mut hits: Vec<Hit> = Vec::new();
     let mut hidden = 0usize;
+    // 本页判定为官方插件、被排除掉的条数（#72）：与 hidden 分开计数，两者的理由
+    // 完全不同——「命名不合规」和「这是官方插件」不能用同一个数字糊在一起。
+    let mut official = 0usize;
     // 本页通过命名规范、可展示的条数（去重前）——与 registry 的 total 区分开。
     let mut filtered = 0usize;
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -350,7 +378,10 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
             if let Ok(bytes) = get_via_with(sources, &url, META_LIMIT, log, &mut fetch) {
                 if let Ok(meta) = serde_json::from_slice::<Meta>(&bytes) {
                     if let Some(latest) = meta.dist_tags.get("latest").cloned() {
-                        if plugin_package_name(&name).is_ok() {
+                        if official_package(&name).is_some() {
+                            // #72：用户点名搜官方包也不在第三方页展示，只计数（安装口另有明确拒绝）。
+                            official += 1;
+                        } else if plugin_package_name(&name).is_ok() {
                             hits.push(Hit {
                                 name: name.clone(),
                                 version: latest,
@@ -385,6 +416,9 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
     let rows = answer.objects.len().min(size);
     for object in answer.objects.into_iter().take(size) {
         let row = object.package;
+        // #72：官方三个插件的 npm 包先排除、单独计数——它们的包名本身合规，
+        // 混进 hidden 的「不符合命名规范」里等于把理由说错。
+        if official_package(&row.name).is_some() { official += 1; continue; }
         if plugin_package_name(&row.name).is_err() { hidden += 1; continue; }
         // 去重后再计数：精确命中已置顶的同名包不会再算一次「本页可用」（t19 F5）。
         if !seen.insert(row.name.clone()) { continue; }
@@ -401,7 +435,7 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
     let next_from = from.saturating_add(rows);
     // registry 报了总数就按总数判；没报时只能看这一页有没有装满。
     let has_more = if total > 0 { next_from < total } else { rows >= size };
-    Ok(SearchReport { hits, hidden, total, filtered, has_more, next_from })
+    Ok(SearchReport { hits, hidden, official, total, filtered, has_more, next_from })
 }
 
 fn truncate(value: &str, max: usize) -> String {
@@ -456,6 +490,9 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
     // 下载前先过命名判据：不合规包在这里就返回明确错误，绝不发起任何网络请求
     //（obtain → resolve → resolve_via 都走这一处，单一判据、下载前拒绝）。
     plugin_package_name(name)?;
+    // #72：官方三个插件的 npm 包同样在这里拒绝——不是「搜不到就算了」，而是
+    // 明确告诉用户去哪儿装。零网络，也不给「装成第三方身份」留后门。
+    if let Some(id) = official_package(name) { return Err(official_words(id)); }
     // 元数据地址走 metadata_url（同样保留 npmmirror 对 @scope/name 的原始形态：
     // 编码返 422、原始返 200，承重勿删）。
     let url = metadata_url(&sources.primary, name);
@@ -770,6 +807,52 @@ mod tests {
         assert_eq!(asked.get(), 0, "不合规包不该发起任何请求");
         assert!(log.is_empty(), "不该有任何取数日志：{log:?}");
         assert!(error.contains("必须是 `fish-dock-plugin-<名字>`") && error.contains("lodash"), "{error}");
+    }
+
+    // ── #72：官方三个插件不许当成第三方 ───────────────────────────────
+    #[test]
+    fn the_three_official_plugins_are_never_third_party() {
+        use std::cell::Cell;
+        for id in crate::plugin_store::OFFICIAL_IDS {
+            let package = crate::plugin_store::npm_package(id);
+            assert_eq!(official_package(&package), Some(id), "{package} 应被认成官方 {id}");
+            // 大小写无关：npm 名只有小写，但用户手打大写时也得认出来。
+            assert_eq!(official_package(&package.to_ascii_uppercase()), Some(id), "{package} 大写也应被认出");
+            assert!(official_words(id).contains(id), "提醒文案要带官方身份：{}", official_words(id));
+        }
+        // 只认官方那份包名：别的 scope、无 scope 的同名包都不是官方包，照常按第三方处理。
+        for third in ["fish-dock-plugin-magpie", "@acme/fish-dock-plugin-magpie", "fish-dock-plugin-filemgr"] {
+            assert_eq!(official_package(third), None, "{third} 不是官方包");
+        }
+
+        // 检索：发现词 `fish-dock-plugin` 会把官方三个排在前面——全部排除并单独计数；
+        // 合规第三方照常留下，hidden（命名不合规）不该被官方包污染。
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let search = search_fixture(serde_json::json!([
+            { "package": { "name": "@fish-under-sea/fish-dock-plugin-clash", "version": "2.1.5", "description": "c", "date": "2026-10-01" } },
+            { "package": { "name": "@fish-under-sea/fish-dock-plugin-magpie", "version": "2.1.6", "description": "m", "date": "2026-10-01" } },
+            { "package": { "name": "@fish-under-sea/fish-dock-plugin-feishu", "version": "2.1.5", "description": "f", "date": "2026-10-01" } },
+            { "package": { "name": "fish-dock-plugin-filemgr", "version": "1.0.10", "description": "file manager", "date": "2026-10-01" } },
+            { "package": { "name": "lodash", "version": "4.17.21", "description": "not a plugin", "date": "2026-10-01" } }
+        ]));
+        let mut log = Vec::new();
+        let report = search_via(&sources, "fish-dock-plugin", &mut log, |_, _| Ok(search.clone())).unwrap();
+        assert_eq!(report.hits.iter().map(|hit| hit.name.as_str()).collect::<Vec<_>>(), ["fish-dock-plugin-filemgr"], "{:?}", report.hits);
+        assert_eq!(report.official, 3, "三个官方包都要被认出来并单独计数");
+        assert_eq!(report.hidden, 1, "只有真正命名不合规的 lodash 进 hidden");
+        assert_eq!(report.filtered, 1);
+
+        // 安装口：官方包名在 resolve_via 就拒绝，一次网络请求都不发（不是静默搜不到）。
+        let asked = Cell::new(0usize);
+        let mut log = Vec::new();
+        let error = resolve_via(&sources, "@fish-under-sea/fish-dock-plugin-clash", None, &mut log, |_, _| {
+            asked.set(asked.get() + 1);
+            Ok(b"{}".to_vec())
+        })
+        .unwrap_err();
+        assert_eq!(asked.get(), 0, "官方包不许发起任何请求");
+        assert!(log.is_empty(), "不该有任何取数日志：{log:?}");
+        assert!(error.contains("官方插件") && error.contains("fish.clash"), "拒绝理由要指回官方商店：{error}");
     }
 
     // ── 精确包名兜底（t37）────────────────────────────────────────────
