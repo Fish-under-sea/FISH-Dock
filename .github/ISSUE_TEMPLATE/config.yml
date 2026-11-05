@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 插件问题（Clash / Magpie / 飞书）
+    url: https://github.com/Fish-under-sea/FISH-DOCK-Plugins/issues
+    about: 插件业务、插件页面、插件包的问题请提到插件仓；本仓只管桌面宿主、SDK、安装器与 Windhawk 集成。
+  - name: 安全漏洞（不要公开提交）
+    url: https://github.com/Fish-under-sea/FISH-Dock/blob/main/SECURITY.md
+    about: 按 SECURITY.md 私下报告，不要在 issue 里贴利用细节或凭据。
+  - name: 提交规则与标签口径
+    url: https://github.com/Fish-under-sea/FISH-Dock/blob/main/.github/CONTRIBUTING.md
+    about: 查重、标签、维护者身份与预修复版本的要求都写在这里。

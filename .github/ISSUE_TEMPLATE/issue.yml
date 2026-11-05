@@ -1,0 +1,123 @@
+name: 问题 / 需求（通用）
+description: 提交前先查重、把标签填全；维护者还要填「预修复版本」并打版本标签
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **提交前四关**（缺一项维护者会打回）：
+        1. **查重**：先搜标题关键词 / 现象 / 版本号，同问题的证据补到原 issue，不新开；
+        2. **标签**：至少 1 个类型标签（`bug` / `performance` / `ui` / `accessibility` / `enhancement` / `documentation` / `question`）；
+        3. **是否维护者**：必答；
+        4. **预修复版本**：维护者必填宿主版本号（如 `2.2.0`）并同时打 `<版本> 修复` 标签；非维护者写「非维护者」。
+
+        规则全文见 [CONTRIBUTING.md](../blob/main/.github/CONTRIBUTING.md)。插件业务问题提到 `Fish-under-sea/FISH-DOCK-Plugins`。
+
+  - type: checkboxes
+    id: duplicate-search
+    attributes:
+      label: 重复检查（必做）
+      description: 提交前确实搜过；同问题的证据请补到原 issue，而不是新开一条。
+      options:
+        - label: 我已经在 Issues 里搜过标题关键词、现象与版本号，并确认这不是重复 issue
+          required: true
+        - label: 如果它与某条 issue 相关但不相同，我会在下面写清区别
+          required: true
+
+  - type: input
+    id: duplicate-keywords
+    attributes:
+      label: 搜索关键词与排除的 issue
+      description: 写清搜过什么词、看过后排除的 issue 编号（例：`内存 GPU 常驻`，排除 #29 #30）
+      placeholder: 关键词：…；已排除：#…
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 类型（对应类型标签）
+      description: 选完请真的把对应标签打上；拿不准选「question」，由维护者改。
+      options:
+        - bug（可复现的缺陷）
+        - performance（内存 / GPU / 启动耗时）
+        - ui（界面 / 视觉 / 交互）
+        - accessibility（无障碍）
+        - enhancement（新功能）
+        - documentation（文档）
+        - question（需要澄清）
+        - crash（崩溃 / 卡死 / WebView 异常，请改用崩溃模板）
+    validations:
+      required: true
+
+  - type: input
+    id: labels-applied
+    attributes:
+      label: 标签自检
+      description: 列出你实际打上的标签（类型 + 其他适用标签）。维护者另加版本标签。
+      placeholder: bug, performance
+    validations:
+      required: true
+
+  - type: dropdown
+    id: maintainer
+    attributes:
+      label: 是否为维护者
+      description: 维护者指对本仓有写权限的人；答「是」就必须填下一项预修复版本。
+      options:
+        - 否
+        - 是
+    validations:
+      required: true
+
+  - type: input
+    id: fix-version
+    attributes:
+      label: 预修复版本（维护者必填）
+      description: 计划在哪个宿主版本修掉，形如 `2.2.0`；定不下来写「待定」。非维护者写「非维护者」。
+      placeholder: 2.2.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 现象
+      description: 一句话说清发生了什么；有数字就给数字，没测的写「未测」，不估算。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从启动到出问题的每一步；能贴截图/日志的直接贴。
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望
+      description: 你认为正确的行为；若是视觉问题，写清「对齐 / 间距 / 颜色」哪一项不对。
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 证据
+      description: 版本号、系统与缩放、日志片段、截图、CSV 路径。**不要贴令牌、凭据、私钥或他人隐私。**
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我没有在正文里留下令牌、凭据、私钥或他人隐私；崩溃报告已用「导出报告」（本机脱敏）生成
+          required: true
