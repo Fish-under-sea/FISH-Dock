@@ -188,6 +188,9 @@ export function installerScript({ version, app, resources, outFile, files, direc
     return '  SetOutPath "$StageDir\\resources' + (folder === '.' ? '' : '\\' + folder.replaceAll('/', '\\')) + '"\n  File "\${RESOURCES}\\' + name.replaceAll('/', '\\') + '"'
   }).join('\n')
   const kilobytes = Math.max(1, Math.round(estimatedBytes / 1024))
+  // #75：精简载荷（payloadFiles 非 null）就是「更新包」，与安装包的区别只有两处：
+  // 桌面快捷方式默认不选（老用户桌面上通常已经有了）、完成页文案写「更新」。
+  const updating = payloadFiles !== null
   // ── #27 清理档要生成的 NSIS 行 ──────────────────────────────────────────
   // 旧卸载表登记项：一个旧名一条 !define，清理时逐条按归属判定。
   const legacyKeyDefines = LEGACY_INSTALL_IDS
@@ -298,10 +301,13 @@ VIAddVersionKey "LegalCopyright" "\${PUBLISHER}"
 !define MUI_ICON ${quote(windowsPath(icon))}
 !define MUI_UNICON ${quote(windowsPath(icon))}
 !define MUI_ABORTWARNING
+; #75：两个包的「立即启动」都默认勾选——不再 define MUI_FINISHPAGE_RUN_NOTCHECKED。
 !define MUI_FINISHPAGE_RUN "$INSTDIR\\${fileName}"
 !define MUI_FINISHPAGE_RUN_TEXT "启动 \${PRODUCT}"
-!define MUI_FINISHPAGE_RUN_NOTCHECKED
+!define MUI_FINISHPAGE_TITLE "已完成 \${PRODUCT} ${updating ? '更新' : '安装'}"
 !insertmacro MUI_PAGE_WELCOME
+; #75：组件页承载「在桌面创建快捷方式」这个可选段（安装包默认选中、更新包默认不选）。
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -409,8 +415,10 @@ ${legacyKeyLines}
 
   CreateDirectory "$SMPROGRAMS\\\${PRODUCT}"
   CreateShortCut "$SMPROGRAMS\\\${PRODUCT}\\\${PRODUCT}.lnk" "$INSTDIR\\${fileName}" "" "$INSTDIR\\${fileName}" 0
-  CreateShortCut "$DESKTOP\\\${PRODUCT}.lnk" "$INSTDIR\\${fileName}" "" "$INSTDIR\\${fileName}" 0
   CreateShortCut "$SMPROGRAMS\\\${PRODUCT}\\卸载 \${PRODUCT}.lnk" "$INSTDIR\\uninstall.exe"
+  ; #75：桌面快捷方式改成可选段（见下面的 Section "桌面快捷方式"），这里只先写「没建」，
+  ; 勾了的话由那个段把记录改回 1；卸载按这条记录决定删不删。
+  WriteRegDWORD HKCU "\${UNINSTALL_KEY}" "DesktopShortcut" 0
 
   WriteUninstaller "$INSTDIR\\uninstall.exe"
 
@@ -427,12 +435,23 @@ ${legacyKeyLines}
   WriteRegDWORD HKCU "\${UNINSTALL_KEY}" "EstimatedSize" ${kilobytes}
 SectionEnd
 
+; #75：桌面快捷方式可选。安装包默认勾选；更新包默认不勾（老用户桌面通常已有，
+; 不重复建、也不覆盖用户自己换过图标的那个）。/o = 默认不选，静默安装同样不建。
+${updating ? 'Section /o "桌面快捷方式" SecDesktop' : 'Section "桌面快捷方式" SecDesktop'}
+  CreateShortCut "$DESKTOP\\\${PRODUCT}.lnk" "$INSTDIR\\${fileName}" "" "$INSTDIR\\${fileName}" 0
+  WriteRegDWORD HKCU "\${UNINSTALL_KEY}" "DesktopShortcut" 1
+SectionEnd
+
 Section "Uninstall"
   ; 只删安装器放下的东西：快捷方式、资源文件、主程序、卸载器。
   Delete "$SMPROGRAMS\\\${PRODUCT}\\\${PRODUCT}.lnk"
   Delete "$SMPROGRAMS\\\${PRODUCT}\\卸载 \${PRODUCT}.lnk"
   RMDir "$SMPROGRAMS\\\${PRODUCT}"
-  Delete "$DESKTOP\\\${PRODUCT}.lnk"
+  ; #75：桌面快捷方式只有安装时真的建过才删——用户自己建的同名快捷方式不碰。
+  ReadRegDWORD $3 HKCU "\${UNINSTALL_KEY}" "DesktopShortcut"
+  \${If} $3 == "1"
+    Delete "$DESKTOP\\\${PRODUCT}.lnk"
+  \${EndIf}
 
   ; 指向本安装的「开机自动启动」值一并清掉，免得登录时去启动一个已删除的程序。
   ; #27 P0：值名是新的 ${RUN_NAME}（connection.rs 写的），同时兜旧名
@@ -487,6 +506,12 @@ ${legacyKeyLines}
   ; #27-D 之后旧目录 %LOCALAPPDATA%\\${LEGACY_HOME_DIRECTORY} 在安装时已迁移并删除，这里不再提它。
   DetailPrint "已保留用户数据：%LOCALAPPDATA%\\${HOME_DIRECTORY}"
 SectionEnd
+
+; #75：组件页的说明文字（勾选项右侧的次级色小字）。
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+  !insertmacro MUI_DESCRIPTION_TEXT \${SecInstall} "FISH Dock 本体、运行资源与卸载入口，必需。"
+  !insertmacro MUI_DESCRIPTION_TEXT \${SecDesktop} "在桌面放一个 FISH Dock 快捷方式；取消就不建，开始菜单里照样能启动。"
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
 `
 }
 

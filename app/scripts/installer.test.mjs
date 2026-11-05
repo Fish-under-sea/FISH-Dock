@@ -503,3 +503,53 @@ test('#27 P0：新数据根就绪后才删 %LOCALAPPDATA%\\FISH\\worker.json，�
     assert.equal(existsSync(path.join(local, 'FISH', 'worker.json')), true, '被拦住时文件必须还在')
   } finally { await rm(base, { recursive: true, force: true }) }
 })
+
+// #75：桌面快捷方式做成可选。安装包默认勾选、更新包默认不勾选（老用户桌面通常已有，
+// 不重复建、不覆盖用户换过的图标）；两包的「立即启动」都默认勾选。
+test('桌面快捷方式可选：安装包默认勾选、更新包默认不勾选，且创建落在独立 Section 里', async () => {
+  const env = await fakeResources()
+  try {
+    const setup = (await script(env)).text
+    assert.match(setup, /!insertmacro MUI_PAGE_COMPONENTS/, '要有一个能承载勾选项的页面')
+    assert.match(setup, /^Section "桌面快捷方式" SecDesktop$/m, '安装包的快捷方式 Section 必须默认选中')
+    assert.doesNotMatch(setup, /^Section \/o "桌面快捷方式"/m)
+
+    const install = setup.slice(setup.indexOf('Section "${PRODUCT}" SecInstall'), setup.indexOf('Section "Uninstall"'))
+    // 用行首锚点定位：上面那行注释里也写了「Section "桌面快捷方式"」，plain indexOf 会截早。
+    const desktop = install.slice(install.search(/^Section "桌面快捷方式" SecDesktop$/m))
+    assert.match(desktop, /CreateShortCut "\$DESKTOP\\\$\{PRODUCT\}\.lnk" "\$INSTDIR\\FISH-Dock\.exe"/, '快捷方式在独立 Section 里建')
+    assert.match(desktop, /WriteRegDWORD HKCU "\$\{UNINSTALL_KEY\}" "DesktopShortcut" 1/, '勾了要记 1')
+    const main = install.slice(0, install.search(/^Section "桌面快捷方式" SecDesktop$/m))
+    assert.doesNotMatch(main, /CreateShortCut "\$DESKTOP/, '主安装段不许再无条件下建桌面快捷方式')
+    assert.match(main, /WriteRegDWORD HKCU "\$\{UNINSTALL_KEY\}" "DesktopShortcut" 0/, '主段先记 0，勾选段再覆盖成 1')
+
+    const update = (await script(env, { payloadFiles: ['node/node.exe'] })).text
+    assert.match(update, /^Section \/o "桌面快捷方式" SecDesktop$/m, '更新包的快捷方式 Section 默认不选')
+  } finally { await rm(env.dir, { recursive: true, force: true }) }
+})
+
+test('两个包的「立即启动」都默认勾选，完成页文案区分安装与更新', async () => {
+  const env = await fakeResources()
+  try {
+    const setup = (await script(env)).text
+    const update = (await script(env, { payloadFiles: ['node/node.exe'] })).text
+    for (const [kind, text] of [['安装', setup], ['更新', update]]) {
+      assert.doesNotMatch(text, /^\s*!define MUI_FINISHPAGE_RUN_NOTCHECKED/m, `${kind}包的「启动」必须默认勾选`)
+      assert.match(text, /!define MUI_FINISHPAGE_RUN "\$INSTDIR\\FISH-Dock\.exe"/, kind)
+      assert.match(text, /!define MUI_FINISHPAGE_RUN_TEXT "启动 \$\{PRODUCT\}"/, kind)
+    }
+    assert.match(setup, /!define MUI_FINISHPAGE_TITLE "已完成 \$\{PRODUCT\} 安装"/)
+    assert.match(update, /!define MUI_FINISHPAGE_TITLE "已完成 \$\{PRODUCT\} 更新"/)
+  } finally { await rm(env.dir, { recursive: true, force: true }) }
+})
+
+test('卸载按安装时的选择删桌面快捷方式，不碰用户自己建的那个', async () => {
+  const env = await fakeResources()
+  try {
+    const { text } = await script(env)
+    const uninstall = text.slice(text.indexOf('Section "Uninstall"'))
+    assert.match(uninstall, /ReadRegDWORD \$3 HKCU "\$\{UNINSTALL_KEY\}" "DesktopShortcut"/, '要先读回安装时的选择')
+    const guarded = uninstall.slice(uninstall.indexOf('"DesktopShortcut"'))
+    assert.match(guarded, /Delete "\$DESKTOP\\\$\{PRODUCT\}\.lnk"/, '只有记录为 1 才删')
+  } finally { await rm(env.dir, { recursive: true, force: true }) }
+})
