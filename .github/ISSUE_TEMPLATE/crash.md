@@ -16,9 +16,10 @@ FISH Dock 的「关于 → 崩溃报告」可以生成预填内容：
 ## 提交前必答（与通用 issue 规则一致，缺一项维护者会打回）
 
 - [ ] **查重**：已搜标题关键词 / 现象 / 版本号，同问题的证据补到原 issue；搜索关键词与被排除的 issue 编号：
-- [ ] **标签**：已打类型标签（`crash` + `bug` 之类）；维护者另加版本标签：
+- [ ] **类型标签**：已打 `crash`（必要时加 `bug`）；标签不表达版本：
 - [ ] **是否维护者**：是 / 否
-- [ ] **预修复版本**（维护者必填，形如 `2.2.0`；非维护者写「非维护者」）：
+- [ ] **版本（Milestone）**：右侧栏 Milestone 挂 `2.1.2` 这种号；维护者必挂，非维护者写「非维护者」：
+- [ ] **侧边栏六项**：Assignees / Labels / Projects（本仓未启用写「无」）/ Milestone / Relationships / Development 逐项补齐：
 
 规则全文见 [CONTRIBUTING.md](../blob/main/.github/CONTRIBUTING.md)。
 
