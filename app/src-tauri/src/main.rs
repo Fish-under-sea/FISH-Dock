@@ -1772,6 +1772,9 @@ fn main() {
     };
     // #73：随包不再内置 Windhawk 引擎，没有需要在启动时拉起的守护进程；
     // 用户自己装的那份由它自身的登录项/托盘负责，这里只在打开外观页时按需读取状态。
+    // 旧版把引擎复制进了数据根（config/windhawk/ 的 exe/helper/ini），这里一次性清掉；
+    // 幂等，被占用就下次再清，不影响启动。
+    std::thread::spawn(|| { if let Err(error)=windhawk::retire_bundled(){ eprintln!("Windhawk: {error}"); } });
     let legacy_identity = identity::from_environment().map(|location| {
         if location.root.join("mail-accounts.json").is_file() { location.root }
         else { location.legacy.unwrap_or(location.root) }

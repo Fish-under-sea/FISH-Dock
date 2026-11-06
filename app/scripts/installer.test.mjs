@@ -19,7 +19,7 @@ import {
 // 触发它的 CLI 主分支（require.main !== module），所以本机上任何目录都不会被碰。
 const updater = createRequire(import.meta.url)('./install-update.cjs')
 
-import { REQUIRED as RUNTIME_REQUIRED } from './prepare-installer.mjs'
+import { REQUIRED as RUNTIME_REQUIRED, writeManifest } from './prepare-installer.mjs'
 
 test('安装器与运行资源必需清单一致且不预装业务插件', () => {
   assert.deepEqual(REQUIRED, RUNTIME_REQUIRED)
@@ -132,7 +132,7 @@ test('卸载只删安装器放下的文件，绝不递归删除目录、绝不�
     assert.doesNotMatch(text.slice(text.indexOf('Section "Uninstall"')), /DSH-FISH\\data|DSH-FISH\\webview|\.dsh-fish|\.fish-dock|mail-secrets|channel-credentials|channel-pack/, '账号、密钥、用量、设置与 WebView 数据不在安装目录里，卸载不得提到删除它们')
     const uninstall = text.slice(text.indexOf('Section "Uninstall"'))
     const inner = [...uninstall.matchAll(/^\s*Delete "(\$INSTDIR\\[^"]+)"/gm)].map(m => m[1].replace(/^\$INSTDIR\\/, '').replace(/\\/g, '/'))
-    const owned = new Set(['FISH-Dock.exe', 'DSH-FISH.exe', 'wakuwaku.exe', 'wakuwaku-sensors.exe', 'uninstall.exe', 'install-manifest.json', 'install-state.json', 'install-update.cjs', 'install-stop.ps1', 'install.log', ...files.map(name => `resources/${name}`)])
+    const owned = new Set(['FISH-Dock.exe', 'DSH-FISH.exe', 'wakuwaku.exe', 'wakuwaku-sensors.exe', 'FISH-Dock-2.0.1-run.exe', 'uninstall.exe', 'install-manifest.json', 'install-state.json', 'install-update.cjs', 'install-stop.ps1', 'install.log', ...files.map(name => `resources/${name}`)])
     for (const name of inner) assert.ok(owned.has(name), `卸载删除了安装器没放下的文件：${name}`)
     for (const name of files) assert.ok(inner.includes(`resources/${name}`), `卸载漏掉了：${name}`)
     // 安装目录之外只允许删自己建的两个快捷方式和开始菜单文件夹。
@@ -258,7 +258,7 @@ test('#27 新名字档：2.0.0 起卸载键、主程序、Run 值、登录开关
   // 旧名：留着识别与清理，绝不再写出去。
   assert.equal(LEGACY_RUN_NAME, 'Wakuwaku')
   assert.equal(LEGACY_AT_LOGIN_ARGS, '--wakuwaku-at-login run')
-  assert.deepEqual(LEGACY_EXE_NAMES, ['DSH-FISH.exe', 'wakuwaku.exe', 'wakuwaku-sensors.exe'], '旧主程序与旧传感器助手都要按旧名删（#t16）')
+  assert.deepEqual(LEGACY_EXE_NAMES, ['DSH-FISH.exe', 'wakuwaku.exe', 'wakuwaku-sensors.exe', 'FISH-Dock-2.0.1-run.exe'], '旧主程序、旧传感器助手与 2.0.1 便携启动器都要按旧名删（#t16 / 2.1.3）')
   assert.ok(LEGACY_INSTALL_IDS.includes('DSH-FISH') && LEGACY_INSTALL_IDS.includes('Wakuwaku'), LEGACY_INSTALL_IDS.join(','))
   assert.equal(LEGACY_WORKER_DIRECTORY, 'FISH')
   assert.equal(LEGACY_WORKER_FILE, 'worker.json')
@@ -503,6 +503,25 @@ test('#27 P0：新数据根就绪后才删 %LOCALAPPDATA%\\FISH\\worker.json，�
     assert.deepEqual(updater.staleWorker({}), { removed: false, reason: 'skipped' })
     assert.equal(existsSync(path.join(local, 'FISH', 'worker.json')), true, '被拦住时文件必须还在')
   } finally { await rm(base, { recursive: true, force: true }) }
+})
+
+// 2.1.2 事故：有人绕过 writeManifest 手写 resources/manifest.json，漏了 node_version，
+// 结果每次启动都弹「安装资源清单无法解析」。这条钉住键集合——清单只能由 writeManifest 生成。
+test('资源清单的键集合固定，七项一个都不能少（2.1.2 漏字段启动即崩）', async () => {
+  const env = await fakeResources()
+  try {
+    await rm(path.join(env.resources, 'manifest.json'))
+    const manifest = await writeManifest(env.resources, { version: '2.1.3', nodeVersion: '24.14.0', webview2Version: '155.0.4283.62' })
+    const written = JSON.parse(await readFile(path.join(env.resources, 'manifest.json'), 'utf8'))
+    assert.deepEqual(Object.keys(written).sort(),
+      ['architecture', 'files', 'node_version', 'product', 'schema', 'version', 'webview2_version'],
+      '清单键集合变了就要同步 runtime.rs 的 Manifest 结构')
+    assert.equal(written.product, 'FISH Dock')
+    assert.equal(written.version, '2.1.3')
+    assert.equal(written.node_version, '24.14.0')
+    assert.equal(written.webview2_version, '155.0.4283.62')
+    assert.equal(manifest.files.length, written.files.length)
+  } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
 // #75：桌面快捷方式做成可选。安装包默认勾选、更新包默认不勾选（老用户桌面通常已有，

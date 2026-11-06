@@ -709,6 +709,17 @@ mod tests {
 
     // 同步那一半只 stat 十四个必需文件；它的存在本身就是 T07 的证据——全量
     // 指纹校验在 verify_pending_at 里，真实启动里那是另一个线程。
+    // 2.1.2 的事故：手写 resources/manifest.json 时漏了 node_version，启动在反序列化
+    // 这一步就崩了（「missing field `node_version`」），用户装完完全起不来。字段是必填的——
+    // 这条钉住它，将来给 Manifest 加字段也要同步 installer.mjs 的 writeManifest。
+    #[test] fn a_manifest_missing_a_version_field_is_rejected_before_anything_else() {
+        let partial = r#"{"schema":2,"product":"FISH Dock","version":"2.1.3","architecture":"x86_64","webview2_version":"155.0.4283.62","files":[]}"#;
+        let error = serde_json::from_str::<Manifest>(partial).unwrap_err().to_string();
+        assert!(error.contains("node_version"), "缺 node_version 必须报出字段名：{error}");
+        let full = r#"{"schema":2,"product":"FISH Dock","version":"2.1.3","architecture":"x86_64","node_version":"24.14.0","webview2_version":"155.0.4283.62","files":[]}"#;
+        assert!(serde_json::from_str::<Manifest>(full).is_ok(), "七个字段齐全必须能解析");
+    }
+
     #[test] fn the_start_checks_the_required_files_and_remembers_a_fingerprint_per_file() {
         let t = Temp::new(); let root = t.0.join("resources"); fs::create_dir_all(&root).unwrap();
         let home = t.0.join("home");

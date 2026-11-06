@@ -77,6 +77,34 @@ fn write_disabled(layout:&Layout,change:&Change)->Result<(),String>{
 fn apply(layout:&Layout,changes:&[Change])->Result<Vec<Outcome>,String>{validate_changes(changes)?;let before=mods(layout)?;
  Ok(changes.iter().map(|change|{let result=(||{let old=before.iter().find(|m|m.id==change.id).ok_or("mod 尚未安装")?;if !change.disabled&&old.library_file.is_empty(){return Err("mod 尚未编译，请先导入源码编译".into());}/* #73：不再内置引擎，没有守护进程要拉起；mod 由用户自己那份 Windhawk 生效 */write_disabled(layout,change)?;let actual=mods(layout)?.into_iter().find(|m|m.id==change.id).ok_or("写入后 mod 消失")?;if actual.disabled!=change.disabled{return Err("mod 状态读取与请求不一致".into());}Ok(actual.disabled)})();match result{Ok(disabled)=>Outcome{id:change.id.clone(),ok:true,disabled:Some(disabled),error:None},Err(error)=>Outcome{id:change.id.clone(),ok:false,disabled:None,error:Some(error)}}}).collect())
 }
+/// #73：清掉旧版内置引擎在数据根留下的东西。
+///
+/// 2.1.1 及更早会把 `windhawk.exe`、`windhawk-x64-helper.exe` 与一份 `windhawk.ini`
+/// 复制到 `config/windhawk/`（ini 里的 EnginePath/CompilerPath 指向安装资源目录）。
+/// 2.1.2 起资源里不再有 windhawk/，这三个文件就永远是悬空的：留着既占地方，又会让
+/// 「已选择路径」读到一个不存在的 layout。这里把它们删掉，**用户的 mod 数据
+/// `config/windhawk/data/` 原样保留**；指向内置目录的 `config/windhawk.json` 一并作废。
+///
+/// 幂等；引擎进程（旧版以 `-tray-only` 起着）还占着文件时删不掉，下次启动再清一次。
+pub fn retire_bundled()->Result<(),String>{
+ let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
+ let host=&context.host;
+ let root=host.path().join("config/windhawk");
+ let mut stuck=0u32;
+ for name in ["windhawk.exe","windhawk-x64-helper.exe","windhawk.ini"]{
+  let file=root.join(name);
+  if !file.is_file(){continue;}
+  crate::storage::safe(&file)?;
+  if fs::remove_file(&file).is_err(){stuck+=1;}
+ }
+ // 手选路径也指向内置目录的话一并作废：目录里已经没有 ini，留着只会让状态读取报错。
+ if let Some(bytes)=host.read("config","windhawk.json")?{
+  let chosen:PathBuf=serde_json::from_slice(&bytes).unwrap_or_default();
+  if chosen==root{let file=host.path().join("config/windhawk.json");crate::storage::safe(&file)?;let _=fs::remove_file(&file);}
+ }
+ if stuck>0{return Err(format!("还有 {stuck} 个旧内置引擎文件被占用（引擎进程可能仍在运行），退出后下次启动会再清一次"));}
+ Ok(())
+}
 #[tauri::command]pub fn windhawk_state()->Result<Value,String>{let host=&crate::storage_context::current().ok_or("存储上下文未就绪")?.host;let mut state=match configured()?{Some(layout)=>json!({"installed":true,"bundled":false,"running":false,"mods":mods(&layout)?,"layout":layout}),None=>json!({"installed":false,"mods":[]})};
  // 2.0.4 T-D（resources）：状态行文案按实际阶段与配置预算生成，前端不再手写秒数——
  // 编译上限来自 windhawk_import.rs 的唯一常量，下载上限来自 config 的下载预算键。

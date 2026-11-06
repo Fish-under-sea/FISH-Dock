@@ -48,7 +48,9 @@ export const AT_LOGIN_ARGS = '--fish-dock-at-login run'
 /// 1.x 写进 Run 值的旧参数（#27 P0）：认出来才能迁走或清掉。
 export const LEGACY_AT_LOGIN_ARGS = '--wakuwaku-at-login run'
 export const LEGACY_RUN_NAME = 'Wakuwaku'
-export const LEGACY_EXE_NAMES = ['DSH-FISH.exe', 'wakuwaku.exe', 'wakuwaku-sensors.exe']
+// 2.1.3 追加 `FISH-Dock-2.0.1-run.exe`：2.0.1 的便携启动器留在安装目录里从没被清过
+// （用户装机后仍能看到它），它不是主程序、也不该在「设置 → 应用」之外留一份可执行的旧壳。
+export const LEGACY_EXE_NAMES = ['DSH-FISH.exe', 'wakuwaku.exe', 'wakuwaku-sensors.exe', 'FISH-Dock-2.0.1-run.exe']
 export const LEGACY_INSTALL_IDS = ['DSH-FISH', 'Wakuwaku', 'FISH Dock']
 /// 旧卸载表登记项里出现过的 DisplayName；只有它对上，或 InstallLocation 就是本
 /// 安装目录，才认定那条登记属于本产品，别的程序的同名登记一律不碰。
