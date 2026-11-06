@@ -19,25 +19,19 @@
 </div>
 
 <table>
-  <tr>
-    <td>
-
-**2.1.3 · Windows 10/11 x64** — a desktop workspace for Agent sessions, notifications, mail and independent plugins.
-
-[Download](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.3) · [中文](README.md) · [Official plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) · [Release notes](app/docs/release-2.1.3.md)
-
-    </td>
-    <td width="232" align="center" valign="middle">
-
+<tr>
+<td>
+<p><strong>2.1.3 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
+<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.3">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.1.3.md">Release notes</a></p>
+</td>
+<td width="232" align="center" valign="middle">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/join-qq-dark.jpg">
-  <img src="assets/readme/join-qq-light.jpg" alt="FISH Dock beta group QR code, QQ 945310176" width="210">
+<source media="(prefers-color-scheme: dark)" srcset="assets/readme/join-qq-dark.jpg">
+<img src="assets/readme/join-qq-light.jpg" alt="FISH Dock beta group QR code, QQ 945310176" width="210">
 </picture>
-
-<p><sub>Scan to join the beta group<br>QQ 945310176</sub></p>
-
-    </td>
-  </tr>
+<p><sub>Scan to join the beta group · QQ 945310176</sub></p>
+</td>
+</tr>
 </table>
 
 ## Features
