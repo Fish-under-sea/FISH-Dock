@@ -6,19 +6,19 @@
       "path": "assets/readme/hero-zh-light.png",
       "kind": "image",
       "channel": "browser-layout-screenshot",
-      "size": 258780,
+      "size": 259049,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:44:59.932Z",
-      "contentHash": "7015db9b1246cf2079d15c59b6cf573bd50604f84eb2cbfff0e243a5ed35c81a"
+      "createdAt": "2026-11-06T11:12:11.636Z",
+      "contentHash": "701413c998ab9060c70d053c8f8bdf19aef64fdc7907022ba79f40caf67865ad"
     },
     {
       "path": "assets/readme/stat-version-zh-light.png",
       "kind": "image",
       "channel": "browser-layout-screenshot",
-      "size": 4566,
+      "size": 4618,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:44:59.957Z",
-      "contentHash": "f31f1fb399b96d323d37a74d31054d8d1a01c4241442abf8864a55a3ee87a30a"
+      "createdAt": "2026-11-06T11:12:11.675Z",
+      "contentHash": "617cc8e4ed28a1096c898dfbe87273ac46c7c32cef4d2231c7afe4580a1068c1"
     },
     {
       "path": "assets/readme/stat-desktop-zh-light.png",
@@ -26,7 +26,7 @@
       "channel": "browser-layout-screenshot",
       "size": 5457,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.008Z",
+      "createdAt": "2026-11-06T11:12:11.709Z",
       "contentHash": "af39f0522ad03777f50d10dc121f4c5b9e55e1531ab3d6c1511dbfa17dfe3d22"
     },
     {
@@ -35,7 +35,7 @@
       "channel": "browser-layout-screenshot",
       "size": 9666,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.059Z",
+      "createdAt": "2026-11-06T11:12:11.758Z",
       "contentHash": "c781b4aa166dcc699872bbd83e26eafb96c2387cc7e152ef1d94ec3965953985"
     },
     {
@@ -44,7 +44,7 @@
       "channel": "browser-layout-screenshot",
       "size": 4279,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.111Z",
+      "createdAt": "2026-11-06T11:12:11.793Z",
       "contentHash": "d16744f1f2fccc6569a39070d3f8602be671402fd3c9fc23f1a3d462d22159d3"
     },
     {
@@ -53,7 +53,7 @@
       "channel": "browser-layout-screenshot",
       "size": 1767,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.156Z",
+      "createdAt": "2026-11-06T11:12:11.841Z",
       "contentHash": "733e21e6b61344b0f72e5e2a74f49dd349c53df0cbcc6c5efce3f674a13991a2"
     },
     {
@@ -62,7 +62,7 @@
       "channel": "browser-layout-screenshot",
       "size": 2348,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.206Z",
+      "createdAt": "2026-11-06T11:12:11.874Z",
       "contentHash": "57425d62d8d6a5f4dd23f8053dd4faebd77afaeea06f7388576ca480c584d1f3"
     },
     {
@@ -71,7 +71,7 @@
       "channel": "browser-layout-screenshot",
       "size": 3278,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.257Z",
+      "createdAt": "2026-11-06T11:12:11.925Z",
       "contentHash": "fccd7cfe5cc1f1a19789a3cbcb4b33d475717c1be1676ef03c0d23d3217536d7"
     },
     {
@@ -80,7 +80,7 @@
       "channel": "browser-layout-screenshot",
       "size": 5043,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.310Z",
+      "createdAt": "2026-11-06T11:12:11.959Z",
       "contentHash": "6be62d64f2fbef517f7a8c393b33cab371448de655f8a8eaa4e3232f332913be"
     },
     {
@@ -89,7 +89,7 @@
       "channel": "browser-layout-screenshot",
       "size": 3830,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.356Z",
+      "createdAt": "2026-11-06T11:12:12.007Z",
       "contentHash": "a58d8b7a9d0b3a302b5b0630076d01dd7058d00614946810c81df7989ed18083"
     },
     {
@@ -98,26 +98,26 @@
       "channel": "browser-layout-screenshot",
       "size": 5022,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.407Z",
+      "createdAt": "2026-11-06T11:12:12.041Z",
       "contentHash": "2687bfbbf290933e164238019eb66588152ca4a7959ac540aaf9ef7edac13bfc"
     },
     {
       "path": "assets/readme/hero-zh-dark.png",
       "kind": "image",
       "channel": "browser-layout-screenshot",
-      "size": 255664,
+      "size": 255933,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.602Z",
-      "contentHash": "bcb23a2719f1ae13d9b03f37760ec82eeba65ac9875f24ed875f48881d0c0b39"
+      "createdAt": "2026-11-06T11:12:12.238Z",
+      "contentHash": "e534b87488cefa8f8a234188c6df2862f7123c61fe0cf05d7e219ef814c0b5ab"
     },
     {
       "path": "assets/readme/stat-version-zh-dark.png",
       "kind": "image",
       "channel": "browser-layout-screenshot",
-      "size": 4662,
+      "size": 4714,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.624Z",
-      "contentHash": "c632b354b3835e4b8dcaff71cebf6f21a24505efae45b0b0ea9c290b0f109f1e"
+      "createdAt": "2026-11-06T11:12:12.277Z",
+      "contentHash": "4dbbb087d49e805a30537e549dd5797712268ac86431296f3274ef1559eb55ca"
     },
     {
       "path": "assets/readme/stat-desktop-zh-dark.png",
@@ -125,7 +125,7 @@
       "channel": "browser-layout-screenshot",
       "size": 5540,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.675Z",
+      "createdAt": "2026-11-06T11:12:12.309Z",
       "contentHash": "82c366715a7a942c29c55098151f1b0cad487fd464a420c632d87d498844067a"
     },
     {
@@ -134,7 +134,7 @@
       "channel": "browser-layout-screenshot",
       "size": 9659,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.727Z",
+      "createdAt": "2026-11-06T11:12:12.360Z",
       "contentHash": "a26ad73801c0c304ea79c01b2697297cf819e2111130bd3fa13357ff8f437cd3"
     },
     {
@@ -143,7 +143,7 @@
       "channel": "browser-layout-screenshot",
       "size": 4298,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.775Z",
+      "createdAt": "2026-11-06T11:12:12.408Z",
       "contentHash": "81a1b661b8ff114abc0468b7989a2b43fb8f68a94495ba0506296a37ebe0da01"
     },
     {
@@ -152,7 +152,7 @@
       "channel": "browser-layout-screenshot",
       "size": 1655,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.807Z",
+      "createdAt": "2026-11-06T11:12:12.457Z",
       "contentHash": "1d5609413d0320bc39b90176ee0ddd46711e747b84932d5840765723e05ea956"
     },
     {
@@ -161,7 +161,7 @@
       "channel": "browser-layout-screenshot",
       "size": 2300,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.859Z",
+      "createdAt": "2026-11-06T11:12:12.511Z",
       "contentHash": "56aa7df0f089dd11d7efd1052efdd072f8017a19b875f45ff0d1989159976c2c"
     },
     {
@@ -170,7 +170,7 @@
       "channel": "browser-layout-screenshot",
       "size": 3225,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.888Z",
+      "createdAt": "2026-11-06T11:12:12.561Z",
       "contentHash": "75b9a475ce45699c8f9f63e69bbff39c1428ae9f037029f5cec3cedcfd607736"
     },
     {
@@ -179,7 +179,7 @@
       "channel": "browser-layout-screenshot",
       "size": 4691,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.941Z",
+      "createdAt": "2026-11-06T11:12:12.609Z",
       "contentHash": "c5574452dc1f499ed2cf0e4cea8cfaf7b61b0c72c812abdc6689b36e804dece7"
     },
     {
@@ -188,7 +188,7 @@
       "channel": "browser-layout-screenshot",
       "size": 3741,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:00.990Z",
+      "createdAt": "2026-11-06T11:12:12.659Z",
       "contentHash": "96a0cddf01040319a49732ec9e9e71d343f1bbeff52a73f6a2185447c269100a"
     },
     {
@@ -197,26 +197,26 @@
       "channel": "browser-layout-screenshot",
       "size": 4931,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.040Z",
+      "createdAt": "2026-11-06T11:12:12.710Z",
       "contentHash": "3e8a605dc1a3c5272818aeb115829c14e221b65240837aa885c330821ba55448"
     },
     {
       "path": "assets/readme/hero-en-light.png",
       "kind": "image",
       "channel": "browser-layout-screenshot",
-      "size": 259764,
+      "size": 260003,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.240Z",
-      "contentHash": "17a22ce3017788a355f87c0c325719faf843b34b61b59143744639d087166559"
+      "createdAt": "2026-11-06T11:12:12.881Z",
+      "contentHash": "70b556c5c619fbbb28570995cb2b0ac30cd11b5762fae27e3bfd8ce0bc9d45d2"
     },
     {
       "path": "assets/readme/stat-version-en-light.png",
       "kind": "image",
       "channel": "browser-layout-screenshot",
-      "size": 5258,
+      "size": 5311,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.274Z",
-      "contentHash": "c6c34188d468ad3f2f7ce398dc72e6707a053e16d7f137a1917026c26ae5e29b"
+      "createdAt": "2026-11-06T11:12:12.912Z",
+      "contentHash": "23ebebc148c0b47344d46ce1a3f9e056f57fc3870ce3204b1f31c7712ee4957a"
     },
     {
       "path": "assets/readme/stat-desktop-en-light.png",
@@ -224,7 +224,7 @@
       "channel": "browser-layout-screenshot",
       "size": 5608,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.308Z",
+      "createdAt": "2026-11-06T11:12:12.959Z",
       "contentHash": "330ce053994cb44bb4b55bb52ab563b3011d76591dc7e2191ecd16195523cabe"
     },
     {
@@ -233,7 +233,7 @@
       "channel": "browser-layout-screenshot",
       "size": 6855,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.357Z",
+      "createdAt": "2026-11-06T11:12:13.008Z",
       "contentHash": "404d6aefe8eb74e5165fcf7492dbd0c2f14a763af1ba13bb0e0667830f1e9cbe"
     },
     {
@@ -242,7 +242,7 @@
       "channel": "browser-layout-screenshot",
       "size": 5225,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.412Z",
+      "createdAt": "2026-11-06T11:12:13.060Z",
       "contentHash": "93729b5f5a52c71839fc339d11415bd925db7ac94f98f58846566cded9162b60"
     },
     {
@@ -251,7 +251,7 @@
       "channel": "browser-layout-screenshot",
       "size": 3649,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.457Z",
+      "createdAt": "2026-11-06T11:12:13.111Z",
       "contentHash": "e05c84b9cd489dba92b1d003d838eb8c050b6baf2e92f2ed6f9a95b18faed02a"
     },
     {
@@ -260,7 +260,7 @@
       "channel": "browser-layout-screenshot",
       "size": 4741,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.506Z",
+      "createdAt": "2026-11-06T11:12:13.158Z",
       "contentHash": "b5a8856af6828cdb6a8fa3f3119a5dc1a5d1f7e8c030eaef66beb581d10925d7"
     },
     {
@@ -269,7 +269,7 @@
       "channel": "browser-layout-screenshot",
       "size": 3717,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.558Z",
+      "createdAt": "2026-11-06T11:12:13.208Z",
       "contentHash": "44d9dafd47e511c9ebd551ae71828dcc34bb8bc2eb247fc9f9bcbc6d0aa14651"
     },
     {
@@ -278,26 +278,26 @@
       "channel": "browser-layout-screenshot",
       "size": 2816,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.605Z",
+      "createdAt": "2026-11-06T11:12:13.257Z",
       "contentHash": "3d3b2dbe4ea412615790af134cc4fef93686aa620980705a4efd28e06a1c67eb"
     },
     {
       "path": "assets/readme/hero-en-dark.png",
       "kind": "image",
       "channel": "browser-layout-screenshot",
-      "size": 256396,
+      "size": 256644,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.786Z",
-      "contentHash": "9dcbe351656b5ec8525e6e334ddcc6a38284601becd424fcb380cea75751a460"
+      "createdAt": "2026-11-06T11:12:13.465Z",
+      "contentHash": "3eab60838a12dc8899fb86f79867e39efa51e54465ef0a66566d6e5781be50f5"
     },
     {
       "path": "assets/readme/stat-version-en-dark.png",
       "kind": "image",
       "channel": "browser-layout-screenshot",
-      "size": 5324,
+      "size": 5376,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.831Z",
-      "contentHash": "045f52f91f4c491351bdc8bfc0d0466bf2c71bb31fa5c81d7eb78915cd99292c"
+      "createdAt": "2026-11-06T11:12:13.499Z",
+      "contentHash": "2a528a94e39e2ce83178a05c47068c653cc0c603c7563f39b3b98c81e52ba947"
     },
     {
       "path": "assets/readme/stat-desktop-en-dark.png",
@@ -305,7 +305,7 @@
       "channel": "browser-layout-screenshot",
       "size": 5671,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.862Z",
+      "createdAt": "2026-11-06T11:12:13.530Z",
       "contentHash": "855db5766a4defa1c61b6455815e8712d5521ff63a341816621af757d1c65eb8"
     },
     {
@@ -314,7 +314,7 @@
       "channel": "browser-layout-screenshot",
       "size": 6919,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.894Z",
+      "createdAt": "2026-11-06T11:12:13.576Z",
       "contentHash": "6f8e947222a7a6d7630ccdebf11db595e60ebe52c211fc77a6d72945545d30aa"
     },
     {
@@ -323,7 +323,7 @@
       "channel": "browser-layout-screenshot",
       "size": 5255,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.942Z",
+      "createdAt": "2026-11-06T11:12:13.609Z",
       "contentHash": "32874a6764a8c94b948a928e5c476a4143a6ae95d630c6b3493b1a61a212df8d"
     },
     {
@@ -332,7 +332,7 @@
       "channel": "browser-layout-screenshot",
       "size": 3626,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:01.990Z",
+      "createdAt": "2026-11-06T11:12:13.643Z",
       "contentHash": "83c875913fe9e6720d6649a86097432232d29d9358cf20168542398d7c3cea77"
     },
     {
@@ -341,7 +341,7 @@
       "channel": "browser-layout-screenshot",
       "size": 4458,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:02.029Z",
+      "createdAt": "2026-11-06T11:12:13.675Z",
       "contentHash": "2bfb061edcee43249bf54dbc689ecda32d10202b7981f7c95e7082a48f45bb41"
     },
     {
@@ -350,7 +350,7 @@
       "channel": "browser-layout-screenshot",
       "size": 3671,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:02.090Z",
+      "createdAt": "2026-11-06T11:12:13.726Z",
       "contentHash": "ca911ac51eff0210197824d48cbe780524881f8b62bb5130798a344e32162e2e"
     },
     {
@@ -359,7 +359,7 @@
       "channel": "browser-layout-screenshot",
       "size": 2771,
       "license": "排版 MIT；用户图片许可单独保留",
-      "createdAt": "2026-11-05T13:45:02.123Z",
+      "createdAt": "2026-11-06T11:12:13.775Z",
       "contentHash": "0a16d63e52104064f9eafc2e380e99ca8312242e8084fd8dc92241724cb672ad"
     }
   ]
