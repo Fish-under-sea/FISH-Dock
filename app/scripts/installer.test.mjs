@@ -24,7 +24,8 @@ import { REQUIRED as RUNTIME_REQUIRED } from './prepare-installer.mjs'
 test('安装器与运行资源必需清单一致且不预装业务插件', () => {
   assert.deepEqual(REQUIRED, RUNTIME_REQUIRED)
   assert.equal(REQUIRED.some(name => name.startsWith('ofm/')), false)
-  assert.ok(REQUIRED.includes('windhawk/Compiler/bin/clang++.exe'))
+  // #73：内置 Windhawk 引擎与编译器不再随包分发，必需清单里不许再出现。
+  assert.equal(REQUIRED.some(name => name.startsWith('windhawk/')), false, 'REQUIRED 里不许再有 windhawk/*')
 })
 // 2.0.4：退役业务载荷按三个前缀逐个拒绝。前缀表本身要能和宿主侧
 // src-tauri/src/legacy_ofm.rs 的 RETIRED_RESOURCE_PREFIXES 对上（宿主有同样的断言）。

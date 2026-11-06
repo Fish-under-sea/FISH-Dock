@@ -22,14 +22,16 @@ test('运行时不再内嵌归档，改为使用安装目录里的资源', () =>
   const runtime = readFileSync(path.join(root, 'src-tauri/src/runtime.rs'), 'utf8')
   assert.doesNotMatch(runtime, /include_bytes!|runtime\.tar|flate2::read::GzDecoder/)
   // 2.0.4 T-Q（t33/F6）：资源目录只有一个解析点——旧断言只看字符串出现过 DSH_FISH_RESOURCES，
-  // 管不住「到底有没有接线」。现在钉住 runtime.rs / windhawk_bundle.rs 都调用
-  // config::resources_override，且不再自己读环境变量。
+  // 管不住「到底有没有接线」。现在钉住 runtime.rs 调用 config::resources_override，
+  // 且不再自己读环境变量。
+  // #73：原来还有 windhawk_bundle.rs 这个第二解析点，随内置引擎一起删了——
+  // 这里反过来钉住它不许回来（再出现就说明内置引擎被悄悄加回发行包）。
   assert.match(runtime, /config::resources_override\(\)/, '安装资源路径必须经 config::resources_override 收口')
   assert.doesNotMatch(runtime, /var_os\(\s*[`"'](?:DSH_FISH|FISH_DOCK)_RESOURCES/, 'runtime.rs 不许再自己读资源环境变量')
   assert.match(runtime, /fn resources_directory/)
-  const bundle = readFileSync(path.join(root, 'src-tauri/src/windhawk_bundle.rs'), 'utf8')
-  assert.match(bundle, /config::resources_override\(\)/, 'windhawk_bundle 也走同一个资源解析点')
-  assert.doesNotMatch(bundle, /var_os\(\s*[`"']DSH_FISH_RESOURCES/, 'windhawk_bundle 不许再自己读旧名')
+  assert.equal(existsSync(path.join(root, 'src-tauri/src/windhawk_bundle.rs')), false, '#73：内置 Windhawk 引擎的模块不许回到源码树')
+  const required = runtime.match(/pub const REQUIRED: \[&str; \d+\] = \[([\s\S]*?)\];/)?.[1] || ''
+  assert.doesNotMatch(required, /windhawk\//, '#73：启动必需清单里不再有 windhawk/*')
   const manifest = readFileSync(path.join(root, 'src-tauri/Cargo.toml'), 'utf8')
   assert.doesNotMatch(manifest, /^single-exe\s*=/m, 'feature 已改名为 installed')
   assert.match(manifest, /^installed\s*=\s*\[\]/m)

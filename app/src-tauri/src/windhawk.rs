@@ -4,7 +4,6 @@ use serde::{Deserialize,Serialize};
 use serde_json::{json,Value};
 use crate::windhawk_source::{self,Metadata};
 #[path="windhawk_import.rs"] mod importer;
-#[path="windhawk_bundle.rs"] mod bundle;
 
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
@@ -45,7 +44,8 @@ fn layout(install:&Path)->Result<Layout,String>{
 fn configured()->Result<Option<Layout>,String>{
  let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
  if let Some(bytes)=context.host.read("config","windhawk.json")?{let path:PathBuf=serde_json::from_slice(&bytes).map_err(|_|"Windhawk 路径配置损坏")?;return layout(&path).map(Some);}
- if let Some(bundled)=bundle::configured()?{return Ok(Some(bundled));}
+ // #73：随包不再内置 Windhawk 引擎与编译器，这里只认「配置里的路径 → 注册表 →
+ // Program Files」三档，用用户自己装的那份。
  #[cfg(windows)]{
   use winreg::{RegKey,enums::HKEY_LOCAL_MACHINE};
   for key in [r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Windhawk",r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Windhawk"]{if let Ok(key)=RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(key){if let Ok(path)=key.get_value::<String,_>("InstallLocation"){if Path::new(&path).join("windhawk.exe").is_file(){return layout(Path::new(&path)).map(Some);}}}}
@@ -75,10 +75,9 @@ fn write_disabled(layout:&Layout,change:&Change)->Result<(),String>{
  Ok(())
 }
 fn apply(layout:&Layout,changes:&[Change])->Result<Vec<Outcome>,String>{validate_changes(changes)?;let before=mods(layout)?;
- Ok(changes.iter().map(|change|{let result=(||{let old=before.iter().find(|m|m.id==change.id).ok_or("mod 尚未安装")?;if !change.disabled&&old.library_file.is_empty(){return Err("mod 尚未编译，请先导入源码编译".into());}if !change.disabled{bundle::ensure_running(layout)?;}write_disabled(layout,change)?;let actual=mods(layout)?.into_iter().find(|m|m.id==change.id).ok_or("写入后 mod 消失")?;if actual.disabled!=change.disabled{return Err("mod 状态读取与请求不一致".into());}Ok(actual.disabled)})();match result{Ok(disabled)=>Outcome{id:change.id.clone(),ok:true,disabled:Some(disabled),error:None},Err(error)=>Outcome{id:change.id.clone(),ok:false,disabled:None,error:Some(error)}}}).collect())
+ Ok(changes.iter().map(|change|{let result=(||{let old=before.iter().find(|m|m.id==change.id).ok_or("mod 尚未安装")?;if !change.disabled&&old.library_file.is_empty(){return Err("mod 尚未编译，请先导入源码编译".into());}/* #73：不再内置引擎，没有守护进程要拉起；mod 由用户自己那份 Windhawk 生效 */write_disabled(layout,change)?;let actual=mods(layout)?.into_iter().find(|m|m.id==change.id).ok_or("写入后 mod 消失")?;if actual.disabled!=change.disabled{return Err("mod 状态读取与请求不一致".into());}Ok(actual.disabled)})();match result{Ok(disabled)=>Outcome{id:change.id.clone(),ok:true,disabled:Some(disabled),error:None},Err(error)=>Outcome{id:change.id.clone(),ok:false,disabled:None,error:Some(error)}}}).collect())
 }
-pub fn resume_bundled()->Result<(),String>{if let Some(layout)=configured()?{if bundle::is_bundled(&layout)&&mods(&layout)?.iter().any(|m|!m.disabled){bundle::ensure_running(&layout)?;}}Ok(())}
-#[tauri::command]pub fn windhawk_state()->Result<Value,String>{let host=&crate::storage_context::current().ok_or("存储上下文未就绪")?.host;let mut state=match configured()?{Some(layout)=>json!({"installed":true,"bundled":bundle::is_bundled(&layout),"running":bundle::running(),"mods":mods(&layout)?,"layout":layout}),None=>json!({"installed":false,"mods":[]})};
+#[tauri::command]pub fn windhawk_state()->Result<Value,String>{let host=&crate::storage_context::current().ok_or("存储上下文未就绪")?.host;let mut state=match configured()?{Some(layout)=>json!({"installed":true,"bundled":false,"running":false,"mods":mods(&layout)?,"layout":layout}),None=>json!({"installed":false,"mods":[]})};
  // 2.0.4 T-D（resources）：状态行文案按实际阶段与配置预算生成，前端不再手写秒数——
  // 编译上限来自 windhawk_import.rs 的唯一常量，下载上限来自 config 的下载预算键。
  state["budget"]=json!({"compileSeconds":importer::COMPILE_SECS,"downloadSeconds":crate::config::plugin_download_timeout().as_secs(),"redirectHops":crate::config::plugin_redirect_hops()});

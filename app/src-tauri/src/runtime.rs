@@ -16,22 +16,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// Files the program cannot start without; checked on every start.
-pub const REQUIRED: [&str; 14] = [
+pub const REQUIRED: [&str; 4] = [
     "node/node.exe",
     "node/LICENSE",
     "webview2/msedgewebview2.exe",
     "licenses/Wakuwaku.txt",
-    "windhawk/windhawk.exe",
-    "windhawk/windhawk-x64-helper.exe",
-    "windhawk/Engine/32/windhawk.dll",
-    "windhawk/Engine/32/windhawk.lib",
-    "windhawk/Engine/64/windhawk.dll",
-    "windhawk/Engine/64/windhawk.lib",
-    "windhawk/Compiler/bin/clang++.exe",
-    "windhawk/Compiler/include/windhawk_api.h",
-    "windhawk/LICENSE-Windhawk.txt",
-    "windhawk/Compiler/LICENSE.TXT",
 ];
+// #73：`windhawk/` 整棵（引擎 + LLVM-MinGW 编译器，原始 557.8 MB / 8413 个文件）不再随包分发，
+// 因此也不再是启动必需项。外观页改为只连接用户自己安装的 Windhawk（`windhawk::configured`
+// 的「配置路径 → 注册表 → Program Files」三档）。
 const SCHEMA: u32 = 2;
 /// `state/verified` 自己的格式版本。旧的两行格式（清单摘要 + 目录）解析不出来，
 /// 按「没有记录」处理：代价是升级后多校验一次，不写迁移脚本（T06）。
@@ -733,7 +726,7 @@ mod tests {
         let was = remembered(&home).expect("校验通过要记下指纹");
         assert_eq!(was.schema, MARKER_SCHEMA);
         assert_eq!(was.resources, normalized(&root));
-        assert_eq!(was.files.len(), 16, "14 个必需文件 + 许可原文 + 一个非必需文件");
+        assert_eq!(was.files.len(), 6, "4 个必需文件（#73 起不含 windhawk/*）+ 许可原文 + 一个非必需文件");
         // 日常启动：不再问许可、不再写 DACL、指纹一个没变，所以连标记都不重写。
         let before = fs::read(verified_marker(&home)).unwrap();
         prepare_at(&root, &home, &mut prompt, &mut acl).unwrap();

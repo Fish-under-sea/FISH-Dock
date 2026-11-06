@@ -1,4 +1,4 @@
-// 构建期准备安装资源：从已锁定的官方下载件解出 Node、固定版 WebView2 与 Windhawk，
+// 构建期准备安装资源：从已锁定的官方下载件解出 Node 与固定版 WebView2（#73 起不再准备 Windhawk），
 // 目录结构与安装后一致，并写一份清单（schema 2）供程序首次启动全量校验、日常启动只查必需文件。
 // 安装包里只装这些文件；安装器不做压缩解包的二次搬运。
 import fs from 'node:fs/promises'
@@ -19,17 +19,9 @@ export const REQUIRED = [
   'node/LICENSE',
   'webview2/msedgewebview2.exe',
   'licenses/Wakuwaku.txt',
-  'windhawk/windhawk.exe',
-  'windhawk/windhawk-x64-helper.exe',
-  'windhawk/Engine/32/windhawk.dll',
-  'windhawk/Engine/32/windhawk.lib',
-  'windhawk/Engine/64/windhawk.dll',
-  'windhawk/Engine/64/windhawk.lib',
-  'windhawk/Compiler/bin/clang++.exe',
-  'windhawk/Compiler/include/windhawk_api.h',
-  'windhawk/LICENSE-Windhawk.txt',
-  'windhawk/Compiler/LICENSE.TXT',
 ]
+// #73：不再携带 `windhawk/`（引擎 + LLVM-MinGW 编译器，原始 557.8 MB / 8413 个文件）。
+// 外观页改为连接用户自己安装的 Windhawk；具体见 runtime.rs 的 REQUIRED 注释与 #73。
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -79,7 +71,7 @@ function run(command, args, quiet = false) {
   if (result.status !== 0) throw new Error(`${command} failed with ${result.status}`)
 }
 
-/// 从官方下载件准备 `output/resources`：解包 Node 与固定版 WebView2，整理 Windhawk 工具链，
+/// 从官方下载件准备 `output/resources`：解包 Node 与固定版 WebView2（#73 起 Windhawk 不再随包），
 /// 放许可原文，最后写清单。每一步都先核对摘要，不信任之前的解压工作目录。
 export async function prepareResources(downloads, output, options = {}) {
   if (process.platform !== 'win32') throw new Error('This resource builder requires Windows x64 tools')
@@ -108,8 +100,7 @@ export async function prepareResources(downloads, output, options = {}) {
   // 解包目录已用完：安装资源就是 resources/，安装器不再压缩打包。
   await fs.rm(unpackNode, { recursive: true, force: true })
   await fs.rm(unpackWebview, { recursive: true, force: true })
-  const {stageWindhawk}=await import('./stage-windhawk.mjs')
-  await stageWindhawk(path.join(downloads,lock.windhawk.filename),path.join(resources,'windhawk'),{source:lock.windhawk,sevenZip:options.sevenZip??'C:/Program Files/7-Zip/7z.exe'})
+  // #73：不再解 Windhawk 引擎与编译器——随包分发已移除，外观页改用用户自己装的那份。
   console.log('Hashing the install resources...')
   const manifest = await writeManifest(resources, { version, nodeVersion: lock.node.version, webview2Version: lock.webview2.version })
   console.log(JSON.stringify({ output, resources, version, files: manifest.files.length, expanded_bytes: manifest.files.reduce((n, f) => n + f.bytes, 0) }, null, 2))

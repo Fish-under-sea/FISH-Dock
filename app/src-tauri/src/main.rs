@@ -1770,7 +1770,8 @@ fn main() {
             return;
         }
     };
-    std::thread::spawn(|| { if let Err(error)=windhawk::resume_bundled(){ eprintln!("Windhawk: {error}"); } });
+    // #73：随包不再内置 Windhawk 引擎，没有需要在启动时拉起的守护进程；
+    // 用户自己装的那份由它自身的登录项/托盘负责，这里只在打开外观页时按需读取状态。
     let legacy_identity = identity::from_environment().map(|location| {
         if location.root.join("mail-accounts.json").is_file() { location.root }
         else { location.legacy.unwrap_or(location.root) }
