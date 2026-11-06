@@ -88,6 +88,7 @@
   let tab = 'now'
   let snap = null
   let lang = 'en'
+  const windhawkPanel = window.WindhawkPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, redraw: () => draw() })
   const extensionLayouts = new Map()
   let extensionLayoutFrame = 0
   // remembered：首个 layout 之前先用这一页上次的高度（宿主侧记忆，不碰沙盒 iframe 的
@@ -972,7 +973,7 @@
             : ''
         }</div>${why}${mode === 'custom' ? `<div class="accents">${swatches}</div>` : ''}</div>
       </div>
-      ${pagePaper()}`
+      ${pagePaper()}${window.pet.mac ? '' : windhawkPanel.render()}`
   }
 
   // Windows' dialog open for the desktop's picture: its own mark, held until
@@ -3511,7 +3512,7 @@
     const changed = setHTML(body, PAGES[tab]())
     if (tab === 'widgets') extensionPanel.mount(body)
     if (tab === 'now') identityPanel.mount(body)
-    if (tab === 'look') { mountTabOrder() }
+    if (tab === 'look') { mountTabOrder(); windhawkPanel.mount(body) }
     if (reset) {
       body.scrollTop = 0
       // Two panes: what is on the right from its top; the list stays where it was.
@@ -3641,7 +3642,7 @@
       if (partToShow === 'connect') partToShow = cardShows() ? 'welcome' : ''
       draw(true)
       showPart()
-      if (tab === 'look') { loadGallery(false) }
+      if (tab === 'look') { loadGallery(false); if (!window.pet.mac) void windhawkPanel.load() }
       if (tab === 'mail' && letterToOpen) {
         const { account, uid, folder } = letterToOpen
         letterToOpen = null
@@ -3693,7 +3694,7 @@
     if (next === tab || !TABS.includes(next)) return
     tab = next
     draw(true)
-    if (tab === 'look') { loadGallery(false) }
+    if (tab === 'look') { loadGallery(false); if (!window.pet.mac) void windhawkPanel.load() }
     relayout()
   }
 

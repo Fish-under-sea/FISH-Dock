@@ -139,7 +139,7 @@ test('规格 16–24：外观页 显示方式 → 内置（任务栏 → 灵动�
     's.builtin', // 18 内置（分组）
     's.taskbarEdge', // 19 任务栏参数
     'islandPosRow()', // 20 灵动岛参数
-    'pageWindows()', // 21 Windows（含壁纸；2.1.4 起 Windhawk 设置面已摘掉）
+    'pageWindows()', // 21 Windows（含壁纸与 Windhawk）
     'pageTabOrder()', // 22 标签页排序
     's.her', // 23 她
     'pagePets()', // 24 宠物与图库
@@ -151,8 +151,7 @@ test('规格 16–24：外观页 显示方式 → 内置（任务栏 → 灵动�
   const pets = slice('  function pagePets()', '  // --- Her island')
   inOrder('宠物与图库', pets, ['home.installed', 's.download', '${more}'])
   const windows = slice('  function pageWindows()', '  let pickingPaper = false')
-  inOrder('Windows', windows, ['s.winMode', 's.winAccent', 'pagePaper()'])
-  assert.doesNotMatch(windows, /windhawk/i, '2.1.4 起外观页不再有 Windhawk 设置面')
+  inOrder('Windows', windows, ['s.winMode', 's.winAccent', 'pagePaper()', 'windhawkPanel.render()'])
 })
 
 test('规格 25–29：邮件页 邮箱 → 本地保留 → 邮件代理 → 收件箱', () => {
