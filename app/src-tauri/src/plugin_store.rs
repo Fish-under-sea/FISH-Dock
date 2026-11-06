@@ -282,9 +282,16 @@ fn release_asset(id:&str,version:&str)->String{
     let slug=id.strip_prefix("fish.").unwrap_or(id);
     format!("{}/v{version}/{slug}.fish-plugin",crate::config::PLUGIN_RELEASE_BASE)
 }
+// 本机已装的这个插件版本（没装过就 None）。回退只允许停在这一档以上；
+// 读注册表失败也不拦着装——把「读不到」变成「装不了」是更糟的错。
+fn local_version(context:&crate::storage_context::Context,id:&str)->Option<[u32;3]>{
+    let manager=crate::plugin_install::Manager{context};
+    let row=manager.list().ok()?.into_iter().find(|row|row.manifest.id==id)?;
+    crate::plugin_manifest::version(&row.manifest.version).ok()
+}
 /// S1 版本候选：目录当前条目 + 目录历史条目（有则用）或内置已验证表（没有则用），
 /// 按版本由新到旧排、按版本去重；第一条就是目录里的最新版。
-fn version_candidates(catalog:&Catalog,id:&str,platform:&str)->Result<Vec<Entry>,String>{
+fn version_candidates(catalog:&Catalog,id:&str,platform:&str,floor:Option<[u32;3]>)->Result<Vec<Entry>,String>{
     let latest=catalog.plugins.iter().find(|row|row.id==id&&row.platform==platform).cloned().ok_or("官方目录没有适用于当前平台的插件版本")?;
     let ceiling=crate::plugin_manifest::version(&latest.version)?;
     let mut fallbacks:Vec<(String,String,String,u64)>=Vec::new();
@@ -302,6 +309,10 @@ fn version_candidates(catalog:&Catalog,id:&str,platform:&str)->Result<Vec<Entry>
         // 比目录当前版本还新的候选不作回退目标：版本选择权留在目录里，宿主只负责
         // 「这一版下不到就退一步」，不负责替目录宣布谁是最新。
         if release>=ceiling||candidates.iter().any(|row|row.version==version) { continue; }
+        // 2.1.4：也不许退到比本机已装版本更老的版本——那叫降级，不是回退。
+        // 用户升级前用的是 2.2.x 时，回退应该停在 2.2.x 那一档，而不是一路退到内置表里
+        // 还能下载的最老一版（历史现场：装成了 2.1.6，比升级前还旧）。
+        if floor.is_some_and(|floor| release<floor) { continue }
         candidates.push(Entry{version,url,sha256,bytes,versions:Vec::new(),..latest.clone()});
     }
     Ok(candidates)
@@ -435,7 +446,7 @@ pub fn obtain(context:&crate::storage_context::Context,id:&str)->Result<(crate::
 pub fn obtain_traced(context:&crate::storage_context::Context,id:&str)->Result<(crate::plugin_package::Package,String,FetchRecord),String>{
     let bytes=context.host.read("config","official-plugin-catalog.json")?.ok_or("请先刷新官方插件商店")?;
     let catalog=parse(&bytes)?;
-    let candidates=version_candidates(&catalog,id,&crate::plugin_install::platform())?;
+    let candidates=version_candidates(&catalog,id,&crate::plugin_install::platform(),local_version(context,id))?;
     let latest=candidates.first().cloned().ok_or("官方目录没有适用于当前平台的插件版本")?;
     crate::plugin_progress::know_total(id,Some(latest.bytes));
     crate::plugin_progress::report(id,"校验",0,Some(latest.bytes))?;
@@ -525,7 +536,7 @@ pub fn obtain_traced(context:&crate::storage_context::Context,id:&str)->Result<(
     fn history_of(archive:&[u8],version:&str)->serde_json::Value{
         serde_json::json!({"version":version,"url":format!("https://github.com/Fish-under-sea/FISH-DOCK-Plugins/releases/download/v{version}/magpie.fish-plugin"),"sha256":format!("{:x}",Sha256::digest(archive)),"bytes":archive.len()})
     }
-    fn candidates(entry:&Entry)->Vec<Entry>{version_candidates(&Catalog{schema:1,plugins:vec![entry.clone()]},"fish.magpie",&crate::plugin_install::platform()).unwrap()}
+    fn candidates(entry:&Entry)->Vec<Entry>{version_candidates(&Catalog{schema:1,plugins:vec![entry.clone()]},"fish.magpie",&crate::plugin_install::platform(),None).unwrap()}
     // npm 的 tarball：ustar（512 字节头 + 内容）+ gzip，内容都在 package/ 下。
     fn tarball(files:&[(&str,Vec<u8>)])->Vec<u8>{
         let mut plain=Vec::new();
@@ -765,20 +776,20 @@ pub fn obtain_traced(context:&crate::storage_context::Context,id:&str)->Result<(
     #[test]fn version_candidates_prefer_the_catalog_history_then_the_builtin_table(){
         let prev=plugin_archive_at("2.4.0"); let entry=catalog_entry_at(&plugin_archive_at("2.5.0"),"2.5.0",vec![history_of(&prev,"2.4.0")]);
         let catalog=Catalog{schema:1,plugins:vec![entry.clone()]};
-        let rows=version_candidates(&catalog,"fish.magpie",&crate::plugin_install::platform()).unwrap();
+        let rows=version_candidates(&catalog,"fish.magpie",&crate::plugin_install::platform(),None).unwrap();
         let versions:Vec<&str>=rows.iter().map(|row|row.version.as_str()).collect();
         assert_eq!(versions,vec!["2.5.0","2.4.0"],"目录历史条目在手时不再叠内置表（内置表最高的 2.2.0 都不该出现）");
         assert_eq!(rows[1].sha256,format!("{:x}",Sha256::digest(&prev)),"历史条目的摘要原样带过来");
         assert!(rows[1].versions.is_empty(),"候选不再带着整份历史（避免递归）");
         // 目录没有 versions 字段（当前 stable.json 的形态）→ 内置已验证表顶上。
         let catalog=Catalog{schema:1,plugins:vec![catalog_entry_at(&plugin_archive_at("2.3.0"),"2.3.0",Vec::new())]};
-        let rows=version_candidates(&catalog,"fish.magpie",&crate::plugin_install::platform()).unwrap();
+        let rows=version_candidates(&catalog,"fish.magpie",&crate::plugin_install::platform(),None).unwrap();
         assert_eq!(rows[0].version,"2.3.0");
         let builtin:Vec<&str>=rows[1..].iter().map(|row|row.version.as_str()).collect();
         assert!(builtin.contains(&"2.2.0")&&builtin.contains(&"2.1.6"),"内置表要有上一可用版本：{builtin:?}");
         assert!(builtin.windows(2).all(|pair|crate::plugin_manifest::version(pair[0]).unwrap()>crate::plugin_manifest::version(pair[1]).unwrap()),"内置候选按新→旧排：{builtin:?}");
         assert!(rows.iter().all(|row|crate::plugin_manifest::version(&row.version).unwrap()<=crate::plugin_manifest::version("2.3.0").unwrap()),"内置表里比目录更新的版本不作回退目标");
-        assert!(version_candidates(&catalog,"fish.ofm",&crate::plugin_install::platform()).is_err(),"目录里没有的 id 不给候选");
+        assert!(version_candidates(&catalog,"fish.ofm",&crate::plugin_install::platform(),None).is_err(),"目录里没有的 id 不给候选");
     }
     // 内置表的每一条都必须是官方发行资源 + 合法摘要：它决定「装哪一版」，不能靠运气。
     // 地址不再逐行抄写：release_asset() 用 config::PLUGIN_RELEASE_BASE 拼，所以这里同时

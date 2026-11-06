@@ -354,7 +354,15 @@ fn ways(host: &str, via: &Via, system: Option<System>, env_proxy: bool) -> Vec<W
         (Via::Manual(p), _) => vec![Way::Manual(p.clone())],
         (Via::Straight, _) => vec![Way::Straight],
         (Via::System, Some(s)) if s.bypasses(host) => vec![Way::Straight],
-        (Via::System, Some(s)) if !env_proxy => s.for_web().map(Way::Through).into_iter().chain([Way::Default]).collect(),
+        // 2.1.4：系统代理优先，进程环境变量只当兜底。
+        // 原来是 `if !env_proxy`：只要环境里有一个 HTTP(S)_PROXY（哪怕它指向已经关掉的内核、
+        // 或者只是别处残留的值），就跳过 Windows 的系统代理，只让 ureq 按环境变量走。结果就是
+        // 「明明挂着节点，Dock 却连不上主源」——用户看到的是回退镜像、装得很慢。
+        // 显式配在系统里的代理是人的意图，比进程环境更可信，所以它先走，Default 留作兜底。
+        (Via::System, Some(s)) => {
+            let _ = env_proxy;
+            s.for_web().map(Way::Through).into_iter().chain([Way::Default]).collect()
+        }
         (Via::System, _) => vec![Way::Default],
     }
 }
@@ -506,8 +514,8 @@ mod tests {
     }
 
     // This computer straight; Windows' proxy then as ureq would; straight
-    // for a host its list names; the environment's alone when one is set
-    // there.
+    // for a host its list names; the environment's alone only when Windows'
+    // has none (2.1.4: a stale HTTP(S)_PROXY must not shadow the system proxy).
     #[test]
     fn the_web_through_windows_proxy_first() {
         let clash = || Some(System { server: "127.0.0.1:7890".into(), bypass: "localhost;127.*;192.168.*;<local>".into() });
@@ -517,7 +525,10 @@ mod tests {
         assert_eq!(ways("192.168.1.5", sys_way, clash(), false), [Way::Straight]);
         assert_eq!(ways("devbox", sys_way, clash(), false), [Way::Straight]);
         assert_eq!(ways("api.github.com", sys_way, None, false), [Way::Default]);
-        assert_eq!(ways("api.github.com", sys_way, clash(), true), [Way::Default]);
+        // 2.1.4：有环境变量代理时也先走 Windows 的系统代理——环境里残留的 HTTP(S)_PROXY
+        // （例如已经关掉的内核地址）不许把系统代理顶掉，否则「挂了节点也连不上主源」，
+        // 只能一路回退镜像、装得很慢。Default（ureq 按环境变量走）退到第二位兜底。
+        assert_eq!(ways("api.github.com", sys_way, clash(), true), [Way::Through("http://127.0.0.1:7890".into()), Way::Default]);
         assert_eq!(ways("::1", sys_way, None, true), [Way::Straight]);
         assert_eq!(ways("127.0.0.1", sys_way, Some(sys("127.0.0.1:7890")), false), [Way::Straight]);
     }
