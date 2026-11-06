@@ -100,7 +100,7 @@ Choose the package for the published version and verify it with `SHA256SUMS.txt`
 | Package | When to use it |
 | --- | --- |
 | `FISH-Dock-Setup-2.1.4.exe` | First installation, missing runtimes or repair; includes the complete offline runtime (about 246 MB). **Use this to repair a 2.1.2 install that will not start.** |
-| `FISH-Dock-Update-2.1.4.exe` | An existing **2.1.3** installation with intact base resources; contains only the changed files (about 30 MB) and points to the full installer if required resources are missing or damaged. |
+| `FISH-Dock-Update-2.1.4.exe` | **Any 2.0.0 or newer installation**: full payload through the transactional update path, keeping user data and install location (about 246 MB). |
 
  Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 and Fixed Version WebView2 155.0.4283.62. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files), so Windows customization uses your own Windhawk install and mod import is unavailable until one is present. The installer is currently unsigned.
 
