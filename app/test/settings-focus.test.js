@@ -5,13 +5,15 @@ const vm = require('node:vm')
 const { test } = require('node:test')
 
 const styles = fs.readFileSync(path.join(__dirname, '../src/pet/settings.css'), 'utf8')
-test('确认弹窗尺寸紧凑，遮罩不把整个 Dock 背景压暗', () => {
+test('确认弹窗尺寸紧凑，遮罩不把整个 Dock 背景压暗，分层交给卡片投影', () => {
   for (const selector of ['s-confirm-dialog']) {
     const rule = styles.match(new RegExp(`#island-settings \\.${selector} \\{([^}]+)\\}`))?.[1] || ''
     assert.match(rule, /width:\s*min\(300px, calc\(100vw - 40px\)\)/)
     assert.match(rule, /max-height:\s*min\(70vh, calc\(100vh - 32px\)\)/)
-    assert.match(rule, /box-shadow:\s*none/)
-    assert.match(styles, new RegExp(`#island-settings \\.${selector}::backdrop \\{ background: transparent; \\}`))
+    // #74：投影从 none 改成一层轻投影——它是唯一被允许的分层手段（见下一条：遮罩必须透明）。
+    assert.doesNotMatch(rule, /box-shadow:\s*none/, '卡片要有投影才看得出层次')
+    assert.match(rule, /box-shadow:\s*0 12px 28px/, '投影保持可辨识的一档')
+    assert.match(styles, new RegExp(`#island-settings \\.${selector}::backdrop \\{ background: transparent; \\}`), '设置面板窗口铺满工作区宽度，遮罩不许压暗')
   }
 })
 test('设置键盘处理不依赖已移除的全屏弹窗变量', () => {

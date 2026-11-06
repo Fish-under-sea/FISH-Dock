@@ -96,7 +96,10 @@
     dialog.style.maxHeight = `${room.height}px`
     // 刚写完宽度就取矩形：getBoundingClientRect 会先强制一次布局，
     // 拿到的就是这次宽度下的真实高度，不是上一次的。
-    const measured = dialog.getBoundingClientRect?.().height
+    // #74：入场动画给了 dialog 一个 scale(.98) 的 transform，gBCR 返回的是**变换后**
+    // 的尺寸——按它设 height 会少 2%，内容溢出、滚动条常驻。offsetHeight 是布局尺寸，
+    // 不吃 transform，量它。
+    const measured = dialog.offsetHeight || dialog.getBoundingClientRect?.().height
     const rect = place({ island, viewport, anchor, height: measured })
     dialog.style.left = `${rect.left}px`
     dialog.style.top = `${rect.top}px`

@@ -2820,13 +2820,25 @@
 .tb-light #island-settings .identity-error, .tb-light #island-settings .identity-warning { color: #8e3d08; }
 
 /* 确认弹窗留在 Dock 内（settings.js seatDialog / DialogAnchor 把它贴在岛的锚点上）；
-   原生 dialog 限定键盘焦点。宽度按岛的最窄口径来，不用视口的一半。 */
-#island-settings .s-confirm-dialog { box-sizing: border-box; width: min(300px, calc(100vw - 40px)); max-height: min(70vh, calc(100vh - 32px)); max-height: min(70dvh, calc(100dvh - 32px)); padding: 14px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); color: var(--fg); box-shadow: none; overflow: auto; }
+   原生 dialog 限定键盘焦点。宽度按岛的最窄口径来，不用视口的一半。
+   #74：几何居中已由 DialogAnchor 锁到 ≤2px，这里补的是「视觉居中」——
+   四边等宽的 14px 内衬会让标题 16px 粗体压在上方、按钮组贴右下，读起来重心偏上偏右。
+   所以上下留白故意不等（上 16 / 下 12）把内容块往中心压，横向保持左右对称；
+   `scrollbar-gutter: stable both-edges` 让出现滚动条时内容中心不动；
+   transform-origin 固定在卡片中心，入场缩放不会产生位移感。 */
+#island-settings .s-confirm-dialog { box-sizing: border-box; width: min(300px, calc(100vw - 40px)); max-height: min(70vh, calc(100vh - 32px)); max-height: min(70dvh, calc(100dvh - 32px)); padding: 16px 14px 12px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); color: var(--fg); box-shadow: 0 12px 28px rgba(0, 0, 0, .28), 0 0 0 1px rgba(0, 0, 0, .06); overflow: auto; scrollbar-gutter: stable both-edges; transform-origin: center center; }
 #island-settings .s-confirm-dialog:not([open]) { display: none; }
+/* 分层靠卡片自己的投影，不靠压暗背景：设置面板窗口铺满整个工作区宽度
+   （island.rs 的 size_for），::backdrop 会把这一整条都压暗，读起来像全屏模态。
+   投影在卡片四周生成层次，卡片中心与面板中心重合这件事才看得出来。 */
 #island-settings .s-confirm-dialog::backdrop { background: transparent; }
+#island-settings .s-confirm-dialog[open] { animation: s-confirm-in .16s ease-out; }
+@keyframes s-confirm-in { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { #island-settings .s-confirm-dialog[open] { animation: none; } }
 #island-settings .s-confirm-dialog h2 { margin: 0 0 8px; font-size: 16px; }
 #island-settings .s-confirm-dialog p { margin: 0 0 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-#island-settings .s-confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* #74：按钮组原来贴右下（flex-end），实心按钮面积大，整个内容块的视觉重心被拉到右下方——实测横向偏右 42px。改成水平居中，配合上下 16/12 的光学补偿，内容块重心才落在卡片中心。 */
+#island-settings .s-confirm-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 #island-settings .s-device-code { display: block; margin: 12px 0 20px; padding: 12px; font-size: 28px; letter-spacing: .12em; text-align: center; user-select: text; background: var(--g2); border: 1px solid var(--g3); border-radius: 8px; overflow-wrap: anywhere; }
 #island-settings .s-device-code[hidden], #island-settings .s-device-actions[hidden] { display: none; }
 #island-settings .s-device-actions { margin-bottom: 12px; }
