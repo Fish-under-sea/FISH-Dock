@@ -18,9 +18,27 @@
 </p>
 </div>
 
-**2.0.4 · Windows 10/11 x64** — a desktop workspace for Agent sessions, notifications, mail and independent plugins.
+<table>
+  <tr>
+    <td>
 
-[Download](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.4) · [中文](README.md) · [Official plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) · [Release notes](app/docs/release-2.0.4.md)
+**2.1.3 · Windows 10/11 x64** — a desktop workspace for Agent sessions, notifications, mail and independent plugins.
+
+[Download](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.3) · [中文](README.md) · [Official plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) · [Release notes](app/docs/release-2.1.3.md)
+
+    </td>
+    <td width="232" align="center" valign="middle">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/join-qq-dark.jpg">
+  <img src="assets/readme/join-qq-light.jpg" alt="FISH Dock beta group QR code, QQ 945310176" width="210">
+</picture>
+
+<p><sub>Scan to join the beta group<br>QQ 945310176</sub></p>
+
+    </td>
+  </tr>
+</table>
 
 ## Features
 

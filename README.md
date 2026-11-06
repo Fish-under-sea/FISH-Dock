@@ -31,9 +31,27 @@
 
 <h2 id="intro"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-intro-dark-v3.png"><img src="assets/readme/section-intro-light-v3.png" alt="INTRO · 简介" width="100%"></picture></h2>
 
+<table>
+  <tr>
+    <td>
+
 FISH Dock 是 Windows 桌面上的会话与模型工作台。它负责窗口、桌面岛、运行时生命周期、插件页面和本地数据边界；具体业务以插件形式装载，让宿主保持清晰、可替换、可恢复。
 
 桌面岛负责展示会话与审批状态，工作台承载邮件和插件页面。通知、代理、模型网关与模型渠道由独立插件按需提供；安装、启停和卸载都由宿主统一管理。
+
+    </td>
+    <td width="232" align="center" valign="middle">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/join-qq-dark.jpg">
+  <img src="assets/readme/join-qq-light.jpg" alt="FISH Dock 内测群二维码，QQ 群号 945310176" width="210">
+</picture>
+
+<p><sub>扫码进内测群<br>QQ 群号 945310176</sub></p>
+
+    </td>
+  </tr>
+</table>
 
 <h2 id="features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-features-dark-v3.png"><img src="assets/readme/section-features-light-v3.png" alt="FEATURES · 能做什么" width="100%"></picture></h2>
 
