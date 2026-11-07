@@ -12,7 +12,7 @@
 </picture>
 
 <p>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.5"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.1.1" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.6"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.1.1" width="23%"></picture></a>
   <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
   <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
@@ -23,7 +23,7 @@
 
 <p>
   <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="app/docs/release-2.1.5.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
+  <a href="app/docs/release-2.1.6.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
@@ -57,7 +57,6 @@
 | 插件安装与更新 | 校验来源、平台与资源摘要；官方插件优先 npm（`@fish-under-sea/fish-dock-plugin-*`）→ npmmirror 镜像 → GitHub Release；安装/更新为带 journal 的事务（中断可续做、不可验证则回滚），更新后只保留当前版本。插件卡上统一三态自启动按钮：已开「关闭自启动」、已关「随 Dock 启动」、无自启动能力「无需自启动」（纯展示）；卡内唯一实心按钮是「更新」，卸载与「打开插件日志」收进「更多」。 |
 | 关于与公告 | 关于页品牌图首位居中、可点击进官网（地址在 `url.official_site` 可覆盖）；更新公告只显示最新版本与新特性要点，完整说明折叠；公告源 GitHub → Gitee → 本地缓存，未配置 Gitee 时明确跳过；内置更新全程在应用内完成。 |
 | 全局快捷键 | 设置页可录制组合键；被其他程序占用时给出提示，30 秒内未录到可用组合就放弃。 |
-| 外观工具链 | 连接你自己安装的 Windhawk（2.1.2 起不再随包内置引擎与编译器），可在外观页导入模组、编译、启停与恢复。 |
 | 主题与可读性 | 暗色白字、浅色黑字；对比度审计（`scripts/check-contrast.mjs`）违规 0。 |
 | 网络与缓存 | 图库/下载走统一出口（尊重代理设置，失败回落直连）；超时分层可配；图库 LRU 缓存离线可用；邮件重连为指数退避 + 熔断 + 状态持久化。 |
 | 内存 | 隐藏即休（页面隐藏则 `IsVisible=false` 并把内存目标降到 Low）；`check_quiet` 不再把隐藏页抬回 normal；插件页 iframe park 后 5 分钟整页退场。预算表按 A/B/C 三档见 `红线-禁止屎山十条.md`（含未结清项，见 issue #29 / #30）。 |
@@ -75,7 +74,9 @@
 
 <h2 id="changelog"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-changelog-dark-v3.png"><img src="assets/readme/section-changelog-light-v3.png" alt="CHANGELOG · 更新记录" width="100%"></picture></h2>
 
-业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器、插件管理与 Windhawk。
+业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器与插件管理。
+
+2.1.6 修复版：宿主 2.1.6，兼容插件 2.x。修掉**插件自启「第一次起不来」的根因**——宿主把「插件 → 宿主」的存储回调从请求窗口里解耦，改由常驻线程随时服务：冷启时插件在 `activate` 之后发出的存储调用不再干等 30 秒直到超时（本机实测两个插件曾在同一毫秒一起报「宿主调用超时」）。同一版让 SDK 丢弃作废编号的迟到回执，一次超时不再把插件会话打死；外观页残留的 **Windhawk 设置面整体移除**（后端能力保留）。完整说明见 [2.1.6 更新记录](app/docs/release-2.1.6.md)。
 
 2.1.5 回退版：宿主 2.1.5，兼容插件 2.x。**2.1.4 删掉外观页的 Windhawk 设置面之后 Dock 打不开**，这一版把它原样恢复成 2.1.3 的形态；其余两项保留：**系统代理优先**（环境里残留的 `HTTP(S)_PROXY` 不再顶掉 Windows 系统代理，主源能连上就不回退镜像）；**插件下载失败的回退不再降级**（以当前已装版本为下限）。完整说明见 [2.1.5 更新记录](app/docs/release-2.1.5.md)。
 
@@ -95,21 +96,21 @@
 
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark-v3.png"><img src="assets/readme/section-install-light-v3.png" alt="INSTALL · 安装" width="100%"></picture></h2>
 
-**FISH Dock 2.1.5** 提供完整安装包和精简更新包。2.1.4 装完打不开的用户请直接用 Setup 覆盖安装（数据在 `%LOCALAPPDATA%\FISH Dock`，不受影响）。下载及校验文件见 [v2.1.5 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.5)。
+**FISH Dock 2.1.6** 提供完整安装包和精简更新包。下载及校验文件见 [v2.1.6 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.6)。
 
 | 安装包 | 使用场景 |
 | --- | --- |
-| `FISH-Dock-Setup-2.1.5.exe` | 首次安装、基础资源缺失或修复安装，包含完整离线运行时（约 246 MB）。**2.1.2 起不来就用这个覆盖安装。** |
-| `FISH-Dock-Update-2.1.5.exe` | 已有 **2.1.3** 且基础资源完整时使用，只含相对 2.1.3 的变更（约 30 MB）；更老的版本请用 Setup。 |
+| `FISH-Dock-Setup-2.1.6.exe` | 首次安装、基础资源缺失或修复安装，包含完整离线运行时。**2.1.2 起不来就用这个覆盖安装。** |
+| `FISH-Dock-Update-2.1.6.exe` | 已有 **2.1.5** 且基础资源完整时使用，只含相对 2.1.5 的变更；更老的版本请用 Setup。 |
 
-1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.5) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
+1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.6) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源并展示运行时条款。
 3. 打开「插件」页，点击「GitHub 登录」。Dock 内弹窗显示验证码及实际复制结果；在系统浏览器中粘贴并确认，Dock 自动检查授权。等待期间可单独解除临时锁定／置顶，也可取消验证。旧版账号若未保存续期凭据，升级后需重新登录一次；新授权随后自动续期。
 4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
 5. 点击「检查更新」读取官方目录，按需安装 [FISH Dock Official Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。新插件安装成功即启用；凭据和服务参数仍需各自配置。
 6. 官方商店目前只有**三个插件**：**飞书**、**Clash**、**Magpie**（飞书 2.1.0，Clash 与 Magpie 2.1.3；要求宿主 ≥ 2.0.0）。OFM 自 2026-10-25 起暂停维护，已从商店下架——已安装的用户仍可在「已安装」里启用或卸载。
 
-安装包包含 Node.js 24.14.0 与固定版 WebView2 155.0.4283.62，供对应插件按需调用。**2.1.2 起不再内置 Windhawk 引擎与 LLVM-MinGW 编译器**（原始 557.8 MB / 8413 个文件）：Windows 美化改用你自己安装的 Windhawk，未安装时外观页不再提供模组导入。安装包当前未做 Authenticode 签名。
+安装包包含 Node.js 24.14.0 与固定版 WebView2 155.0.4283.62，供对应插件按需调用。**2.1.2 起不再内置 Windhawk 引擎与 LLVM-MinGW 编译器**（原始 557.8 MB / 8413 个文件），2.1.6 起外观页也移除了 Windhawk 设置面。安装包当前未做 Authenticode 签名。
 
 正式安装版在「关于」和「软件更新」均可检查官方新版本，并在启动后及每天自动检查。GitHub API 受限时自动改读官方 Release 的版本信息（仍在应用内提示）；新版通过完整安装包或精简更新包在应用内升级，不单独替换宿主 EXE、不跳转外部网页。同版本修订不会因为版本号相同自动提示，请从 Release 重新下载安装并核对最新 SHA-256。
 

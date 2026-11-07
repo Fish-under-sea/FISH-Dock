@@ -6,14 +6,14 @@
 </p>
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark.png"><img src="assets/readme/hero-en-light.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.5"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.1.1"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.6"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.1.1"></picture></a>
 <a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
 <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v2.png"><img src="assets/readme/stat-channels-en-light-v2.png" width="23%" alt="Three independent official plugins"></picture></a>
 </p>
 <p>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.1"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="app/docs/release-2.1.5.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
+<a href="app/docs/release-2.1.6.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark.png"><img src="assets/readme/key-issues-en-light.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
@@ -21,8 +21,8 @@
 <table>
 <tr>
 <td>
-<p><strong>2.1.3 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
-<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.5">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.1.5.md">Release notes</a></p>
+<p><strong>2.1.6 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
+<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.6">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.1.6.md">Release notes</a></p>
 </td>
 <td width="232" align="center" valign="middle">
 <picture>
@@ -64,6 +64,8 @@ This section is only about entry points and operations; capability detail is abo
 
 Business code, plugin packages and the store catalog are maintained in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins); this repository owns the desktop host, SDK, installer, plugin management and Windhawk.
 
+**2.1.6** fixes the root cause of “plugin autostart fails on the first launch”: the host no longer serves plugin-to-host storage callbacks only while it happens to be waiting on that plugin's reply. A resident callback thread serves them at any time, so the storage reads a plugin issues right after `activate` no longer sit until the 30-second SDK timeout (on this machine both plugins once failed in the same millisecond). The SDK also drops late replies for already-expired request ids instead of closing the session, and the leftover **Windhawk section is removed from the Appearance page** (backend kept). Full notes: [2.1.6 release notes](app/docs/release-2.1.6.md).
+
 **2.1.5** reverts the part of 2.1.4 that broke startup: removing the Windhawk section from the Appearance page left Dock unable to open, so it is restored to its 2.1.3 shape. The other two fixes stay: **the system proxy now wins** over a stale `HTTP(S)_PROXY` (so Dock reaches the primary source instead of falling back to mirrors), and **plugin download fallback no longer downgrades** below the version you already have. Full notes: [2.1.5 release notes](app/docs/release-2.1.5.md).
 
 **2.0.4** is a revision release: host 2.0.4, compatible with plugins 2.1.x (Clash and Magpie 2.1.3, Feishu 2.1.0). It closes issues #63, #65, #66 and #67 and regresses #64. Plugin autostart becomes a single scheduler — one shared budget per attempt (60 s cold, 10 s warm), a 180-second lifecycle per round, one in-flight attempt per plugin, two plugins in parallel, and late results dropped by generation — so a backup-time pause no longer spawns a second instance. Resource fetching moves into one picker layer: the origin first, configured mirrors as candidates, retried per proxy way, all sharing a single total budget and landing through a unique temporary file plus an atomic rename; the update package downloads through it too, and pet lists, details, posters and previews are fetched and cached by the host. Pet now raises a notice when a new version is found. The plugin card More menu becomes a full-row action list, npm discovery search pages correctly on short pages via `nextFrom`, and http/https links in plugin pages open through a host-mediated channel (all other schemes are refused). OFM is fully unwired, legacy naming is cleaned up, and the Agent session API (`/v1`) plus `agent-core` land. See the [2.0.4 release notes](app/docs/release-2.0.4.md) for the full text and known limitations.
@@ -99,10 +101,10 @@ Choose the package for the published version and verify it with `SHA256SUMS.txt`
 
 | Package | When to use it |
 | --- | --- |
-| `FISH-Dock-Setup-2.1.5.exe` | First installation, missing runtimes or repair; includes the complete offline runtime (about 246 MB). **Use this to repair a 2.1.2 install that will not start.** |
-| `FISH-Dock-Update-2.1.5.exe` | An existing **2.1.4** installation with intact base resources; contains only the changed files (about 30 MB). Older versions should use the Setup package. |
+| `FISH-Dock-Setup-2.1.6.exe` | First installation, missing runtimes or repair; includes the complete offline runtime. **Use this to repair a 2.1.2 install that will not start.** |
+| `FISH-Dock-Update-2.1.6.exe` | An existing **2.1.5** installation with intact base resources; contains only the changed files. Older versions should use the Setup package. |
 
- Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 and Fixed Version WebView2 155.0.4283.62. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files), so Windows customization uses your own Windhawk install and mod import is unavailable until one is present. The installer is currently unsigned.
+ Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 and Fixed Version WebView2 155.0.4283.62. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files); 2.1.6 removes the leftover Windhawk section from the Appearance page. The installer is currently unsigned.
 
 Installed releases support manual checks in About and Updates, plus checks after launch and daily. If the GitHub API is unavailable, checks fall back to reading the official release page's version information (still surfaced in-app). Upgrade with a package installer in-app rather than replacing the host executable; the flow never opens an external web page. Same-version revisions do not trigger a version-number notification; download the revised package and verify the latest checksum.
 

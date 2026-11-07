@@ -1,6 +1,6 @@
 {
   "name": "fish-dock",
-  "version": "2.1.5",
+  "version": "2.1.6",
   "description": "Connects Claude Code to FISH Dock for session status and prompt replies.",
   "author": {
     "name": "Pengjie Zhou"
