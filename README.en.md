@@ -6,14 +6,14 @@
 </p>
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark.png"><img src="assets/readme/hero-en-light.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.6"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.1.1"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.7"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.1.1"></picture></a>
 <a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
 <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v2.png"><img src="assets/readme/stat-channels-en-light-v2.png" width="23%" alt="Three independent official plugins"></picture></a>
 </p>
 <p>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.1"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="app/docs/release-2.1.6.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
+<a href="app/docs/release-2.1.7.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark.png"><img src="assets/readme/key-issues-en-light.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
@@ -22,7 +22,7 @@
 <tr>
 <td>
 <p><strong>2.1.6 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
-<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.6">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.1.6.md">Release notes</a></p>
+<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.7">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.1.7.md">Release notes</a></p>
 </td>
 <td width="232" align="center" valign="middle">
 <picture>
@@ -64,6 +64,8 @@ This section is only about entry points and operations; capability detail is abo
 
 Business code, plugin packages and the store catalog are maintained in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins); this repository owns the desktop host, SDK, installer, plugin management and Windhawk.
 
+**2.1.7** re-issues the update package with **2.1.0 as its baseline**: every install from 2.1.0 through 2.1.6 can now take the in-app update in one step, and the package stays a slim diff (a three-file payload, about 30 MB). The 2.1.6 update was diffed only against the previous release, so on 2.1.0/2.1.1 the older `resources/licenses/runtime-sources.json` was neither in the payload nor matching the new digest — the installer stopped with “base resources missing” and rolled back. This release moves the diff origin to the oldest supported version and keeps that baseline manifest in the repo with a self-check. Full notes: [2.1.7 release notes](app/docs/release-2.1.7.md).
+
 **2.1.6** fixes the root cause of “plugin autostart fails on the first launch”: the host no longer serves plugin-to-host storage callbacks only while it happens to be waiting on that plugin's reply. A resident callback thread serves them at any time, so the storage reads a plugin issues right after `activate` no longer sit until the 30-second SDK timeout (on this machine both plugins once failed in the same millisecond). The SDK also drops late replies for already-expired request ids instead of closing the session, and the leftover **Windhawk section is removed from the Appearance page** (backend kept). Full notes: [2.1.6 release notes](app/docs/release-2.1.6.md).
 
 **2.1.5** reverts the part of 2.1.4 that broke startup: removing the Windhawk section from the Appearance page left Dock unable to open, so it is restored to its 2.1.3 shape. The other two fixes stay: **the system proxy now wins** over a stale `HTTP(S)_PROXY` (so Dock reaches the primary source instead of falling back to mirrors), and **plugin download fallback no longer downgrades** below the version you already have. Full notes: [2.1.5 release notes](app/docs/release-2.1.5.md).
@@ -101,8 +103,8 @@ Choose the package for the published version and verify it with `SHA256SUMS.txt`
 
 | Package | When to use it |
 | --- | --- |
-| `FISH-Dock-Setup-2.1.6.exe` | First installation, missing runtimes or repair; includes the complete offline runtime. **Use this to repair a 2.1.2 install that will not start.** |
-| `FISH-Dock-Update-2.1.6.exe` | An existing **2.1.5** installation with intact base resources; contains only the changed files. Older versions should use the Setup package. |
+| `FISH-Dock-Setup-2.1.7.exe` | First installation, missing runtimes or repair; includes the complete offline runtime. **Use this to repair a 2.1.2 install that will not start.** |
+| `FISH-Dock-Update-2.1.7.exe` | **2.1.0 and later** can all take it (the diff origin is pinned at 2.1.0); 2.0.x should use the Setup package. |
 
  Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 and Fixed Version WebView2 155.0.4283.62. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files); 2.1.6 removes the leftover Windhawk section from the Appearance page. The installer is currently unsigned.
 
