@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import { mkdtemp, mkdir, writeFile, rm, readFile, stat } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
@@ -14,6 +15,7 @@ import {
   PRODUCT, INSTALL_ID, EXE_NAME, PUBLISHER, RUN_NAME, RUN_KEY, APPROVED_KEY, AT_LOGIN_ARGS, CLEANUP_FLAG,
   LEGACY_RUN_NAME, LEGACY_AT_LOGIN_ARGS, LEGACY_EXE_NAMES, LEGACY_INSTALL_IDS, LEGACY_DISPLAY_NAMES, LEGACY_HOME_DIRECTORY, HOME_DIRECTORY, MIGRATE_HOME_FLAG,
   LEGACY_WORKER_DIRECTORY, LEGACY_WORKER_FILE, LEGACY_PAYLOAD_PREFIXES, payloadPaths,
+  setupReference, setupAssetName, releasePage, FALLBACK_SCRIPT,
 } from './installer.mjs'
 // install-update.cjs 是真正动 fs 的那一半（#27-D 的迁移与删旧）；require 它不会
 // 触发它的 CLI 主分支（require.main !== module），所以本机上任何目录都不会被碰。
@@ -592,4 +594,57 @@ test('卸载按安装时的选择删桌面快捷方式，不碰用户自己建�
     const guarded = uninstall.slice(uninstall.indexOf('"DesktopShortcut"'))
     assert.match(guarded, /Delete "\$DESKTOP\\\$\{PRODUCT\}\.lnk"/, '只有记录为 1 才删')
   } finally { await rm(env.dir, { recursive: true, force: true }) }
+})
+
+// ── 2.1.8：精简更新包失败后的兜底 ────────────────────────────────────────
+// 现场：Update 包的事务失败时只弹一句「更新未完成」，用户除了自己去找安装包没有
+// 第二条路。现在失败分支自动取同版本的完整安装包、校验摘要、交给它覆盖安装。
+test('更新包失败时自动下载并运行完整安装包，安装包没有这条分支', async () => {
+  const env = await fakeResources()
+  try {
+    const fallback = { url: 'https://example.test/FISH-Dock-Setup-0.3.3.exe', sha256: 'a'.repeat(64), bytes: 12345678, page: 'https://example.test/v0.3.3' }
+    const update = (await script(env, { payloadFiles: ['node/node.exe'], fallback })).text
+    assert.match(update, /!define SETUP_SHA256 "a{64}"/)
+    assert.match(update, /!define SETUP_BYTES 12345678/)
+    assert.match(update, /File \/oname=update-fallback\.ps1 "\$\{FALLBACK\}"/, '兜底脚本要进包')
+    assert.match(update, /CopyFiles \/SILENT "\$PLUGINSDIR\\bootstrap\\update-fallback\.ps1" "\$TEMP\\fish-dock-update-fallback\.ps1"/, '先搬到 TEMP，暂存目录随后会被删')
+    assert.match(update, /nsExec::ExecToLog[^\n]*fish-dock-update-fallback\.ps1[^\n]*-Sha256 "a{64}"/)
+    assert.match(update, /nsExec::ExecToLog[^\n]*-Version "0\.3\.3"/, '版本串要传给兜底窗口')
+    assert.match(update, /SetErrorLevel 0\r?\n\s*Quit/, '兜底窗口把 Setup 拉起来后，这个安装器就该退出')
+    assert.match(update, /手动下载：https:\/\/example\.test\/v0\.3\.3/, '兜底也失败时要给出下载页')
+    // 兜底只在事务失败分支里：正常的成功路径不许提前退出。
+    const failure = update.slice(update.indexOf('$0 != 0'))
+    assert.match(failure.slice(0, 1200), /update-fallback\.ps1/)
+
+    const setup = (await script(env)).text
+    assert.doesNotMatch(setup, /update-fallback\.ps1/, '完整安装包没有更小的可退，不带兜底')
+    assert.match(setup, /更新未完成，旧版本已保留或恢复。请查看安装详情后重试。/)
+  } finally { await rm(env.dir, { recursive: true, force: true }) }
+})
+
+test('兜底的完整安装包信息从这次构建出来的 Setup 文件本身取', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'fish-setup-ref-'))
+  try {
+    const file = path.join(dir, setupAssetName('2.1.8'))
+    const body = Buffer.from('not really an installer, but its bytes are what matter')
+    await writeFile(file, body)
+    const reference = await setupReference({ version: '2.1.8', setup: file })
+    assert.equal(reference.bytes, body.length)
+    assert.equal(reference.sha256, createHash('sha256').update(body).digest('hex'))
+    assert.match(reference.url, /releases\/download\/v2\.1\.8\/FISH-Dock-Setup-2\.1\.8\.exe$/)
+    assert.equal(reference.page, releasePage('2.1.8'))
+    assert.equal(await setupReference({ version: '2.1.8' }), null, '没有 Setup 就不写兜底')
+    await assert.rejects(() => setupReference({ version: '2.1.8', setup: path.join(dir, 'missing.exe') }), /读不到/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('兜底脚本是带 BOM 的 UTF-8，参数契约与安装器一致', async () => {
+  const bytes = readFileSync(FALLBACK_SCRIPT)
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'Windows PowerShell 5.1 只有见到 BOM 才按 UTF-8 读中文')
+  const text = bytes.toString('utf8')
+  for (const name of ['-Url', '-Sha256', '-Version', '-Bytes', '-Page']) assert.match(text, new RegExp(`\\$${name.slice(1)}`), name)
+  assert.match(text, /\[System\.Security\.Cryptography\.SHA256\]::Create\(\)/, '下载完必须核对摘要（用 .NET，不依赖 Get-FileHash 那个模块）')
+  assert.match(text, /UseProxy = \$useProxy/, '直连与系统代理两条路都要能走')
+  assert.match(text, /@\(\$false, \$true\)/, '先直连，失败再试系统代理')
+  assert.match(text, /Range/, '中断要能续传')
 })

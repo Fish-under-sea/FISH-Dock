@@ -80,6 +80,37 @@ export const CLEANUP_FLAG = '--fish-dock-uninstall-cleanup'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SAFE = /^[^/\\:*?"<>|]+(\/[^/\\:*?"<>|]+)*$/
 
+/// 精简更新包失败后的兜底脚本（下载完整安装包并运行它）。它是**独立于 WebView2**
+/// 的一份 WinForms 窗口：更新失败往往连带着运行资源出问题，兜底不能再依赖那些。
+export const FALLBACK_SCRIPT = path.join(root, 'scripts/update-fallback.ps1')
+/// 完整安装包在 Release 里的资产名（与 build-dual-package 的产物名一致）。
+export function setupAssetName(version) {
+  return `FISH-Dock-Setup-${version}.exe`
+}
+/// 发行页：兜底窗口里「手动下载」按钮去的地方，也是自动下载失败时的说明。
+export function releasePage(version) {
+  return `https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v${version}`
+}
+/// 完整安装包的下载地址。默认走 GitHub 发行资产；`FISH_DOCK_SETUP_URL` 只给
+/// 内网/镜像联调用，组件本身不读它（安装器是离线生成的，运行时不看环境变量）。
+export function setupUrl(version, override = process.env.FISH_DOCK_SETUP_URL) {
+  return override || `https://github.com/Fish-under-sea/FISH-Dock/releases/download/v${version}/${setupAssetName(version)}`
+}
+/// 兜底要用的那一份完整安装包：地址、摘要、字节数、发行页。摘要与字节数都从
+/// **这次构建出来的 Setup 文件本身**取——不去读发布页，也就不会与真包对不上。
+/// 拿不到 Setup（只出 Update 的场合）就返回 null，那份 Update 包不写兜底分支。
+export async function setupReference({ version, setup, page, url }) {
+  if (!setup) return null
+  const bytes = await fs.readFile(setup).catch(() => undefined)
+  if (!bytes) throw new Error(`兜底需要完整安装包，但读不到：${setup}`)
+  return {
+    url: url || setupUrl(version),
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    bytes: bytes.length,
+    page: page || releasePage(version),
+  }
+}
+
 function windowsPath(target) {
   return path.resolve(target).replace(/\//g, '\\')
 }
@@ -175,7 +206,7 @@ export function scriptSource(text) {
 }
 
 /// 生成 NSIS 脚本。`outFile` 是安装包，`app` 是编译好的主程序，`resources` 是解好的资源目录。
-export function installerScript({ version, app, resources, outFile, files, directories, product = PRODUCT, publisher = PUBLISHER, icon = path.join(root, 'src-tauri/icons/FISH-Dock-Windows.ico'), estimatedBytes = 0, payloadFiles = null, installManifest = path.join(path.dirname(resources), 'install-manifest.json') }) {
+export function installerScript({ version, app, resources, outFile, files, directories, product = PRODUCT, publisher = PUBLISHER, icon = path.join(root, 'src-tauri/icons/FISH-Dock-Windows.ico'), estimatedBytes = 0, payloadFiles = null, installManifest = path.join(path.dirname(resources), 'install-manifest.json'), fallback = null }) {
   if (!version) throw new Error('安装包需要产品版本')
   if (!files?.length) throw new Error('安装包需要资源文件清单（resourceFiles）')
   const fileName = path.basename(app)
@@ -240,6 +271,58 @@ export function installerScript({ version, app, resources, outFile, files, direc
     ...LEGACY_INSTALL_IDS.slice(1).map((id, index) => `  \${If} $1 == ""\n    ReadRegStr $1 HKCU "\${LEGACY_UNINSTALL_${index + 2}}" "InstallLocation"\n  \${EndIf}`),
   ].join('\n')
   const runMigrationLines = legacyRunForms.map((form, index) => `      ${index ? '${OrIf}' : '${If}'} $1 == '${form}'`).join('\n')
+  // ── 精简更新包失败后的兜底（2.1.8）─────────────────────────────────────
+  // 只在「这份包装的是增量载荷」且「构建时拿得到同版本的完整安装包」时生成。
+  // 失败分支不再是一条死路：自动下载 Setup、校验摘要、由它覆盖安装。
+  const quoteNsis = text => String(text).replace(/\$/g, '$$$$').replace(/"/g, '$\\"')
+  const fallbackDefines = fallback
+    ? [
+      `!define FALLBACK ${quote(windowsPath(FALLBACK_SCRIPT))}`,
+      `!define SETUP_URL ${quote(quoteNsis(fallback.url))}`,
+      `!define SETUP_SHA256 ${quote(quoteNsis(fallback.sha256))}`,
+      `!define SETUP_BYTES ${Number(fallback.bytes) || 0}`,
+      `!define SETUP_PAGE ${quote(quoteNsis(fallback.page))}`,
+    ].join('\n') + '\n'
+    : ''
+  const fallbackFile = fallback ? '  File /oname=update-fallback.ps1 "${FALLBACK}"' : '  ; 本包不带兜底脚本（没有完整安装包可回退）'
+  const failureBranch = fallback
+    ? `    ; 增量更新没做成：安装器已经把旧版本原样恢复，这里不再弹一条死路，
+    ; 直接把同版本的完整安装包取下来、校验、交给它覆盖安装。兜底窗口是独立的
+    ; WinForms 进程（不依赖 WebView2），安装器在这里等它结束。
+    CopyFiles /SILENT "$PLUGINSDIR\\bootstrap\\update-fallback.ps1" "$TEMP\\fish-dock-update-fallback.ps1"
+    DetailPrint "增量更新未完成（$0）：自动下载完整安装包（${fallback.bytes} 字节）"
+    nsExec::ExecToLog '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$TEMP\\fish-dock-update-fallback.ps1" -Url "${quoteNsis(fallback.url)}" -Sha256 "${fallback.sha256}" -Version "${version}" -Bytes ${fallback.bytes} -Page "${quoteNsis(fallback.page)}" -Icon "$INSTDIR\\${fileName}"'
+    Pop $1
+    RMDir /r "$StageDir"
+    \${If} $1 == 0
+      DetailPrint "完整安装包已启动；这个安装器退出，由它接管"
+      SetErrorLevel 0
+      Quit
+    \${EndIf}
+    MessageBox MB_OK|MB_ICONSTOP "更新未完成，旧版本已保留或恢复；自动获取完整安装包也没成功。可以手动下载：${quoteNsis(fallback.page)}" /SD IDOK
+    SetErrorLevel 1
+    Abort`
+    : `    RMDir /r "$StageDir"
+    MessageBox MB_OK|MB_ICONSTOP "更新未完成，旧版本已保留或恢复。请查看安装详情后重试。" /SD IDOK
+    SetErrorLevel 1
+    Abort`
+  // 品牌图为什么不在这里：MUI2 的 MUI_WELCOMEFINISHPAGE_BITMAP / MUI_HEADERIMAGE 在
+  // 本机 NSIS 3.13 上会让 MUI_PAGE_WELCOME 直接编译失败（连它自带的向导图也一样），
+  // 试到「换成官方 win.bmp 仍失败」才确认不是图的格式问题。界面改造因此只做文案与
+  // 流程，不做位图；要加图时先在干净 NSIS 里单独验证那两行，再回来动这里。
+  const welcomeTitle = updating ? `欢迎更新 ${product}` : `欢迎安装 ${product}`
+  // NSIS 的字符串里不能有真的换行：段与段之间要用它自己的 `$\r$\n`（在 JS 里写成
+  // `$\\r$\\n`，落盘才是两个字符的转义），否则 !define 会被截成两行、编译直接报错。
+  const paragraph = lines => lines.join('$\\r$\\n$\\r$\\n')
+  const welcomeText = updating
+    ? paragraph([`这次装的是增量更新包：只包含相对 ${version} 之前版本的变更，体积小、装得快。`,
+      '点「下一步」开始；中途失败会自动改用完整安装包，旧版本始终可以继续使用。'])
+    : paragraph([`把 ${product} ${version} 装到这台电脑上。`,
+      '她是一个常驻桌面的小助手：随时在、不打断，账号与设置在安装后自己配。'])
+  const finishText = updating
+    ? '更新完成。你原来的账号、设置、插件与数据都还在原处。'
+    : '装好了。她会在桌面右下角开始工作；要开机自动启动，在设置里打开「登录时启动」。'
+  const confirmText = `卸载会删掉程序与运行资源，但保留 %LOCALAPPDATA%\\${HOME_DIRECTORY} 里的账号、设置与数据；重新安装后会继续沿用。`
   return `; 由 scripts/installer.mjs 生成，请勿手改。
 Unicode true
 !include "MUI2.nsh"
@@ -254,7 +337,7 @@ Unicode true
 !define OWNERSHIP ${quote(windowsPath(installManifest))}
 !define UPDATER ${quote(windowsPath(path.join(root, 'scripts/install-update.cjs')))}
 !define STOPPER ${quote(windowsPath(path.join(root, 'scripts/install-stop.ps1')))}
-!define UNINSTALL_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${INSTALL_ID}"
+${fallbackDefines}!define UNINSTALL_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${INSTALL_ID}"
 !define RUN_KEY "${RUN_KEY}"
 !define APPROVED_KEY "${APPROVED_KEY}"
 !define RUN_NAME "${RUN_NAME}"
@@ -307,6 +390,10 @@ VIAddVersionKey "LegalCopyright" "\${PUBLISHER}"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\\${fileName}"
 !define MUI_FINISHPAGE_RUN_TEXT "启动 \${PRODUCT}"
 !define MUI_FINISHPAGE_TITLE "已完成 \${PRODUCT} ${updating ? '更新' : '安装'}"
+!define MUI_FINISHPAGE_TEXT "${finishText}"
+!define MUI_WELCOMEPAGE_TITLE "${welcomeTitle}"
+!define MUI_WELCOMEPAGE_TEXT "${welcomeText}"
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "${confirmText}"
 !insertmacro MUI_PAGE_WELCOME
 ; #75：组件页承载「在桌面创建快捷方式」这个可选段（安装包默认选中、更新包默认不选）。
 !insertmacro MUI_PAGE_COMPONENTS
@@ -323,6 +410,7 @@ Section "\${PRODUCT}" SecInstall
   InitPluginsDir
   SetOutPath "$PLUGINSDIR\\bootstrap"
   File /oname=node.exe "\${RESOURCES}\\node\\node.exe"
+${fallbackFile}
   CreateDirectory "$INSTDIR"
   GetTempFileName $StageSeed "$INSTDIR"
   Delete "$StageSeed"
@@ -351,10 +439,7 @@ ${payloadLines}
   IfFileExists "$StageDir\\home-migration-failed" 0 +2
     StrCpy $HomeMigrationFailed 1
   \${If} $0 != 0
-    RMDir /r "$StageDir"
-    MessageBox MB_OK|MB_ICONSTOP "更新未完成，旧版本已保留或恢复。请查看安装详情后重试。" /SD IDOK
-    SetErrorLevel 1
-    Abort
+${failureBranch}
   \${EndIf}
   SetOutPath "$INSTDIR"
   RMDir /r "$StageDir"
@@ -537,7 +622,7 @@ export function payloadPaths(files, baselineFiles) {
   const previous = new Map(baselineFiles.map(f => [f.path, f]))
   return files.filter(f => { const old = previous.get(f.path); return !old || old.bytes !== f.bytes || old.sha256 !== f.sha256 }).map(f => f.path)
 }
-export async function buildInstaller({ version, app, resources, outFile, makensis, product, publisher, baselineManifest }) {
+export async function buildInstaller({ version, app, resources, outFile, makensis, product, publisher, baselineManifest, setup, page }) {
   if (!makensis) throw new Error('需要 makensis（NSIS 3）的路径')
   makensis = stageMakensis(makensis)
   const files = await resourceFiles(resources)
@@ -559,6 +644,8 @@ export async function buildInstaller({ version, app, resources, outFile, makensi
   const script = installerScript({
     version, app: path.resolve(app), resources: path.resolve(resources), outFile: target,
     files, directories, product, publisher, payloadFiles, estimatedBytes: total + appStat.size, installManifest,
+    // 兜底只对「增量载荷」有意义：完整安装包本身就是那份东西，它失败时没有更小的可退。
+    fallback: payloadFiles === null ? null : await setupReference({ version, setup, page }),
   })
   await fs.mkdir(path.dirname(target), { recursive: true })
   const scriptPath = path.join(path.dirname(target), `${path.basename(target, '.exe')}.nsi`)
@@ -644,6 +731,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     outFile: path.resolve(option('out')),
     makensis,
     baselineManifest: args.includes('--baseline') ? path.resolve(option('baseline')) : undefined,
+    // 出 Update 包时把同版本的 Setup 一起给它：失败时用它兜底（不传就没有兜底）。
+    setup: args.includes('--setup') ? path.resolve(option('setup')) : undefined,
+    page: args.includes('--page') ? option('page') : undefined,
   })
   console.log(JSON.stringify(result, null, 2))
 }
