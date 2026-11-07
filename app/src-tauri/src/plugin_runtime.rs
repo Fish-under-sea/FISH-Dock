@@ -267,7 +267,7 @@ pub fn discard_late(id:&str,generation:u64){
         runner.processes.remove(id)
     };
     if let Some(handle)=handle{
-        if let Ok(mut process)=handle.lock(){process.stop();}
+        if let Ok(mut process)=handle.lock(){process.stop_quick();}
     }
 }
 // spawn_starts 在 CURRENT 之外跑整轮自启调度（T-E / A02–A04）：每插件一个在途 token
@@ -348,7 +348,7 @@ fn scheduled_attempt(manager:&Manager<'_>,node:Option<&Path>,assignment:&crate::
     // F3（t33）：拉起成功不代表可以登记——整轮生命周期已经到期时，结果按丢弃处理，
     // 并且把刚起的进程停掉，不让它变成「调度外仍在跑但卡片 failed」的实例。
     if !crate::plugin_start::accepting() {
-        started.process.stop();
+        started.process.stop_quick();
         eprintln!("FISH Dock: [plugin-start] id={} attempt={} state=discarded reason=lifecycle",assignment.token.id,assignment.attempt);
         return Outcome::cancelled("自启生命周期已到期，本次结果丢弃");
     }
@@ -400,7 +400,7 @@ impl Runner {
         let taken=std::mem::take(&mut self.processes);
         for (id,handle) in taken {
             self.retire(&id);
-            if let Ok(mut process)=handle.lock(){process.stop();}
+            if let Ok(mut process)=handle.lock(){process.stop_quick();}
         }
     }
     // 最终退出：此后 resume 一律不再拉起（main.rs 的退出路径）。
@@ -654,7 +654,7 @@ impl Runner {
             // 启动失败也留一条结构化记录（#53-3）：卡上要能看见是哪一版、哪一步、日志在哪。
             Err(error)=>{let elapsed=Some(started_at.elapsed().as_millis() as u64);let a=attempt.or(Some(1));let failure=self.failure(&id,&row.manifest.version,"启动",None,a,elapsed.or(elapsed_ms),None,None,None,&error);self.record(manager,failure);return Err(error)}
         };
-        if let Err(error)=manager.set_enabled(&id,true){process.stop();return Err(error);}
+        if let Err(error)=manager.set_enabled(&id,true){process.stop_quick();return Err(error);}
         self.processes.insert(id.clone(),Arc::new(Mutex::new(process)));self.failures.remove(&id);
         // F2（t33）：手动启动已经定案，摘掉上一轮自启的调度记录——卡片以后只看实时 running。
         crate::plugin_start::forget(&id);

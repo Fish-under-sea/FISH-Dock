@@ -127,6 +127,7 @@ mod plugins;
 mod pointer;
 mod power;
 mod proxy;
+mod proxy_heal;
 mod screen;
 mod scripts;
 mod sensors;
@@ -1668,6 +1669,15 @@ fn main() {
     if let Some(at) = args.iter().position(|a| a == lhm_setup::ADMIN_FLAG) {
         std::process::exit(lhm_setup::admin(&args[at + 1..]));
     }
+    // The system proxy left pointing at a kernel that is gone, put back once
+    // and gone (proxy_heal.rs): the task the installer's logon entry leaves
+    // runs this at logon and every five minutes. No lease, no action at all.
+    if let Some(at) = args.iter().position(|a| a == proxy_heal::FLAG) {
+        // 可选一个数据根：诊断与「在计划任务里按真实令牌跑一遍」时用，正常由任务
+        // 计划调用时不带参数。
+        let root = args.get(at + 1).filter(|value| value.starts_with('-') == false).map(std::path::Path::new);
+        std::process::exit(proxy_heal::run_at(root));
+    }
     let port: u16 = crate::config::port();
     if let Some(at) = args.iter().position(|a| a == connection::ENSURE_FLAG || a == connection::LEGACY_ENSURE_FLAG) {
         return ensure_running(port, &args[at + 1..]);
@@ -1775,6 +1785,14 @@ fn main() {
     // 旧版把引擎复制进了数据根（config/windhawk/ 的 exe/helper/ini），这里一次性清掉；
     // 幂等，被占用就下次再清，不影响启动。
     std::thread::spawn(|| { if let Err(error)=windhawk::retire_bundled(){ eprintln!("Windhawk: {error}"); } });
+    // 2.1.8：崩溃后没人再开她时，系统代理只能靠任务计划里那只手（proxy_heal.rs）。
+    // 数据根已经知道，注册放在后台：COM 初始化几十毫秒，不该挡住首帧。没有声明
+    // `system-proxy` 的插件时它顺手把这个任务删掉——不留「谁都不用」的常驻项。
+    std::thread::spawn(|| {
+        if let Err(error) = proxy_heal::ensure_task() {
+            eprintln!("proxy heal: {error}");
+        }
+    });
     let legacy_identity = identity::from_environment().map(|location| {
         if location.root.join("mail-accounts.json").is_file() { location.root }
         else { location.legacy.unwrap_or(location.root) }

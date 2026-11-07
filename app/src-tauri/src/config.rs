@@ -128,6 +128,11 @@ const ENV_PLUGIN_DOWNLOAD_SECS: &str = "FISH_DOCK_PLUGIN_DOWNLOAD_TIMEOUT_SECS";
 const DEFAULT_PLUGIN_DOWNLOAD_SECS: u64 = 30;
 const ENV_PLUGIN_ACTIVATE_SECS: &str = "FISH_DOCK_PLUGIN_ACTIVATE_TIMEOUT_SECS";
 const DEFAULT_PLUGIN_ACTIVATE_SECS: u64 = 5;
+// 停用（plugin.deactivate）单独一份预算：它要收内核、探控制器、还系统代理，几件
+// 事串起来正常就要几秒。以前复用激活的 5 秒，clash 的 restore 排在最后，经常在
+// 收尾前被强杀——用户只看到「关了内核，整台机器没网」（2.1.8）。
+const ENV_PLUGIN_DEACTIVATE_SECS: &str = "FISH_DOCK_PLUGIN_DEACTIVATE_TIMEOUT_SECS";
+const DEFAULT_PLUGIN_DEACTIVATE_SECS: u64 = 30;
 const ENV_PLUGIN_RPC_SECS: &str = "FISH_DOCK_PLUGIN_RPC_TIMEOUT_SECS";
 const DEFAULT_PLUGIN_RPC_SECS: u64 = 15;
 const ENV_PLUGIN_EVENT_SECS: &str = "FISH_DOCK_PLUGIN_EVENT_TIMEOUT_SECS";
@@ -272,6 +277,7 @@ pub const KEYS: &[Key] = &[
     Key { name: "timeout.proxy_test_ms", env: ENV_PROXY_TEST_MS, default: "10000", category: Category::Timeout, impact: "设置页「测试代理」向 GitHub 发一次请求的预算" },
     Key { name: "timeout.plugin_download_secs", env: ENV_PLUGIN_DOWNLOAD_SECS, default: "30", category: Category::Timeout, impact: "单次插件包/目录下载预算" },
     Key { name: "timeout.plugin_activate_secs", env: ENV_PLUGIN_ACTIVATE_SECS, default: "5", category: Category::Timeout, impact: "插件激活 RPC 预算" },
+    Key { name: "timeout.plugin_deactivate_secs", env: ENV_PLUGIN_DEACTIVATE_SECS, default: "30", category: Category::Timeout, impact: "插件停用预算（收内核、还系统代理都在里面，与激活分开）" },
     Key { name: "timeout.plugin_rpc_secs", env: ENV_PLUGIN_RPC_SECS, default: "15", category: Category::Timeout, impact: "插件通用 RPC 预算" },
     Key { name: "timeout.plugin_event_secs", env: ENV_PLUGIN_EVENT_SECS, default: "10", category: Category::Timeout, impact: "插件事件投递预算" },
     Key { name: "timeout.plugin_cold_until_secs", env: ENV_PLUGIN_COLD_UNTIL, default: "300", category: Category::Timeout, impact: "T04 冷态判据：登录后多少秒内算冷启（分档只放宽不收紧）" },
@@ -444,6 +450,8 @@ pub fn proxy_connect_timeout() -> Duration { ms(ENV_PROXY_CONNECT_MS, DEFAULT_PR
 pub fn proxy_test_timeout() -> Duration { ms(ENV_PROXY_TEST_MS, DEFAULT_PROXY_TEST_MS) }
 pub fn plugin_download_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_DOWNLOAD_SECS, DEFAULT_PLUGIN_DOWNLOAD_SECS)) }
 pub fn plugin_activate_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_ACTIVATE_SECS, DEFAULT_PLUGIN_ACTIVATE_SECS)) }
+/// 一次正常停用的预算（秒）。与激活分开：停用要收内核、探控制器、还系统代理。
+pub fn plugin_deactivate_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_DEACTIVATE_SECS, DEFAULT_PLUGIN_DEACTIVATE_SECS)) }
 pub fn plugin_rpc_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_RPC_SECS, DEFAULT_PLUGIN_RPC_SECS)) }
 pub fn plugin_event_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_EVENT_SECS, DEFAULT_PLUGIN_EVENT_SECS)) }
 
@@ -908,6 +916,7 @@ mod tests {
                 "timeout.proxy_test_ms" => proxy_test_timeout().as_millis().to_string(),
                 "timeout.plugin_download_secs" => plugin_download_timeout().as_secs().to_string(),
                 "timeout.plugin_activate_secs" => plugin_activate_timeout().as_secs().to_string(),
+        "timeout.plugin_deactivate_secs" => plugin_deactivate_timeout().as_secs().to_string(),
                 "timeout.plugin_rpc_secs" => plugin_rpc_timeout().as_secs().to_string(),
                 "timeout.plugin_event_secs" => plugin_event_timeout().as_secs().to_string(),
                 "timeout.plugin_cold_until_secs" => PLUGIN_COLD_UNTIL_SECS.to_string(),

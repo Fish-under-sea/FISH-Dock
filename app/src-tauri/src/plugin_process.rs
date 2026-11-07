@@ -148,7 +148,7 @@ impl Process {
         let service=probe_service_with(deadline,Instant::now,|method,params,timeout|process.request(method,params,timeout));
         stages.service_ms=phase_service.elapsed().as_millis() as u64;
         if let Service::Down(reason)=&service {
-            process.stop();
+            process.stop_quick();
             return Err(StartError::new(Phase::Service,format!("{reason}（业务服务未就绪，宿主实例不算通过）"),stages,false));
         }
         log_stages(&row.manifest.id,budget,&stages,&service);
@@ -215,15 +215,31 @@ impl Process {
         }
     }
     pub fn stop(&mut self){
+        // 用户点的「停用」：值得等它把内核与系统代理收干净（2.1.8 起单独一份预算，
+        // 不再复用激活的 5 秒）。
+        self.stop_with(crate::config::plugin_deactivate_timeout());
+    }
+    // 宿主退出、丢弃迟到的实例、启动失败清理：这些路径上没人盯着，不能让用户
+    // 关个程序等 30 秒。代理那一步在 stop_with 里先做，6 秒足够。
+    pub fn stop_quick(&mut self){
+        self.stop_with(std::time::Duration::from_secs(6));
+    }
+    fn stop_with(&mut self,budget:std::time::Duration){
         // 只要进程还活着就发告别：探针 2 s 超时说明它「忙」（一条慢命令排着队），
         // 不等于「可以跳过 deactivate」。跳过就等于直接 kill——clash 的系统代理租约
         // 会留在注册表里指向已经死掉的端口，用户看到的是整机断网。
-        if self.alive(){let _=self.request("plugin.deactivate",json!({}),crate::config::plugin_activate_timeout());}
+        if self.alive(){let _=self.request("plugin.deactivate",json!({}),budget);}
+        // 告别没赶上（超时、插件卡死、或它根本没实现 deactivate）时，代理只能由宿主
+        // 自己修：此刻内核还在跑就什么都不做，端口已经没了就写回接管前的那一份。
+        // 必须在 take/kill 之前——Job 一关，插件与它拉起的 mihomo 一起消失。
+        self.heal_proxy();
         // 正常停用后也回收本实例创建的残留子进程。
         self.owner.take();let _=self.child.kill();let _=self.child.wait();
     }
+    // 插件命名空间里的系统代理租约（插件侧 `createProxyLease` 写的那一份）。
+    fn heal_proxy(&self)->crate::proxy_heal::Outcome{let lease=self.namespace.path().join("config").join("system-proxy.json");crate::proxy_heal::heal_one(&lease)}
 }
-impl Drop for Process {fn drop(&mut self){self.owner.take();let _=self.child.kill();let _=self.child.wait();}}
+impl Drop for Process {fn drop(&mut self){self.heal_proxy();self.owner.take();let _=self.child.kill();let _=self.child.wait();}}
 // 一次握手 + 激活：**整段共享一个 deadline**（A02）。hello 用掉的时间从 activate 里扣，
 // 反之亦然；预算在握手之前或握手之后花完都明确报「哪一步没时间了」，不静默降级。
 fn handshake_with<C>(plugin_id:&str,hello:Value,deadline:Instant,mut now:impl FnMut()->Instant,stages:&mut Stages,mut call:C)->Result<(),StartError>

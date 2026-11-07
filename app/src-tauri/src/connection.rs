@@ -3268,6 +3268,14 @@ mod login {
                 }
             }
         }
+        // 2.1.8：崩溃自愈任务（proxy_heal.rs）说的是「登录时 + 每 5 分钟跑一次
+        // --proxy-heal」。程序删掉以后它只会一次一次地失败，所以卸载时一起拿走；
+        // 同名但不是本程序的任务（别的安装）留着。
+        match crate::proxy_heal::remove_task() {
+            Ok(true) => said.push("her proxy heal task removed".to_string()),
+            Ok(false) => {}
+            Err(error) => said.push(format!("her proxy heal task not cleaned up: {error}")),
+        }
         Ok(if said.is_empty() { None } else { Some(said.join("; ")) })
     }
 
