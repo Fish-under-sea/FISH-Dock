@@ -113,7 +113,9 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('插件协议应为 JSON 对象');
     if (!Object.hasOwn(row,'method')) {
       const waiter = pending.get(row.id);
-      if (!waiter) throw new Error('宿主响应编号不匹配');
+      // 编号已经作废（宿主晚付的回执）就丢掉：这里以前直接 throw，receive 的 catch 会
+      // close() 整个会话——一次超时之后插件再也不应答，宿主只能重启进程。
+      if (!waiter) return;
       pending.delete(row.id); clearTimeout(waiter.timer);
       if (Object.hasOwn(row,'result') === Object.hasOwn(row,'error')) return waiter.reject(new Error('宿主响应结构无效'));
       if (row.error) waiter.reject(new Error('宿主存储操作失败')); else waiter.resolve(row.result);

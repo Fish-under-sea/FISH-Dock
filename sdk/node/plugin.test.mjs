@@ -68,6 +68,26 @@ test('加密存储采用独立宿主方法，事件能力控制分发且停用�
  }finally{f.plugin.close()}
  const noEvents=fixture({onEvent:()=>{events++}});try{await activate(noEvents);noEvents.send({id:3,method:'plugin.event',params:{type:'agent.alert'}});assert.equal((await noEvents.next()).error.code,'CAPABILITY_REQUIRED');assert.equal(events,1)}finally{noEvents.plugin.close()}
 });
+// A2 下游（2.1.6）：宿主晚到的响应（编号已经超时作废）不许把会话打死。
+// 旧实现 pending 里找不到就 throw，receive 的 catch 直接 close()——一次超时之后插件
+// 再也不应答，只能重启进程，宿主侧看到的是「插件响应超时」。
+test('超时作废的迟到响应被忽略，会话继续可用', async () => {
+  const f=fixture({commands:{probe:async(_,ctx)=>{try{await ctx.storage.read('keys','x.json');return 'answered'}catch{throw Object.assign(new Error('TIMEOUT'),{code:'HOST_TIMEOUT'})}},echo:value=>value}});
+  try {
+    f.send({id:1,method:'host.hello',params:{protocol:1,pluginId:'acme.weather',capabilities:['storage'],hostCallTimeoutMs:5}});
+    await f.next();
+    f.send({id:2,method:'plugin.activate',params:{}});await f.next();
+    f.send({id:3,method:'probe',params:{}});
+    const write=await f.next();assert.equal(write.method,'host.storage.read'); // 宿主故意不答
+    const timedOut=await f.next();assert.equal(timedOut.error.code,'HOST_TIMEOUT');
+    // 宿主此刻才把那条已经作废的编号回写回来。
+    f.send({id:write.id,result:{value:'late'}});
+    f.send({id:4,method:'echo',params:{value:'alive'}});
+    const echo=await f.next();
+    assert.deepEqual(echo.result,{value:'alive'},'迟到响应不得关闭会话');
+    assert.equal(f.plugin.closed,false,'会话必须仍然可用');
+  } finally {f.plugin.close();}
+});
 test('无换行超大帧终止读取且报告帧错误', async () => {
   let error;const f=fixture({maxLine:128,onError:err=>{error=err;}});
   try {f.input.write('x'.repeat(129));await new Promise(resolve=>setImmediate(resolve));assert.match(error?.message??'',/超过/);assert.equal(f.plugin.closed,true);}
