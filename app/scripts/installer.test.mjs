@@ -13,7 +13,7 @@ import {
   installerScript, resourceDirectories, resourceFiles, scriptSource, writeOwnershipManifest, REQUIRED, findTool, stageMakensis,
   PRODUCT, INSTALL_ID, EXE_NAME, PUBLISHER, RUN_NAME, RUN_KEY, APPROVED_KEY, AT_LOGIN_ARGS, CLEANUP_FLAG,
   LEGACY_RUN_NAME, LEGACY_AT_LOGIN_ARGS, LEGACY_EXE_NAMES, LEGACY_INSTALL_IDS, LEGACY_DISPLAY_NAMES, LEGACY_HOME_DIRECTORY, HOME_DIRECTORY, MIGRATE_HOME_FLAG,
-  LEGACY_WORKER_DIRECTORY, LEGACY_WORKER_FILE, LEGACY_PAYLOAD_PREFIXES,
+  LEGACY_WORKER_DIRECTORY, LEGACY_WORKER_FILE, LEGACY_PAYLOAD_PREFIXES, payloadPaths,
 } from './installer.mjs'
 // install-update.cjs 是真正动 fs 的那一半（#27-D 的迁移与删旧）；require 它不会
 // 触发它的 CLI 主分支（require.main !== module），所以本机上任何目录都不会被碰。
@@ -26,6 +26,26 @@ test('安装器与运行资源必需清单一致且不预装业务插件', () =>
   assert.equal(REQUIRED.some(name => name.startsWith('ofm/')), false)
   // #73：内置 Windhawk 引擎与编译器不再随包分发，必需清单里不许再出现。
   assert.equal(REQUIRED.some(name => name.startsWith('windhawk/')), false, 'REQUIRED 里不许再有 windhawk/*')
+})
+// 2.1.7：更新包的基线固定在最老的受支持版本（2.1.0），不能随版本滚动。
+// 2.1.0/2.1.1 的 runtime-sources.json 与 2.1.2 之后不同：只拿上一版做基线时，
+// 它既不进载荷、现场校验又对不上，2.1.0 用户点更新会报「基础资源缺失」并回滚。
+test('更新包基线固定 2.1.0：覆盖最老受支持版本，不把 windhawk 带回来', async () => {
+  const baseline = JSON.parse(await readFile(new URL('./baselines/install-manifest-2.1.0.json', import.meta.url), 'utf8'))
+  assert.equal(baseline.schema, 1)
+  assert.equal(baseline.product, PRODUCT)
+  assert.equal(baseline.version, '2.1.0', '基线必须是最老的受支持版本，滚到上一版就等于丢掉老用户的升级路径')
+  assert.equal(baseline.files.some(f => f.path.startsWith('resources/windhawk/')), false, '基线里不许留已下线的 windhawk 资源')
+  const legacy = baseline.files.find(f => f.path === 'resources/licenses/runtime-sources.json')
+  assert.ok(legacy, '2.1.0 的 runtime-sources.json 必须在基线里，否则 2.1.0 用户升级会缺这个文件')
+  // 载荷语义：与基线一致的不进包；变了的、新增的必须进包。
+  const same = baseline.files.find(f => f.path === 'resources/node/node.exe')
+  const current = [
+    { path: 'FISH-Dock.exe', bytes: 1, sha256: 'a' },
+    { path: legacy.path, bytes: legacy.bytes, sha256: 'changed-after-2.1.1' },
+    { path: same.path, bytes: same.bytes, sha256: same.sha256 },
+  ]
+  assert.deepEqual(payloadPaths(current, baseline.files).sort(), ['FISH-Dock.exe', legacy.path].sort())
 })
 // 2.0.4：退役业务载荷按三个前缀逐个拒绝。前缀表本身要能和宿主侧
 // src-tauri/src/legacy_ofm.rs 的 RETIRED_RESOURCE_PREFIXES 对上（宿主有同样的断言）。

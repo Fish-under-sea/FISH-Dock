@@ -528,6 +528,15 @@ export async function writeOwnershipManifest(app, resources, files, output, vers
 }
 
 /// 一次构建：读资源清单、生成 .nsi、调用 makensis。
+/// 更新包的载荷 = 相对基线「新增或内容变了」的文件。**基线必须取最老的受支持版本**
+/// （`baselines/install-manifest-2.1.0.json`），不要随版本滚动：2.1.0/2.1.1 的
+/// `resources/licenses/runtime-sources.json` 与 2.1.2 之后的不同，只拿上一版做基线时
+/// 它既不进载荷、现场校验又对不上，升级会报「精简更新包所需基础资源缺失」并回滚
+/// （2.1.6 的实测故障）。
+export function payloadPaths(files, baselineFiles) {
+  const previous = new Map(baselineFiles.map(f => [f.path, f]))
+  return files.filter(f => { const old = previous.get(f.path); return !old || old.bytes !== f.bytes || old.sha256 !== f.sha256 }).map(f => f.path)
+}
 export async function buildInstaller({ version, app, resources, outFile, makensis, product, publisher, baselineManifest }) {
   if (!makensis) throw new Error('需要 makensis（NSIS 3）的路径')
   makensis = stageMakensis(makensis)
@@ -543,8 +552,7 @@ export async function buildInstaller({ version, app, resources, outFile, makensi
   if (baselineManifest) {
     const baseline = JSON.parse(await fs.readFile(baselineManifest, 'utf8'))
     if (baseline.schema !== 1 || baseline.product !== 'FISH Dock' || !Array.isArray(baseline.files)) throw Error('精简更新的基础清单无效')
-    const previous = new Map(baseline.files.map(f => [f.path, f]))
-    ownership.payload = ownership.files.filter(f => { const old = previous.get(f.path); return !old || old.bytes !== f.bytes || old.sha256 !== f.sha256 }).map(f => f.path)
+    ownership.payload = payloadPaths(ownership.files, baseline.files)
     payloadFiles = ownership.payload.filter(p => p.startsWith('resources/')).map(p => p.slice(10))
     await fs.writeFile(installManifest, JSON.stringify(ownership, null, 2))
   }
