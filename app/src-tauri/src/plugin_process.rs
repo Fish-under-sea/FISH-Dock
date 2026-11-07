@@ -104,10 +104,36 @@ impl Process {
         let Some(mut stdin)=child.stdin.take() else{let _=child.kill();return Err(StartError::new(Phase::Spawn,"插件缺少输入管道",stages,false))};
         let Some(stderr)=child.stderr.take() else{let _=child.kill();return Err(StartError::new(Phase::Spawn,"插件缺少错误输出管道",stages,false))};
         watch_stderr(row.manifest.id.clone(),stderr,manager.context.root.clone(),crate::plugin_runtime::log_file(manager.context,&row.manifest.id));
-        let (tell,output)=mpsc::sync_channel(4);
-        std::thread::spawn(move||{let mut reader=BufReader::new(stdout);loop{match crate::plugin_protocol::line(&mut reader){Ok(Some(value))=>{if tell.send(Ok(value)).is_err(){break}},Ok(None)=>break,Err(error)=>{let _=tell.send(Err(error));break}}}});
         let (input,read)=mpsc::sync_channel::<Value>(2);
         std::thread::spawn(move||{for value in read {let Ok(mut bytes)=serde_json::to_vec(&value) else{break};bytes.push(b'\n');if stdin.write_all(&bytes).and_then(|_|stdin.flush()).is_err(){break;}}});
+        // A2（2.1.6）：插件 → 宿主的回调（带 method 的帧）由**独立线程**在任何时刻服务，
+        // 不再要求「宿主正好有一次在途请求」。旧实现只有 request/handshake 在等响应的
+        // 循环里顺手处理回调，自启流程一结束就没有线程读 stdout：插件在 activate 之后
+        // 的每一次 storage 调用都只能干等到 SDK 超时（冷态 30 s），自启动必然失败。
+        let (callbacks,callback_rx)=mpsc::channel::<Value>();
+        {
+            let input=input.clone();
+            let namespace=namespace.clone();
+            let capabilities=row.manifest.capabilities.clone();
+            std::thread::spawn(move||{
+                for value in callback_rx {
+                    let method=value.get("method").and_then(Value::as_str).unwrap_or_default();
+                    let result=storage_call(&namespace,&capabilities,method,&value["params"]);
+                    let response=match result{Ok(result)=>json!({"id":value["id"],"result":result}),Err(_)=>json!({"id":value["id"],"error":{"code":"HOST_OPERATION_FAILED","message":"宿主操作失败，请检查存储类别与声明能力"}})};
+                    if input.send(response).is_err(){break}
+                }
+            });
+        }
+        let (tell,output)=mpsc::sync_channel(8);
+        std::thread::spawn(move||{let mut reader=BufReader::new(stdout);loop{match crate::plugin_protocol::line(&mut reader){
+            Ok(Some(value))=>{
+                // 带 method 的是回调：交给回调线程，别排在响应队列里等下一次请求。
+                if value.get("method").is_some(){if callbacks.send(value).is_err(){break}}
+                else if tell.send(Ok(value)).is_err(){break}
+            },
+            Ok(None)=>break,
+            Err(error)=>{let _=tell.send(Err(error));break},
+        }}});
         stages.spawn_ms=phase_spawn.elapsed().as_millis() as u64;
         let mut process=Self{child,owner:Some(owner),output,input,next:0,namespace,capabilities:row.manifest.capabilities.clone(),id:row.manifest.id.clone(),probe:None};
         // —— hello + activate：同一份 deadline，谁先花完谁就把后者挤掉 ——
@@ -128,25 +154,18 @@ impl Process {
         if serde_json::to_vec(&value).map_err(|_|"插件请求编码失败")?.len() as u64>crate::plugin_protocol::MAX_LINE-1 {return Err("插件请求超过协议限制".into());}
         self.input.try_send(value).map_err(|_|"插件输入阻塞或进程已退出".into())
     }
+    // request 只等**自己这条**响应：回调帧已由常驻线程处理（A2），这里不再兼职。
     pub fn request(&mut self,method:&str,params:Value,timeout:Duration)->Result<Value,String> {
         self.next=self.next.checked_add(1).ok_or("插件请求编号已耗尽")?;let id=self.next;
         self.send(json!({"id":id,"method":method,"params":params}))?;
-        let deadline=Instant::now()+timeout;let mut callbacks=0;
-        loop {
-            let left=deadline.saturating_duration_since(Instant::now());if left.is_zero(){return Err("插件响应超时".into());}
-            let value=match self.output.recv_timeout(left){
-                Ok(value)=>value?,
-                Err(mpsc::RecvTimeoutError::Timeout)=>return Err("插件响应超时".into()),
-                Err(mpsc::RecvTimeoutError::Disconnected)=>{let code=self.child.try_wait().ok().flatten().and_then(|status|status.code());return Err(format!("插件进程已退出（退出码：{code:?}）"));}
-            };
-            if let Some(method)=value.get("method").and_then(Value::as_str) {
-                callbacks+=1;if callbacks>64 {return Err("插件在单次请求中发送过多宿主调用".into());}
-                let result=storage_call(&self.namespace,&self.capabilities,method,&value["params"]);
-                let response=match result{Ok(result)=>json!({"id":value["id"],"result":result}),Err(_)=>json!({"id":value["id"],"error":{"code":"HOST_OPERATION_FAILED","message":"宿主操作失败，请检查存储类别与声明能力"}})};
-                self.send(response)?;continue;
-            }
-            return crate::plugin_protocol::answer(value,id);
-        }
+        let deadline=Instant::now()+timeout;
+        let left=deadline.saturating_duration_since(Instant::now());if left.is_zero(){return Err("插件响应超时".into());}
+        let value=match self.output.recv_timeout(left){
+            Ok(value)=>value?,
+            Err(mpsc::RecvTimeoutError::Timeout)=>return Err("插件响应超时".into()),
+            Err(mpsc::RecvTimeoutError::Disconnected)=>{let code=self.child.try_wait().ok().flatten().and_then(|status|status.code());return Err(format!("插件进程已退出（退出码：{code:?}）"));}
+        };
+        crate::plugin_protocol::answer(value,id)
     }
     pub fn accepts_events(&self)->bool{self.capabilities.iter().any(|c|c=="events")}
     // 进程退出码（#53-3）：还活着是 None；已经退出就是它带走的那个码
@@ -183,13 +202,7 @@ impl Process {
         loop {
             let left=deadline.saturating_duration_since(Instant::now());if left.is_zero(){return false}
             let value=match self.output.recv_timeout(left){Ok(Ok(value))=>value,_=>return false};
-            if let Some(method)=value.get("method").and_then(Value::as_str) {
-                // 探针期间插件回叫宿主：照常答，别把它堵在等宿主上。
-                let result=storage_call(&self.namespace,&self.capabilities,method,&value["params"]);
-                let response=match result{Ok(result)=>json!({"id":value["id"],"result":result}),Err(_)=>json!({"id":value["id"],"error":{"code":"HOST_OPERATION_FAILED","message":"宿主操作失败，请检查存储类别与声明能力"}})};
-                if self.send(response).is_err(){return false}
-                continue;
-            }
+            // 回调由常驻线程处理（A2）；探针只认自己这个编号，别的（迟到响应）丢掉重等。
             if value.get("id").and_then(Value::as_u64)==Some(id) { return true }
         }
     }
@@ -579,6 +592,39 @@ mod tests {
             assert!(storage_call(&ns,&caps,"host.storage.writeSecret",&json!({"category":"config","name":"no","value":"secret"})).is_err());
         }
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // A2（2.1.6）：宿主不在「等这个插件自己的响应」时，插件发来的宿主调用也必须当场被处理。
+    // 旧实现把回调帧塞进 output，只有 request/handshake 在等响应时才顺手服务；自启流程一结束
+    // 就没有任何线程读它，插件的 storage 调用只能干等到 SDK 超时，自启动必然失败。
+    #[test]
+    #[ignore = "需 FISH_DOCK_TEST_NODE；验证空闲窗口里的回调"]
+    fn a_callback_is_served_while_no_request_is_in_flight() {
+        let node=std::env::var_os("FISH_DOCK_TEST_NODE").map(std::path::PathBuf::from).expect("设置 FISH_DOCK_TEST_NODE");
+        let root=std::env::temp_dir().join(format!("fish-idle-call-{}-{}",std::process::id(),crate::now_ms())).join(".fish-dock");
+        let host=t29_namespace(root.join("host"),"host","host","1.0.0");
+        t29_namespace(root.join(".plugin.acme.weather"),"acme.weather",".plugin.acme.weather","1.0.0");
+        let context=crate::storage_context::Context{root:root.clone(),host};let manager=Manager{context:&context};
+        // activate 返回 60 ms 之后（宿主这边已经没有在途请求）再写一次存储。
+        let backend=b"import {createPlugin} from './sdk.mjs';createPlugin({id:'acme.weather',activate:async context=>{setTimeout(()=>{void context.storage.write('config','late.json','served')},60)}});".to_vec();
+        let sdk=include_bytes!("../../../sdk/node/plugin.mjs").to_vec();
+        let mut files=BTreeMap::from([("backend.mjs".to_string(),backend),("sdk.mjs".to_string(),sdk),("README.md".to_string(),b"# synthetic".to_vec())]);
+        let hashes:BTreeMap<_,_>=files.iter().map(|(key,value)|(key.clone(),format!("{:x}",Sha256::digest(value)))).collect();
+        let raw=json!({"schema":1,"id":"acme.weather","name":"合成天气","version":"1.0.0","hostApi":1,"platforms":[crate::plugin_install::platform()],"storage":{"directory":".plugin.acme.weather","dataSchema":1},"backend":{"runtime":"node","entry":"backend.mjs"},"capabilities":["storage"],"files":hashes});
+        files.insert("plugin.json".into(),serde_json::to_vec(&raw).unwrap());
+        let bytes=crate::identity_archive::zip(&files).unwrap();let digest=format!("{:x}",Sha256::digest(&bytes));
+        let package=crate::plugin_package::inspect(&bytes,&digest,&root,crate::storage::Source::ThirdParty,&crate::plugin_install::platform()).unwrap();
+        let row=manager.install(package,&digest,false).unwrap();
+        let process=Process::start(&manager,&row,Some(&node),false).unwrap();
+        let ns=manager.namespace(&row).unwrap();
+        let deadline=std::time::Instant::now()+Duration::from_secs(3);
+        let mut served=false;
+        while std::time::Instant::now()<deadline {
+            if ns.read("config","late.json").unwrap().is_some(){served=true;break}
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        drop(process);
+        std::fs::remove_dir_all(root.parent().unwrap()).ok();
+        assert!(served,"activate 返回后发出的宿主调用，在没有在途请求时也必须当场被服务（A2）");
     }
     // t38/B1：新包已落地但服务起不来 → 注册表回滚到 1.0.0 之外，packages/<id>/ 也只
     // 留旧版本（失败的新版本目录一并删掉），旧服务仍在运行。
