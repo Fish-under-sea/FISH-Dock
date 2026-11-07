@@ -702,6 +702,13 @@ pub fn start(sh: &Arc<Shared>) {
     // 更新公告不跟「能不能装」绑定：安装版也要有；盘上缓存先顶上，读不到再说
     // 读不到。所以放在 may_update 判断之前。
     refresh_notes(sh);
+    // #27 收尾：更新下下来的安装器（`installer-v<ver>-<which>.exe`）跑完就没人再用，
+    // 一份几十 MB。这一段以前排在「安装版直接 return」之后，于是只有便携版会扫，
+    // 安装版的 host/ 里一个版本攒一份、永不回落（实测 12 天 6 个 / 154 MB）。
+    // 判据只看文件名里的版本：比当前版本新的留着，其余删；删不掉下次启动再收。
+    for name in sweep_update_downloads(&sh.dir) {
+        sh.log(&format!("update: {name}, left by an update, removed"));
+    }
     if cfg!(feature = "installed") {
         sh.log("update: installed release; official checks enabled, upgrades use package installers");
         schedule_checks(sh);
@@ -722,11 +729,6 @@ pub fn start(sh: &Arc<Shared>) {
             std::thread::sleep(Duration::from_secs(5));
             tell(&soon);
         });
-    }
-    // A download cut off (she quit in the middle of it): its .part gone; and an
-    // installer an update has already used (#27): nobody will need it again.
-    for name in sweep_update_downloads(&sh.dir) {
-        sh.log(&format!("update: {name}, left by an update, removed"));
     }
     let tidy = sh.clone();
     std::thread::spawn(move || {
