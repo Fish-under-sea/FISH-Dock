@@ -56,9 +56,14 @@ SDK 原来收到「编号已经作废」的迟到回执会直接抛错并关闭�
 
 ## 包与校验
 
-- `FISH-Dock-Setup-2.1.6.exe`：首次安装、基础资源缺失或修复安装，含完整离线运行时。
-- `FISH-Dock-Update-2.1.6.exe`：相对 **2.1.5** 的精简差分包；更早版本请用 Setup。
-- 各自附 `.sha256`，`SHA256SUMS.txt` 列出全部。
+| 包 | 体积 | 说明 |
+| --- | --- | --- |
+| `FISH-Dock-Setup-2.1.6.exe` | 245.67 MB | 完整安装包（2110 个文件，Node + 固定版 WebView2） |
+| `FISH-Dock-Update-2.1.6.exe` | 29.75 MB | 精简差分包，只含相对 **2.1.5** 的变更（10 个文件） |
+
+- 各自附 `.sha256`；`SHA256SUMS.txt` 列出全部。
+- 精简包只对 2.1.5 有效；更早版本请用 Setup 覆盖安装（数据在 `%LOCALAPPDATA%\FISH Dock`，安装器不碰）。
+- 两个包都经 `7z t` 校验通过，包内 `resources/manifest.json` 为 `FISH Dock / 2.1.6 / schema 2`，七字段齐全。
 
 ## 已知限制
 
