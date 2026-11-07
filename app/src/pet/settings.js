@@ -11,8 +11,8 @@
 //             the welcome card while nothing is connected, and what writing
 //             puts where
 //   look      her home (island, taskbar): the display, then the built-in ones
-//             (taskbar, island, Windows' mode and accent colour, the wallpaper
-//             and Windhawk), the tab order, her (size, strolls, eyes) and the
+//             (taskbar, island, Windows' mode and accent colour, the wallpaper),
+//             the tab order, her (size, strolls, eyes) and the
 //             pets (downloaded, the gallery)
 //   widgets   plugins: the built-in ones, those she runs for you (how each is and where it is put, no switch: placed is on; their settings folded under), turns, nudges, waku, and how to write one
 //   mail      mail accounts, and setting one up as Thunderbird does: an address and a password, the server found or typed
@@ -88,7 +88,6 @@
   let tab = 'now'
   let snap = null
   let lang = 'en'
-  const windhawkPanel = window.WindhawkPanel.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, redraw: () => draw() })
   const extensionLayouts = new Map()
   let extensionLayoutFrame = 0
   // remembered：首个 layout 之前先用这一页上次的高度（宿主侧记忆，不碰沙盒 iframe 的
@@ -917,7 +916,7 @@
   }
 
   // 外观（规格 17–24，逐条同序）：显示方式 → 内置（任务栏参数 → 灵动岛参数 →
-  // Windows，Windhawk 与它同一个分节）→ 标签页排序 → 她 → 宠物与图库。
+  // Windows）→ 标签页排序 → 她 → 宠物与图库。
   function pageLook() {
     const s = snap.settings
     return `${sec(T('home.display'))}<div class="modes">
@@ -973,7 +972,7 @@
             : ''
         }</div>${why}${mode === 'custom' ? `<div class="accents">${swatches}</div>` : ''}</div>
       </div>
-      ${pagePaper()}${window.pet.mac ? '' : windhawkPanel.render()}`
+      ${pagePaper()}`
   }
 
   // Windows' dialog open for the desktop's picture: its own mark, held until
@@ -3512,7 +3511,7 @@
     const changed = setHTML(body, PAGES[tab]())
     if (tab === 'widgets') extensionPanel.mount(body)
     if (tab === 'now') identityPanel.mount(body)
-    if (tab === 'look') { mountTabOrder(); windhawkPanel.mount(body) }
+    if (tab === 'look') { mountTabOrder() }
     if (reset) {
       body.scrollTop = 0
       // Two panes: what is on the right from its top; the list stays where it was.
@@ -3642,7 +3641,7 @@
       if (partToShow === 'connect') partToShow = cardShows() ? 'welcome' : ''
       draw(true)
       showPart()
-      if (tab === 'look') { loadGallery(false); if (!window.pet.mac) void windhawkPanel.load() }
+      if (tab === 'look') { loadGallery(false) }
       if (tab === 'mail' && letterToOpen) {
         const { account, uid, folder } = letterToOpen
         letterToOpen = null
@@ -3694,7 +3693,7 @@
     if (next === tab || !TABS.includes(next)) return
     tab = next
     draw(true)
-    if (tab === 'look') { loadGallery(false); if (!window.pet.mac) void windhawkPanel.load() }
+    if (tab === 'look') { loadGallery(false) }
     relayout()
   }
 
