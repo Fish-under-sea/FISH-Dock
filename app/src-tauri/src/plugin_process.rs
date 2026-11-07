@@ -13,6 +13,9 @@ const STDERR_CHUNK:u64=8192;
 // 缓存这么久不再重复探——设置页每次重绘都探一遍会把界面拖慢。
 const PROBE_TIMEOUT:Duration=Duration::from_secs(2);
 const PROBE_TTL:Duration=Duration::from_secs(2);
+// 回调帧的待办队列深度：满了就让读线程阻塞（背压回插件的 stdout），不无限攒内存。
+// 每帧上限 1 MB，32 帧即最坏 32 MB/插件。
+const CALLBACK_BACKLOG:usize=32;
 // 业务服务探测的轮询间隔（T-E）：插件说「还没就绪」时最多歇这么久再看，整段仍在
 // 本次尝试的共享 deadline 之内。
 const HEALTH_POLL:Duration=Duration::from_millis(500);
@@ -110,7 +113,8 @@ impl Process {
         // 不再要求「宿主正好有一次在途请求」。旧实现只有 request/handshake 在等响应的
         // 循环里顺手处理回调，自启流程一结束就没有线程读 stdout：插件在 activate 之后
         // 的每一次 storage 调用都只能干等到 SDK 超时（冷态 30 s），自启动必然失败。
-        let (callbacks,callback_rx)=mpsc::channel::<Value>();
+        // 有界队列 + 阻塞发送即背压：插件狂发回调时堵住的是它自己的 stdout，不涨宿主内存。
+        let (callbacks,callback_rx)=mpsc::sync_channel::<Value>(CALLBACK_BACKLOG);
         {
             let input=input.clone();
             let namespace=namespace.clone();
@@ -159,13 +163,17 @@ impl Process {
         self.next=self.next.checked_add(1).ok_or("插件请求编号已耗尽")?;let id=self.next;
         self.send(json!({"id":id,"method":method,"params":params}))?;
         let deadline=Instant::now()+timeout;
-        let left=deadline.saturating_duration_since(Instant::now());if left.is_zero(){return Err("插件响应超时".into());}
-        let value=match self.output.recv_timeout(left){
-            Ok(value)=>value?,
-            Err(mpsc::RecvTimeoutError::Timeout)=>return Err("插件响应超时".into()),
-            Err(mpsc::RecvTimeoutError::Disconnected)=>{let code=self.child.try_wait().ok().flatten().and_then(|status|status.code());return Err(format!("插件进程已退出（退出码：{code:?}）"));}
-        };
-        crate::plugin_protocol::answer(value,id)
+        loop {
+            let left=deadline.saturating_duration_since(Instant::now());if left.is_zero(){return Err("插件响应超时".into());}
+            let value=match self.output.recv_timeout(left){
+                Ok(value)=>value?,
+                Err(mpsc::RecvTimeoutError::Timeout)=>return Err("插件响应超时".into()),
+                Err(mpsc::RecvTimeoutError::Disconnected)=>{let code=self.child.try_wait().ok().flatten().and_then(|status|status.code());return Err(format!("插件进程已退出（退出码：{code:?}）"));}
+            };
+            // 上一条请求超时后才到的回执会把编号串位：丢掉它继续等自己的编号，
+            // 不把一次瞬时超时升级成「ID 不匹配 → 杀掉插件」。
+            if value.get("id").and_then(Value::as_u64)==Some(id){ return crate::plugin_protocol::answer(value,id); }
+        }
     }
     pub fn accepts_events(&self)->bool{self.capabilities.iter().any(|c|c=="events")}
     // 进程退出码（#53-3）：还活着是 None；已经退出就是它带走的那个码
@@ -207,7 +215,10 @@ impl Process {
         }
     }
     pub fn stop(&mut self){
-        if self.running(){let _=self.request("plugin.deactivate",json!({}),crate::config::plugin_activate_timeout());}
+        // 只要进程还活着就发告别：探针 2 s 超时说明它「忙」（一条慢命令排着队），
+        // 不等于「可以跳过 deactivate」。跳过就等于直接 kill——clash 的系统代理租约
+        // 会留在注册表里指向已经死掉的端口，用户看到的是整机断网。
+        if self.alive(){let _=self.request("plugin.deactivate",json!({}),crate::config::plugin_activate_timeout());}
         // 正常停用后也回收本实例创建的残留子进程。
         self.owner.take();let _=self.child.kill();let _=self.child.wait();
     }
