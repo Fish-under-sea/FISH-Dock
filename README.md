@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 <p>
   <a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark.png"><img src="assets/readme/key-zh-zh-light.png" alt="中文" height="40"></picture></a>
@@ -12,7 +12,7 @@
 </picture>
 
 <p>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.7"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.1.1" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.8"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.1.8" width="23%"></picture></a>
   <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
   <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
@@ -23,7 +23,7 @@
 
 <p>
   <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="app/docs/release-2.1.7.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
+  <a href="app/docs/release-2.1.8.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
@@ -77,6 +77,8 @@
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器与插件管理。
 
 2.1.7 更新修复版：宿主 2.1.7，兼容插件 2.x。**更新包以 2.1.0 为基线重出**：2.1.0 到 2.1.6 的用户点「应用内更新」都能一次升上来，包体仍是精简差分（三个文件的载荷，安装包约 30 MB）。2.1.6 的更新包只按上一版做差，2.1.0/2.1.1 的 `resources/licenses/runtime-sources.json` 与新版摘要不同、又不在载荷里，装到一半会报「基础资源缺失」并回滚——这一版把差分起点前移到最老的受支持版本，并把这份基线清单入库自检。完整说明见 [2.1.7 更新记录](app/docs/release-2.1.7.md)。
+
+2.1.8 断网修复版：宿主 2.1.8，兼容插件 2.x（官方目录 2.3.4：Clash / Magpie / 飞书）。**关掉 Clash 不再断网**：系统代理在「停内核 / 停用插件 / 退出 Dock / 强杀 Dock / 强杀插件」五种情况下都会被还回去，排序改成「先还代理、再收内核」；宿主新增 `--proxy-heal`（登录时 + 每 5 分钟一次的计划任务，无租约零动作）与 kill 前兜底，崩溃后不再需要你手动重开 Dock；停用预算 5 秒 → 30 秒，关程序仍走 6 秒的快速路径。**精简更新包失败自动兜底**：失败分支会把同版本完整安装包下载下来、校验摘要、交给它覆盖安装（独立于 WebView2 的进度窗，支持续传、取消与重试）。插件侧同步：Clash 修停止顺序/坏租约/半死内核/TUN 宿主看门狗，看门狗改任务计划拉起、只在代理接管期间存在；Magpie 修 #47（换代理后 provider 被说成「你移除了它」）。完整说明见 [2.1.8 更新记录](app/docs/release-2.1.8.md)。
 
 2.1.6 修复版：宿主 2.1.6，兼容插件 2.x。修掉**插件自启「第一次起不来」的根因**——宿主把「插件 → 宿主」的存储回调从请求窗口里解耦，改由常驻线程随时服务：冷启时插件在 `activate` 之后发出的存储调用不再干等 30 秒直到超时（本机实测两个插件曾在同一毫秒一起报「宿主调用超时」）。同一版让 SDK 丢弃作废编号的迟到回执，一次超时不再把插件会话打死；外观页残留的 **Windhawk 设置面整体移除**（后端能力保留）。完整说明见 [2.1.6 更新记录](app/docs/release-2.1.6.md)。
 
