@@ -5760,3 +5760,129 @@ body.has-news #island[data-view='compact'] .news-dot {
   margin-left: 5px;
   font-weight: normal;
 }
+
+/* ---- 子灵动岛：文件暂存长条 ⇄ 小球（IslandX 弹簧动画，尺寸/圆角由 JS 每帧驱动）---- */
+#stash-sub {
+  position: fixed;
+  z-index: 60;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(18, 20, 26, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: #e8eaf0;
+  will-change: width, height, left, border-radius;
+}
+#stash-sub.collapsed { cursor: pointer; }
+#stash-sub .ssub-count {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font: 600 13px/1 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+#stash-sub .ssub-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  align-content: center;
+  gap: 8px;
+  padding: 30px 12px 8px 12px; /* 顶部让出右上三个按钮，左右对称 */
+  flex: 0 0 auto;
+  white-space: normal;
+  overflow: hidden;
+  max-width: none;
+}
+#stash-sub .ssub-pin {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  appearance: none;
+  border: 0;
+  background: rgba(255, 255, 255, 0.10);
+  color: #dfe3ea;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+#stash-sub.locked .ssub-pin {
+  background: rgba(120, 170, 255, 0.30);
+  color: #dbe7ff;
+}
+.ssub-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 6px 0 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.07);
+  font: 500 12px/1 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: none;
+}
+.ssub-chip.missing { opacity: 0.5; }
+.ssub-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+}
+.ssub-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: none;
+}
+.ssub-act {
+  appearance: none;
+  border: 0;
+  background: rgba(255, 255, 255, 0.10);
+  color: #dfe3ea;
+  height: 20px;
+  min-width: 20px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.ssub-act.del { background: rgba(255, 90, 90, 0.18); color: #ffb3b3; }
+.ssub-act:hover { background: rgba(255, 255, 255, 0.20); }
+/* 每个文件名后面的移除 × */
+.ssub-x {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #9aa0ab;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 5px;
+}
+.ssub-x:hover { background: rgba(255, 90, 90, 0.25); color: #ffd0d0; }
+/* 小球（收起）态隐藏右上角按钮 */
+#stash-sub.collapsed .ssub-pin { display: none; }
+/* 子灵动岛融入动画：复刻 dock 的 goo metaball（SVG #goo-filter 模糊+阈值） */
+#ssub-goo { position: fixed; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; z-index: 80; display: none; filter: url(#goo-filter); }
+#ssub-goo .ssub-goo-shape { position: absolute; background: #000; border-radius: 50%; }
+#ssub-goo .ssub-goo-neck { border-radius: 99px; }
+.ssub-wobble { animation: ssub-wobble .5s ease; transform-origin: 50% 0; }
+@keyframes ssub-wobble { 30% { transform: scale(1.04, .9); } 60% { transform: scale(.98, 1.04); } }

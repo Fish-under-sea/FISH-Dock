@@ -53,6 +53,7 @@ mod crash;
 mod data;
 mod desk;
 mod detach;
+mod dropwin;
 mod events;
 mod events_agy;
 mod events_codex;
