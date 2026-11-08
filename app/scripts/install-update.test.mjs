@@ -247,7 +247,9 @@ test('清理可回滚：提交中途失败时，已移走的旧受管文件与�
       },
     }
     assert.throws(() => load().update(f.stage, f.root, failing), /模拟提交中断/)
-    assert.deepEqual(treeFiles(f.root), before, '失败后目录树必须与更新前逐条一致（旧文件回滚，不留暂存残骸）')
+    // 失败标记是留给安装器选措辞的现场凭据（不是回滚残骸）；除此之外目录树逐条一致。
+    assert.equal(fs.readFileSync(path.join(f.root, load().FAILED), 'utf8'), 'rolled-back')
+    assert.deepEqual(treeFiles(f.root), [...before, load().FAILED].sort(), '失败后除失败标记外目录树必须与更新前逐条一致（旧文件回滚，不留暂存残骸）')
     assert.equal(fs.readFileSync(path.join(f.root, 'DSH-FISH.exe'), 'utf8'), 'old-exe')
     assert.equal(fs.readFileSync(path.join(f.root, 'resources/gone.bin'), 'utf8'), 'gone-old', '要删的旧文件在失败时必须回来')
     assert.equal(fs.readFileSync(path.join(f.root, 'resources/old-dir/gone2.bin'), 'utf8'), 'gone2-old', '深层旧文件同样要回来')
@@ -280,5 +282,80 @@ test('有旧清单时仍按发行名收走旁边的旧 exe，无归属文件一�
     assert.equal(fs.readFileSync(path.join(f.root, 'FISH-Dock.exe'), 'utf8'), 'MZ new program')
     assert.ok(result.removed >= 3, `清理计数要含这三份旧 exe：${JSON.stringify(result)}`)
     console.log(`旧 exe 补扫：removed=${result.removed}，obsolete=${result.obsolete}`)
+  } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
+})
+test('2.2.0 已提交事务清理失败保留新版本且不写未开始标记，下次可继续清理', () => {
+  const f = fixture()
+  try {
+    release(f.stage, { 'DSH-FISH.exe': 'new' })
+    put(f.root, 'DSH-FISH.exe', 'old')
+    const tx = path.join(f.root, '.fish-install-transaction')
+    const io = { ...fs, rmSync(target, options) {
+      if (target === tx) throw Error('模拟事务目录被占用')
+      return fs.rmSync(target, options)
+    } }
+    const logs = []
+    const result = load().update(f.stage, f.root, io, {log: text => logs.push(text)})
+    assert.equal(result.version, '1.2.0')
+    assert.equal(fs.readFileSync(path.join(f.root, 'DSH-FISH.exe'), 'utf8'), 'new')
+    assert.equal(fs.existsSync(path.join(f.root, load().FAILED)), false)
+    assert.equal(JSON.parse(fs.readFileSync(path.join(tx, 'journal.json'))).committed, true)
+    assert.ok(logs.some(line => line.includes('清理未完成')))
+    load().recover(f.root)
+    assert.equal(fs.existsSync(tx), false)
+    assert.equal(fs.readFileSync(path.join(f.root, 'DSH-FISH.exe'), 'utf8'), 'new')
+  } finally { fs.rmSync(f.base, {recursive:true, force:true}) }
+})
+
+// ── 2.2.0：失败标记只写真实状态（未改动 / 已回滚 / 回滚失败）──────────────
+// 安装器的错误提示按这个标记选措辞，所以标记本身必须可证：不能一律写「已恢复」。
+test('2.2.0 成功安装不留失败标记，旧标记也会被清掉', () => {
+  const f = fixture()
+  try {
+    release(f.stage, { 'DSH-FISH.exe': 'new' })
+    put(f.root, 'DSH-FISH.exe', 'old')
+    put(f.root, load().FAILED, 'rolled-back')
+    load().update(f.stage, f.root)
+    assert.equal(fs.existsSync(path.join(f.root, load().FAILED)), false, '成功之后不许留失败标记')
+  } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
+})
+
+test('2.2.0 事务开始前失败写 not-written：文件没动过，不许说成已恢复', () => {
+  const f = fixture()
+  try {
+    release(f.stage, { 'DSH-FISH.exe': 'new' })
+    put(f.root, 'DSH-FISH.exe', 'old')
+    put(f.stage, 'DSH-FISH.exe', 'tampered')
+    assert.throws(() => load().update(f.stage, f.root), /校验/)
+    assert.equal(fs.readFileSync(path.join(f.root, load().FAILED), 'utf8'), 'not-written')
+    assert.equal(fs.readFileSync(path.join(f.root, 'DSH-FISH.exe'), 'utf8'), 'old')
+  } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
+})
+
+test('2.2.0 提交阶段失败且回滚成功写 rolled-back：旧文件真的回到原位', () => {
+  const f = fixture()
+  try {
+    release(f.stage, { 'DSH-FISH.exe': 'new', 'resources/new.txt': 'new' })
+    put(f.root, 'DSH-FISH.exe', 'old')
+    const io = { ...fs, renameSync(from, to) { if (to === path.join(f.root, 'resources/new.txt')) throw Error('模拟文件占用'); return fs.renameSync(from, to) } }
+    assert.throws(() => load().update(f.stage, f.root, io), /模拟文件占用/)
+    assert.equal(fs.readFileSync(path.join(f.root, load().FAILED), 'utf8'), 'rolled-back')
+    assert.equal(fs.readFileSync(path.join(f.root, 'DSH-FISH.exe'), 'utf8'), 'old', '回滚成功要真的恢复旧文件')
+  } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
+})
+
+test('2.2.0 回滚本身也失败写 rollback-failed：安装器会要求保留现场', () => {
+  const f = fixture()
+  try {
+    release(f.stage, { 'DSH-FISH.exe': 'new', 'resources/new.txt': 'new' })
+    put(f.root, 'DSH-FISH.exe', 'old')
+    let failing = false
+    const io = { ...fs, renameSync(from, to) {
+      if (!failing && to === path.join(f.root, 'resources/new.txt')) { failing = true; throw Error('模拟提交失败') }
+      if (failing) throw Error('模拟回滚失败')
+      return fs.renameSync(from, to)
+    } }
+    assert.throws(() => load().update(f.stage, f.root, io), /安装恢复尚未完成/)
+    assert.equal(fs.readFileSync(path.join(f.root, load().FAILED), 'utf8'), 'rollback-failed')
   } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
 })

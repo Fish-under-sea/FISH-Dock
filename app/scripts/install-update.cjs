@@ -6,6 +6,15 @@
 'use strict';
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const MANIFEST = 'install-manifest.json', STATE = 'install-state.json', TX = '.fish-install-transaction', LOG = 'install.log';
+/// 2.2.0：一次失败到底改没改到文件、回滚成没成，安装器要按实情说，不能一律
+/// 宣称「旧版本已恢复」。这个文件写在安装根里，由 NSIS 的失败分支读取后删掉：
+///   not-written    —— 还没进入提交阶段，安装目录里的文件没有被改动；
+///   rolled-back    —— 提交阶段失败，事务回滚已经完成，旧文件回到原位；
+///   rollback-failed —— 回滚本身也没做完，必须请用户保留现场并运行完整安装包。
+const FAILED = 'update-failed';
+function markFailure(io, root, state) {
+  try { io.writeFileSync(path.join(root, FAILED), state, 'utf8'); } catch { /* 标记写不进去也拦不住安装器失败退出 */ }
+}
 // 安装器日志里只出现 ASCII：这段文字经 nsExec 按 OEM 代码页转出来。
 const SAY = {
   stop: 'Stopping the running copy of this installation...',
@@ -200,6 +209,9 @@ function update(stage, root, io = fs, options = {}) {
     const percent = Math.floor(done * 100 / Math.max(1, total));
     if (force || percent >= lastPercent + 10 || Date.now() - lastReport >= 1000) { report(`${label} ${done}/${total} (${percent}%)`); lastPercent = percent; lastReport = Date.now(); }
   };
+  // 上一次失败留下的标记不能带到这一次：本次的结果由本次重新写。
+  try { io.rmSync(path.join(root, FAILED), { force: true }); } catch {}
+  try {
   io.mkdirSync(root, { recursive: true }); const target = resolver(root, io); recover(root, io);
   const old = manifest(root, io, target), previous = old ? old.files.slice() : legacy(root, io, target, metrics), receipt = loadState(root, old, io, target);
   const names = new Set(next.files.map(f => f.path.toLowerCase()));
@@ -289,11 +301,25 @@ function update(stage, root, io = fs, options = {}) {
     io.writeFileSync(path.join(staging, STATE), JSON.stringify({ schema: 1, root: canonical(root), manifest: next.hash, files }));
     put(entries[entries.length - 1]); journal.committed = true; save();
   } catch (error) {
-    try { recover(root, io); } catch (restore) { throw Error(error.message + '；安装恢复尚未完成，请保留 ' + dir + ' 后重试修复：' + restore.message); }
+    // 事务目录里的 journal 能说出「有没有动过文件」：preparing 期间目标文件还没被
+    // 换掉，applying 才是真正的提交阶段。回滚成功与失败必须分开报，安装器据此选措辞。
+    let state = 'not-written';
+    try { if (JSON.parse(io.readFileSync(path.join(dir, 'journal.json'), 'utf8')).phase === 'applying') state = 'rolled-back'; } catch { /* 读不到 journal 就当还没动文件 */ }
+    try { recover(root, io); } catch (restore) {
+      markFailure(io, root, 'rollback-failed');
+      throw Error(error.message + '；安装恢复尚未完成，请保留 ' + dir + ' 后重试修复：' + restore.message);
+    }
+    markFailure(io, root, state);
     throw error;
   }
-  recover(root, io);
-  if (ownedStage && options.cleanupStage !== false) { resolver(stage, io); io.rmSync(stage, { recursive: true, force: true }); }
+  // 提交点之后的目录收尾失败不回滚、不冒充「未写入」；保留 committed 日志，
+  // 下次更新仍可按 recover 的已提交分支安全清掉旧事务。
+  try { recover(root, io); }
+  catch (error) { log('安装已提交，事务目录清理未完成，下次更新将继续清理：' + error.message); }
+  if (ownedStage && options.cleanupStage !== false) {
+    try { resolver(stage, io); io.rmSync(stage, { recursive: true, force: true }); }
+    catch (error) { log('安装已提交，临时载荷清理未完成：' + error.message); }
+  }
   // 旧文件已经随事务目录一起清掉，这里只负责「记账」与「收拾空壳」：
   // 删掉的个数按「更新前在、更新后不在」数，不是按计划数；空目录把 resources/ 整棵
   // 走一遍（判据只有「空」，见 pruneEmpty）。
@@ -310,6 +336,12 @@ function update(stage, root, io = fs, options = {}) {
   report(SAY.done(result.replaced, metrics.cachedFiles, (result.elapsedMs / 1000).toFixed(1)));
   log(`安装完成：替换 ${result.replaced} 个文件，复用 ${metrics.cachedFiles} 个，耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒`);
   return result;
+  } catch (error) {
+    // 校验/清单在进入事务前就抛错时，内层 catch 还没写标记：这里补一个
+    // not-written（确实没动目标文件），安装器据此说「未开始」而不是「已恢复」。
+    try { if (!io.existsSync(path.join(root, FAILED))) markFailure(io, root, 'not-written'); } catch { /* 标记写不进去也要返回失败码 */ }
+    throw error;
+  }
 }
 /// 一棵目录树里的全部普通文件：相对路径（用 `/` 分隔）、字节数与 SHA-256，按路径排序。
 /// 迁移前后各盘一次，两份清单必须逐条对上，才敢删旧目录。
@@ -410,7 +442,7 @@ function staleWorker(env = process.env, io = fs, options = {}) {
     return { removed: false, reason: 'delete-failed' };
   }
 }
-module.exports = { update, recover, migrateHome, homePaths, inventoryTree, staleWorker, HOME_FROM, HOME_TO, HOME_OVERRIDES, MIGRATE_FLAG, MIGRATE_SKIP, MIGRATE_ATTEMPTS, STALE_DIR, STALE_FILE };
+module.exports = { update, recover, migrateHome, homePaths, inventoryTree, staleWorker, HOME_FROM, HOME_TO, HOME_OVERRIDES, MIGRATE_FLAG, MIGRATE_SKIP, MIGRATE_ATTEMPTS, STALE_DIR, STALE_FILE, FAILED };
 if (require.main === module) {
   // 安装器日志（nsExec 转出去的那一屏）只用 ASCII；细节写进 install.log。
   // 出口都过 ascii()：连报错里带的中文路径也不会漏到那一屏上。
@@ -421,6 +453,7 @@ if (require.main === module) {
     fs.mkdirSync(root, { recursive: true }); process.chdir(root);
     // 每次安装一份新的详情日志：上次留下的不该和这一次混在一起。
     try { fs.rmSync(path.join(root, LOG), { force: true }); } catch {}
+    try { fs.rmSync(path.join(root, FAILED), { force: true }); } catch {}
     log = detail(root);
     log(`FISH Dock 安装详情 ${new Date().toISOString()}（安装暂存：${stage}，安装目录：${root}）`);
     const stop = path.join(stage, 'install-stop.ps1');
@@ -456,6 +489,11 @@ if (require.main === module) {
     }
     console.log(ascii(JSON.stringify(result)));
   } catch (e) {
+    // 在 update() 之前就停下（例如结束旧进程失败）：文件一个都还没动。
+    try {
+      const root = process.argv[3] ? path.resolve(process.argv[3]) : null;
+      if (root && !fs.existsSync(path.join(root, FAILED))) fs.writeFileSync(path.join(root, FAILED), 'not-written', 'utf8');
+    } catch { /* 标记只是给安装器措辞用，写不进去也要返回失败码 */ }
     console.error(ascii(SAY.failed(e.message)));
     log('安装更新失败：' + e.message);
     process.exitCode = 1;

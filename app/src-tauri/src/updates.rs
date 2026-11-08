@@ -252,18 +252,14 @@ fn exe_name(version: &str) -> String {
     format!("wakuwaku-v{version}-windows-x64.exe")
 }
 
-// 应用内更新真正下载的那份载荷（`installer_names` 的第一项：先用增量 Update 包）。
+// 2.2.0（规格 §8.2）：应用内更新只认完整安装包 Setup。
 //
-// 2.1.1 / #72 修的是这里「拿历史名去核对当前发行」的错位：检查器一直按
-// `exe_name`（便携 exe 的历史名）去发行里找资产与 `<exe>.sha256`，而 2.0.x 起的
-// 发行只有 `FISH-Dock-Setup-<ver>.exe` / `FISH-Dock-Update-<ver>.exe`——于是
-// GitHub 侧的 `exe/digest` 恒为 None、Gitee 侧连 `.sha256` 都探不到，整条
-// 「另一处也有发行」的判断等于没做（`AGENTS.md` §8.1 记的上游缺陷①）。
-//
-// 摘要两侧必须核对**同一个文件**才谈得上「两边一致」：更新检查统一用这份
-// Update 载荷的摘要（Gitee 侧 2.1.0 起放的正是它）。
-fn update_asset_name(version: &str) -> String {
-    format!("FISH-Dock-Update-{version}.exe")
+// 2.1.1 / #72 修过「拿历史便携名去核对当前发行」的错位；2.2.0 再把载荷从 Update
+// 换成 Setup：GitHub 的摘要、Gitee 的 `.sha256` 探针和实际下载对象必须是**同一个
+// 文件**，否则「两边摘要一致」只是一句空话。即使同一发行里还有 Update 也不选它；
+// GitHub/Gitee 与镜像之间的失败切换保留，但不再有 Update → Setup 的资产回退。
+fn installer_asset_name(version: &str) -> String {
+    format!("FISH-Dock-Setup-{version}.exe")
 }
 
 // A release's version by its tag, if it counts (no draft, no prerelease).
@@ -290,14 +286,14 @@ pub fn sums_of(text: &str) -> Option<String> {
 //
 // exe = 便携载荷（历史上按 `exe_name` 命名；当前发行不再提供便携 exe，所以是
 // None，便携版「换掉自己的 exe」这条入口保持不可用，而不是拿安装器去顶替）。
-// digest = **安装器载荷**（`update_asset_name`）的摘要：与 Gitee 侧探的是同一
+// digest = **Setup 载荷**（`installer_asset_name`）的摘要：与 Gitee 侧探的是同一
 // 份文件，两个来源的摘要因此可以逐字比对（`merge` 的 conflict）。
 pub fn github_release(v: &Value) -> Option<Found> {
     let version = version_of(v)?;
     let assets = v["assets"].as_array();
     let asset = |name: String| assets.and_then(|all| all.iter().find(|a| a["name"].as_str() == Some(name.as_str())));
     let portable = asset(exe_name(&version));
-    let installer = asset(update_asset_name(&version));
+    let installer = asset(installer_asset_name(&version));
     Some(Found {
         source: Source::GitHub,
         page: v["html_url"].as_str().unwrap_or("").to_string(),
@@ -323,22 +319,24 @@ pub fn newest_tag(refs: &str) -> Option<String> {
 
 // Gitee：最新的 tag，和那个 tag 的发行里 Gitee 真正放上去的文件。
 //
-// 2.1.1 / #72：Gitee 侧现在有资产了（`FISH-Dock-Update-<ver>.exe` 与紧挨着它的
-// `.sha256`，见 `app/scripts/gitee-release.ps1`），所以这条通道**默认启用**。
-// 探针名的错位也在这里修掉：原先按 `exe_name`（便携 exe 的历史名）拼路径，
-// Gitee 上永远 404，等于「配了也没用」。
+// 2.1.1 / #72：Gitee 侧有发行资产了，这条通道**默认启用**。探针名的错位也在这
+// 里修掉：原先按 `exe_name`（便携 exe 的历史名）拼路径，Gitee 上永远 404。
 //
-// 只认安装器载荷（Update 包）那一份：
-//   - 它正是应用内更新先下载的文件，与 GitHub 侧摘要口径逐字一致（能比对）；
-//   - 发行里没有它的 `.sha256` 时返回 None——Gitee 只传了 Setup 的那种半份发行
-//     不拿来做「有新版本」的依据，也不制造与 GitHub 的假摘要冲突。
+// 2.2.0 起只认 **Setup** 那一份（`FISH-Dock-Setup-<ver>.exe.sha256`）：
+//   - 它正是应用内更新实际下载的文件，与 GitHub 侧摘要口径逐字一致（能比对）；
+//   - 发行里没有它的 `.sha256` 时返回 None——不再回头探 Update，也不制造与
+//     GitHub 的假摘要冲突（Gitee 今后只放 Setup）。
 // exe 恒为 None：Gitee 侧不放便携载荷，「换掉自己的 exe」这条路不该指到这里。
+fn gitee_sums_url(repo: &str, tag: &str, version: &str) -> String {
+    format!("{repo}releases/download/{tag}/{}.sha256", installer_asset_name(version))
+}
+
 fn gitee_found(repo: &str) -> Result<Option<Found>, String> {
     let repo = format!("{}/", repo.trim_end_matches('/'));
     let refs = get_text(&format!("{}.git/info/refs?service=git-upload-pack", repo.trim_end_matches('/')), 1 << 20)?.unwrap_or_default();
     let Some(tag) = newest_tag(&refs) else { return Ok(None) };
     let version = tag.trim_start_matches(['v', 'V']).to_string();
-    let sums_url = format!("{repo}releases/download/{tag}/{}.sha256", update_asset_name(&version));
+    let sums_url = gitee_sums_url(&repo, &tag, &version);
     let Some(sums) = get_text(&sums_url, 4096)? else { return Ok(None) };
     Ok(Some(Found { source: Source::Gitee, page: format!("{repo}releases/tag/{tag}"), exe: None, digest: sums_of(&sums), size: 0, version }))
 }
@@ -1102,8 +1100,8 @@ pub fn view(sh: &Shared) -> Value {
             "version": r.version,
             "page": r.page(first),
             "newer": newer(&r.version, current()),
-            // 安装版也「能装」：装的是发行包里的安装器（Update 增量包，其次 Setup
-            // 完整包），不是把她自己换掉（install_installer）。
+            // 安装版也「能装」：装的是发行里的完整 Setup 安装器，不是把她自己换掉
+            // （install_installer）。2.2.0 起不再有 Update 增量包候选。
             "canInstall": mode.installed || r.can_install(),
             "installer": mode.installed,
             "places": r.from.iter().map(|f| f.source.name()).collect::<Vec<_>>(),
@@ -1133,10 +1131,11 @@ pub fn view(sh: &Shared) -> Value {
     })
 }
 
-// 安装版要的包：优先增量 Update 包，其次完整 Setup 包（两份都在同一条发行里，
-// 见 docs/release-2.0.0.md 的「双包」）。
-pub fn installer_names(version: &str) -> [String; 2] {
-    [format!("FISH-Dock-Update-{version}.exe"), format!("FISH-Dock-Setup-{version}.exe")]
+// 安装版要的包：只有完整 Setup。2.2.0 起不再先试增量 Update，也没有「Update 失败
+// 再下 Setup」的资产回退；同一个 Setup 的 GitHub/Gitee 与镜像失败切换仍由
+// `sources::candidates` 与下面的逐处重试承担。
+pub fn installer_names(version: &str) -> [String; 1] {
+    [installer_asset_name(version)]
 }
 
 // 下载地址按 releases/download 的固定形状拼出来（和 Gitee 那边一样，不依赖
@@ -1165,9 +1164,10 @@ pub fn digest_of(text: &str, name: &str) -> Option<String> {
     None
 }
 
-// 安装版的一次更新：下载发行里的安装器（优先 Update 增量包，其次 Setup 完整包），
-// 按发行给出的 SHA-256 校验，然后拉起它并退出她。全程不打开浏览器：没有
-// settings_open_site，也没有 open_page。
+// 安装版的一次更新：下载发行里的 Setup 安装器，按发行给出的 SHA-256 校验，然后
+// 拉起它并退出她。2.2.0 起只认 Setup（同一发行里的 Update 不看），失败时只在本
+// 函数的「逐处/逐镜像」循环里换源重试，不再退到另一个安装包。全程不打开浏览器：
+// 没有 settings_open_site，也没有 open_page。
 fn install_installer(sh: &Arc<Shared>, r: &Release) -> Result<(), Value> {
     if r.conflict {
         return Err(error("mismatch", r.version.clone()));
@@ -1175,57 +1175,56 @@ fn install_installer(sh: &Arc<Shared>, r: &Release) -> Result<(), Value> {
     // 每一处按「哪来的」配一对（不是只有页面）：下载中的进度要说真话——从哪里
     // 下就报哪里（原来这里写死 GitHub，选 Gitee 的用户会看到错的一行）。
     let places: Vec<(Source, String)> = r.ordered(gitee_first(sh)).iter().map(|f| (f.source, f.page.clone())).filter(|(_, p)| !p.is_empty()).collect();
-    let names = installer_names(&r.version);
+    let name = installer_asset_name(&r.version);
+    // 固定的 setup 暂存名：2.2.0 之前按包名区分 update/setup，现在只有 Setup；
+    // `sweep_update_downloads` 仍按 `installer-v<版本>-` 前缀扫掉用过的安装器。
+    let part = sh.dir.join(format!("installer-v{}-setup.exe", r.version));
     let mut failed = error("noExe", "");
     for (source, page) in places {
         let Some((repo, _tag)) = page.split_once("/releases/tag/") else { continue };
         let repo = repo.to_string();
-        for name in &names {
-            let url = asset_url(&repo, &r.version, name);
-            if !allowed(&url) {
-                failed = error("elsewhere", url);
-                continue;
-            }
-            let digest = match get_text(&format!("{url}.sha256"), 4096).ok().flatten().and_then(|t| digest_of(&t, name)) {
-                Some(d) => d,
-                None => {
-                    failed = error("noDigest", name.clone());
-                    continue;
-                }
-            };
-            let which = if name.contains("Update") { "update" } else { "setup" };
-            let part = sh.dir.join(format!("installer-v{}-{which}.exe", r.version));
-            {
-                let mut s = STATE.lock().unwrap();
-                s.stage = Some("download");
-                s.from = Some(source);
-                s.got = 0;
-                s.total = 0;
-            }
-            sh.push_settings();
-            let (got, how) = match download(sh, &url, &part) {
-                Ok(got) => got,
-                Err(e) => {
-                    let _ = std::fs::remove_file(&part);
-                    sh.log(&format!("update: {name} not downloaded: {e}"));
-                    failed = error("download", format!("{name}: {e}"));
-                    continue;
-                }
-            };
-            stage(sh, "verify");
-            if got != digest {
-                let _ = std::fs::remove_file(&part);
-                sh.log(&format!("update: {name}: SHA-256 {got}, not {digest}"));
-                failed = error("digest", format!("{name}: {got} ≠ {digest}"));
-                continue;
-            }
-            sh.log(&format!("update: {name} downloaded ({how}), its SHA-256 as given"));
-            stage(sh, "restart");
-            run_installer(&part).map_err(|e| error("start", e))?;
-            sh.log(&format!("update: installer {name} started; she quits for it"));
-            sh.quit(crate::data::Quit::ByChoice, "an update's handover");
-            return Ok(());
+        let url = asset_url(&repo, &r.version, &name);
+        if !allowed(&url) {
+            failed = error("elsewhere", url);
+            continue;
         }
+        let digest = match get_text(&format!("{url}.sha256"), 4096).ok().flatten().and_then(|t| digest_of(&t, &name)) {
+            Some(d) => d,
+            None => {
+                failed = error("noDigest", name.clone());
+                continue;
+            }
+        };
+        {
+            let mut s = STATE.lock().unwrap();
+            s.stage = Some("download");
+            s.from = Some(source);
+            s.got = 0;
+            s.total = 0;
+        }
+        sh.push_settings();
+        let (got, how) = match download(sh, &url, &part) {
+            Ok(got) => got,
+            Err(e) => {
+                let _ = std::fs::remove_file(&part);
+                sh.log(&format!("update: {name} not downloaded: {e}"));
+                failed = error("download", format!("{name}: {e}"));
+                continue;
+            }
+        };
+        stage(sh, "verify");
+        if got != digest {
+            let _ = std::fs::remove_file(&part);
+            sh.log(&format!("update: {name}: SHA-256 {got}, not {digest}"));
+            failed = error("digest", format!("{name}: {got} ≠ {digest}"));
+            continue;
+        }
+        sh.log(&format!("update: {name} downloaded ({how}), its SHA-256 as given"));
+        stage(sh, "restart");
+        run_installer(&part).map_err(|e| error("start", e))?;
+        sh.log(&format!("update: installer {name} started; she quits for it"));
+        sh.quit(crate::data::Quit::ByChoice, "an update's handover");
+        return Ok(());
     }
     Err(failed)
 }
@@ -1788,43 +1787,53 @@ mod tests {
     fn github_read() {
         let asset = |name: &str, digest: &str| json!({ "name": name, "size": 7, "digest": digest, "browser_download_url": format!("https://github.com/Fish-under-sea/FISH-Dock/releases/download/x/{name}") });
         let update_digest = format!("sha256:{}", "AB".repeat(32));
+        let setup_digest = format!("sha256:{}", "CD".repeat(32));
         let update = asset("FISH-Dock-Update-0.2.1.exe", &update_digest);
+        let setup = asset("FISH-Dock-Setup-0.2.1.exe", &setup_digest);
         let good = json!({
             "tag_name": "v0.2.1", "draft": false, "prerelease": false,
             "html_url": "https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v0.2.1",
-            "assets": [asset("notes.txt", ""), update.clone(), asset("FISH-Dock-Setup-0.2.1.exe", "")],
+            "assets": [asset("notes.txt", ""), update.clone(), setup.clone()],
         });
         let r = github_release(&good).unwrap();
         assert_eq!(r.source, Source::GitHub);
         assert_eq!(r.version, "0.2.1");
-        // #72：摘要取**安装器载荷**（Gitee 侧放的是同一份文件），不再是便携 exe 的历史名。
-        assert_eq!(r.digest.as_deref(), Some("ab".repeat(32).as_str()));
+        // 2.2.0：摘要取 **Setup**（Gitee 探针与实际下载的也是它），不再取 Update。
+        assert_eq!(r.digest.as_deref(), Some("cd".repeat(32).as_str()), "同一发行里同时有 Update 与 Setup 时只认 Setup 摘要");
         // 当前发行没有便携载荷：exe 为 None，不拿安装器顶替「换掉自己的 exe」。
         assert_eq!(r.exe, None);
+        // 只有 Update：没有 Setup 摘要可核对，也不回退到 Update（2.2.0 移除资产回退分支）。
+        let mut update_only = good.clone();
+        update_only["assets"] = json!([asset("notes.txt", ""), update.clone()]);
+        assert_eq!(github_release(&update_only).unwrap().digest, None, "只有 Update 的发行不再给出安装摘要");
+        // 只有 Setup：这正是 2.2.0 之后的发行形状，摘要正常给出。
+        let mut setup_only = good.clone();
+        setup_only["assets"] = json!([asset("notes.txt", ""), setup.clone()]);
+        assert_eq!(github_release(&setup_only).unwrap().digest.as_deref(), Some("cd".repeat(32).as_str()), "仅 Setup 的发行可检查");
         let mut draft = good.clone();
         draft["draft"] = json!(true);
         assert!(github_release(&draft).is_none());
         let mut pre = good.clone();
         pre["prerelease"] = json!(true);
         assert!(github_release(&pre).is_none());
-        // 便携载荷真出现时 exe 才带上它；摘要仍只算安装器那份（跨来源比的是同一个文件，
+        // 便携载荷真出现时 exe 才带上它；摘要仍只算 Setup 那份（跨来源比的是同一个文件，
         // 便携 exe 的摘要掺进来只会制造假冲突）。
         let mut portable = good.clone();
-        portable["assets"] = json!([update.clone(), asset("wakuwaku-v0.2.1-windows-x64.exe", &format!("sha256:{}", "CD".repeat(32)))]);
+        portable["assets"] = json!([update.clone(), setup.clone(), asset("wakuwaku-v0.2.1-windows-x64.exe", &format!("sha256:{}", "EF".repeat(32)))]);
         let r = github_release(&portable).unwrap();
         assert!(r.exe.unwrap().ends_with("wakuwaku-v0.2.1-windows-x64.exe"));
-        assert_eq!(r.digest.as_deref(), Some("ab".repeat(32).as_str()), "摘要只认安装器载荷");
-        // No SHA-256 given, or not one: none to check by.
+        assert_eq!(r.digest.as_deref(), Some("cd".repeat(32).as_str()), "摘要只认 Setup");
+        // Setup 没有给出合法 SHA-256：没有可核对的值，不拿 Update 的摘要顶替。
         let mut bare = good.clone();
-        bare["assets"] = json!([asset("FISH-Dock-Update-0.2.1.exe", "md5:xyz")]);
+        bare["assets"] = json!([update.clone(), asset("FISH-Dock-Setup-0.2.1.exe", "md5:xyz")]);
         assert_eq!(github_release(&bare).unwrap().digest, None);
-        // 旧发行只有便携 exe（没有安装器载荷）：摘要同样是 None——Gitee 侧没有那份文件，
+        // 旧发行只有便携 exe（没有 Setup 载荷）：摘要同样是 None——Gitee 侧没有那份文件，
         // 拿便携 exe 的摘要去比只会得到一条假的「两边不一致」。
         let mut legacy = good;
         legacy["assets"] = json!([asset("wakuwaku-v0.2.1-windows-x64.exe", &update_digest)]);
         let r = github_release(&legacy).unwrap();
         assert!(r.exe.unwrap().ends_with("wakuwaku-v0.2.1-windows-x64.exe"));
-        assert_eq!(r.digest, None, "没有安装器载荷就没有可比对的摘要");
+        assert_eq!(r.digest, None, "没有 Setup 载荷就没有可比对的摘要");
     }
 
     // A repo's tags as git's info/refs gives them (as Gitee's does): the
@@ -2007,12 +2016,13 @@ mod tests {
 
     #[test]
     fn installer_packages_named_and_checked() {
-        assert_eq!(installer_names("2.0.0"), ["FISH-Dock-Update-2.0.0.exe".to_string(), "FISH-Dock-Setup-2.0.0.exe".to_string()]);
+        // 2.2.0：安装器只有一个候选——Setup。Update 不再出现在下载名单里。
+        assert_eq!(installer_names("2.0.0"), ["FISH-Dock-Setup-2.0.0.exe".to_string()]);
         let hex = "cd".repeat(32);
         // 一份 SHA256SUMS：按名字挑那一行，别的行不算。
         let sums = format!("{}  other.exe\n{hex}  FISH-Dock-Setup-2.0.0.exe\n", "ab".repeat(32));
         assert_eq!(digest_of(&sums, "FISH-Dock-Setup-2.0.0.exe").as_deref(), Some(hex.as_str()));
-        assert_eq!(digest_of(&sums, "FISH-Dock-Update-2.0.0.exe"), None);
+        assert_eq!(digest_of(&sums, "FISH-Dock-Update-2.0.0.exe"), None, "Update 不再参与安装器摘要挑选");
         // 只有 hex 的 <name>.sha256。
         assert_eq!(digest_of(&hex, "whatever.exe").as_deref(), Some(hex.as_str()));
         assert_eq!(digest_of("not a sum", "x"), None);
@@ -2470,17 +2480,30 @@ mod tests {
         });
     }
 
-    // 装的时候：`install_installer` 用 `installer_names` 拼地址（不是 `exe_name`
-    // 那个历史名），所以 Gitee 附件候选也要按这两个名字生效——实测 GitHub v2.0.4
-    // 的资产正是这两个名字，`wakuwaku-v2.0.4-windows-x64.exe` 在发行里 404。
+    // 2.2.0：Gitee 的摘要探针也只拼 Setup 的 `.sha256`——GitHub 摘要、Gitee 探针与
+    // 实际下载必须是同一个文件，否则「两边一致」无从谈起。
     #[test]
-    fn both_installer_names_get_the_gitee_candidate() {
+    fn the_gitee_probe_asks_for_the_setup_checksum() {
+        let repo = format!("{GITEE_REPO}/");
+        let url = super::gitee_sums_url(&repo, "v2.2.0", "2.2.0");
+        assert_eq!(url, format!("{GITEE_REPO}/releases/download/v2.2.0/FISH-Dock-Setup-2.2.0.exe.sha256"));
+        assert!(url.ends_with("FISH-Dock-Setup-2.2.0.exe.sha256"), "2.2.0 只探 Setup：{url}");
+        assert!(!url.contains("Update"), "不再回头探 Update：{url}");
+    }
+
+    // 装的时候：`install_installer` 用 `installer_names` 拼地址（不是 `exe_name`
+    // 那个历史名），所以 Gitee 附件候选要按它生效。2.2.0 起名单里只有 Setup：
+    // 实测 GitHub v2.0.4 的资产是 Update/Setup 两个名字，但应用内更新只下 Setup。
+    #[test]
+    fn the_setup_installer_gets_the_gitee_candidate() {
         let _urls = production_urls();
         with_gitee(Some(GITEE_REPO), || {
             // t10 F1(b)：先钉候选表再断言下标——环境里若残留 GH_PROXY，`got[1]` 会是
             // 「Release 加速」而不是「Gitee 附件」，这条用例就会随机红。
             with_empty_mirrors(|| {
-                for name in installer_names("2.0.4") {
+                let names = installer_names("2.0.4");
+                assert_eq!(names, ["FISH-Dock-Setup-2.0.4.exe".to_string()], "2.2.0 只下载 Setup，不再有 Update 候选");
+                for name in names {
                     let url = super::asset_url(crate::config::update_repo().trim_end_matches('/'), "2.0.4", &name);
                     let got = crate::sources::candidates(&url);
                     assert_eq!(got.iter().map(|p| p.label).collect::<Vec<_>>(), ["原地址", "Gitee 附件"], "{name} → {got:?}");

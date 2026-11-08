@@ -4,23 +4,25 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtemp, mkdir, writeFile, rm, readFile, stat } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { spawnSync, spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  installerScript, resourceDirectories, resourceFiles, scriptSource, writeOwnershipManifest, REQUIRED, findTool, stageMakensis,
+  installerScript, resourceDirectories, resourceFiles, scriptSource, writeOwnershipManifest, REQUIRED, findTool, stageMakensis, buildInstaller,
   PRODUCT, INSTALL_ID, EXE_NAME, PUBLISHER, RUN_NAME, RUN_KEY, APPROVED_KEY, AT_LOGIN_ARGS, CLEANUP_FLAG,
   LEGACY_RUN_NAME, LEGACY_AT_LOGIN_ARGS, LEGACY_EXE_NAMES, LEGACY_INSTALL_IDS, LEGACY_DISPLAY_NAMES, LEGACY_HOME_DIRECTORY, HOME_DIRECTORY, MIGRATE_HOME_FLAG,
   LEGACY_WORKER_DIRECTORY, LEGACY_WORKER_FILE, LEGACY_PAYLOAD_PREFIXES, payloadPaths,
-  setupReference, setupAssetName, releasePage, FALLBACK_SCRIPT,
   WEBVIEW2_RUNTIME_GUID, WEBVIEW2_UPDATE_KEY, WEBVIEW2_DOWNLOAD_PAGE,
 } from './installer.mjs'
 // install-update.cjs 是真正动 fs 的那一半（#27-D 的迁移与删旧）；require 它不会
 // 触发它的 CLI 主分支（require.main !== module），所以本机上任何目录都不会被碰。
 const updater = createRequire(import.meta.url)('./install-update.cjs')
+// 原生安装器可能结束运行实例；仅允许在专用隔离机器显式启用。
+const nativeInstallerSkip = process.platform !== 'win32' || process.env.FISH_DOCK_ISOLATED_INSTALL_TESTS !== '1'
+  ? '原生安装器测试仅限隔离机器，需显式设置 FISH_DOCK_ISOLATED_INSTALL_TESTS=1'
+  : false
 
 import { REQUIRED as RUNTIME_REQUIRED, writeManifest } from './prepare-installer.mjs'
 
@@ -236,12 +238,15 @@ test('Setup 在开始安装前检测系统 Evergreen WebView2，缺了就提示�
     assert.match(init, /\$3 != ""/)
     assert.match(init, /\$3 != "0\.0\.0\.0"/)
     assert.match(init, /\$\{FileExists\} "\$4\\\$3\\msedgewebview2\.exe"/)
-    // 提示 + 官方下载页 + 中止本次安装（静默安装不弹窗，但同样以非零码退出）。
+    // 提示 + 官方下载页 + 中止本次安装。2.2.0：`/S` 下也必须弹（不带 /SD），
+    // 否则静默更新缺运行时只剩一行看不见的 DetailPrint。
     assert.match(init, /MessageBox MB_YESNO\|MB_ICONEXCLAMATION[^\n]*WebView2 运行时/)
     assert.ok(init.includes(WEBVIEW2_DOWNLOAD_PAGE), '提示里要有官方下载页')
     assert.match(init, /ExecShell "open" "https:\/\/developer\.microsoft\.com\/microsoft-edge\/webview2\/"/)
     assert.match(init, /SetErrorLevel 1\r?\n\s*Quit/)
-    assert.match(init, /IfSilent fishDockWebViewMissingSilent/)
+    assert.doesNotMatch(init, /IfSilent/, '不许再把静默路径降级成看不见的 DetailPrint')
+    assert.doesNotMatch(init, /fishDockWebViewMissingSilent/)
+    assert.doesNotMatch(init, /MessageBox[^\n]*\/SD/, '缺依赖的提示在 /S 下必须真的可见')
     // 检测在欢迎页与安装段之前：.onInit 本身就在它们前面。
     assert.ok(text.indexOf('Function .onInit') < text.indexOf('!insertmacro MUI_PAGE_WELCOME'))
     assert.ok(text.indexOf('Function .onInit') < text.indexOf('Section "${PRODUCT}" SecInstall'))
@@ -654,55 +659,234 @@ test('卸载按安装时的选择删桌面快捷方式，不碰用户自己建�
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
-// ── 2.1.8：精简更新包失败后的兜底 ────────────────────────────────────────
-// 现场：Update 包的事务失败时只弹一句「更新未完成」，用户除了自己去找安装包没有
-// 第二条路。现在失败分支自动取同版本的完整安装包、校验摘要、交给它覆盖安装。
-test('更新包失败时自动下载并运行完整安装包，安装包没有这条分支', async () => {
+// ── 2.2.0：精简更新包不再有「下载 Setup 兜底」 ────────────────────────────
+// 规格 §8：安装事务失败后只回滚并明确报错，旧版继续可用；不再由增量包再去下
+// 一个 Setup。构建参数与脚本文案一并移除——旧的 --setup/--page 即使被外部脚本
+// 继续传进来，也不许再生成任何兜底分支。
+test('2.2.0 更新包不再带下载 Setup 的兜底，失败只回滚并明确报错', async () => {
   const env = await fakeResources()
   try {
     const fallback = { url: 'https://example.test/FISH-Dock-Setup-0.3.3.exe', sha256: 'a'.repeat(64), bytes: 12345678, page: 'https://example.test/v0.3.3' }
     const update = (await script(env, { payloadFiles: ['node/node.exe'], fallback })).text
-    assert.match(update, /!define SETUP_SHA256 "a{64}"/)
-    assert.match(update, /!define SETUP_BYTES 12345678/)
-    assert.match(update, /File \/oname=update-fallback\.ps1 "\$\{FALLBACK\}"/, '兜底脚本要进包')
-    assert.match(update, /CopyFiles \/SILENT "\$PLUGINSDIR\\bootstrap\\update-fallback\.ps1" "\$TEMP\\fish-dock-update-fallback\.ps1"/, '先搬到 TEMP，暂存目录随后会被删')
-    assert.match(update, /nsExec::ExecToLog[^\n]*fish-dock-update-fallback\.ps1[^\n]*-Sha256 "a{64}"/)
-    assert.match(update, /nsExec::ExecToLog[^\n]*-Version "0\.3\.3"/, '版本串要传给兜底窗口')
-    assert.match(update, /SetErrorLevel 0\r?\n\s*Quit/, '兜底窗口把 Setup 拉起来后，这个安装器就该退出')
-    assert.match(update, /手动下载：https:\/\/example\.test\/v0\.3\.3/, '兜底也失败时要给出下载页')
-    // 兜底只在事务失败分支里：正常的成功路径不许提前退出。
-    const failure = update.slice(update.indexOf('$0 != 0'))
-    assert.match(failure.slice(0, 1200), /update-fallback\.ps1/)
-
-    const setup = (await script(env)).text
-    assert.doesNotMatch(setup, /update-fallback\.ps1/, '完整安装包没有更小的可退，不带兜底')
-    assert.match(setup, /更新未完成，旧版本已保留或恢复。请查看安装详情后重试。/)
+    assert.doesNotMatch(update, /update-fallback/i, '旧参数不许再把兜底脚本带进包')
+    assert.doesNotMatch(update, /SETUP_(URL|SHA256|BYTES|PAGE)/, '兜底的地址与摘要定义一并移除')
+    assert.doesNotMatch(update, /自动(下载|改用)完整安装包/, '文案不再承诺自动换成完整安装包')
+    assert.match(update, /中途失败会整体回滚，旧版本始终可以继续使用/)
+    // 2.2.0：失败分支按事务的真实结果选措辞（未写入 / 已回滚 / 回滚失败），
+    // 且 /S 下不许用 /SD 把消息框吞掉。
+    assert.match(update, /FileOpen \$1 "\$INSTDIR\\update-failed" r/)
+    for (const state of ['not-written', 'rolled-back', 'rollback-failed']) assert.ok(update.includes(state), `失败状态要有 ${state}`)
+    assert.match(update, /更新未开始：安装目录里的文件没有被改动/)
+    assert.match(update, /本次改动已回滚，旧版本文件已恢复/)
+    assert.match(update, /自动回滚尚未成功。请不要删除安装目录/)
+    assert.match(update, /MessageBox MB_OK\|MB_ICONSTOP "\$3"\r?\n/)
+    assert.doesNotMatch(update.slice(update.indexOf('fishDockUpdateFailedSay'), update.indexOf('SetErrorLevel 1')), /\/SD/, '失败提示不许带 /SD')
+    assert.match(update, /SetErrorLevel 1\r?\n\s*Abort/, '失败就明确结束，不再拉起另一个安装器')
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
-test('兜底的完整安装包信息从这次构建出来的 Setup 文件本身取', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'fish-setup-ref-'))
+test('2.2.0 过渡版仍能构建以 2.1.0 为基线的增量 Update 包，包内没有兜底脚本', async () => {
+  const makensis = makensisTool()
+  assert.ok(existsSync(makensis), `缺少离线 NSIS：${makensis}`)
+  const env = await fakeResources()
   try {
-    const file = path.join(dir, setupAssetName('2.1.8'))
-    const body = Buffer.from('not really an installer, but its bytes are what matter')
-    await writeFile(file, body)
-    const reference = await setupReference({ version: '2.1.8', setup: file })
-    assert.equal(reference.bytes, body.length)
-    assert.equal(reference.sha256, createHash('sha256').update(body).digest('hex'))
-    assert.match(reference.url, /releases\/download\/v2\.1\.8\/FISH-Dock-Setup-2\.1\.8\.exe$/)
-    assert.equal(reference.page, releasePage('2.1.8'))
-    assert.equal(await setupReference({ version: '2.1.8' }), null, '没有 Setup 就不写兜底')
-    await assert.rejects(() => setupReference({ version: '2.1.8', setup: path.join(dir, 'missing.exe') }), /读不到/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
+    // 2.2.0 是最后一个双包过渡版：基线固定 2.1.0（见上面的基线用例）。
+    const baselineManifest = path.join(env.dir, 'baseline-2.1.0.json')
+    await writeFile(baselineManifest, JSON.stringify({ schema: 1, product: PRODUCT, version: '2.1.0', files: [] }))
+    const outFile = path.join(env.dir, 'FISH-Dock-Update-0.3.3.exe')
+    // 外部双包脚本在 2.2.0 之前还会传 setup/page；传递过来也不得再生成兜底分支。
+    const fakeSetup = path.join(env.dir, 'FISH-Dock-Setup-0.3.3.exe')
+    await writeFile(fakeSetup, 'setup bytes that must not be referenced')
+    const result = await buildInstaller({
+      version: '0.3.3', app: env.app, resources: env.resources, outFile, makensis,
+      baselineManifest, setup: fakeSetup, page: 'https://example.test/v0.3.3',
+    })
+    assert.ok((await stat(result.outFile)).size > 100_000, '增量包要真的编出来')
+    const generated = await readFile(result.scriptPath, 'utf8')
+    assert.doesNotMatch(generated, /update-fallback/i)
+    assert.doesNotMatch(generated, /SETUP_(URL|SHA256|BYTES|PAGE)/)
+    assert.match(generated, /FileOpen \$1 "\$INSTDIR\\update-failed" r/)
+    assert.doesNotMatch(generated, /更新未完成，旧版本已保留或恢复/, '不再一律宣称旧版本已恢复')
+    // 归属清单写下了本次载荷（基线为空 → 全部文件都在载荷里）。
+    const ownership = JSON.parse(await readFile(path.join(env.dir, 'install-manifest-0.3.3.json'), 'utf8'))
+    assert.ok(Array.isArray(ownership.payload) && ownership.payload.length > 0, '过渡版仍要写出增量载荷')
+  } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
-test('兜底脚本是带 BOM 的 UTF-8，参数契约与安装器一致', async () => {
-  const bytes = readFileSync(FALLBACK_SCRIPT)
-  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'Windows PowerShell 5.1 只有见到 BOM 才按 UTF-8 读中文')
-  const text = bytes.toString('utf8')
-  for (const name of ['-Url', '-Sha256', '-Version', '-Bytes', '-Page']) assert.match(text, new RegExp(`\\$${name.slice(1)}`), name)
-  assert.match(text, /\[System\.Security\.Cryptography\.SHA256\]::Create\(\)/, '下载完必须核对摘要（用 .NET，不依赖 Get-FileHash 那个模块）')
-  assert.match(text, /UseProxy = \$useProxy/, '直连与系统代理两条路都要能走')
-  assert.match(text, /@\(\$false, \$true\)/, '先直连，失败再试系统代理')
-  assert.match(text, /Range/, '中断要能续传')
+// ── 2.2.0：`/S` 失败的用户可见出口（真实运行，不只读源码字符串）──────────
+// 判据不是「进程还活着」（挂起也会活着），而是 Windows UI Automation 枚举出
+// 真实顶层窗口：拿到标题、控件文本与 IsOffscreen，断言错误框确实可见、措辞符合
+// 实情，再用 WM_CLOSE 自动关掉，最后核对安装器退出码与安装目录未被改动。
+// UI Automation 走的是 Windows 自带客户端库，不需要 WMI/CIM。
+const UIA_PROBE = `param([int]$TargetPid, [string]$OutFile)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+Add-Type -Namespace FishDockNative -Name User32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam); [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr hWnd, int id);'
+$result = [ordered]@{ found = $false; title = ''; texts = @(); offscreen = $false; closed = $false; exited = $false; exitCode = $null }
+$deadline = (Get-Date).AddSeconds(12)
+while ((Get-Date) -lt $deadline) {
+  $p = $null
+  try { $p = [System.Diagnostics.Process]::GetProcessById($TargetPid) } catch {}
+  if ($null -eq $p) { $result.exited = $true; break }
+  $p.Refresh()
+  if ($p.HasExited) { $result.exited = $true; $result.exitCode = $p.ExitCode; break }
+  $root = [System.Windows.Automation.AutomationElement]::RootElement
+  $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $TargetPid)
+  $win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $cond)
+  if ($null -ne $win) {
+    $result.found = $true
+    $result.title = $win.Current.Name
+    $result.offscreen = [bool]$win.Current.IsOffscreen
+    $names = @()
+    foreach ($e in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+      if ($e.Current.Name) { $names += $e.Current.Name }
+    }
+    $result.texts = $names
+    $hwnd = [IntPtr]$win.Current.NativeWindowHandle
+    # Yes/No 对话框没有 Cancel，Windows 可以忽略 WM_CLOSE；明确点击 No，避免误开网页。
+    if (($names -join ' ') -match 'WebView2') {
+      [FishDockNative.User32]::PostMessage($hwnd, 0x0111, [IntPtr]7, [IntPtr]::Zero) | Out-Null
+    } else {
+      [FishDockNative.User32]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    }
+    $result.closed = $true
+    if ($p.WaitForExit(8000)) { $result.exited = $true; $result.exitCode = $p.ExitCode } else { $result.exited = $false }
+    break
+  }
+  Start-Sleep -Milliseconds 250
+}
+[IO.File]::WriteAllText($OutFile, ($result | ConvertTo-Json -Compress -Depth 4))
+`
+/// 启动 /S 安装器，等它自己结束；返回进程对象（用 exitCode 判结果）。
+function spawnSetup(exe) {
+  const child = spawn(exe, ['/S'], { stdio: 'ignore', windowsHide: false })
+  return child
+}
+async function exitOf(child, ms = 20000) {
+  if (child.exitCode !== null) return child.exitCode
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(null), ms)
+    child.once('exit', code => { clearTimeout(timer); resolve(code) })
+  })
+}
+function stopPid(pid) {
+  const cmd = 'Stop-Process -Id ' + pid + ' -Force -ErrorAction SilentlyContinue'
+  spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { stdio: 'ignore', windowsHide: true, timeout: 15000 })
+}
+/// 真实弹框取证：窗口标题、控件文本、可见性、自动关闭与退出码。
+async function visibleDialog(child, dir) {
+  const scriptPath = path.join(dir, `uia-${child.pid}.ps1`)
+  const outPath = path.join(dir, `uia-${child.pid}.json`)
+  await writeFile(scriptPath, '\ufeff' + UIA_PROBE, 'utf8')
+  const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-TargetPid', String(child.pid), '-OutFile', outPath], { stdio: 'inherit', windowsHide: true, timeout: 45000 })
+  try { return JSON.parse(await readFile(outPath, 'utf8')) } catch { return { found: false, exited: false, note: `powershell exit=${run.status} ${run.error?.message ?? ''}` } }
+}
+function overrideInstallDir(text, target) {
+  const dir = target.replaceAll('/', '\\')
+  const out = text.replace(/^InstallDir .*$/m, `InstallDir "${dir}"`).replace(/^InstallDirRegKey .*\r?\n/m, '')
+  assert.ok(out.includes(`InstallDir "${dir}"`), '安装目录要指到隔离夹具')
+  return out
+}
+
+test('2.2.0 静默事务失败：/S 下弹出可见错误并按实情措辞，安装目录未被改动', { skip: nativeInstallerSkip, timeout: 180000 }, async () => {
+  const makensis = makensisTool()
+  assert.ok(existsSync(makensis), `缺少离线 NSIS：${makensis}`)
+  const env = await fakeResources()
+  const target = path.join(env.dir, '安装 目录')
+  let child = null
+  try {
+    const outFile = path.join(env.dir, 'FISH-Dock-Setup-0.3.3.exe')
+    const { text } = await script(env, { outFile })
+    // 归属清单先按原样写好，再把一份资源改掉：makensis 打进包的字节与清单摘要不符，
+    // 事务会在提交前失败。即使本机 CIM 被拒（install-stop.ps1 先失败），失败也发生在
+    // 改动任何目标文件之前——两条路都该走 not-written 措辞。
+    await writeFile(path.join(env.resources, 'licenses/NOTICE.txt'), 'tampered after the ownership manifest was written')
+    const nsi = path.join(env.dir, 'failure.nsi')
+    await writeFile(nsi, scriptSource(overrideInstallDir(text, target)))
+    assert.equal(spawnSync(makensis, ['/V2', nsi], { stdio: 'inherit', windowsHide: true }).status, 0)
+    child = spawnSetup(outFile)
+    assert.ok(child.pid > 0)
+    const seen = await visibleDialog(child, env.dir)
+    assert.equal(seen.found, true, `应能在 /S 下枚举到可见错误框：${JSON.stringify(seen)}`)
+    assert.match(seen.title, /FISH Dock/, '原生错误框属于本安装器')
+    assert.equal(seen.offscreen, false, '错误框不能是离屏/隐藏窗口')
+    const words = seen.texts.join('\n')
+    assert.match(words, /更新未开始/, '文件没被改动时要说「未开始/未改动」')
+    assert.doesNotMatch(words, /已恢复/, '没动过文件不许谎称旧版本已恢复')
+    assert.equal(seen.closed, true, '错误框要能被用户关掉')
+    assert.equal(seen.exited, true, '关掉错误框后安装器应结束')
+    assert.equal(await exitOf(child), 1, '失败要给出非零退出码')
+    // 回滚语义：没有主程序、没有归属清单/状态文件留下半套安装。
+    for (const name of ['FISH-Dock.exe', 'install-manifest.json', 'install-state.json']) {
+      assert.equal(existsSync(path.join(target, name)), false, `失败后不该留下 ${name}`)
+    }
+    assert.equal(existsSync(path.join(target, 'update-failed')), false, '失败标记被安装器读走后不该留在安装目录里')
+  } finally {
+    if (child && child.exitCode === null) stopPid(child.pid)
+    await rm(env.dir, { recursive: true, force: true })
+  }
+})
+
+test('2.2.0 缺系统 WebView2 时静默 Setup 也弹可见错误（不再只写 DetailPrint）', { skip: nativeInstallerSkip, timeout: 180000 }, async () => {
+  const makensis = makensisTool()
+  assert.ok(existsSync(makensis), `缺少离线 NSIS：${makensis}`)
+  const env = await fakeResources()
+  const target = path.join(env.dir, '缺运行时 目录')
+  let child = null
+  try {
+    const outFile = path.join(env.dir, 'FISH-Dock-Setup-0.3.3.exe')
+    const { text } = await script(env, { outFile })
+    // 换成一个必然不存在的运行时 GUID：.onInit 的检测就会判「缺」。
+    const missing = text.replaceAll(WEBVIEW2_RUNTIME_GUID, '{00000000-0000-0000-0000-000000000000}')
+    assert.notEqual(missing, text)
+    const nsi = path.join(env.dir, 'webview-missing.nsi')
+    await writeFile(nsi, scriptSource(overrideInstallDir(missing, target)))
+    assert.equal(spawnSync(makensis, ['/V2', nsi], { stdio: 'inherit', windowsHide: true }).status, 0)
+    child = spawnSetup(outFile)
+    const seen = await visibleDialog(child, env.dir)
+    assert.equal(seen.found, true, `缺依赖时 /S 下也要有可见错误框：${JSON.stringify(seen)}`)
+    assert.equal(seen.offscreen, false)
+    const words = seen.texts.join('\n')
+    assert.match(words, /WebView2/)
+    assert.match(words, /请先安装它/)
+    assert.match(words, /webview2/)
+    assert.equal(seen.exited, true)
+    assert.equal(await exitOf(child), 1)
+    assert.equal(existsSync(path.join(target, 'FISH-Dock.exe')), false, '缺依赖时一个安装文件都不写')
+  } finally {
+    if (child && child.exitCode === null) stopPid(child.pid)
+    await rm(env.dir, { recursive: true, force: true })
+  }
+})
+
+test('2.2.0 正常静默安装仍然全程无弹框且成功退出', { skip: nativeInstallerSkip, timeout: 180000 }, async () => {
+  const makensis = makensisTool()
+  assert.ok(existsSync(makensis), `缺少离线 NSIS：${makensis}`)
+  const env = await fakeResources()
+  const target = path.join(env.dir, '成功 目录')
+  let child = null
+  try {
+    const outFile = path.join(env.dir, 'FISH-Dock-Setup-0.3.3.exe')
+    const { text } = await script(env, { outFile })
+    // 成功路径的行为夹具：把真实事务替换成「返回 0」（本机 CIM 被拒，真实事务
+    // 无法在沙箱里成功跑完；事务本身的成功路径由 install-update.test.mjs 覆盖），
+    // 然后截断在安装目录动作之前，确保不写真实注册表/快捷方式。
+    let source = overrideInstallDir(text, target).replace(/(\r?\n\s*)nsExec::ExecToLog '[^']*install-update\.cjs[^']*'\s*\r?\n\s*Pop \$0/, '$1StrCpy $0 0')
+    assert.match(source, /StrCpy \$0 0/)
+    const cut = source.indexOf('  SetOutPath "$INSTDIR"\n')
+    assert.ok(cut > 0)
+    source = `${source.slice(0, cut)}  SetOutPath "$INSTDIR"\r\n  RMDir /r "$StageDir"\r\nSectionEnd\r\n`
+    const nsi = path.join(env.dir, 'success.nsi')
+    await writeFile(nsi, scriptSource(source))
+    assert.equal(spawnSync(makensis, ['/V2', nsi], { stdio: 'inherit', windowsHide: true }).status, 0)
+    child = spawnSetup(outFile)
+    const seen = await visibleDialog(child, env.dir)
+    assert.equal(seen.found, false, `成功安装不许弹框：${JSON.stringify(seen)}`)
+    assert.equal(await exitOf(child), 0, '成功静默安装要 0 退出')
+    assert.equal(existsSync(path.join(target, 'update-failed')), false, '成功时不该有失败标记')
+  } finally {
+    if (child && child.exitCode === null) stopPid(child.pid)
+    await rm(env.dir, { recursive: true, force: true })
+  }
 })

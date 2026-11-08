@@ -13,6 +13,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // require 不会触发 install-update.cjs 的 CLI 主分支（require.main !== module），
 // 所以本机的 %LOCALAPPDATA% 在任何用例里都不会被读到、更不会被删。
 const updater = createRequire(import.meta.url)('./install-update.cjs')
+// 完整安装器会执行停进程逻辑，只能在专用隔离机器显式运行。
+const nativeInstallerSkip = process.platform !== 'win32' || process.env.FISH_DOCK_ISOLATED_INSTALL_TESTS !== '1'
+  ? '真实升级测试仅限隔离机器，需显式设置 FISH_DOCK_ISOLATED_INSTALL_TESTS=1'
+  : false
 
 // ── #27-D 用户数据目录迁移的临时夹具 ─────────────────────────────────────
 // 目录名必须是 DSH-FISH 与 FISH Dock：migrateHome 只认这一对名字，并要求两者在
@@ -99,7 +103,7 @@ test('资源直接解压到目标卷隔离暂存，Node 引导程序单独运行
   assert.match(source, /RMDir \/r "\$StageDir"/)
 })
 
-test('NSIS 通过真实 Node 和 PowerShell 5.1 完成中文路径安装与覆盖', { skip: process.platform !== 'win32', timeout: 120000 }, () => {
+test('NSIS 通过真实 Node 和 PowerShell 5.1 完成中文路径安装与覆盖', { skip: nativeInstallerSkip, timeout: 120000 }, () => {
   const results = path.resolve(root, '../.test-results')
   fs.mkdirSync(results, { recursive: true })
   const fixture = fs.mkdtempSync(path.join(results, 'installer-runtime-'))
@@ -319,7 +323,7 @@ test('#27-D 目录树里有链接或非普通文件时拒绝迁移，不跟着�
 // 摆成旧版本的样子（DSH-FISH.exe + wakuwaku.exe + 旧归属清单），装完只该剩
 // FISH-Dock.exe。为了绝不碰本机真实注册表与用户数据，脚本截断在 SetOutPath 之后
 // （不写卸载键、不建快捷方式），并剥掉 .onInit 与 --migrate-home。
-test('#27 P2 ④：覆盖升级后安装目录只有 FISH-Dock.exe，旧 exe 一个不留', { skip: process.platform !== 'win32', timeout: 120000 }, async () => {
+test('#27 P2 ④：覆盖升级后安装目录只有 FISH-Dock.exe，旧 exe 一个不留', { skip: nativeInstallerSkip, timeout: 120000 }, async () => {
   const results = path.resolve(root, '../.test-results')
   fs.mkdirSync(results, { recursive: true })
   const fixture = fs.mkdtempSync(path.join(results, 'installer-exe-'))
@@ -497,7 +501,7 @@ test('2.1.9 Setup 覆盖 2.1.8：提交阶段锁定安装清单时整体回滚�
       },
     }
     assert.throws(() => updater.update(f.stage, f.installRoot, locked), /模拟安装清单被占用/)
-    assert.deepEqual(snapshot(f.installRoot), before, '失败后目录树必须与更新前逐条一致（WebView2 旧文件回滚，不留事务残骸）')
+    assert.deepEqual(snapshot(f.installRoot), { ...before, [updater.FAILED]: 'rolled-back' }, '旧受管文件全部恢复，唯一新增项是供安装器读取的真实回滚状态')
     assert.deepEqual(snapshot(path.join(f.base, 'FISH Dock')), userBefore, '用户数据一个字节都不能动')
     assert.equal(fs.existsSync(path.join(f.installRoot, '.fish-install-transaction')), false)
   } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
@@ -532,7 +536,7 @@ test('2.1.9 Setup 覆盖 2.1.8：旧 resources/webview2 运行时文件被占用
     assert.match(failure.message, /模拟旧 WebView2 运行时文件被占用/)
     assert.equal(attempts, 1, '注入点必须命中：旧运行时文件要在事务里被移走时失败')
     // 已移走的旧文件、旧 exe 与归属清单全部回到原位；新版一个字节都不留。
-    assert.deepEqual(snapshot(f.installRoot), before, '失败后目录树必须与更新前逐条一致')
+    assert.deepEqual(snapshot(f.installRoot), { ...before, [updater.FAILED]: 'rolled-back' }, '旧受管文件全部恢复，唯一新增项是供安装器读取的真实回滚状态')
     assert.equal(fs.readFileSync(lockedFile, 'utf8'), 'MZ fixed runtime 155.0.4283.62', '被占用的旧运行时文件回到原位')
     assert.equal(fs.readFileSync(path.join(f.installRoot, 'resources/licenses/WebView2-Fixed-Version.html'), 'utf8'),
       '<html>fixed version terms</html>', '失败前已经移进事务暂存的旧许可也要还原')
