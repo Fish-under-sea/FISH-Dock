@@ -1,8 +1,8 @@
 <p align="center"><img src="src-tauri/icons/fish-dock.png" width="112" alt="FISH Dock 图标"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">AI 会话有处停靠，模型连接集中管理。</p>
-<p align="center"><strong>2.0.3</strong> · Windows x64 · MIT 代码许可</p>
-<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.3">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-2.0.3.md">更新记录</a></p>
+<p align="center"><strong>2.1.9</strong> · Windows x64 · MIT 代码许可</p>
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-2.1.9.md">更新记录</a></p>
 
 > **这是二次开发集成，不是上游官方发行版。** FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 的桌面与 AI 会话体验；模型能力由 Magpie 插件提供，插件、插件包与商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。原作者、版权和许可证见「来源与致谢」。
 
@@ -19,6 +19,10 @@
 | 保存模式、位置与屏幕，每次启动播放入场 | 按需启动独立服务，退出时回收自己的进程 |
 
 **「本地」不等于本机离线推理。** 工作台、代理和数据在本机运行；模型请求仍发送到所选渠道的服务商。资格、额度、计费和可用性由服务商决定。本项目不承诺永久免费、无限额度或绕过服务限制。
+
+## 2.1.9 更新
+
+本版只升级 Dock 宿主，插件不变。纳入 #76/#77 子灵动岛文件暂存与原生拖放，以及 #78 系统 Evergreen WebView2 改造。Setup 在安装前检查系统运行时，缺失时提示官方下载页并中止；Update 自身不检测、不提示、不安装 WebView2。覆盖升级按安装清单事务清理旧固定版运行时和许可文件，失败则回滚，并保留 `%LOCALAPPDATA%/FISH Dock/webview` 用户资料与配置。完整变化、包摘要和验证边界见 [2.1.9 更新记录](docs/release-2.1.9.md)。
 
 ## 2.0.0 更新
 
@@ -42,7 +46,7 @@
 - 内化应用确认弹窗；移除旧自动锁定逻辑，验证期间只保留临时焦点状态。
 - 修复全屏退出恢复、主动唤醒及审批显示；保存手动置顶与锁定偏好。
 - 插件中心和「关于」支持检查更新，目录含 GitHub API 回退，包大小自动换算单位。
-- 内置 Windhawk 与编译器；保留原生插件管理页、标签拖动及单双栏布局。
+- 可连接用户自行安装的 Windhawk；保留原生插件管理页、标签拖动及单双栏布局。
 
 完整变化和验证边界见 [2.0.0 更新记录](docs/release-2.0.0.md)。
 
@@ -50,10 +54,10 @@
 
 适用平台：**Windows 10/11 x64**。系统任务栏集成主要面向 Windows 11；其他系统版本与第三方任务栏软件组合需要单独验证。
 
-1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.3) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-2.0.3.exe` 用于首装或修复；`FISH-Dock-Update-2.0.3.exe` 适用于基础资源完整的已有安装。
+1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-2.1.9.exe` 用于首装或修复；`FISH-Dock-Update-2.1.9.exe` 适用于基础资源完整的已有安装。
 2. 从托盘完全退出旧版，再运行安装器并选择目录。新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock`；已有安装沿用登记目录覆盖升级，不自动搬迁。
-3. 通过桌面或开始菜单启动 **FISH Dock**。Node.js、固定版 WebView2、Windhawk 与编译器随包安装；业务插件另行下载。
-4. 首次启动需要确认运行时许可并校验资源；后续使用安装目录中的文件，不重复解压整套依赖。
+3. 通过桌面或开始菜单启动 **FISH Dock**。安装包包含 Node.js；WebView2 使用系统 Evergreen 运行时，Windhawk 与业务插件需另行准备。首次安装若缺少 Evergreen，Setup 会提示官方下载页并中止；Update 本身不检测依赖。
+4. 首次启动会校验运行资源，不再要求确认随包固定版 WebView2 许可；后续直接使用安装目录中的文件。
 
 **安装器尚未进行 Authenticode 代码签名。** Windows 可能提示未知发布者或 SmartScreen。改名、换图标、自签名都不能可靠消除信誉提示。仅使用可信来源，核对摘要，不要关闭系统防护、导入不明根证书或绕过组织策略。通常不要求以管理员身份运行。
 
@@ -95,7 +99,7 @@ Agent、邮件和第三方插件仍需要各自客户端、账号和权限；安
 | 主程序和内置依赖 | 用户选择的安装目录，新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock` |
 | 设置、宠物、布局与日志 | 数据根下 `host` 命名空间 |
 | WebView2 用户数据 | 数据根下 `host/webview` |
-| 许可确认及资源校验状态 | 系统用户运行时状态目录 |
+| 资源校验状态 | 系统用户运行时状态目录 |
 | 插件配置、凭据与身份 | 数据根下 `.fishplugin-*` 或 `.plugin.<publisher>.<name>`，按分类隔离 |
 
 内部程序名 `DSH-FISH.exe`、应用标识、卸载登记和旧数据路径保留兼容，不代表显示名称未更新。卸载只移除自身安装文件与登记，保留用户数据；只清理确认属于本安装的自启动任务。手动删除数据前应先备份。
@@ -118,13 +122,13 @@ FISH-Dock/
 在桌面源码目录执行；构建宿主不再需要旧模型服务源码树：
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <运行时缓存> --out <新的资源目录> --version 2.0.1
+node scripts/prepare-installer.mjs --downloads <运行时缓存> --out <新的资源目录> --version 2.1.9
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <资源目录> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
 ```
 
-版本和官方摘要锁定在 [runtime-sources.json](scripts/runtime-sources.json)。测试证据、环境限制和历史包见 [安装版构建记录](docs/installer-build.md)。安装包不含模型权重，也不含开发 Dock 所需的 Rust／MSVC 环境；内置 Windhawk 的 LLVM-MinGW 编译器用于模组编译。
+版本和官方摘要锁定在 [runtime-sources.json](scripts/runtime-sources.json)。测试证据、环境限制和历史包见 [安装版构建记录](docs/installer-build.md)。安装包不含模型权重，也不含开发 Dock 所需的 Rust／MSVC 环境；Windhawk 与 LLVM-MinGW 编译器自 2.1.2 起不再随包。
 
 ## 来源与致谢
 
@@ -135,7 +139,7 @@ node --test "test/*.test.js" "scripts/*.test.mjs"
 
 **Fish-under-sea** 负责 FISH Dock 集成与维护。新增集成代码使用 MIT，上游版权声明原样保留。不能将全部功能描述为 FISH Dock 原创，也不应让上游维护者承担本发行版的支持责任。
 
-应用沿用用户提供的蓝发角色原图标，未重新绘制，也不宣称其为原创 MIT 素材。宠物精灵图、应用图标和图库资源不自动适用源码的 MIT 许可；再分发前应核实素材授权。Claude 小姐原角色设计来自 **ZipZipPipe**，像素二创来自 **zhoupengjie**。Node.js、WebView2、fflate 及其他第三方组件保留各自许可。
+应用沿用用户提供的蓝发角色原图标，未重新绘制，也不宣称其为原创 MIT 素材。宠物精灵图、应用图标和图库资源不自动适用源码的 MIT 许可；再分发前应核实素材授权。Claude 小姐原角色设计来自 **ZipZipPipe**，像素二创来自 **zhoupengjie**。Node.js 许可随资源提供；WebView2 使用系统 Evergreen 运行时，固定版运行时与其许可自 2.1.9 起不再随包。fflate 及其他第三方组件保留各自许可。
 
 ## 反馈与安全
 

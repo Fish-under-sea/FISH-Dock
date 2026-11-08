@@ -3,7 +3,7 @@
 # 包名与二进制名不同是刻意的：包名要 Cargo 合法（小写连字符），而 Windows 上用户
 # 看到、任务计划/注册表/快捷方式指向的必须是 FISH-Dock.exe。
 name = "fish-dock"
-version = "2.1.8"
+version = "2.1.9"
 edition = "2021"
 license = "MIT"
 authors = ["Pengjie Zhou"]
@@ -86,9 +86,8 @@ members = ["crates/agent-core"]
 default = ["custom-protocol"]
 # Serve the pages from the binary; without it Tauri waits for a dev server.
 custom-protocol = ["tauri/custom-protocol"]
-# The release the installer delivers: Node, the fixed-version WebView2 runtime
-# and the local model service are expanded beside the program at install time
-# and used in place (runtime.rs). The program itself embeds no archive.
+# 安装发行版：Node 在安装时展开到程序旁并原位使用（runtime.rs）。
+# 2.1.9 起不再携带固定版 WebView2，改用系统 Evergreen；程序本身不嵌入资源压缩包。
 installed = []
 
 [profile.release]

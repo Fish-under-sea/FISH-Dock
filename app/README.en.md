@@ -1,8 +1,8 @@
 <p align="center"><img src="src-tauri/icons/fish-dock.png" width="112" alt="FISH Dock icon"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">A place for AI sessions to dock, and model connections to come together.</p>
-<p align="center"><strong>2.0.3</strong> · Windows x64 · MIT-licensed code</p>
-<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.3">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-2.0.3.md">Release notes</a></p>
+<p align="center"><strong>2.1.9</strong> · Windows x64 · MIT-licensed code</p>
+<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-2.1.9.md">Release notes</a></p>
 
 > **A derivative integration, not an official upstream release.** FISH Dock builds on the desktop and AI-session experience of [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku); model capabilities are provided by the Magpie plugin, with plugins, plugin packages and the store catalog maintained by [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Original authors, copyrights, and licenses are credited below.
 
@@ -19,6 +19,10 @@ This repository contains the desktop host, plugin SDK, storage and runtime manag
 | Remembered mode, position, display, and startup entrance | An on-demand service with an owned process lifecycle |
 
 **Local does not mean offline model inference.** The workspace, proxy, and stored data run on your computer. Model requests still go to the selected provider. Eligibility, quotas, pricing, and availability are controlled by those providers. This project does not promise unlimited usage, permanently free access, or bypasses for provider restrictions.
+
+## New in 2.1.9
+
+This host-only release leaves plugin versions unchanged. It includes child-island file staging and native drop targets (#76/#77), and switches to the system Evergreen WebView2 Runtime (#78). Setup checks for the runtime before installation and offers the official download page if it is missing, then exits. Update itself does not check, prompt for, or install WebView2. Upgrades transactionally remove the old installer-owned Fixed Version runtime and license files; failures roll back, and `%LOCALAPPDATA%/FISH Dock/webview` user data and settings remain intact. See the [2.1.9 release notes](docs/release-2.1.9.md) for package hashes and verification limits.
 
 ## New in 2.0.0
 
@@ -42,7 +46,7 @@ These existing capabilities are retained:
 - In-window confirmations and temporary authentication focus, preserving manual pin/top preferences.
 - Fullscreen recovery, explicit wake-up and approval visibility while fullscreen.
 - About/plugin update checks, catalog API fallback and readable KB/MB/GB package sizes.
-- Bundled Windhawk/compiler, native management pages, draggable tabs and configurable columns.
+- Connects to Windhawk installed by the user; retains native management pages, draggable tabs and configurable columns.
 
 See the [2.0.0 release notes](docs/release-2.0.0.md) for verification scope.
 
@@ -50,10 +54,10 @@ See the [2.0.0 release notes](docs/release-2.0.0.md) for verification scope.
 
 Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows 11; other Windows releases and third-party taskbar software require separate verification.
 
-1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.3) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-2.0.3.exe` is for first installation or repair; `FISH-Dock-Update-2.0.3.exe` is for an existing installation with intact base resources.
+1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-2.1.9.exe` is for first installation or repair; `FISH-Dock-Update-2.1.9.exe` is for an existing installation with intact base resources.
 2. Fully exit the previous version from the tray. Run the installer and choose a destination. Fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock`; upgrades reuse the registered directory instead of moving it.
-3. Start **FISH Dock** from the desktop or Start menu. Node.js, Fixed Version WebView2, Windhawk, its compiler, and license notices are bundled. Business plugins are downloaded separately.
-4. The first launch confirms runtime terms and verifies resources. Later launches use installed files without repeatedly extracting the entire runtime.
+3. Start **FISH Dock** from the desktop or Start menu. Node.js is bundled; WebView2 uses the system Evergreen Runtime, while Windhawk and business plugins must be obtained separately. If Evergreen is missing, Setup offers its official download page and exits; Update itself does not check dependencies.
+4. The first launch verifies runtime resources without a Fixed Version WebView2 license prompt. Later launches use installed files without repeatedly extracting the runtime.
 
 **The installer has no Authenticode signature.** Windows may display unknown-publisher or SmartScreen warnings. Renaming, new artwork, and self-signing cannot reliably remove reputation warnings. Use a trusted source, compare the digest, and do not disable protection, install unknown roots, or bypass organizational policy. Normal use does not generally require administrator rights.
 
@@ -95,7 +99,7 @@ Keep FISH Dock open for import. The app pauses its own model service and mail sy
 | Application and bundled dependencies | Chosen directory; fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock` |
 | Settings, pets, layouts, and logs | `host` under the data root |
 | WebView2 profile | `host/webview` under the data root |
-| Runtime terms and verification state | System per-user runtime state |
+| Resource verification state | System per-user runtime state |
 | Plugin configuration and secrets | Isolated `.fishplugin-*` / `.plugin.<publisher>.<name>` namespaces |
 
 `DSH-FISH.exe`, the application identifier, uninstall registration, and data directories remain for compatibility. Uninstall removes owned installation files and registration while preserving user data. Startup tasks are deleted only when verified to belong to this installation. Back up data before deleting it manually.
@@ -118,13 +122,13 @@ FISH-Dock/
 From the desktop directory; the host build no longer needs the old model-service source tree:
 
 ```powershell
-node scripts/prepare-installer.mjs --downloads <runtime-cache> --out <new-resource-directory> --version 2.0.1
+node scripts/prepare-installer.mjs --downloads <runtime-cache> --out <new-resource-directory> --version 2.1.9
 cargo test --locked --offline --features installed --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <prepared-directory> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
 ```
 
-Pinned versions and digests are in [runtime-sources.json](scripts/runtime-sources.json). Actual tests, environment limits, and historical artifacts are in the [build record](docs/installer-build.md). The installer includes no model weights or Rust/MSVC environment for building Dock. It does include the LLVM-MinGW compiler used by Windhawk mods.
+Pinned versions and digests are in [runtime-sources.json](scripts/runtime-sources.json). Actual tests, environment limits, and historical artifacts are in the [build record](docs/installer-build.md). The installer includes no model weights or Rust/MSVC environment for building Dock. Windhawk and its LLVM-MinGW compiler are no longer bundled as of 2.1.2.
 
 ## Sources and Credits
 
@@ -135,7 +139,7 @@ Pinned versions and digests are in [runtime-sources.json](scripts/runtime-source
 
 **Fish-under-sea** maintains the FISH Dock integration. New integration code uses MIT, and upstream copyright notices remain intact. Do not describe the whole feature set as original FISH Dock work or make upstream maintainers responsible for this distribution.
 
-The application uses the user's original blue-haired character icon, not redrawn artwork or a claimed original MIT asset. Pet sprites, application artwork, and galleries do not automatically inherit the source-code license; verify their rights before redistribution. The default Claude character is designed by **ZipZipPipe**, with pixel adaptation by **zhoupengjie**. Node.js, WebView2, fflate, and other dependencies retain their own licenses.
+The application uses the user's original blue-haired character icon, not redrawn artwork or a claimed original MIT asset. Pet sprites, application artwork, and galleries do not automatically inherit the source-code license; verify their rights before redistribution. The default Claude character is designed by **ZipZipPipe**, with pixel adaptation by **zhoupengjie**. The Node.js license ships with its resources. WebView2 uses the system Evergreen Runtime; the Fixed Version runtime and its license are no longer bundled as of 2.1.9. fflate and other dependencies retain their own licenses.
 
 ## Feedback and Security
 

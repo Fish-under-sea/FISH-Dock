@@ -6,14 +6,14 @@
 </p>
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark.png"><img src="assets/readme/hero-en-light.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.8"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.1.1"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.1.9"></picture></a>
 <a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
 <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v2.png"><img src="assets/readme/stat-channels-en-light-v2.png" width="23%" alt="Three independent official plugins"></picture></a>
 </p>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.1"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="app/docs/release-2.1.8.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
+<a href="app/docs/release-2.1.9.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark.png"><img src="assets/readme/key-issues-en-light.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
@@ -21,8 +21,8 @@
 <table>
 <tr>
 <td>
-<p><strong>2.1.6 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
-<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.8">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.1.7.md">Release notes</a></p>
+<p><strong>2.1.9 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
+<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.1.9.md">Release notes</a></p>
 </td>
 <td width="232" align="center" valign="middle">
 <picture>
@@ -64,9 +64,11 @@ This section is only about entry points and operations; capability detail is abo
 
 Business code, plugin packages and the store catalog are maintained in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins); this repository owns the desktop host, SDK, installer, plugin management and Windhawk.
 
-**2.1.7** re-issues the update package with **2.1.0 as its baseline**: every install from 2.1.0 through 2.1.6 can now take the in-app update in one step, and the package stays a slim diff (a three-file payload, about 30 MB). The 2.1.6 update was diffed only against the previous release, so on 2.1.0/2.1.1 the older `resources/licenses/runtime-sources.json` was neither in the payload nor matching the new digest — the installer stopped with “base resources missing” and rolled back. This release moves the diff origin to the oldest supported version and keeps that baseline manifest in the repo with a self-check. Full notes: [2.1.7 release notes](app/docs/release-2.1.7.md).
+**2.1.9** adds file staging and native drag-and-drop targets to child islands (#76/#77), and switches to the system Evergreen WebView2 Runtime (#78). Setup checks it before installing; if missing, it offers the official download page and exits. Update itself does not check, prompt for, or install WebView2. Upgrades transactionally remove the installer-owned Fixed Version runtime while preserving WebView user data and settings. This is a host-only release; plugins are unchanged. See the [2.1.9 notes](app/docs/release-2.1.9.md).
 
 **2.1.8** fixes the network going out when Clash is closed: the system proxy is put back on all five exits (kernel stopped, plugin disabled, Dock quit, Dock killed, plugin killed), with the order changed to "proxy first, kernel second"; the host gains `--proxy-heal` (a logon + every-five-minutes task that does nothing without a lease) and a heal before killing a plugin, so a crash no longer needs you to reopen Dock; the deactivate budget goes from 5 s to 30 s while quitting stays on the 6 s quick path. A failed slim update now falls back by itself: it downloads the full installer for the same version, checks its digest and hands over to it (a progress window that does not depend on WebView2, with resume, cancel and retry). Plugins: Clash fixes stop order, bad leases, half-dead kernels and the TUN host watchdog, and its watchdog now runs from the Task Scheduler only while the proxy is taken over; Magpie fixes #47 (a replaced plugin host made a provider look removed). See the [2.1.8 notes](app/docs/release-2.1.8.md).
+
+**2.1.7** re-issues the update package with **2.1.0 as its baseline**: every install from 2.1.0 through 2.1.6 can now take the in-app update in one step, and the package stays a slim diff (a three-file payload, about 30 MB). The 2.1.6 update was diffed only against the previous release, so on 2.1.0/2.1.1 the older `resources/licenses/runtime-sources.json` was neither in the payload nor matching the new digest — the installer stopped with “base resources missing” and rolled back. This release moves the diff origin to the oldest supported version and keeps that baseline manifest in the repo with a self-check. Full notes: [2.1.7 release notes](app/docs/release-2.1.7.md).
 
 **2.1.6** fixes the root cause of “plugin autostart fails on the first launch”: the host no longer serves plugin-to-host storage callbacks only while it happens to be waiting on that plugin's reply. A resident callback thread serves them at any time, so the storage reads a plugin issues right after `activate` no longer sit until the 30-second SDK timeout (on this machine both plugins once failed in the same millisecond). The SDK also drops late replies for already-expired request ids instead of closing the session, and the leftover **Windhawk section is removed from the Appearance page** (backend kept). Full notes: [2.1.6 release notes](app/docs/release-2.1.6.md).
 
@@ -105,12 +107,12 @@ Choose the package for the published version and verify it with `SHA256SUMS.txt`
 
 | Package | When to use it |
 | --- | --- |
-| `FISH-Dock-Setup-2.1.7.exe` | First installation, missing runtimes or repair; includes the complete offline runtime. **Use this to repair a 2.1.2 install that will not start.** |
-| `FISH-Dock-Update-2.1.7.exe` | **2.1.0 and later** can all take it (the diff origin is pinned at 2.1.0); 2.0.x should use the Setup package. |
+| `FISH-Dock-Setup-2.1.9.exe` | First installation or repair; includes Node.js. **Requires the system Evergreen WebView2 Runtime.** If missing, Setup offers the official download page and exits without installing dependencies. |
+| `FISH-Dock-Update-2.1.9.exe` | **2.1.0 and later** can all take it (the diff origin is pinned at 2.1.0); 2.0.x should use the Setup package. |
 
- Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 and Fixed Version WebView2 155.0.4283.62. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files); 2.1.6 removes the leftover Windhawk section from the Appearance page. The installer is currently unsigned.
+ Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 but no longer bundles Fixed Version WebView2 or its license as of 2.1.9. It uses the system Evergreen runtime. Upgrades remove installer-owned old runtime files and preserve `%LOCALAPPDATA%/FISH Dock/webview`. Update does not check system dependencies; ensure Evergreen is available before upgrading. If a failed Update hands over to the full Setup, Setup still performs its own prerequisite check. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files); 2.1.6 removes the leftover Windhawk section from the Appearance page. The installer is currently unsigned.
 
-Installed releases support manual checks in About and Updates, plus checks after launch and daily. If the GitHub API is unavailable, checks fall back to reading the official release page's version information (still surfaced in-app). Upgrade with a package installer in-app rather than replacing the host executable; the flow never opens an external web page. Same-version revisions do not trigger a version-number notification; download the revised package and verify the latest checksum.
+Installed releases support manual checks in About and Updates, plus checks after launch and daily. If the GitHub API is unavailable, checks fall back to reading the official release page's version information (still surfaced in-app). Upgrade with a package installer in-app rather than replacing the host executable; only Setup may offer an external official download page when WebView2 is missing. Same-version revisions do not trigger a version-number notification; download the revised package and verify the latest checksum.
 
 ## Data
 
@@ -136,4 +138,4 @@ Build inputs are pinned in `app/scripts/runtime-sources.json`. Prepare a new res
 
 ## Acknowledgements
 
-Upstream copyright and the [MIT license](LICENSE) are retained (Wakuwaku, Copyright 2026 Pengjie Zhou); model capabilities are provided by the Magpie plugin. Original licenses for Node.js and WebView2 ship with the installed resources; Windhawk is no longer redistributed as of 2.1.2, so its GPLv3 obligations follow the copy you install yourself. Source and redistribution bounds of the original brand assets are in [asset credits](assets/readme/SOURCES.md): pet sprites and the application icon keep their own asset rights and are not relicensed by the open-source code. People and repository ownership are listed under Contributors above.
+Upstream copyright and the [MIT license](LICENSE) are retained (Wakuwaku, Copyright 2026 Pengjie Zhou); model capabilities are provided by the Magpie plugin. The Node.js license ships with the installed resources; WebView2 is provided by the system Evergreen runtime, and its Fixed Version runtime and license are no longer bundled as of 2.1.9; Windhawk is no longer redistributed as of 2.1.2, so its GPLv3 obligations follow the copy you install yourself. Source and redistribution bounds of the original brand assets are in [asset credits](assets/readme/SOURCES.md): pet sprites and the application icon keep their own asset rights and are not relicensed by the open-source code. People and repository ownership are listed under Contributors above.
