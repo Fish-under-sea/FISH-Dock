@@ -104,6 +104,7 @@ mod plugin_dependencies;
 mod github_access;
 mod tab_order;
 mod plugin_page;
+mod plugin_window;
 mod windhawk_source;
 mod windhawk_collection;
 mod windhawk;
@@ -901,6 +902,8 @@ impl Shared {
         let going = self.clone();
         std::thread::spawn(move || {
             island::handoff_out(&going);
+            // 2.2.0：宿主退出前收掉所有插件外部窗口（不留到下一次启动）。
+            plugin_window::close_all("exit");
             going.app.exit(0);
         });
     }
@@ -1888,6 +1891,10 @@ fn main() {
             plugin_api::extension_page,
             plugin_api::extension_page_close,
             plugin_api::extension_page_call,
+            plugin_window::plugin_window_attach,
+            plugin_window::plugin_window_ready,
+            plugin_window::plugin_window_call,
+            plugin_window::plugin_window_close,
             settings::settings_set,
             settings::settings_open,
             settings::settings_closed,
@@ -2059,6 +2066,10 @@ fn main() {
                 evals: Mutex::new((0, std::collections::HashMap::new())),
             });
             app.manage(sh.clone());
+            // 2.2.0：外部插件窗口服务要先拿到 AppHandle 与主线程身份才能建窗。
+            plugin_window::install(app.handle().clone());
+            // 接收线程独立于主岛存在；无订阅时阻塞且不创建 HWND。
+            dropwin::start(app.handle().clone());
             plugin_api::resume();
             // Her requests to the web the way the General page says (proxy.rs).
             proxy::set_web(&sh.setting("netProxy"));
@@ -2301,10 +2312,15 @@ fn main() {
                         let screens = screen::read(&ticker.app);
                         // Displays come or go, or change: the desktop's widgets' windows
                         // with them (only while there are any).
-                        let moved = desk::any() && ticker.screens.lock().unwrap().areas != screens.areas;
-                        *ticker.screens.lock().unwrap() = screens;
-                        if moved {
-                            desk::sync(&ticker);
+                        let changed = {
+                            let mut previous = ticker.screens.lock().unwrap();
+                            let changed = previous.areas != screens.areas || previous.primary != screens.primary;
+                            *previous = screens;
+                            changed
+                        };
+                        if changed {
+                            plugin_window::screens_changed();
+                            if desk::any() { desk::sync(&ticker); }
                         }
                         pet::keep_on_screen(&ticker);
                         island::keep_on_screen(&ticker);

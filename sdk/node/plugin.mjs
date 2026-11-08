@@ -30,8 +30,8 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     if (bytes.length > maxLine || output.writableLength > maxLine * 4) { close(); throw new Error('插件通信队列或帧超过限制'); }
     output.write(bytes);
   }
-  function host(method, params) {
-    if (!hello?.capabilities.includes('storage')) return Promise.reject(new Error('插件未声明存储能力'));
+  function hostFor(capability, method, params) {
+    if (!hello?.capabilities.includes(capability)) return Promise.reject(new Error(capability === 'storage' ? '插件未声明存储能力' : `插件未声明 ${capability} 能力`));
     if (closed || pending.size >= 64) return Promise.reject(new Error('宿主请求队列已满或已关闭'));
     const requestId = `sdk-${++sequence}`;
     return new Promise((resolve, reject) => {
@@ -41,14 +41,61 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
       catch (error) { clearTimeout(timer); pending.delete(requestId); reject(error); }
     });
   }
+  function host(method, params) { return hostFor('storage', method, params); }
   function file(category, name) {
     if (!CATEGORIES.has(category) || typeof name !== 'string' || name.length > 128 || !/^[a-zA-Z0-9_.-]+$/.test(name)
       || name.includes('..') || name.toLowerCase() === 'readme.md' || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) throw new Error('存储类别或文件名无效');
     return { category, name };
   }
+  // 外部原生窗口与定向拖入（2.2.0）：与浏览器 SDK 同一套协议方法，宿主侧同一套
+  // 权限、代次与句柄检查。句柄是宿主给的字符串，插件不能自造，也不从中读身份。
+  const listeners = { windows: new Set(), fileDrop: new Set() };
+  function listen(kind, listener) {
+    if (typeof listener !== 'function') throw new TypeError('事件监听器必须是函数');
+    listeners[kind].add(listener);
+    return () => listeners[kind].delete(listener);
+  }
+  function handleOf(value, what) {
+    if (typeof value !== 'string' || !value) throw new Error(`${what}句柄无效`);
+    return value;
+  }
+  const windows = Object.freeze({
+    async open(options = {}) {
+      if (!options || typeof options !== 'object' || Array.isArray(options)) throw new Error('窗口参数应为对象');
+      const result = await hostFor('windows', 'host.windows.open', options);
+      return result?.handle;
+    },
+    async update(handle, options = {}) {
+      return hostFor('windows', 'host.windows.update', { ...options, handle: handleOf(handle, '窗口') });
+    },
+    async close(handle) {
+      const result = await hostFor('windows', 'host.windows.close', { handle: handleOf(handle, '窗口') });
+      return !!result?.closed;
+    },
+    async list() {
+      const result = await hostFor('windows', 'host.windows.list', {});
+      return result?.windows ?? [];
+    },
+    onEvent: listener => listen('windows', listener),
+  });
+  const fileDrop = Object.freeze({
+    // scope: 'dock'（主 Dock，独占）或 'window' + handle（本插件自己的窗口）。
+    async subscribe(options = {}) {
+      const result = await hostFor('file-drop', 'host.fileDrop.subscribe', options);
+      return result?.handle;
+    },
+    async unsubscribe(handle) {
+      const result = await hostFor('file-drop', 'host.fileDrop.unsubscribe', { handle: handleOf(handle, '拖入订阅') });
+      return !!result?.unsubscribed;
+    },
+    onEvent: listener => listen('fileDrop', listener),
+  });
   const context = Object.freeze({
     get dataDirectory() { return hello?.dataDirectory; },
     get storageIdentity() { return hello?.storage; },
+    // 2.2.0：外部原生窗口与定向拖入（与浏览器 SDK 同名同义）。
+    windows,
+    fileDrop,
     secrets: Object.freeze({
       async read(category, name) {
         const params=file(category,name);if(!['credentials','keys'].includes(category))throw new Error('加密凭据仅允许 credentials 或 keys 类别');
@@ -92,6 +139,22 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
       if (row.method === 'plugin.event') {
         if (!hello.capabilities.includes('events')) return error('CAPABILITY_REQUIRED','插件未声明事件能力');
         return reply(await onEvent(row.params ?? {},context));
+      }
+      // 2.2.0：宿主单向通知本插件的窗口事件（ready/closed/anchorChanged/fileDrop）。
+      // 与 plugin.event 分开：窗口事件属于 windows / file-drop 能力，不要求 events。
+      if (row.method === 'plugin.windowEvent') {
+        const payload = row.params ?? {};
+        const need = payload.event === 'fileDrop' ? 'file-drop' : 'windows';
+        if (!hello.capabilities.includes(need)) return error('CAPABILITY_REQUIRED',`插件未声明 ${need} 能力`);
+        for (const listener of [...listeners.windows]) {
+          try { await listener(payload); } catch { /* 监听器自己的错不该断会话 */ }
+        }
+        if (payload.event === 'fileDrop') {
+          for (const listener of [...listeners.fileDrop]) {
+            try { await listener(payload); } catch { /* 同上 */ }
+          }
+        }
+        return reply({ handled:true });
       }
       if (!Object.hasOwn(commands,row.method) || typeof commands[row.method] !== 'function') return error('UNKNOWN_METHOD','插件方法未注册');
       return reply(await commands[row.method](row.params ?? {},context));

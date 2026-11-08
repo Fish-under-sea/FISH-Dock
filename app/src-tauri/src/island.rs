@@ -686,6 +686,11 @@ fn create(sh: &Arc<Shared>) {
                 // A click anywhere else takes the focus from the settings: they close.
                 let app = sh.app.clone();
                 win.on_window_event(move |event| {
+                    // 2.2.0 §5：Dock 动了/换了屏/DPI 变了，锚定在它旁边的插件窗口跟着重排，
+                    // 不通过扩大主岛来容纳它们。
+                    if let WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } = event {
+                        crate::plugin_window::dock_changed();
+                    }
                     // Not when it is her own window being shown (Shared::show_window).
                     if let WindowEvent::Focused(false) = event {
                         if !crate::shared(&app).is_shuffling() {
@@ -711,8 +716,6 @@ fn create(sh: &Arc<Shared>) {
                     crate::tasks::no_transitions(hwnd.0 as isize);
                 }
                 sh.own_window(&win);
-                // 文件拖放落点窗口（dropwin.rs）
-                crate::dropwin::start(sh.app.clone());
                 // Its renderer gone: told, and the page loaded again (crash.rs).
                 crate::crash::watch(&sh, &win);
             }
@@ -732,8 +735,6 @@ fn create(sh: &Arc<Shared>) {
 static OVER_MAX: AtomicBool = AtomicBool::new(false);
 static TOP_LIGHT: AtomicU8 = AtomicU8::new(2);
 static PRESS_OUTSIDE: AtomicBool = AtomicBool::new(false);
-// pet（她的角色）小圆窗口的位置缓存：变了才给页面发 pet:pet-rect。
-static PET_LAST: std::sync::Mutex<Option<(i64, i64, i64, i64)>> = std::sync::Mutex::new(None);
 // 按下点在岛窗口区域内、无法判断是否为“外面拖进来”时的计时起点（ms）。
 static HOLD_SINCE: AtomicU64 = AtomicU64::new(0);
 
@@ -782,10 +783,11 @@ const LEAVE_MS: u128 = 600;
 // the stowed band and the edge that calls it down (call_look) follow from
 // this. None before the page said its size, or in another home.
 fn closed_rect(isl: &Island) -> Option<(i32, i32, i32, i32)> {
-    // 页面若因“岛常驻、不自动收起”（islandHideUnder=false）从未上报过 closed 尺寸，
-    // 用默认胶囊尺寸兜底，保证拖放检测区 closed_rect 仍然成立。
+    // 2.2.0 §7：页面还没报过 closed 尺寸时**不再**用 500×36 的虚构矩形兜底——那个默认
+    // 值会在没有任何订阅者、也没有真实胶囊的区域上捕获拖入（旧 stash 子岛就靠它）。
+    // 没有真实尺寸就当作「胶囊不在」，拖放检测区随之不存在。
     let (w0, h0) = isl.stow.closed;
-    let (w, h) = if w0 > 0.0 && h0 > 0.0 { (w0, h0) } else { (500.0, 36.0) };
+    let (w, h) = if w0 > 0.0 && h0 > 0.0 { (w0, h0) } else { return None };
     if !isl.created || w <= 0.0 || h <= 0.0 {
         return None;
     }
@@ -941,6 +943,8 @@ pub fn ready(sh: &Arc<Shared>) {
 }
 
 pub fn apply_visibility(sh: &Arc<Shared>) {
+    // 即使主岛尚未创建/就绪或显示状态未变化，也先同步全局隐藏。
+    crate::plugin_window::set_dock_hidden(!sh.is_visible());
     // Told before it shows, so the strip never shows over the full screen;
     // told it is over once it has gone (or, the full screen gone, stays up).
     let over = over_full(sh);
@@ -1014,6 +1018,9 @@ fn show_or_hide(sh: &Arc<Shared>) {
             isl.reaching = false;
         }
     }
+    // 2.2.0 §5：Dock **全局隐藏/全屏避让**时，插件外部窗口随之隐藏并停止接受拖入；
+    // 主岛普通收起（缩成胶囊）不算，那只是主岛自己的形态变化。恢复时只恢复本来就
+    // 还开着的窗口（用户自己关掉的不复活）。
     if let Some(win) = window(sh) {
         // 隐藏即休（power::webview_rest）：岛藏起来时它的页面也一起歇——
         // IsVisible 关掉（rAF 停下、定时器被节流）、内存目标降到最低。改前
@@ -1174,7 +1181,6 @@ pub fn keep_on_screen(sh: &Shared) {
 pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
     // She is being dragged past: the home is not being hovered.
     let passive = crate::pet::is_dragged(sh);
-    let mut pet_anchor: Option<(f64, f64, f64, f64)> = None;
     let (ignore, pointer, wait, called, came) = {
         let mut isl = sh.island.lock().unwrap();
         if !isl.ready {
@@ -1197,22 +1203,8 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
             // 检测区只在“胶囊”和“子子灵动岛”周围一圈，不再覆盖大片桌面。
             let mut rects: Vec<(i32, i32, i32, i32)> = Vec::new();
             if let Some(r) = pill { rects.push(r); }
-            // 子岛小球锚定在 pet（她的角色）那个小圆窗口的左上角外侧。
-            let ball = (36.0 * page_sf) as i32;
-            let pet = sh.app.get_webview_window("pet").and_then(|w| match (w.outer_position(), w.outer_size()) {
-                (Ok(p), Ok(s)) => Some((p.x, p.y, s.width, s.height)),
-                _ => None,
-            });
-            if let Some((px, py, pw, ph)) = pet {
-                let ax = (px - pos.0) as f64 / page_sf;
-                let ay = (py - pos.1) as f64 / page_sf;
-                pet_anchor = Some((ax, ay, pw as f64 / page_sf, ph as f64 / page_sf));
-                let bx = px - ball - ((2.0 * page_sf) as i32);
-                rects.push((bx, py, ball, ball));
-            } else if let Some(r) = pill {
-                let gap = (8.0 * sf) as i32;
-                rects.push((r.0 - gap - ball, r.1, ball, ball));
-            }
+            // 2.2.0 §7：原先在 pet 小圆窗口旁边挂一个 36 px 的「子岛小球」命中区，只有
+            // 宿主暂存子岛会用到；子岛删除后这里也不再往落点表里塞这个虚构区域。
             for s in solid.iter() {
                 let x = pos.0 + (s[0] * psf) as i32;
                 let y = pos.1 + (s[1] * psf) as i32;
@@ -1270,15 +1262,6 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
         }
     };
     set_ignore(sh, ignore);
-    if let Some(a) = pet_anchor {
-        let sig = (a.0.round() as i64, a.1.round() as i64, a.2.round() as i64, a.3.round() as i64);
-        let mut last = PET_LAST.lock().unwrap();
-        if *last != Some(sig) {
-            *last = Some(sig);
-            drop(last);
-            let _ = sh.app.emit_to("island", "pet:pet-rect", json!({ "x": a.0, "y": a.1, "w": a.2, "h": a.3 }));
-        }
-    }
     if let Some(at) = pointer {
         let _ = sh.app.emit_to("island", "pet:pointer", at);
     }

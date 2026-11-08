@@ -20,6 +20,75 @@
     pending.delete(row.id); clearTimeout(waiter.timer)
     if (row.error) waiter.reject(failure(row.error)); else waiter.resolve(row.result)
   })
+  // ---- 外部原生窗口与定向拖入（2.2.0）-------------------------------------------
+  // 宿主只给**本插件**的窗口发事件；页面按事件名自己分辨。
+  //   ready / closed / anchorChanged：本插件某个外部窗口的生命周期；
+  //   fileDrop：enter / leave（不含路径）与 drop（含 paths，仅本插件收到）。
+  const windowListeners = new Set()
+  const dropListeners = new Set()
+  function listen(set, listener) {
+    if (typeof listener !== 'function') throw new TypeError('事件监听器必须是函数')
+    set.add(listener)
+    return () => set.delete(listener)
+  }
+  function dispatch(payload) {
+    for (const listener of [...windowListeners]) {
+      try { listener(payload) } catch (error) { console.error('FishDock windows listener', error) }
+    }
+    if (payload.event === 'fileDrop') {
+      for (const listener of [...dropListeners]) {
+        try { listener(payload) } catch (error) { console.error('FishDock fileDrop listener', error) }
+      }
+    }
+  }
+  window.addEventListener('message', event => {
+    const row = event.data
+    if (event.source !== parent || !row || row.ticket !== ticket) return
+    if (row.type === 'fish:window-event') dispatch(row)
+  })
+  function handle(value, what) {
+    if (typeof value !== 'string' || !value) throw new Error(`${what}句柄无效`)
+    return value
+  }
+  const windows = Object.freeze({
+    // 页面就绪后返回不透明句柄；同一 key 重复调用复用同一个实例（宿主判定）。
+    async open(options = {}) {
+      const result = await send('dock.windows.open', options)
+      return result && result.handle
+    },
+    async update(handle, options = {}) {
+      return send('dock.windows.update', { ...options, handle: handleOf(handle, '窗口') })
+    },
+    async close(handle) {
+      const result = await send('dock.windows.close', { handle: handleOf(handle, '窗口') })
+      return !!(result && result.closed)
+    },
+    async list() {
+      const result = await send('dock.windows.list', {})
+      return (result && result.windows) || []
+    },
+    onEvent: listener => listen(windowListeners, listener),
+  })
+  const fileDrop = Object.freeze({
+    // scope: 'dock'（主 Dock，独占）或 'window' + handle（本插件自己的窗口）。
+    async subscribe(options = {}) {
+      const result = await send('dock.fileDrop.subscribe', options)
+      return result && result.handle
+    },
+    async unsubscribe(handle) {
+      const result = await send('dock.fileDrop.unsubscribe', { handle: handleOf(handle, '拖入订阅') })
+      return !!(result && result.unsubscribed)
+    },
+    onEvent: listener => listen(dropListeners, listener),
+  })
+  // 宿主保留 Escape 出口：透明浮窗没有原生关闭按钮时，页面里按 Escape 也要能真正关掉。
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return
+    parent.postMessage({ type: 'fish:escape', ticket }, '*')
+  })
+  function handleOf(value, what) {
+    return handle(value, what)
+  }
   // 宿主把插件业务错误编码成「<文案>（错误码 CODE）」（见 plugin_protocol.rs 的 business_error）：
   // 这里还原成带 code 的 Error，页面就能按码查表显示专属文案；不是这种形状的提示按原文报。
   const CODE_TAIL = /（错误码 ([A-Z][A-Z0-9_]{0,39})）$/
@@ -160,5 +229,5 @@
     deliver(href).catch(() => {})                            // 宿主拒绝时静默：外链失败不该炸页面
   }
   document.addEventListener('click', onClick, true)
-  Object.defineProperty(window, 'FishDock', { value: Object.freeze({ call, setLayout, openExternal }), writable: false, configurable: false })
+  Object.defineProperty(window, 'FishDock', { value: Object.freeze({ call, setLayout, openExternal, windows, fileDrop }), writable: false, configurable: false })
 })()

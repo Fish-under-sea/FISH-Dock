@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "acme.notes",
+  "name": "合成暂存示例",
+  "version": "1.0.0",
+  "hostApi": 1,
+  "platforms": ["windows-x86_64"],
+  "storage": { "directory": ".plugin.acme.notes", "dataSchema": 1 },
+  "backend": { "runtime": "node", "entry": "backend.mjs" },
+  "capabilities": ["storage", "windows", "file-drop"],
+  "pages": [{ "id": "panel", "title": "我的暂存", "entry": "panel.html" }],
+  "files": {
+    "backend.mjs": "0c0061dee854ac0ccb41d2c9df1503a72fe30ac509c9c3a1352aeadf4c1e9000",
+    "panel.html": "d61c038d3646a310faf47817ee9b922b535aca5bd5709a8b953401023a70473a",
+    "README.md": "fed8130958c85fa37a6bbeabb311c283ec3631ba56eb081acbd9085b39d47d3e"
+  }
+}

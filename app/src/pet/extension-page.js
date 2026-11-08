@@ -160,7 +160,7 @@
         const frame=document.createElement('iframe')
         frame.title=page.title; frame.className='extension-frame'; frame.setAttribute('sandbox','allow-scripts'); frame.setAttribute('referrerpolicy','no-referrer')
         const outer=document.createElement('div');outer.className='extension-service-shell';outer.appendChild(frame)
-        const record={frame,outer,key:page.key,page,root,title:page.title,ticket:granted.ticket,digest:page.digest,pending:new Set(),ready:false,timer:null,layoutTimer:null,layoutSeen:false,pageHeight:0,toolbarHeight:0,isService:false,layout:'single',notice:null,reported:false,initialTimer:null}
+        const record={frame,outer,key:page.key,page,root,title:page.title,ticket:granted.ticket,generation:granted.generation,digest:page.digest,pending:new Set(),ready:false,timer:null,layoutTimer:null,layoutSeen:false,pageHeight:0,toolbarHeight:0,isService:false,layout:'single',notice:null,reported:false,initialTimer:null}
         frames.set(page.key,record)
         record.timer=setTimeout(()=>{
           if (record.ready) return
@@ -224,7 +224,26 @@
     const themeObserver = hostWindow.MutationObserver ? new hostWindow.MutationObserver(() => { for (const record of frames.values()) if (record.ready) theme(record) }) : null
     themeObserver?.observe(document.body, { attributes:true, attributeFilter:['class'] })
     hostWindow.addEventListener('message',receive)
-    return { enter,park,sync,dispose(){themeObserver?.disconnect();hostWindow.removeEventListener('message',receive);clearDiscard();for(const key of frames.keys())retire(key);parked.remove()} }
+    // 2.2.0：宿主的插件外部窗口事件只转给**这个插件**的帧（别的插件收不到，路径不广播）。
+    // 设置面板里的插件页与外部窗口共用同一份 FishDock.windows / fileDrop 接口。
+    let stopWindowEvents = null, disposed = false
+    try {
+      const listen = hostWindow.__TAURI__?.event?.listen
+      if (typeof listen === 'function') {
+        void listen('plugin:window-event', event => {
+          const payload = event?.payload
+          if (!payload || typeof payload.plugin !== 'string' || typeof payload.event !== 'string') return
+          for (const record of frames.values()) {
+            if (record.key.split('/')[0] !== payload.plugin || record.generation !== payload.generation) continue
+            try { record.frame.contentWindow.postMessage({ type:'fish:window-event', ticket:record.ticket, ...payload }, '*') } catch { /* 帧已退场 */ }
+          }
+        }).then(stop => {
+          if (typeof stop !== 'function') return
+          if (disposed) stop(); else stopWindowEvents = stop
+        }).catch(() => {})
+      }
+    } catch { /* 没有事件桥时窗口事件不可用，业务调用照常 */ }
+    return { enter,park,sync,dispose(){if(disposed)return;disposed=true;themeObserver?.disconnect();hostWindow.removeEventListener('message',receive);stopWindowEvents?.();clearDiscard();for(const key of frames.keys())retire(key);parked.remove()} }
   }
   window.ExtensionPage = { accepts, create }
 })()

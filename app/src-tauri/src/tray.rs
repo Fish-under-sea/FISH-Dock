@@ -35,6 +35,8 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
     let flag = |key: &str| settings.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
     let home = sh.home();
     let is_tray = over == Over::Tray;
+    // 2.2.0：插件外部窗口的宿主出口——透明浮窗没有原生关闭按钮时也能从托盘真正关掉。
+    let windows_open = crate::plugin_window::count();
     let menu = Menu::new(app)?;
     // The taskbar's layout being edited: a way out first, whatever its bar
     // does (zhoupengjie/Wakuwaku#53: its buttons took no press, Esc went to
@@ -60,6 +62,9 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
         menu.append(&MenuItem::with_id(app, "controlPanel", t("menu.controlPanel"), true, None::<&str>)?)?;
         menu.append(&MenuItem::with_id(app, "deviceManager", t("menu.deviceManager"), true, None::<&str>)?)?;
         menu.append(&PredefinedMenuItem::separator(app)?)?;
+        if windows_open > 0 {
+            menu.append(&MenuItem::with_id(app, "closePluginWindows", t("menu.closePluginWindows"), true, None::<&str>)?)?;
+        }
         menu.append(&MenuItem::with_id(app, "quit", t("menu.quit"), true, None::<&str>)?)?;
         return Ok(menu);
     }
@@ -115,6 +120,9 @@ pub fn menu(sh: &Shared, over: Over) -> tauri::Result<Menu<Wry>> {
     // （上面 Over::Home 的分支，main.rs 里右键条带会走到那里）。这是上游 a791d6f5 的原则——
     // 她的菜单只说关于她的事；插件化特有项（hardwareSettings、editCapsule、她的家等）照旧保留。
     menu.append(&PredefinedMenuItem::separator(app)?)?;
+    if windows_open > 0 {
+        menu.append(&MenuItem::with_id(app, "closePluginWindows", t("menu.closePluginWindows"), true, None::<&str>)?)?;
+    }
     menu.append(&MenuItem::with_id(app, "quit", t("menu.quit"), true, None::<&str>)?)?;
     Ok(menu)
 }
@@ -186,6 +194,11 @@ pub fn on_menu(sh: &Arc<Shared>, id: &str) {
         }
         "deviceManager" => {
             crate::tasks::launch("devmgmt.msc");
+        }
+        // 2.2.0：插件外部窗口的宿主出口（透明浮窗没有原生关闭按钮时只剩这条与 Escape）。
+        "closePluginWindows" => {
+            crate::plugin_window::close_windows("user");
+            crate::tray::refresh_menu(sh);
         }
         // Quit by the person: no session's hook starts her again until she
         // is opened (data.rs Quit).

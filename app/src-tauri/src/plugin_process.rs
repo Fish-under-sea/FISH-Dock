@@ -62,7 +62,9 @@ impl std::fmt::Display for StartError { fn fmt(&self,f:&mut std::fmt::Formatter<
 
 // 一次成功的启动：进程 + 分阶段耗时 + 业务服务健康。
 pub struct Started { pub process:Process, pub stages:Stages, pub service:Service }
-pub struct Process { child:Child, owner:Option<crate::plugin_job::Owner>, output:Receiver<Result<Value,String>>, input:SyncSender<Value>, next:u64, namespace:Namespace, capabilities:Vec<String>, id:String, probe:Option<Instant> }
+pub struct Process { child:Child, owner:Option<crate::plugin_job::Owner>, output:Receiver<Result<Value,String>>, input:SyncSender<Value>, next:u64, namespace:Namespace, capabilities:Vec<String>, id:String, probe:Option<Instant>,
+    // 会话在握手前建立，实例停止或 Drop 时只撤销它自己的窗口与订阅。
+    hook_session:crate::plugin_window::Session }
 // autostart_flag 是传给插件的那个环境变量值（#22）：只有 1 是「随 Dock 启动」，
 // 其余一律 0，插件据此决定要不要自己把服务拉起来。
 fn autostart_flag(autostart:bool)->&'static str { if autostart{"1"}else{"0"} }
@@ -107,23 +109,37 @@ impl Process {
         let Some(mut stdin)=child.stdin.take() else{let _=child.kill();return Err(StartError::new(Phase::Spawn,"插件缺少输入管道",stages,false))};
         let Some(stderr)=child.stderr.take() else{let _=child.kill();return Err(StartError::new(Phase::Spawn,"插件缺少错误输出管道",stages,false))};
         watch_stderr(row.manifest.id.clone(),stderr,manager.context.root.clone(),crate::plugin_runtime::log_file(manager.context,&row.manifest.id));
-        let (input,read)=mpsc::sync_channel::<Value>(2);
+        // 宿主回执和窗口事件共用有界写队列；预留突发空间，同时不阻塞 UI 事件线程。
+        let (input,read)=mpsc::sync_channel::<Value>(32);
         std::thread::spawn(move||{for value in read {let Ok(mut bytes)=serde_json::to_vec(&value) else{break};bytes.push(b'\n');if stdin.write_all(&bytes).and_then(|_|stdin.flush()).is_err(){break;}}});
         // A2（2.1.6）：插件 → 宿主的回调（带 method 的帧）由**独立线程**在任何时刻服务，
         // 不再要求「宿主正好有一次在途请求」。旧实现只有 request/handshake 在等响应的
         // 循环里顺手处理回调，自启流程一结束就没有线程读 stdout：插件在 activate 之后
         // 的每一次 storage 调用都只能干等到 SDK 超时（冷态 30 s），自启动必然失败。
         // 有界队列 + 阻塞发送即背压：插件狂发回调时堵住的是它自己的 stdout，不涨宿主内存。
+        // 代次在握手前确定，activate 内也可使用 Hook；回调线程一直绑定这次会话。
+        let hook_session=crate::plugin_window::begin_session(&row.manifest.id,input.clone());
+        let generation=hook_session.generation;
         let (callbacks,callback_rx)=mpsc::sync_channel::<Value>(CALLBACK_BACKLOG);
         {
             let input=input.clone();
             let namespace=namespace.clone();
             let capabilities=row.manifest.capabilities.clone();
+            let id=row.manifest.id.clone();
+            let context=manager.context.clone();
             std::thread::spawn(move||{
                 for value in callback_rx {
                     let method=value.get("method").and_then(Value::as_str).unwrap_or_default();
-                    let result=storage_call(&namespace,&capabilities,method,&value["params"]);
-                    let response=match result{Ok(result)=>json!({"id":value["id"],"result":result}),Err(_)=>json!({"id":value["id"],"error":{"code":"HOST_OPERATION_FAILED","message":"宿主操作失败，请检查存储类别与声明能力"}})};
+                    let params=&value["params"];
+                    // 窗口与定向拖入是宿主能力：走 plugin_window 的同一套权限、代次与配额
+                    // 检查；其余（存储）仍走 storage_call。回调线程不持插件实例锁。
+                    let window_call=method.starts_with("host.windows.")||method.starts_with("host.fileDrop.");
+                    let result=if window_call{crate::plugin_window::backend(&context,&id,generation,method,params)}else{storage_call(&namespace,&capabilities,method,params)};
+                    let response=match result{
+                        Ok(result)=>json!({"id":value["id"],"result":result}),
+                        Err(error) if window_call=>json!({"id":value["id"],"error":crate::plugin_window::failure(&error)}),
+                        Err(_)=>json!({"id":value["id"],"error":{"code":"HOST_OPERATION_FAILED","message":"宿主操作失败，请检查存储类别与声明能力"}})
+                    };
                     if input.send(response).is_err(){break}
                 }
             });
@@ -133,13 +149,14 @@ impl Process {
             Ok(Some(value))=>{
                 // 带 method 的是回调：交给回调线程，别排在响应队列里等下一次请求。
                 if value.get("method").is_some(){if callbacks.send(value).is_err(){break}}
+                else if value.get("id").and_then(Value::as_str).is_some_and(|id|id.starts_with("window-event-")) { continue; }
                 else if tell.send(Ok(value)).is_err(){break}
             },
             Ok(None)=>break,
             Err(error)=>{let _=tell.send(Err(error));break},
         }}});
         stages.spawn_ms=phase_spawn.elapsed().as_millis() as u64;
-        let mut process=Self{child,owner:Some(owner),output,input,next:0,namespace,capabilities:row.manifest.capabilities.clone(),id:row.manifest.id.clone(),probe:None};
+        let mut process=Self{child,owner:Some(owner),output,input,next:0,namespace,capabilities:row.manifest.capabilities.clone(),id:row.manifest.id.clone(),probe:None,hook_session};
         // —— hello + activate：同一份 deadline，谁先花完谁就把后者挤掉 ——
         let hello=json!({"protocol":1,"pluginId":row.manifest.id,"hostVersion":env!("CARGO_PKG_VERSION"),"dataDirectory":process.namespace.path(),"storage":process.namespace.identity(),"capabilities":row.manifest.capabilities,"hostCallTimeoutMs":crate::config::plugin_host_call_timeout_ms_of(budget)});
         handshake_with(&row.manifest.id,hello,deadline,Instant::now,&mut stages,|method,params,timeout|process.request(method,params,timeout))?;
@@ -174,6 +191,11 @@ impl Process {
             // 不把一次瞬时超时升级成「ID 不匹配 → 杀掉插件」。
             if value.get("id").and_then(Value::as_u64)==Some(id){ return crate::plugin_protocol::answer(value,id); }
         }
+    }
+    /// 页面调用还必须匹配这个借出实例的 Hook 会话，不能只检查同 ID 当前会话。
+    pub fn request_session(&mut self,generation:u64,method:&str,params:Value,timeout:Duration)->Result<Value,String>{
+        if generation==0||self.hook_session.generation!=generation||crate::plugin_window::current_generation(&self.id)!=generation{return Err("页面会话已撤销".into());}
+        self.request(method,params,timeout)
     }
     pub fn accepts_events(&self)->bool{self.capabilities.iter().any(|c|c=="events")}
     // 进程退出码（#53-3）：还活着是 None；已经退出就是它带走的那个码
@@ -225,6 +247,7 @@ impl Process {
         self.stop_with(std::time::Duration::from_secs(6));
     }
     fn stop_with(&mut self,budget:std::time::Duration){
+        self.hook_session.revoke();
         // 只要进程还活着就发告别：探针 2 s 超时说明它「忙」（一条慢命令排着队），
         // 不等于「可以跳过 deactivate」。跳过就等于直接 kill——clash 的系统代理租约
         // 会留在注册表里指向已经死掉的端口，用户看到的是整机断网。

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark light">
+<title>插件窗口</title>
+<style>
+  /* 宿主容器：没有标题栏内容、没有业务 UI。插件自己的界面在 #page 这个沙箱 iframe 里。 */
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  html.opaque, html.opaque body { background: #1b1b1f; }
+  #page { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
+  #note { margin: 0; padding: 8px 10px; font: 12px/1.5 system-ui, "Segoe UI", sans-serif; color: #c3c9d6; text-align: center; }
+</style>
+</head>
+<body>
+<iframe id="page" title="插件窗口" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+<p id="note" role="status"></p>
+<script src="window.js"></script>
+</body>
+</html>

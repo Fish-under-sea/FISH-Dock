@@ -12,6 +12,9 @@ use std::{collections::BTreeMap,path::PathBuf,sync::Mutex,time::{Duration,Instan
 use crate::plugin_install::Stamp;
 #[derive(Clone)]struct Grant {
     id:String, digest:String, entry:String, issued:Instant,
+    // 2.2.0：票据绑定「承载标签」（island 或某个插件外部窗口的 label）。资源协议只对
+    // 这个标签放行，别的窗口拿到这张票也加载不了这一页——不靠放宽成任意 label 实现。
+    host:String, generation:u64,
     // T09：开页面时一次性解析好的活动版本。之后每一次取资源只查这份快照——不再读
     // 注册表（EDIT 锁）、不再整包核验。停用/卸载/换版时 plugin_runtime 会 revoke()
     // 掉这个 id 的全部票据，所以这里不需要每次再去确认「它还在不在」。
@@ -19,7 +22,7 @@ use crate::plugin_install::Stamp;
 }
 static GRANTS:Mutex<BTreeMap<String,Grant>>=Mutex::new(BTreeMap::new());
 fn route(path:&str)->Result<(&str,&str),String> { path.strip_prefix('/').and_then(|s|s.split_once('/')).filter(|(token,name)|token.len()==64&&token.bytes().all(|b|b.is_ascii_hexdigit())&&!name.is_empty()).ok_or_else(||"插件页面票据或路径无效".into()) }
-fn allowed(grant:&Grant,id:&str,digest:&str,enabled:bool)->bool { enabled&&grant.id==id&&grant.digest==digest&&grant.issued.elapsed()<Duration::from_secs(86400) }
+fn allowed(grant:&Grant,id:&str,digest:&str,session_valid:bool)->bool { session_valid&&grant.id==id&&grant.digest==digest&&grant.issued.elapsed()<Duration::from_secs(86400) }
 fn token()->Result<String,String>{
  let mut bytes=[0u8;32];
  #[cfg(windows)]{#[link(name="bcrypt")]unsafe extern "system"{fn BCryptGenRandom(algorithm:isize,buffer:*mut u8,size:u32,flags:u32)->i32;}if unsafe{BCryptGenRandom(0,bytes.as_mut_ptr(),32,2)}<0{return Err("页面随机票据生成失败".into());}}
@@ -28,13 +31,16 @@ fn token()->Result<String,String>{
 }
 pub fn revoke(id:&str){if let Ok(mut grants)=GRANTS.lock(){grants.retain(|_,g|g.id!=id);}}
 pub fn close(ticket:&str){if let Ok(mut grants)=GRANTS.lock(){grants.remove(ticket);}}
-pub fn open(key:&str)->Result<serde_json::Value,String>{
+pub fn open(key:&str)->Result<serde_json::Value,String>{open_in(key,"island")}
+// open_in 是同一个入口的「绑定承载标签」版本（2.2.0 §5）：外部插件窗口在创建时先拿到
+// 票据，票据只对那个窗口的 label 放行。`open()` 保留给设置面板里的插件页（island）。
+pub fn open_in(key:&str,host:&str)->Result<serde_json::Value,String>{
  let (id,page)=key.split_once('/').ok_or("插件页面键无效")?;
  let context=crate::storage_context::current().ok_or("存储尚未就绪")?;crate::github_access::require_plugin(context,id)?;let manager=crate::plugin_install::Manager{context};
- let row=manager.list()?.into_iter().find(|r|r.manifest.id==id&&r.enabled).ok_or("插件未启用")?;
+ let row=manager.list()?.into_iter().find(|r|r.manifest.id==id).ok_or("插件未启用")?;
  // T09：入口只看「有没有这个实例」——不握手、不占锁等探针。一次 RPC 正在跑的时候
  // 开页面也不会被它卡住（以前这里持 CURRENT 要等探针 2 s）。
- if !crate::plugin_runtime::present(id){return Err("插件尚未运行".into());}
+ let generation=crate::plugin_window::current_generation(id);if generation==0{return Err("插件尚未运行".into());}
  let entry=row.manifest.pages.iter().find(|p|p.id==page).ok_or("插件页面未注册")?.entry.clone();
  // T09 + T03：这里**不做**全文校验。目录只算路径（manifest.validate），指纹表直接
  // 读上次安装/启动时落盘的快照；快照缺失也不在这里补哈希——资源请求会按需算那一个
@@ -42,17 +48,22 @@ pub fn open(key:&str)->Result<serde_json::Value,String>{
  let directory=manager.directory(&row)?;
  let (files,stamps)=(row.manifest.files.clone(),manager.verified_stamps(&row));
  let ticket=token()?;let mut grants=GRANTS.lock().map_err(|_|"插件页面锁不可用")?;
- grants.retain(|_,g|g.issued.elapsed()<Duration::from_secs(86400));if grants.len()>=32{return Err("插件页面过多，请关闭部分页面后重试".into());}
- grants.insert(ticket.clone(),Grant{id:id.into(),digest:row.digest,entry:entry.clone(),issued:Instant::now(),directory,files,stamps});
+ grants.retain(|_,g|g.issued.elapsed()<Duration::from_secs(86400)&&crate::plugin_window::current_generation(&g.id)==g.generation);if grants.len()>=32{return Err("插件页面过多，请关闭部分页面后重试".into());}
+ grants.insert(ticket.clone(),Grant{id:id.into(),digest:row.digest,entry:entry.clone(),issued:Instant::now(),host:host.into(),generation,directory,files,stamps});
+ // 持票据锁复查：已撤销的迟到创建立即回收，不占页面配额。
+ if crate::plugin_window::current_generation(id)!=generation {grants.remove(&ticket);return Err("插件会话已撤销".into());}
+ Ok(serde_json::json!({"ticket":ticket,"url":url(&ticket,&entry),"generation":generation}))
+}
+fn url(ticket:&str,entry:&str)->String{
  let base=if cfg!(windows){"http://fish-plugin.localhost"}else{"fish-plugin://localhost"};
- Ok(serde_json::json!({"ticket":ticket,"url":format!("{base}/{ticket}/{entry}")}))
+ format!("{base}/{ticket}/{entry}")
 }
 fn checked(ticket:&str)->Result<(Grant,crate::plugin_install::Installed),String>{
  let grant=GRANTS.lock().map_err(|_|"插件页面锁不可用")?.get(ticket).cloned().ok_or("页面票据失效")?;
  let context=crate::storage_context::current().ok_or("存储尚未就绪")?;
  crate::github_access::require_plugin(context,&grant.id)?;
  let row=crate::plugin_install::Manager{context}.list()?.into_iter().find(|r|r.manifest.id==grant.id).ok_or("插件未安装")?;
- if !allowed(&grant,&row.manifest.id,&row.digest,row.enabled){return Err("页面票据与活动版本不匹配".into());}Ok((grant,row))
+ if !allowed(&grant,&row.manifest.id,&row.digest,crate::plugin_window::current_generation(&grant.id)==grant.generation){return Err("页面票据与活动版本不匹配".into());}Ok((grant,row))
 }
 /// #67：`dock.open_external` 的参数判定（纯函数，不碰 FFI，可单测）。
 /// 只认网页地址；缺参/非字符串/危险协议都在这一步拒绝，绝不启动浏览器。
@@ -83,23 +94,33 @@ pub fn call(ticket:&str,method:&str,params:serde_json::Value)->Result<serde_json
  }
  // T09：业务调用**不持 CURRENT 跑 RPC**。call_outside 借出实例句柄后放锁等回答，
  // 回答回来再拿一次短锁结账；等待期间这个插件被停用/卸载，结果按代次作废。
+ // 2.2.0：插件外部窗口与定向拖入。页面侧的入口在这里统一判定：票据已经证明了插件
+ // 身份与承载标签，能力/代次/句柄/配额/资源所有者都在 plugin_window 里再验一遍
+ // （后端经 host.windows.* / host.fileDrop.* 走同一套检查）。
+ if method.starts_with("dock.windows.")||method.starts_with("dock.fileDrop.") {
+  return crate::plugin_window::page(&grant.id,&grant.digest,grant.generation,&grant.host,method,&params);
+ }
  if method=="gateway.open" {
   // 已装退役插件仍可开自己的本机页面：特判集中在 legacy_ofm，不扩大成任意插件通行。
   if !crate::legacy_ofm::is_legacy_gateway_plugin(&grant.id){return Err("该插件没有本机服务页面".into());}
-  let state=crate::plugin_runtime::call_outside(&grant.id,"gateway.view",serde_json::json!({}))?;
+  let state=crate::plugin_runtime::call_outside_session(&grant.id,"gateway.view",serde_json::json!({}),Some(grant.generation))?;
   if state["state"]!="running"{return Err("请先启动服务".into());}
   let raw=state["url"].as_str().ok_or("服务尚未就绪")?;let url=tauri::Url::parse(raw).map_err(|_|"服务地址无效")?;
   if url.scheme()!="http"||url.host_str()!=Some("127.0.0.1")||!url.username().is_empty()||url.password().is_some()||url.port().map(u64::from)!=state["port"].as_u64(){return Err("服务就绪地址无效".into());}
   return Ok(serde_json::json!({"url":url.as_str()}));
  }
- crate::plugin_runtime::call_outside(&grant.id,method,params)
+ crate::plugin_runtime::call_outside_session(&grant.id,method,params,Some(grant.generation))
 }
-fn resource(ticket:&str,name:&str)->Result<(Vec<u8>,&'static str),String>{
+fn resource(host:&str,ticket:&str,name:&str)->Result<(Vec<u8>,&'static str),String>{
  use sha2::{Digest,Sha256};
  // T09：只查票据（一把内存锁），不读注册表、不碰 EDIT 锁、不整包核验。票据在停用/
  // 卸载/换版时由 plugin_runtime 调 revoke() 当场作废，所以每次再去注册表确认一遍
  // 只是把已经知道的事又问一遍，而且是重活。
  let grant=GRANTS.lock().map_err(|_|"插件页面锁不可用")?.get(ticket).cloned().ok_or("页面票据失效")?;
+ if crate::plugin_window::current_generation(&grant.id)!=grant.generation{return Err("页面会话已撤销".into());}
+ // 2.2.0 §5：票据绑定承载标签——别的窗口拿着这张票也加载不了这一页。不通过把资源
+ // 协议放宽成「任意 label」来实现。
+ if grant.host!=host{return Err("页面票据不属于这个承载窗口".into());}
  if grant.issued.elapsed()>=Duration::from_secs(86400){return Err("页面票据失效".into());}
  if name=="_fish_bridge.js" {return Ok((include_bytes!("../../../sdk/browser/bridge.js").to_vec(),"text/javascript; charset=utf-8"));}
  let expected=grant.files.get(name).ok_or("页面资源未在清单登记")?;
@@ -114,10 +135,13 @@ fn resource(ticket:&str,name:&str)->Result<(Vec<u8>,&'static str),String>{
  let mime=match name.rsplit('.').next().unwrap_or(""){"html"=>"text/html; charset=utf-8","js"|"mjs"=>"text/javascript; charset=utf-8","css"=>"text/css; charset=utf-8","png"=>"image/png","svg"=>"image/svg+xml","jpg"|"jpeg"=>"image/jpeg","webp"=>"image/webp","woff2"=>"font/woff2",_=>return Err("页面资源类型未支持".into())};
  if name.ends_with(".html")&&name!=grant.entry{return Err("页面入口与票据不一致".into());}
  let bytes=if name==grant.entry {let html=String::from_utf8(bytes).map_err(|_|"页面不是 UTF-8")?;format!("<!doctype html><script src=\"/{ticket}/_fish_bridge.js\"></script>{html}").into_bytes()}else{bytes};
+ // 读文件期间可能已关页或撤销实例，返回前再核对票据与会话。
+ let live=GRANTS.lock().map_err(|_|"插件页面锁不可用")?.get(ticket).is_some_and(|g|g.generation==grant.generation&&g.id==grant.id);
+ if !live||crate::plugin_window::current_generation(&grant.id)!=grant.generation{return Err("页面会话已撤销".into());}
  Ok((bytes,mime))
 }
 pub fn serve(label:&str,request:tauri::http::Request<Vec<u8>>)->tauri::http::Response<Vec<u8>>{
- let result=if label!="island"||request.method()!=tauri::http::Method::GET {Err("页面请求来源无效".into())}else{route(request.uri().path()).and_then(|(ticket,name)|resource(ticket,name))};
+ let result=if request.method()!=tauri::http::Method::GET {Err("页面请求来源无效".into())}else{route(request.uri().path()).and_then(|(ticket,name)|resource(label,ticket,name))};
  let (status,body,mime)=match result {Ok((bytes,mime))=>(200,bytes,mime),Err(_)=>(403,b"Extension resource unavailable".to_vec(),"text/plain; charset=utf-8")};
  tauri::http::Response::builder().status(status).header("Content-Type",mime).header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff").header("Referrer-Policy","no-referrer").header("Content-Security-Policy","default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'").body(body).expect("固定响应头")
 }
@@ -136,7 +160,7 @@ pub fn serve(label:&str,request:tauri::http::Request<Vec<u8>>)->tauri::http::Res
   }
  }
  #[test]fn page_grants_bind_identity_version_enabled_state_and_lifetime(){
-  let grant=Grant{id:"acme.weather".into(),digest:"1".repeat(64),entry:"page.html".into(),issued:Instant::now(),directory:PathBuf::from("packages/acme.weather"),files:BTreeMap::new(),stamps:BTreeMap::new()};
+  let grant=Grant{id:"acme.weather".into(),digest:"1".repeat(64),entry:"page.html".into(),issued:Instant::now(),host:"island".into(),generation:1,directory:PathBuf::from("packages/acme.weather"),files:BTreeMap::new(),stamps:BTreeMap::new()};
   assert!(allowed(&grant,"acme.weather",&"1".repeat(64),true));
   assert!(!allowed(&grant,"fish.ofm",&"1".repeat(64),true));assert!(!allowed(&grant,"acme.weather",&"2".repeat(64),true));assert!(!allowed(&grant,"acme.weather",&"1".repeat(64),false));
   let expired=Grant{issued:Instant::now()-Duration::from_secs(86401),..grant};assert!(!allowed(&expired,"acme.weather",&"1".repeat(64),true));
@@ -157,11 +181,16 @@ pub fn serve(label:&str,request:tauri::http::Request<Vec<u8>>)->tauri::http::Res
   let before=crate::plugin_install::stamp(&page).unwrap();
   let digest=format!("{:x}",Sha256::digest(&html));
   let ticket="b".repeat(64);
-  let grant=Grant{id:"acme.weather".into(),digest:"c".repeat(64),entry:"page.html".into(),issued:Instant::now(),directory:directory.clone(),
+  let (output,_input)=std::sync::mpsc::sync_channel(4);
+  let session=crate::plugin_window::begin_session("acme.weather",output);
+  let grant=Grant{id:"acme.weather".into(),digest:"c".repeat(64),entry:"page.html".into(),issued:Instant::now(),host:"plugin-win-1".into(),generation:session.generation,directory:directory.clone(),
    files:BTreeMap::from([("page.html".into(),digest.clone())]),
    stamps:BTreeMap::from([("page.html".into(),before)])};
   GRANTS.lock().unwrap().insert(ticket.clone(),grant);
-  let (served,mime)=resource(&ticket,"page.html").expect("指纹没变的资源必须直接发");
+  let (served,mime)=resource("plugin-win-1",&ticket,"page.html").expect("指纹没变的资源必须直接发");
+  // 2.2.0 §5：别的承载窗口（island、另一个插件窗口）拿同一张票取资源必须被拒。
+  assert!(resource("island",&ticket,"page.html").is_err(),"票据绑定的承载标签之外的窗口不许加载这一页");
+  assert!(resource("plugin-win-2",&ticket,"page.html").is_err(),"另一个插件窗口也不许借票");
   assert_eq!(mime,"text/html; charset=utf-8");
   assert!(String::from_utf8_lossy(&served).contains("<title>fixture</title>"),"入口页要注入桥");
   assert!(String::from_utf8_lossy(&served).contains(&format!("/{ticket}/_fish_bridge.js")),"入口页要带本票据的桥脚本");
@@ -174,10 +203,13 @@ pub fn serve(label:&str,request:tauri::http::Request<Vec<u8>>)->tauri::http::Res
   std::fs::write(&page,&longer).unwrap();
   let after=crate::plugin_install::stamp(&page).unwrap();
   assert_ne!(after,before,"长度变了，指纹必须跟着变");
-  assert!(resource(&ticket,"page.html").is_err(),"指纹变了、摘要对不上必须拒绝");
+  assert!(resource("plugin-win-1",&ticket,"page.html").is_err(),"指纹变了、摘要对不上必须拒绝");
+  // 会话撤销先于票据清理时，也不得继续加载桥或资源。
+  session.revoke();
+  assert!(resource("plugin-win-1",&ticket,"_fish_bridge.js").is_err());
   // 停用/卸载/换版：revoke 之后同一张票据立刻失效，在途的页面请求也一并被拒。
   revoke("acme.weather");
-  assert!(resource(&ticket,"page.html").is_err(),"revoke 之后票据必须失效");
+  assert!(resource("plugin-win-1",&ticket,"page.html").is_err(),"revoke 之后票据必须失效");
   GRANTS.lock().unwrap().clear();
   std::fs::remove_dir_all(&root).unwrap();
  }
@@ -186,7 +218,7 @@ pub fn serve(label:&str,request:tauri::http::Request<Vec<u8>>)->tauri::http::Res
   let directory=root.join("packages");
   std::fs::create_dir_all(&directory).unwrap();
   let ticket="d".repeat(64);
-  GRANTS.lock().unwrap().insert(ticket.clone(),Grant{id:"fish.magpie".into(),digest:"e".repeat(64),entry:"page.html".into(),issued:Instant::now(),directory,files:BTreeMap::from([("page.html".into(),"f".repeat(64))]),stamps:BTreeMap::new()});
+  GRANTS.lock().unwrap().insert(ticket.clone(),Grant{id:"fish.magpie".into(),digest:"e".repeat(64),entry:"page.html".into(),issued:Instant::now(),host:"island".into(),generation:1,directory,files:BTreeMap::from([("page.html".into(),"f".repeat(64))]),stamps:BTreeMap::new()});
   // 别人的票据被 revoke 时，这张还在；但 revoke 自己那个 id 时必须一起清掉。
   revoke("fish.clash");
   assert!(GRANTS.lock().unwrap().contains_key(&ticket),"revoke 只作废那一个插件的票据");

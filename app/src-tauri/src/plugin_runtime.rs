@@ -230,15 +230,23 @@ fn valid_method(method:&str)->Result<(),String>{
 // 短锁结账。等待期间一次都不占 CURRENT，所以「装 magpie 期间开插件页」不会再撞
 // 「插件页面请求超时」。
 pub fn call_outside(id:&str,method:&str,params:Value)->Result<Value,String>{
+    call_outside_session(id,method,params,None)
+}
+pub fn call_outside_session(id:&str,method:&str,params:Value,hook_generation:Option<u64>)->Result<Value,String>{
     valid_method(method)?;
     let (handle,generation)={
         let runner=CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
+        // 与借出实例同一临界区：旧票据不能在重启后借到新实例。
+        if hook_generation.is_some_and(|expected|expected==0||crate::plugin_window::current_generation(id)!=expected){return Err("页面会话已撤销".into());}
         let handle=runner.processes.get(id).cloned().ok_or("插件尚未运行")?;
         (handle,runner.generation(id))
     };
     // 句柄已经借到：这一段在锁外，最长到 RPC 超时。
     let timeout=crate::config::plugin_rpc_timeout();
-    let result=match handle.lock(){Ok(mut process)=>process.request(method,params,timeout),Err(_)=>Err("插件进程状态不可用".into())};
+    let result=match handle.lock(){
+        Ok(mut process)=>match hook_generation { Some(generation)=>process.request_session(generation,method,params,timeout),None=>process.request(method,params,timeout) },
+        Err(_)=>Err("插件进程状态不可用".into())
+    };
     // 结账：等待期间被停用/卸载/换版（plugin_page::revoke → retire）就作废这次结果。
     let mut runner=CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
     settle_outside(&mut runner,id,generation,&handle,result)
@@ -249,12 +257,6 @@ pub fn call_outside(id:&str,method:&str,params:Value)->Result<Value,String>{
 fn settle_outside(runner:&mut Runner,id:&str,generation:u64,handle:&Instance,result:Result<Value,String>)->Result<Value,String>{
     if !runner.settles(id,generation,handle) { return Err("插件已停用或卸载，本次调用结果已丢弃".into()); }
     runner.settle(id,result)
-}
-// present 是插件页面入口用的「有没有这个实例」查询（T09）：不握手、不拿实例锁、
-// 不做任何 I/O，所以一次在途 RPC 也挡不住开页面。
-pub fn present(id:&str)->bool{
-    let Ok(runner)=CURRENT.lock() else {return false};
-    runner.present(id)
 }
 // discard_late（t33/F3）：整轮到期后才起来的实例不登记为健康，直接停掉并摘除；
 // 只有代次仍对得上才动手，绝不误杀之后拉起的新实例。
@@ -386,9 +388,9 @@ impl Runner {
     // 暂停（身份导出/导入用）：停掉当前实例、取消这一轮调度，但**不是最终退出**——
     // 随后的 resume 会把 stopping 复位，插件照常回来（t33/F1）。
     pub fn pause_all(&mut self){
-        self.quiesce("插件运行已暂停（身份操作）");
+        self.quiesce("插件运行已暂停（身份操作）","suspended");
     }
-    fn quiesce(&mut self,reason:&str){
+    fn quiesce(&mut self,reason:&str,code:&str){
         self.stopping=true;
         crate::plugin_start::cancel_all(reason);
         // t46/F1-1：暂停时还在 Process::start 里的 id 也必须 retire——否则 resume 会以
@@ -396,17 +398,19 @@ impl Runner {
         // 前一个 Process。清 in_flight 的同时把代次推走，旧 worker 回来只能被丢弃。
         let flying:Vec<String>=self.in_flight.iter().cloned().collect();
         self.in_flight.clear();
-        for id in flying { self.retire(&id); }
+        for id in flying { self.retire(&id); crate::plugin_window::revoke_plugin(&id,code); }
         let taken=std::mem::take(&mut self.processes);
         for (id,handle) in taken {
             self.retire(&id);
+            // 2.2.0：暂停/退出同样撤销窗口、票据与拖入订阅，不留给下一次启动复活。
+            crate::plugin_window::revoke_plugin(&id,code);
             if let Ok(mut process)=handle.lock(){process.stop_quick();}
         }
     }
     // 最终退出：此后 resume 一律不再拉起（main.rs 的退出路径）。
     pub fn close(&mut self){
         self.closed=true;
-        self.quiesce("宿主退出");
+        self.quiesce("宿主退出","exit");
     }
     // 一条失败：先进内存（插件卡当场显示），再逐行追加进 plugin-failures.log。
     // 落盘失败只影响「宿主重启后还能不能查」，绝不影响这次调用本身的返回。
@@ -438,6 +442,9 @@ impl Runner {
     // Drop 兜底杀进程树；代次已经 +1，那个线程回来也不会再把实例塞回去。
     fn drop_instance(&mut self,id:&str){
         self.retire(id);
+        // 2.2.0：实例一换，这个插件的窗口、票据与拖入订阅当场撤销（不清就成幽灵窗口）。
+        // 这里只动内存并把销毁排进主线程，绝不在持锁时等主线程。
+        crate::plugin_window::revoke_plugin(id,"revoked");
         // T-E/A04：停用、卸载、换版都作废这个插件的在途自启尝试（迟到的结果不许回填）。
         crate::plugin_start::cancel(id,"插件已停用、卸载或换版");
         if let Some(handle)=self.processes.remove(id) { if let Ok(mut process)=handle.try_lock(){process.stop();} }
@@ -457,6 +464,7 @@ impl Runner {
     }
     fn install_instance(&mut self,id:&str,generation:u64,round:u64,process:Process)->bool{
         if !self.accepts_instance_round(id,generation,round) { return false; }
+        // 调度代次控制迟到启动结果；进程的 Hook 会话在握手前独立建立。
         self.processes.insert(id.into(),Arc::new(Mutex::new(process)));
         self.failures.remove(id);
         true
@@ -497,6 +505,8 @@ impl Runner {
                 }
             };
             if let Some(code)=gone {
+                // 2.2.0：进程真的没了（崩溃/被杀）：窗口按崩溃撤销，不复活。
+                crate::plugin_window::revoke_plugin(id,"crashed");
                 self.drop_instance(id);
                 // 到这里一定是进程真的没了。退出码取不到时也别冒充「已退出」以外的
                 // 判断——说清是问不到退出码，用户才知道该去查什么。
@@ -615,6 +625,8 @@ impl Runner {
         self.versions.insert(id.into(),row.manifest.version.clone());
         if !enabled {
             crate::plugin_page::revoke(id);
+            // 2.2.0：停用的窗口、票据与拖入订阅一起撤销（reason 给插件的 closed 事件）。
+            crate::plugin_window::revoke_plugin(id,"deactivated");
             manager.set_enabled(id,false)?;
             self.drop_instance(id);
             self.failures.remove(id);return Ok(());
@@ -655,6 +667,7 @@ impl Runner {
             Err(error)=>{let elapsed=Some(started_at.elapsed().as_millis() as u64);let a=attempt.or(Some(1));let failure=self.failure(&id,&row.manifest.version,"启动",None,a,elapsed.or(elapsed_ms),None,None,None,&error);self.record(manager,failure);return Err(error)}
         };
         if let Err(error)=manager.set_enabled(&id,true){process.stop_quick();return Err(error);}
+
         self.processes.insert(id.clone(),Arc::new(Mutex::new(process)));self.failures.remove(&id);
         // F2（t33）：手动启动已经定案，摘掉上一轮自启的调度记录——卡片以后只看实时 running。
         crate::plugin_start::forget(&id);
@@ -733,6 +746,8 @@ impl Runner {
         // t29/C：先停服务（整树，端口释放）再删文件——反过来的话 Windows 上正在运行的
         // 进程还占着 exe/资源句柄，remove_dir_all 会失败，留下半个 packages/<id>/。
         crate::plugin_page::revoke(id);
+        // 2.2.0：卸载前先收窗口与拖入订阅（卸载会删掉整个插件目录，不能留幽灵窗口）。
+        crate::plugin_window::revoke_plugin(id,"uninstalled");
         self.drop_instance(id);
         manager.uninstall(id)?;
         self.failures.remove(id);Ok(())
@@ -754,6 +769,8 @@ impl Runner {
             point.archive
         }else{None};
         crate::plugin_page::revoke(&id);
+        // 2.2.0：换版前先收旧版本的窗口与订阅；新版本要开窗得重新 open。
+        crate::plugin_window::revoke_plugin(&id,"upgraded");
         self.drop_instance(&id);
         let installed=manager.install(package,digest,official);
         let attempt=match installed {
@@ -884,6 +901,15 @@ fn failure_step(error:&str)->&'static str {
 mod tests {
     use super::*;
     fn root(name:&str)->PathBuf{std::env::temp_dir().join(format!("fish-{name}-{}-{}",std::process::id(),crate::now_ms()))}
+    #[test]
+    fn page_cannot_borrow_backend_after_hook_replacement() {
+        let (old_output,_old_input)=std::sync::mpsc::sync_channel(1);
+        let old=crate::plugin_window::begin_session("acme.rpc-revoked",old_output);
+        let (new_output,_new_input)=std::sync::mpsc::sync_channel(1);
+        let new=crate::plugin_window::begin_session("acme.rpc-revoked",new_output);
+        assert_eq!(call_outside_session("acme.rpc-revoked","status",json!({}),Some(old.generation)).unwrap_err(),"页面会话已撤销");
+        assert_eq!(call_outside_session("acme.rpc-revoked","status",json!({}),Some(new.generation)).unwrap_err(),"插件尚未运行");
+    }
     // #53-3/5：失败结构化——文案带退出码与日志路径，并逐行追加进 plugin-failures.log；
     // 宿主重启（新的 Runner）之后盘上那条仍在。
     #[test] fn failures_are_structured_and_survive_a_restart() {
@@ -1455,7 +1481,7 @@ else send(row.id,'pong');}});"#;
     fn manual_enable_retry_path_actually_runs() {
         // t21：获取测试锁，防止并行测试干扰注入的静态量。
         let _guard = crate::plugin_runtime::acquire_manual_enable_test_lock();
-        
+
         use std::sync::atomic::{AtomicUsize, Ordering};
         // 注入退避计数器。
         let backoff_called = Arc::new(AtomicUsize::new(0));

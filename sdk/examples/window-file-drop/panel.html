@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>我的暂存</title>
+<style>
+  /* 插件自己的界面（示例）：宿主只提供窗口容器，形状、颜色、按钮都由插件决定。 */
+  html, body { margin: 0; height: 100%; background: #14161c; color: #e6e9f2; font: 13px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { padding: 14px 16px; }
+  h1 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+  p { margin: 6px 0; color: #a9b1c3; font-size: 12px; }
+  ul { margin: 8px 0 12px; padding: 0; list-style: none; }
+  li { padding: 4px 8px; border-radius: 6px; background: #1d2029; margin-bottom: 4px; font-size: 12px; }
+  button { font: inherit; padding: 5px 12px; border-radius: 7px; border: 1px solid #3a4050; background: #232734; color: #e6e9f2; cursor: pointer; }
+  button:hover { background: #2b3040; }
+</style>
+</head>
+<body>
+<main>
+  <h1>拖进来的文件</h1>
+  <p id="count" role="status">还没有文件。</p>
+  <ul id="list"></ul>
+  <button id="close" type="button">关闭窗口</button>
+</main>
+<script>
+  // 页面桥由宿主注入（FishDock）：这里只用 windows / fileDrop 两项。
+  ;(function () {
+    const count = document.getElementById('count')
+    const list = document.getElementById('list')
+    let panel = null
+    function paint(paths) {
+      const names = paths.map(path => String(path).split(/[\\/]/).pop())
+      count.textContent = `${names.length} 个文件（示例只显示文件名）`
+      list.replaceChildren(...names.map(name => { const item = document.createElement('li'); item.textContent = name; return item }))
+    }
+    // 窗口事件：ready 时拿到自己的句柄（也可以随时 windows.list() 查）。
+    FishDock.windows.onEvent(event => {
+      if (event.event === 'ready') panel = event.handle
+      if (event.event === 'fileDrop' && event.phase === 'drop') paint(event.paths || [])
+    })
+    FishDock.windows.list().then(rows => {
+      panel = rows[0]?.handle || panel
+      // 本窗口自己接收拖入：只给这个窗口的所有者，别的插件收不到。
+      if (panel) return FishDock.fileDrop.subscribe({ scope: 'window', handle: panel })
+    }).catch(() => {})
+    document.getElementById('close').addEventListener('click', () => {
+      if (panel) void FishDock.windows.close(panel).catch(() => {})
+    })
+  })()
+</script>
+</body>
+</html>

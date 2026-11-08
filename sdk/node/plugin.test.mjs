@@ -143,3 +143,101 @@ test('host.hello 不下发 hostCallTimeoutMs 时，宿主调用 50 ms 内不得�
     assert.equal(f.plugin.closed,false,'反证期间会话仍在，说明是「等」而不是「已断」');
   } finally {f.plugin.close();}
 });
+
+// 2.2.0：外部原生窗口与定向拖入。SDK 只做三件事——能力不满足就本地拒绝、
+// 把同一套协议方法发给宿主、把宿主的单向窗口事件分给监听器；身份与句柄由宿主校验。
+async function handshake(f,capabilities){
+  f.send({id:1,method:'host.hello',params:{protocol:1,pluginId:'acme.weather',capabilities}});
+  assert.equal((await f.next()).result.type,'plugin.hello');
+  f.send({id:2,method:'plugin.activate',params:{}});assert.deepEqual((await f.next()).result,{active:true});
+}
+test('窗口：能力、句柄与代次都由宿主校验，SDK 只转发协议', async () => {
+  const seen=[];
+  const f=fixture({commands:{
+    panel:async(_,ctx)=>({handle:await ctx.windows.open({key:'panel',page:'main',width:420})}),
+    resize:async(_,ctx)=>ctx.windows.update('h-1',{height:260}),
+    shut:async(_,ctx)=>ctx.windows.close('h-1'),
+    listing:async(_,ctx)=>ctx.windows.list(),
+  }});
+  try{
+    await handshake(f,['storage']);
+    f.send({id:3,method:'panel'});
+    assert.equal((await f.next()).error.code,'COMMAND_FAILED','没声明 windows 能力时本地就拒绝');
+    assert.equal(f.rows.length,0,'本地拒绝不该向宿主要求开窗');
+
+    f.send({id:4,method:'host.hello',params:{protocol:1,pluginId:'acme.weather',capabilities:['storage','windows','file-drop']}});
+    // 重复握手在 SDK 里是 BAD_HANDSHAKE：新能力要重新拉起会话才生效（测试里另起一个）。
+  } finally {f.plugin.close();}
+
+  const w=fixture({commands:{
+    panel:async(_,ctx)=>({handle:await ctx.windows.open({key:'panel',page:'main',width:420})}),
+    resize:async(_,ctx)=>ctx.windows.update('h-1',{height:260}),
+    shut:async(_,ctx)=>ctx.windows.close('h-1'),
+    listing:async(_,ctx)=>ctx.windows.list(),
+  }});
+  try{
+    await handshake(w,['storage','windows','file-drop']);
+    w.send({id:3,method:'panel'});
+    const open=await w.next();
+    assert.equal(open.method,'host.windows.open');
+    assert.deepEqual(open.params,{key:'panel',page:'main',width:420});
+    w.send({id:open.id,result:{handle:'h-1',key:'panel',ready:true}});
+    assert.equal((await w.next()).result.handle,'h-1','open 把宿主的 opaque handle 交回');
+
+    w.send({id:4,method:'resize'});
+    const update=await w.next();
+    assert.equal(update.method,'host.windows.update');
+    assert.deepEqual(update.params,{height:260,handle:'h-1'},'update 必须带上自己的句柄');
+    w.send({id:update.id,result:{handle:'h-1'}});
+    assert.equal((await w.next()).result.handle,'h-1');
+
+    w.send({id:5,method:'shut'});
+    const close=await w.next();
+    assert.equal(close.method,'host.windows.close');
+    assert.deepEqual(close.params,{handle:'h-1'});
+    w.send({id:close.id,result:{closed:true}});
+    assert.equal((await w.next()).result,true);
+
+    w.send({id:6,method:'listing'});
+    const list=await w.next();
+    assert.equal(list.method,'host.windows.list');
+    w.send({id:list.id,result:{windows:[{handle:'h-1',key:'panel'}]}});
+    assert.deepEqual((await w.next()).result,[{handle:'h-1',key:'panel'}]);
+    void seen;
+  } finally {w.plugin.close();}
+});
+test('窗口事件：宿主单向通知按能力分发给 windows / fileDrop 监听器', async () => {
+  const windowsSeen=[],dropsSeen=[],off=[];
+  const f=fixture({commands:{wire:async(_,ctx)=>{off.push(ctx.windows.onEvent(row=>windowsSeen.push(row)));off.push(ctx.fileDrop.onEvent(row=>dropsSeen.push(row)));return 'wired'}}});
+  try{
+    await handshake(f,['storage','windows','file-drop']);
+    f.send({id:3,method:'wire'});assert.equal((await f.next()).result,'wired');
+    f.send({id:9,method:'plugin.windowEvent',params:{event:'ready',handle:'h-1'}});
+    assert.deepEqual((await f.next()).result,{handled:true});
+    assert.equal(windowsSeen.length,1);assert.equal(windowsSeen[0].event,'ready');
+    f.send({id:10,method:'plugin.windowEvent',params:{event:'fileDrop',phase:'drop',scope:'window',handle:'h-1',paths:['synthetic-one.txt','synthetic-two.png']}});
+    assert.deepEqual((await f.next()).result,{handled:true});
+    assert.equal(windowsSeen.length,2,'窗口监听器也收到拖入事件');
+    assert.equal(dropsSeen.length,1);assert.deepEqual(dropsSeen[0].paths,['synthetic-one.txt','synthetic-two.png']);
+    // 监听器抛错不断会话：后面还能正常应答。
+    const off2=off.slice();off2.forEach(fn=>fn());
+    f.send({id:11,method:'plugin.windowEvent',params:{event:'closed',handle:'h-1',reason:'user'}});
+    assert.deepEqual((await f.next()).result,{handled:true});
+    assert.equal(windowsSeen.length,2,'退订之后不再分发');
+  } finally {f.plugin.close();}
+});
+test('窗口事件：能力不足时宿主通知被拒绝且监听器不被调用', async () => {
+  let seen=0;
+  const f=fixture({commands:{wire:async(_,ctx)=>{ctx.windows.onEvent(()=>{seen++});return 'wired'}}});
+  try{
+    await handshake(f,['storage']);
+    f.send({id:3,method:'wire'});assert.equal((await f.next()).result,'wired');
+    f.send({id:9,method:'plugin.windowEvent',params:{event:'ready',handle:'h-1'}});
+    assert.equal((await f.next()).error.code,'CAPABILITY_REQUIRED');
+    assert.equal(seen,0,'没有 windows 能力时监听器不该被调用');
+    // fileDrop 订阅同样本地拒绝。
+    const g=fixture({commands:{wire:async(_,ctx)=>ctx.fileDrop.subscribe({scope:'dock'})}});
+    try{await handshake(g,['storage','windows']);g.send({id:3,method:'wire'});assert.equal((await g.next()).error.code,'COMMAND_FAILED')}
+    finally{g.plugin.close()}
+  } finally {f.plugin.close();}
+});
