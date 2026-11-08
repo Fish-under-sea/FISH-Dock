@@ -46,7 +46,10 @@ mod imp {
 
     use super::DRAG_RECT;
 
-    type Hwnd = isize;
+    // 与仓库内其他 Win32 模块（backplate.rs、systray.rs、desk.rs、inputs.rs 等）
+    // 使用同一个 `Hwnd` 定义：窗口句柄是不透明指针，这里也按它们的写法声明，
+    // 同一 crate 内的 user32 符号便不会触发 clashing_extern_declarations 警告。
+    type Hwnd = *mut c_void;
 
     static APP: OnceLock<AppHandle> = OnceLock::new();
 
@@ -62,10 +65,10 @@ mod imp {
         lpfn_wnd_proc: Option<unsafe extern "system" fn(Hwnd, u32, usize, isize) -> isize>,
         cb_cls_extra: i32,
         cb_wnd_extra: i32,
-        h_instance: Hwnd,
-        h_icon: Hwnd,
-        h_cursor: Hwnd,
-        hbr_background: Hwnd,
+        h_instance: isize,
+        h_icon: isize,
+        h_cursor: isize,
+        hbr_background: isize,
         lpsz_menu_name: *const u16,
         lpsz_class_name: *const u16,
     }
@@ -89,13 +92,16 @@ mod imp {
     }
 
     extern "system" {
-        fn GetModuleHandleW(name: *const u16) -> Hwnd;
+        // 签名与仓库内其他 Win32 模块保持一致：同一个 user32 符号只有一种声明，
+        // 不会互相冲突。窗口句柄用 `Hwnd`（即 *mut c_void），模块/菜单/实例
+        // 句柄等按仓库惯例仍用 `isize`。
+        fn GetModuleHandleW(name: *const u16) -> isize;
         fn RegisterClassW(class: *const WndClassW) -> u16;
         #[allow(clippy::too_many_arguments)]
         fn CreateWindowExW(
             ex_style: u32, class: *const u16, name: *const u16, style: u32,
             x: i32, y: i32, w: i32, h: i32,
-            parent: Hwnd, menu: Hwnd, instance: Hwnd, param: *mut c_void,
+            parent: Hwnd, menu: isize, instance: isize, param: *mut c_void,
         ) -> Hwnd;
         fn DefWindowProcW(hwnd: Hwnd, msg: u32, w: usize, l: isize) -> isize;
         fn SetLayeredWindowAttributes(hwnd: Hwnd, key: u32, alpha: u8, flags: u32) -> i32;
@@ -104,7 +110,7 @@ mod imp {
         fn DragFinish(hdrop: Hwnd);
         fn ShowWindow(hwnd: Hwnd, cmd: i32) -> i32;
         fn MoveWindow(hwnd: Hwnd, x: i32, y: i32, w: i32, h: i32, repaint: i32) -> i32;
-        fn SetWindowPos(hwnd: Hwnd, after: Hwnd, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+        fn SetWindowPos(hwnd: Hwnd, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
         fn PeekMessageW(msg: *mut Msg, hwnd: Hwnd, min: u32, max: u32, remove: u32) -> i32;
         fn TranslateMessage(msg: *const Msg) -> i32;
         fn DispatchMessageW(msg: *const Msg) -> isize;
@@ -138,9 +144,9 @@ mod imp {
         const EX: u32 = 0x0008_0000 | 0x0000_0008 | 0x0800_0000 | 0x0000_0080;
         let hwnd = CreateWindowExW(
             EX, class.as_ptr(), title.as_ptr(), WS_POPUP,
-            0, 0, 10, 10, 0, 0, instance, std::ptr::null_mut(),
+            0, 0, 10, 10, std::ptr::null_mut(), 0, instance, std::ptr::null_mut(),
         );
-        if hwnd == 0 {
+        if hwnd.is_null() {
             log("dropwin: could not create its window");
             return;
         }
@@ -151,7 +157,7 @@ mod imp {
         let mut shown = false;
         loop {
             let mut msg: Msg = std::mem::zeroed();
-            while PeekMessageW(&mut msg, 0, 0, 0, 0x1) != 0 {
+            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, 0x1) != 0 {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
