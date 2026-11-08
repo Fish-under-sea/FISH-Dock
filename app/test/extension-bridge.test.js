@@ -50,7 +50,13 @@ function boot({ height = 400, readyState = 'complete', bodyAtParse = true } = {}
     observe(target) { this.target = target }
   }
   const parent = { postMessage: row => posted.push(row) }
-  const win = { addEventListener(type, fn) { win.listener = fn }, removeEventListener() {} }
+  // EventTarget 会保留同类事件的所有监听器；主题和窗口事件各自注册，不能互相覆盖。
+  const listeners = new Map()
+  const win = {
+    addEventListener(type, fn) { const rows = listeners.get(type) || new Set(); rows.add(fn); listeners.set(type, rows) },
+    removeEventListener(type, fn) { listeners.get(type)?.delete(fn) },
+    dispatchEvent(event) { for (const fn of [...(listeners.get(event.type) || [])]) fn(event) },
+  }
   const navigator = activation.api ? { userActivation: { get isActive() { return activation.active } } } : {}
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../sdk/browser/bridge.js'), 'utf8'), {
     window: win,
@@ -83,7 +89,7 @@ function boot({ height = 400, readyState = 'complete', bodyAtParse = true } = {}
     resize: () => observers.at(-1)?.fn(),
     domReady: () => doc.domReady?.(),
     // 模拟宿主收到 ready 后投回来的主题消息（与 extension-page.js 的 theme() 同形）。
-    theme: mode => win.listener({ source: parent, data: { type: 'fish:theme', ticket: TICKET, title: 'T', mode, colors: { '--dock-bg': '#fff' } } }),
+    theme: mode => win.dispatchEvent({ type: 'message', source: parent, data: { type: 'fish:theme', ticket: TICKET, title: 'T', mode, colors: { '--dock-bg': '#fff' } } }),
     dockTheme: () => doc.documentElement.dataset.dockTheme,
     // #67 helpers
     link,

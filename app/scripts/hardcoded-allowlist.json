@@ -18,6 +18,7 @@
     { "glob": "src-tauri/src/lhm.rs", "categories": ["HTTP_URL"], "reason": "LibreHardwareMonitor 的本机 web 服务（127.0.0.1 + 运行期端口）" },
     { "glob": "src-tauri/src/lhm_setup.rs", "categories": ["HTTP_URL", "TIMEOUT_MAGIC", "ABS_PATH"], "reason": "LHM 安装：第三方发行端、本机探测、任务计划 XML 命名空间、ProgramFiles 目录" },
     { "glob": "src-tauri/src/logon.rs", "categories": ["HTTP_URL"], "reason": "登录任务计划 XML 命名空间（schemas.microsoft.com）" },
+    { "glob": "src-tauri/src/proxy_heal.rs", "categories": ["HTTP_URL"], "reason": "Windows Task Scheduler 固定 XML 命名空间 http://schemas.microsoft.com/windows/2004/02/mit/task，用于标识任务文档协议，不是网络请求或可配置服务地址；与 logon.rs 同一协议" },
     { "glob": "src-tauri/src/updates.rs", "categories": ["HTTP_URL", "TIMEOUT_MAGIC"], "reason": "更新/公告的端点校验前缀与「本机回拨 after-update」；主机来自 config.url.*，此处是校验/回拨" },
     { "glob": "src-tauri/src/plugin_page.rs", "categories": ["HTTP_URL"], "reason": "插件页的自定义协议 scheme（fish-plugin.localhost / fish-plugin:），内部路由不是外网端点" },
     { "glob": "src-tauri/src/data.rs", "categories": ["HTTP_URL", "ABS_PATH"], "reason": "Tauri 内部资产协议 asset.localhost 与 current_exe 定位，非用户数据目录" },

@@ -294,7 +294,7 @@ fn leases(explicit: Option<&Path>) -> Vec<PathBuf> {
         Some(_) => return Vec::new(),
         None => {
             let Ok(home) = crate::storage::profile_directory() else { return Vec::new() };
-            let Ok(root) = crate::storage::resolve_root(&home, None, std::env::var_os("FISH_DOCK_HOME").map(PathBuf::from).as_deref()) else { return Vec::new() };
+            let Ok(root) = crate::storage::resolve_root(&home, None, crate::config::unified_root_env().as_deref()) else { return Vec::new() };
             root
         }
     };
@@ -473,7 +473,7 @@ impl Env for System {
     fn listening(&self, port: u16) -> bool {
         use std::net::{SocketAddr, TcpStream};
         let address = SocketAddr::from(([127, 0, 0, 1], port));
-        TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_ok()
+        TcpStream::connect_timeout(&address, crate::config::PROXY_HEAL_CONNECT_TIMEOUT).is_ok()
     }
 }
 

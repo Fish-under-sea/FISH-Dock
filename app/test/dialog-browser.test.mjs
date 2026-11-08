@@ -38,7 +38,8 @@ test('真实浏览器校验 Dock 弹窗尺寸、透明遮罩、长文本滚动�
    assert.ok(geometry.width<=360 && geometry.width<=width-39)
    assert.ok(geometry.height<=height*.7+1)
    assert.ok(geometry.x>=0 && geometry.y>=0)
-   assert.equal(geometry.shadow,'none');assert.equal(geometry.backdrop,'rgba(0, 0, 0, 0)');assert.equal(geometry.scroll,true)
+   // #74 保留卡片轻投影，遮罩仍透明；与 settings-focus 的产品契约一致。
+   assert.equal(geometry.shadow,'rgba(0, 0, 0, 0.28) 0px 12px 28px 0px, rgba(0, 0, 0, 0.06) 0px 0px 0px 1px');assert.equal(geometry.backdrop,'rgba(0, 0, 0, 0)');assert.equal(geometry.scroll,true)
    await page.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await page.call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
    await eventually(()=>evaluate('!document.querySelector("dialog").open && document.activeElement.id==="origin"'))
   }
