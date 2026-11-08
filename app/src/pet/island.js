@@ -6304,8 +6304,23 @@
   const followBar = () => false
   // 默认跟随主岛：compact（或收起滑走）缩成左侧小球，展开态显示下方长条；手动操作优先。
   const showBar = () => manual !== null ? manual : followBar()
-  // 小球是常驻入口：即使暂无暂存文件也要显示（可点开成空长条再拖文件进去）。
-  const visible = () => true
+  // 常驻入口：即使暂无暂存文件也显示（可点开成空长条再拖文件进去）。
+  // 主岛因全屏/滑走要收起时：展开的长条先缩成小球，小球再跟主岛一起滑走（不是原地消失）。
+  const overFull = () => document.body.classList.contains('over-full')
+  const collapsing = () => dockStowed() || overFull()
+  // 三个尺寸弹簧都静止且已是小球态 = 收缩动画放完了。
+  const ballRest = () => !showBar() && W.atRest && H.atRest && R.atRest && C.atRest
+  // 主岛是否已完全滑到屏幕外（向上滑走）。子岛跟着一起滑出去，滑到位才真正隐藏。
+  const mainOffscreen = () => {
+    const r = islandEl.getBoundingClientRect()
+    return r.bottom <= 2 || r.top >= window.innerHeight - 2
+  }
+  // 收起期间：跟随主岛滑走（滑出屏幕才隐藏）；全屏(over-full，主岛不滑走)时小球收好即隐藏；平时常驻。
+  const visible = () => {
+    if (overFull()) return !ballRest()
+    if (dockStowed()) return !mainOffscreen()
+    return true
+  }
 
   // 文件类型 → 前置图标（文件夹/文档/图片/视频/音频/压缩包/代码/其他）
   function iconOf(it) {
@@ -6388,6 +6403,8 @@
 
   // 依据"主岛状态 + 是否手动展开"决定形态：bar 长条（下方）/ 小球（左侧）。
   function syncMode() {
+    // 主岛因全屏/滑走要收起时，展开的长条先收成小球（再由 visible() 在收缩完隐藏/恢复）。
+    if (collapsing() && manual !== false) manual = false
     const bar = showBar()
     if (bar) {
       if (!barShown) { feelFor(true, true); W.setTarget(barWidth()); H.setTarget(barHeight()); R.setTarget(THICK / 2); C.configure(280, 30) }
@@ -6408,8 +6425,11 @@
       const th = Math.max(1, H.target)
       let tx, ty
       if (bar) { tx = rr.left + rr.width / 2 - tw / 2; ty = rr.bottom + GAP }
-      else { tx = rr.left - GAP_R - tw; ty = (baseTop != null ? baseTop : rr.top) + (THICK - th) / 2 }
+      else { tx = rr.left - GAP_R - tw; ty = rr.top + (rr.height - th) / 2 }
+      // 主岛滑走/恢复过程中：位置直接跟当前矩形同帧走（像主岛一样滑），平时用弹簧平滑。
+      const followSnap = dockStowed() || rr.top < -1
       if (!posInit) { X.snap(tx); Y.snap(ty); posInit = true }
+      else if (followSnap) { X.snap(tx); Y.snap(ty) }
       else {
         const k = bar ? 475 : 437, c = bar ? 33 : 36
         X.configure(k, c); Y.configure(k, c)
@@ -6483,6 +6503,8 @@
     countEl.style.opacity = (1 - c).toFixed(3)
     // “收起”按钮仅在长条态显示。
     closeBtn.style.display = showBar() ? 'block' : 'none'
+    // 主岛收起期间：收缩动画放完（已成小球）就隐藏；否则显示（看小球形成）。平时常驻显示。
+    wrap.style.display = visible() ? 'flex' : 'none'
   }
   function tick(ts) {
     const dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.1) : 0.016
@@ -6523,11 +6545,14 @@
     syncMode()
     refresh()
   }
-  // 主岛收起/滑走状态变化（isl-stowed）：只重排形态，不影响手动状态。
+  // 主岛收起/滑走（isl-stowed）或有窗口全屏（over-full）变化：重排形态，跟随主岛一起收起。
+  let lastOverFull = document.body.classList.contains('over-full')
   function onStowedChange() {
     const s = document.body.classList.contains('isl-stowed')
-    if (s === lastStowed) return
+    const of = document.body.classList.contains('over-full')
+    if (s === lastStowed && of === lastOverFull) return
     lastStowed = s
+    lastOverFull = of
     syncMode()
   }
   try {
@@ -6537,30 +6562,32 @@
     moBody.observe(document.body, { attributes: true, attributeFilter: ['class'] })
   } catch (err) { console.error('stash-sub observe', err) }
   // ===== hook：每帧比对主岛状态，比 MutationObserver 早一帧跟上（更快跟随）=====
-  let lastSig = (islandEl.dataset.view || '') + '|' + (document.body.classList.contains('isl-stowed') ? 'stowed' : 'up')
+  let lastSig = (islandEl.dataset.view || '') + '|' + (document.body.classList.contains('isl-stowed') ? 'stowed' : 'up') + '|' + (lastOverFull ? 'of' : 'nof')
   let lastRSig = ''
   function watchMain() {
     const v = islandEl.dataset.view || ''
     const s = document.body.classList.contains('isl-stowed')
+    const of = document.body.classList.contains('over-full')
     // 记住“收起胶囊”的宽度，供子岛固定长度使用（避免主岛展开变宽时取到卡片宽度）。
     if (v === 'compact' && !s) {
       const w = islandEl.getBoundingClientRect().width
       if (w > 60) baseW = w
       baseTop = islandEl.getBoundingClientRect().top
     }
-    const sig = v + '|' + (s ? 'stowed' : 'up')
+    const sig = v + '|' + (s ? 'stowed' : 'up') + '|' + (of ? 'of' : 'nof')
     if (sig !== lastSig) {
       lastSig = sig
       const viewChanged = v !== lastView
       lastView = v
       lastStowed = s
+      lastOverFull = of
       if (viewChanged) manual = null
       syncMode()
       if (viewChanged) refresh()
     }
     // 主岛长度在变（展开/收起过渡）时，小球要持续向左平移跟随：按岛矩形变化每帧重算位置。
     const ir = islandEl.getBoundingClientRect()
-    const rsig = Math.round(ir.left) + '|' + Math.round(ir.width) + '|' + Math.round(ir.height)
+    const rsig = Math.round(ir.left) + '|' + Math.round(ir.top) + '|' + Math.round(ir.width) + '|' + Math.round(ir.height)
     if (rsig !== lastRSig) { lastRSig = rsig; if (!showBar()) syncMode() }
     requestAnimationFrame(watchMain)
   }
