@@ -1751,9 +1751,11 @@ fn main() {
     };
 
     // 启动资源的校验分两半（2.0.3 T07）：`prepare()` 只做毫秒级的那一半——
-    // 读清单、stat 十四个必需文件、WebView2 许可与「按需」的沙箱读取权限、
-    // 再把 WEBVIEW2_* 设好（窗口创建那一刻 WebView2 就读它）。整棵资源树的
-    // 全量校验（10,513 个文件 / 1.30 GB，实测更新后首启必跑）挪到后台线程，
+    // 读清单、stat 三个必需资源（node/node.exe、node/LICENSE、licenses/Wakuwaku.txt），
+    // 建好并设置 Evergreen WebView2 的用户数据目录（WEBVIEW2_USER_DATA_FOLDER，窗口
+    // 创建那一刻 WebView2 就读它）。2.1.9 起不再随包内置固定版 WebView2：启动时不检测
+    // 系统 Evergreen 是否存在、也不弹提示（检测与提示在 Setup 安装前置里做，Update 不做）。
+    // 整棵资源树的全量校验挪到后台线程，实际范围由当前安装资源清单决定，
     // 而且按 `state/verified` 的逐文件指纹只校验变了的文件（T06）：首帧不再
     // 等它，插件自启也不再和它抢磁盘。
     #[cfg(feature = "installed")]

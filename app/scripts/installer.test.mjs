@@ -16,6 +16,7 @@ import {
   LEGACY_RUN_NAME, LEGACY_AT_LOGIN_ARGS, LEGACY_EXE_NAMES, LEGACY_INSTALL_IDS, LEGACY_DISPLAY_NAMES, LEGACY_HOME_DIRECTORY, HOME_DIRECTORY, MIGRATE_HOME_FLAG,
   LEGACY_WORKER_DIRECTORY, LEGACY_WORKER_FILE, LEGACY_PAYLOAD_PREFIXES, payloadPaths,
   setupReference, setupAssetName, releasePage, FALLBACK_SCRIPT,
+  WEBVIEW2_RUNTIME_GUID, WEBVIEW2_UPDATE_KEY, WEBVIEW2_DOWNLOAD_PAGE,
 } from './installer.mjs'
 // install-update.cjs 是真正动 fs 的那一半（#27-D 的迁移与删旧）；require 它不会
 // 触发它的 CLI 主分支（require.main !== module），所以本机上任何目录都不会被碰。
@@ -71,7 +72,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // 本仓可以落在中文目录，所以这里统一拿暂存后的那一个。
 const makensisTool = () => stageMakensis(process.env.FISH_MAKENSIS || findTool('nsis-3.13/makensis.exe'))
 
-const LISTED = [...REQUIRED, 'licenses/WebView2-Fixed-Version.html', 'licenses/NOTICE.txt', 'webview2/locales/zh-CN.pak', 'webview2/EBWebView/x.txt']
+// 2.1.9：资源里不再有随包 WebView2（与它的固定版许可），Setup 改为检测系统 Evergreen 运行时。
+const LISTED = [...REQUIRED, 'licenses/NOTICE.txt']
 
 // 一份最小的安装资源：真实目录结构，内容随便，够生成脚本即可。
 // node/node.exe 用不可压缩的字节，好让「安装包里确实带上了资源」能按体积判断。
@@ -163,7 +165,7 @@ test('卸载只删安装器放下的文件，绝不递归删除目录、绝不�
     // 目录只用非递归 RMDir，且只删清单里出现过的子目录。
     const removed = [...uninstall.matchAll(/^\s*RMDir "(.+)"$/gm)].map(m => m[1]).filter(name => name === '$INSTDIR' || name.startsWith('$INSTDIR\\'))
     for (const name of removed) assert.match(name, /^\$INSTDIR(\\resources(\\.+)?)?$/, name)
-    assert.ok(removed.includes('$INSTDIR\\resources\\webview2\\EBWebView'), '深层目录也要清掉')
+    assert.ok(removed.includes('$INSTDIR\\resources\\node\\node_modules\\npm\\tap-snapshots\\workspaces\\arborist'), '深层目录也要清掉')
     assert.ok(!removed.includes('$INSTDIR\\resources\\node\\include'), '没出现过的目录不必列举')
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
@@ -211,13 +213,51 @@ test('资源里的空目录也要清掉，否则卸载后留下一串空壳文�
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
-test('安装时一次性给 WebView2 沙箱只读授权，日常启动不再需要递归授权', async () => {
+// ── 2.1.9（#78）：Setup 前置检测系统 Evergreen WebView2 ─────────────
+// 不再随包携带固定版运行时：Setup 在 .onInit（欢迎页之前、真正装文件之前）检测
+// 系统里的 Evergreen 运行时，缺了就提示官方下载页并中止本次安装；Update 包不做
+// 这件事，也不安装 WebView2。检测不在应用启动时做（#78：应用不新增自定义弹框）。
+test('Setup 在开始安装前检测系统 Evergreen WebView2，缺了就提示官方下载页并中止', async () => {
   const env = await fakeResources()
   try {
     const { text } = await script(env)
-    assert.match(text, /icacls "\$INSTDIR\\resources\\webview2"/)
-    assert.match(text, /\*S-1-15-2-1:\(OI\)\(CI\)\(RX\) \*S-1-15-2-2:\(OI\)\(CI\)\(RX\) \/T/)
-    assert.match(text, /nsExec::ExecToLog/)
+    const init = text.slice(text.indexOf('Function .onInit'), text.indexOf('FunctionEnd', text.indexOf('Function .onInit')))
+    assert.ok(init.length > 0, '检测要放在 .onInit')
+    assert.equal(WEBVIEW2_RUNTIME_GUID, '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', '这是 Evergreen 运行时的官方 EdgeUpdate 产品 GUID')
+    assert.equal(WEBVIEW2_UPDATE_KEY, `Software\\Microsoft\\EdgeUpdate\\Clients\\${WEBVIEW2_RUNTIME_GUID}`)
+    assert.ok(init.includes(WEBVIEW2_RUNTIME_GUID), '要查官方运行时 GUID')
+    assert.ok(!text.includes('8BDD-D21BB9CB4FA1'), '不要沿用错的那份 GUID')
+    // 三个登记位置：HKCU（按用户安装）、HKLM 64 位视图、HKLM 32 位视图（x64 上常见）。
+    assert.match(init, /ReadRegStr \$3 HKCU "Software\\Microsoft\\EdgeUpdate\\Clients\\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5\}" "pv"/)
+    assert.match(init, /SetRegView 64\r?\n\s*ReadRegStr \$3 HKLM/)
+    assert.match(init, /SetRegView 32/)
+    assert.equal((init.match(/ReadRegStr \$3 HKLM/g) || []).length, 2, 'HKLM 的 64 位与 32 位两个视图都要查')
+    // 目录存在不等于能用：pv 必须合法且不是 0.0.0.0，并且 location/<pv>/msedgewebview2.exe 真的在。
+    assert.match(init, /\$3 != ""/)
+    assert.match(init, /\$3 != "0\.0\.0\.0"/)
+    assert.match(init, /\$\{FileExists\} "\$4\\\$3\\msedgewebview2\.exe"/)
+    // 提示 + 官方下载页 + 中止本次安装（静默安装不弹窗，但同样以非零码退出）。
+    assert.match(init, /MessageBox MB_YESNO\|MB_ICONEXCLAMATION[^\n]*WebView2 运行时/)
+    assert.ok(init.includes(WEBVIEW2_DOWNLOAD_PAGE), '提示里要有官方下载页')
+    assert.match(init, /ExecShell "open" "https:\/\/developer\.microsoft\.com\/microsoft-edge\/webview2\/"/)
+    assert.match(init, /SetErrorLevel 1\r?\n\s*Quit/)
+    assert.match(init, /IfSilent fishDockWebViewMissingSilent/)
+    // 检测在欢迎页与安装段之前：.onInit 本身就在它们前面。
+    assert.ok(text.indexOf('Function .onInit') < text.indexOf('!insertmacro MUI_PAGE_WELCOME'))
+    assert.ok(text.indexOf('Function .onInit') < text.indexOf('Section "${PRODUCT}" SecInstall'))
+    // ACL 不再需要：运行时归系统，安装器不再动它的权限。
+    assert.doesNotMatch(text, /icacls|webview-acl-needed|S-1-15-2-1/)
+  } finally { await rm(env.dir, { recursive: true, force: true }) }
+})
+
+test('Update 包不检测、不提示、不安装 WebView2', async () => {
+  const env = await fakeResources()
+  try {
+    const update = (await script(env, { payloadFiles: ['node/node.exe'] })).text
+    for (const pattern of [/F3017226-FE2A-4295-8BDF-00C3A9A7E4C5/, /microsoft-edge\/webview2/i, /msedgewebview2/i, /icacls/i, /webview-acl-needed/i]) {
+      assert.doesNotMatch(update, pattern, `更新包里不该有：${pattern}`)
+    }
+    assert.match(update, /SetOutPath "\$StageDir\\resources"/, '更新包照旧只放载荷')
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
@@ -233,6 +273,19 @@ test('资源目录缺少清单或混入清单外文件时拒绝生成安装包',
     await rm(path.join(env.resources, 'stranger.txt'))
     await rm(path.join(env.resources, 'node/node.exe'))
     await assert.rejects(resourceFiles(env.resources), /node\/node\.exe/)
+  } finally { await rm(env.dir, { recursive: true, force: true }) }
+})
+
+test('2.1.9：资源目录里还带着随包固定版 WebView2 时拒绝打包，避免旧运行时装上用户机器', async () => {
+  const env = await fakeResources()
+  try {
+    await mkdir(path.join(env.resources, 'webview2'), { recursive: true })
+    await writeFile(path.join(env.resources, 'webview2/msedgewebview2.exe'), 'MZ fixed runtime')
+    await writeFile(path.join(env.resources, 'licenses/WebView2-Fixed-Version.html'), '<html>fixed terms</html>')
+    const manifest = JSON.parse(await readFile(path.join(env.resources, 'manifest.json'), 'utf8'))
+    manifest.files.push({ path: 'webview2/msedgewebview2.exe' }, { path: 'licenses/WebView2-Fixed-Version.html' })
+    await writeFile(path.join(env.resources, 'manifest.json'), JSON.stringify(manifest))
+    await assert.rejects(resourceFiles(env.resources), /不再随包固定版 WebView2/, '旧资源目录（清单没重算）必须被挡在打包入口')
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
@@ -529,19 +582,24 @@ test('#27 P0：新数据根就绪后才删 %LOCALAPPDATA%\\FISH\\worker.json，�
 
 // 2.1.2 事故：有人绕过 writeManifest 手写 resources/manifest.json，漏了 node_version，
 // 结果每次启动都弹「安装资源清单无法解析」。这条钉住键集合——清单只能由 writeManifest 生成。
-test('资源清单的键集合固定，七项一个都不能少（2.1.2 漏字段启动即崩）', async () => {
+// 2.1.9（#78）：固定版 WebView2 不再随包，清单不再写 webview2_version；宿主把它当可选
+// 字段，2.1.8 及以前的旧清单（写着它）仍能解析。
+test('资源清单的键集合固定，2.1.9 起六项且不再写 webview2_version（旧清单仍可解析）', async () => {
   const env = await fakeResources()
   try {
     await rm(path.join(env.resources, 'manifest.json'))
-    const manifest = await writeManifest(env.resources, { version: '2.1.3', nodeVersion: '24.14.0', webview2Version: '155.0.4283.62' })
+    const manifest = await writeManifest(env.resources, { version: '2.1.3', nodeVersion: '24.14.0' })
     const written = JSON.parse(await readFile(path.join(env.resources, 'manifest.json'), 'utf8'))
     assert.deepEqual(Object.keys(written).sort(),
-      ['architecture', 'files', 'node_version', 'product', 'schema', 'version', 'webview2_version'],
+      ['architecture', 'files', 'node_version', 'product', 'schema', 'version'],
       '清单键集合变了就要同步 runtime.rs 的 Manifest 结构')
     assert.equal(written.product, 'FISH Dock')
     assert.equal(written.version, '2.1.3')
     assert.equal(written.node_version, '24.14.0')
-    assert.equal(written.webview2_version, '155.0.4283.62')
+    assert.equal('webview2_version' in written, false)
+    const runtime = readFileSync(new URL('../src-tauri/src/runtime.rs', import.meta.url), 'utf8')
+    assert.match(runtime, /pub webview2_version: Option<String>/, '宿主把 webview2_version 当可选字段，旧清单才读得动')
+    assert.match(runtime, /#\[serde\(default[^\]]*\)\][\s\S]{0,200}pub webview2_version/, '缺省值必须由 serde 兜住，否则新清单一启动就崩')
     assert.equal(manifest.files.length, written.files.length)
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })

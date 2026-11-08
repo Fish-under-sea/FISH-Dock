@@ -1,5 +1,6 @@
-// 生成 FISH Dock 的 Windows 安装包脚本（NSIS 3）：安装时把主程序、Node、固定版
-// WebView2 与本地模型服务一次展开到安装目录，日常启动直接使用这些文件。
+// 生成 FISH Dock 的 Windows 安装包脚本（NSIS 3）：安装时把主程序、Node 与本地模型
+// 服务一次展开到安装目录，日常启动直接使用这些文件。WebView2 自 2.1.9 起改用系统
+// Evergreen 运行时、不再随包：Setup 在开始安装之前检测它，Update 包不检测、不安装。
 // 卸载只删除安装器自己放下的文件与快捷方式，绝不递归删目录、绝不碰用户数据
 // （%LOCALAPPDATA%\FISH Dock 里的账号、设置、用量与 WebView 配置）。
 import fs from 'node:fs/promises'
@@ -14,6 +15,15 @@ export const PRODUCT = 'FISH Dock'
 export const INSTALL_ID = 'FISH Dock'
 export const EXE_NAME = 'FISH-Dock.exe'
 export const PUBLISHER = 'Fish-under-sea'
+// ── 2.1.9（#78）：系统 Evergreen WebView2 的前置检测 ──────────────────
+// 不再随包携带固定版 WebView2，Setup 在 .onInit（开始安装之前）检查系统运行时；
+// 缺了就指向官方下载页并中止本次安装，Update 包不检测、不提示、不安装。
+// EdgeUpdate 客户端里 pv 是版本、location 是安装根；目录存在不等于能用，判据是
+// location/<pv>/msedgewebview2.exe 真的在。登记可能在三个位置：按用户安装（HKCU）、
+// 64 位 HKLM 与 32 位 HKLM（x64 上通常落在后者）。
+export const WEBVIEW2_RUNTIME_GUID = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+export const WEBVIEW2_UPDATE_KEY = `Software\\Microsoft\\EdgeUpdate\\Clients\\${WEBVIEW2_RUNTIME_GUID}`
+export const WEBVIEW2_DOWNLOAD_PAGE = 'https://developer.microsoft.com/microsoft-edge/webview2/'
 /// 程序启动必需的文件；与 src-tauri/src/runtime.rs 的 REQUIRED 保持一致。
 export { REQUIRED } from './prepare-installer.mjs'
 import { REQUIRED } from './prepare-installer.mjs'
@@ -138,6 +148,15 @@ export async function resourceFiles(resources) {
     throw new Error(`安装资源里还有已下架的载荷（${legacy.length} 个，例如 ${legacy.slice(0, 3).join(', ')}）：` +
       '先从资源目录删掉再重算清单，否则它们会被装到用户机器上，而且以后不会再被清理')
   }
+  // 2.1.9（#78）：固定版 WebView2 与它的许可原文也不再随包（Setup 改检测系统 Evergreen
+  // 运行时）。资源目录若还是 2.1.8 那份（清单没重算），这里直接拒绝——否则整套旧运行时
+  // 会连同已停发的许可一起装上用户机器，而且以后不会再被清理。
+  const retiredWebview = listed.filter(name => name.startsWith('webview2/') ||
+    name.toLowerCase() === 'licenses/webview2-fixed-version.html')
+  if (retiredWebview.length) {
+    throw new Error(`2.1.9 起不再随包固定版 WebView2（${retiredWebview.length} 个，例如 ${retiredWebview.slice(0, 3).join(', ')}）：` +
+      '请用 prepare-installer.mjs 重新准备资源目录（或删掉 resources/webview2 与固定版许可后重算清单）再打包')
+  }
   const files = [...listed, 'manifest.json'].sort()
   for (const name of files) {
     if (!SAFE.test(name) || name.split('/').includes('..')) throw new Error(`安装资源里有不安全的相对路径：${name}`)
@@ -224,6 +243,65 @@ export function installerScript({ version, app, resources, outFile, files, direc
   // #75：精简载荷（payloadFiles 非 null）就是「更新包」，与安装包的区别只有两处：
   // 桌面快捷方式默认不选（老用户桌面上通常已经有了）、完成页文案写「更新」。
   const updating = payloadFiles !== null
+  // ── 2.1.9（#78）：系统 Evergreen WebView2 前置检测 ────────────────
+  // 只进完整安装包的 .onInit（欢迎页之前）：缺运行时就不许往下走，也不留半套安装。
+  // Update 包不放这一段——增量更新只换受管文件，系统运行时的有无不该挡住一次已经
+  // 装好的产品更新，它也不再安装 WebView2（资源里已经没有 webview2/ 了）。
+  // 探测三个登记位置：HKCU（按用户安装）、HKLM 64 位视图、HKLM 32 位视图（x64 上
+  // WebView2 通常登记在 WOW6432Node，由 32 位视图命中）。pv 为空、为 "0.0.0.0"
+  // （卸载残留），或 location/<pv>/msedgewebview2.exe 不存在，都不算装好——
+  // 目录还在不等于运行时能用。
+  const webviewCheck = updating ? '' : `  ; 2.1.9 起不再随包携带固定版 WebView2：要先有系统 Evergreen 运行时。
+  StrCpy $2 0
+  ReadRegStr $3 HKCU "${WEBVIEW2_UPDATE_KEY}" "pv"
+  ReadRegStr $4 HKCU "${WEBVIEW2_UPDATE_KEY}" "location"
+  \${If} $4 == ""
+    StrCpy $4 "$LOCALAPPDATA\\Microsoft\\EdgeWebView\\Application"
+  \${EndIf}
+  \${If} $3 != ""
+  \${AndIf} $3 != "0.0.0.0"
+  \${AndIf} \${FileExists} "$4\\$3\\msedgewebview2.exe"
+    StrCpy $2 1
+  \${EndIf}
+  \${If} $2 == 0
+    SetRegView 64
+    ReadRegStr $3 HKLM "${WEBVIEW2_UPDATE_KEY}" "pv"
+    ReadRegStr $4 HKLM "${WEBVIEW2_UPDATE_KEY}" "location"
+    SetRegView 32
+    \${If} $4 == ""
+      StrCpy $4 "$PROGRAMFILES64\\Microsoft\\EdgeWebView\\Application"
+    \${EndIf}
+    \${If} $3 != ""
+    \${AndIf} $3 != "0.0.0.0"
+    \${AndIf} \${FileExists} "$4\\$3\\msedgewebview2.exe"
+      StrCpy $2 1
+    \${EndIf}
+  \${EndIf}
+  \${If} $2 == 0
+    ReadRegStr $3 HKLM "${WEBVIEW2_UPDATE_KEY}" "pv"
+    ReadRegStr $4 HKLM "${WEBVIEW2_UPDATE_KEY}" "location"
+    \${If} $4 == ""
+      StrCpy $4 "$PROGRAMFILES32\\Microsoft\\EdgeWebView\\Application"
+    \${EndIf}
+    \${If} $3 != ""
+    \${AndIf} $3 != "0.0.0.0"
+    \${AndIf} \${FileExists} "$4\\$3\\msedgewebview2.exe"
+      StrCpy $2 1
+    \${EndIf}
+  \${EndIf}
+  \${If} $2 == 0
+    IfSilent fishDockWebViewMissingSilent
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION "这台电脑还没有 Microsoft Edge WebView2 运行时（系统 Evergreen 版），FISH Dock 要用它显示界面。$\\r$\\n$\\r$\\n请先安装它，再运行本安装程序：$\\r$\\n${WEBVIEW2_DOWNLOAD_PAGE}$\\r$\\n$\\r$\\n是：现在打开官方下载页；否：退出本次安装。" IDNO fishDockWebViewMissing
+      ExecShell "open" "${WEBVIEW2_DOWNLOAD_PAGE}"
+    fishDockWebViewMissing:
+    SetErrorLevel 1
+    Quit
+    fishDockWebViewMissingSilent:
+    DetailPrint "Microsoft Edge WebView2 Runtime is required: ${WEBVIEW2_DOWNLOAD_PAGE}"
+    SetErrorLevel 1
+    Quit
+  \${EndIf}
+`
   // ── #27 清理档要生成的 NSIS 行 ──────────────────────────────────────────
   // 旧卸载表登记项：一个旧名一条 !define，清理时逐条按归属判定。
   const legacyKeyDefines = LEGACY_INSTALL_IDS
@@ -352,7 +430,6 @@ RequestExecutionLevel user
 Var StageSeed
 Var StageName
 Var StageDir
-Var NeedsWebviewAcl
 Var HomeMigrationFailed
 SetCompressor /SOLID lzma
 SetCompressorDictSize 32
@@ -372,7 +449,7 @@ ${legacyInstallDirLines}
       StrCpy $INSTDIR $1
     \${EndIf}
   \${EndIf}
-FunctionEnd
+${webviewCheck}FunctionEnd
 
 VIProductVersion "\${VERSION}.0"
 VIAddVersionKey "ProductName" "\${PRODUCT}"
@@ -430,11 +507,8 @@ ${payloadLines}
   ; 复制 → 逐个核对摘要 → 两份清单对齐 → 才删旧目录。不带这个参数它一个目录都不碰。
   nsExec::ExecToLog '"$PLUGINSDIR\\bootstrap\\node.exe" "$StageDir\\install-update.cjs" "$StageDir" "$INSTDIR" ${MIGRATE_HOME_FLAG}'
   Pop $0
-  ; 两个标记都要在暂存目录被删掉之前读出来：更新失败那条分支同样会把暂存目录整份删掉，
-  ; 读晚了（或者等失败分支走完再读）就什么也读不到。
-  StrCpy $NeedsWebviewAcl 0
-  IfFileExists "$StageDir\\webview-acl-needed" 0 +2
-    StrCpy $NeedsWebviewAcl 1
+  ; 这个标记要在暂存目录被删掉之前读出来：更新失败那条分支同样会把暂存目录整份
+  ; 删掉，读晚了（或者等失败分支走完再读）就什么也读不到。
   StrCpy $HomeMigrationFailed 0
   IfFileExists "$StageDir\\home-migration-failed" 0 +2
     StrCpy $HomeMigrationFailed 1
@@ -449,18 +523,6 @@ ${failureBranch}
   \${If} $HomeMigrationFailed == 1
     DetailPrint "用户数据迁移未完成：旧目录已原样保留，细节见安装目录里的 install.log"
     MessageBox MB_OK|MB_ICONEXCLAMATION "用户数据没能迁到新的目录，旧目录已原样保留（账号、设置与 WebView 数据都还在）。请从托盘完全退出 \${PRODUCT}，再重新运行一次安装程序。" /SD IDOK
-  \${EndIf}
-
-  ; 固定版 WebView2 的沙箱主体只需读取运行时：安装时授权一次（仅这两个 SID、只读、仅本目录），
-  ; 日常启动不再递归设置权限。这里失败不阻止安装，但首次启动会再试一次并把失败说清楚：
-  ; 没有这份授权，WebView2 建不出界面。
-  \${If} $NeedsWebviewAcl == 1
-  DetailPrint "设置内置浏览器运行时权限..."
-  nsExec::ExecToLog 'icacls "$INSTDIR\\resources\\webview2" /grant *S-1-15-2-1:(OI)(CI)(RX) *S-1-15-2-2:(OI)(CI)(RX) /T'
-  Pop $0
-  \${If} $0 != 0
-    DetailPrint "内置浏览器运行时授权未成功（$0）：首次启动会再试一次并提示修复方式"
-  \${EndIf}
   \${EndIf}
 
   ; ── #27 清理档：旧发行名留下的东西 ─────────────────────────────────────

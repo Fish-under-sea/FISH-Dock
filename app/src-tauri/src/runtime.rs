@@ -1,25 +1,24 @@
 //! Installed runtime resources.
 //!
-//! The installer expands Node, the fixed-version WebView2 runtime and the local
-//! model service once, beside the program, and the program uses those files in
-//! place. Nothing is unpacked at start-up, and the start-up path never walks the
-//! whole tree (2.0.3 T07): it stat()s the handful of files the program cannot
-//! start without — milliseconds — and a background thread hashes only the files
-//! whose recorded size+mtime no longer matches. `state/verified` keeps one
-//! fingerprint per file, not the manifest's digest, so a new manifest (a version
-//! bump, a new file list) no longer means a full re-verification (T06). The
-//! WebView2 sandbox's read rights are inspected, not rewritten: `icacls /T` runs
-//! only where the two Application Package identities cannot read the runtime
-//! (T08), and its failure still stops the start with words that say how to fix it.
+//! The installer expands Node and the local model service once, beside the
+//! program, and the program uses those files in place. WebView2 is not bundled
+//! since 2.1.9: the system Evergreen runtime is used instead, and a missing one
+//! is reported by the Setup installer's pre-check — the program neither checks
+//! nor prompts for it at start-up. Nothing is unpacked at start-up, and the
+//! start-up path never walks the whole tree (2.0.3 T07): it stat()s the handful
+//! of files the program cannot start without — milliseconds — and a background
+//! thread hashes only the files whose recorded size+mtime no longer matches.
+//! `state/verified` keeps one fingerprint per file, not the manifest's digest,
+//! so a new manifest (a version bump, a new file list) no longer means a full
+//! re-verification (T06).
 #![cfg_attr(not(feature = "installed"), allow(dead_code))]
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// Files the program cannot start without; checked on every start.
-pub const REQUIRED: [&str; 4] = [
+pub const REQUIRED: [&str; 3] = [
     "node/node.exe",
     "node/LICENSE",
-    "webview2/msedgewebview2.exe",
     "licenses/Wakuwaku.txt",
 ];
 // #73：`windhawk/` 整棵（引擎 + LLVM-MinGW 编译器，原始 557.8 MB / 8413 个文件）不再随包分发，
@@ -54,7 +53,11 @@ pub struct Verified {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Manifest {
     pub schema: u32, pub product: String, pub version: String, pub architecture: String,
-    pub node_version: String, pub webview2_version: String,
+    pub node_version: String,
+    /// 2.1.9 起不再随包内置 WebView2，清单不再写它；旧清单（schema 2，2.1.8 及以前）里的
+    /// 值仍可解析，只是不再使用。写入端也兼容两头：有值照写（老包），没有就整键省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webview2_version: Option<String>,
     pub files: Vec<FileRecord>,
 }
 
@@ -218,7 +221,7 @@ fn verify_pending_at(resources: &Path, home: &Path) -> Result<(), String> {
 }
 
 /// The synchronous half of a start: only the files the program must have, by
-/// size — fourteen stat()s, milliseconds. Everything else waits for the
+/// size — three stat()s, milliseconds. Everything else waits for the
 /// background thread (`verify_pending_at`), so the first frame never waits for
 /// 10,513 files / 1.30 GB (T07).
 fn check_required(root: &Path, files: &std::collections::BTreeMap<String, &FileRecord>) -> Result<(), String> {
@@ -283,19 +286,6 @@ fn migrate_data(old: &Path, new: &Path) -> Result<(), String> {
     std::fs::rename(&stage.0, new).map_err(|e| format!("启用新数据目录失败，原数据未删除：{e}"))
 }
 
-fn accept_terms(home: &Path, digest: &str, prompt: impl FnOnce() -> Result<bool, String>) -> Result<(), String> {
-    use std::io::Write;
-    let _lock = lock_at(home, ".terms.lock")?;
-    let marker = home.join("accepted-runtime-terms");
-    if let Ok(meta) = std::fs::symlink_metadata(&marker) {
-        if !meta.is_file() || linked(&meta) { return Err("许可记录不是普通文件".into()); }
-        if meta.len() < 1024 && std::fs::read_to_string(&marker).map_err(|e| e.to_string())? == digest { return Ok(()); }
-    }
-    if !prompt()? { return Err("未同意内置 WebView2 许可，已停止启动；未修改账号和原数据".into()); }
-    let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&marker).map_err(|e| e.to_string())?;
-    file.write_all(digest.as_bytes()).and_then(|_| file.sync_all()).map_err(|e| e.to_string())
-}
-
 /// Where the last completed verification is remembered (`home/state/verified`).
 fn verified_marker(home: &Path) -> PathBuf { home.join("state").join("verified") }
 
@@ -336,7 +326,7 @@ fn remember(home: &Path, resources: &Path, recorded: &std::collections::BTreeMap
     // rename 是原子的，所以断电最坏也只是留下**完整**的旧记录或**完整**的新记录；
     // 以前 truncate+write 撞上断电会留半截 JSON，下次启动解析失败 → 整棵树（10,513 个
     // 文件 / 1.30 GB）重校一遍，正好把 T06/T07 省下的那次又赔回去。
-    // 锁照同文件 accept_terms 的 .terms.lock 那套（lock_at）：多开或将来并发写时不会
+    // 锁照同文件 lock_at 的那套：多开或将来并发写时不会
     // 互相截断。rename/写入任何一步失败都只删掉临时文件，旧记录原封不动，并留一行日志。
     let _lock = lock_at(directory, ".verified.lock")?;
     let temporary = directory.join(format!(".verified-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
@@ -352,146 +342,6 @@ fn remember(home: &Path, resources: &Path, recorded: &std::collections::BTreeMap
         return Err(format!("无法记录安装资源校验结果 {}：{error}", marker.display()));
     }
     Ok(())
-}
-
-#[cfg(all(feature = "installed", windows))]
-fn prompt_terms(terms: &Path) -> Result<bool, String> {
-    #[link(name = "user32")] extern "system" { fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, kind: u32) -> i32; }
-    #[link(name = "shell32")] extern "system" { fn ShellExecuteW(hwnd: *mut core::ffi::c_void, operation: *const u16, file: *const u16, params: *const u16, directory: *const u16, show: i32) -> isize; }
-    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
-    let text = wide(&format!("FISH Dock 内置 Microsoft Edge WebView2 Runtime（固定版）。\n\n继续使用前，请阅读并同意其完整许可条款：\n{}\n\nMicrosoft Defender SmartScreen 默认启用，可能收集并向 Microsoft 发送信息。\n隐私声明：https://aka.ms/privacy\nSmartScreen：https://learn.microsoft.com/en-us/microsoft-edge/privacy-whitepaper#smartscreen\n\n是：我已阅读并同意上述条款，继续启动。\n否：打开完整许可原文，读完后返回确认。\n取消：退出，不启用运行时。", terms.display()));
-    let title = wide("FISH Dock · 内置运行时许可");
-    loop {
-        match unsafe { MessageBoxW(0, text.as_ptr(), title.as_ptr(), 0x0000_0003 | 0x0000_0040 | 0x0000_0200) } {
-            6 => return Ok(true),
-            7 => {
-                let open = wide("open"); let file = wide(&terms.to_string_lossy());
-                let result = unsafe { ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), 1) };
-                if result <= 32 { return Err(format!("无法打开许可原文，请直接查看 {}", terms.display())); }
-            }
-            2 => return Ok(false),
-            _ => return Err("无法显示内置运行时许可确认窗口".into()),
-        }
-    }
-}
-
-/// 固定版 WebView2 在 Windows 10 上要求这两个沙箱主体能读运行时：
-/// S-1-15-2-1 = 全部应用程序包（Application Packages），S-1-15-2-2 = 受限应用程序包。
-///
-/// 它们在 SDDL 里的写法不止一种：S-1-15-2-1 是 well-known SID，规范形式会写成
-/// 别名 `AC`（本机实测的 DACL 正是 `(A;OICI;0x1200a9;;;AC)`），而 S-1-15-2-2
-/// 没有别名，留在数字形式。两种写法都认，否则「读得通」会被误判成「读不了」，
-/// 每次启动都白跑一次递归 icacls /T——那正是 T08 要去掉的东西。
-pub const WEBVIEW_SANDBOXES: [&[&str]; 2] = [&["S-1-15-2-1", "AC"], &["S-1-15-2-2"]];
-
-/// 授权的那条命令：目录本身 + `(OI)(CI)` 继承 + 递归（/T）。递归只在探测到
-/// 读不了时才跑（T08），不是每次启动都跑；新装进来、替换进来的子文件靠
-/// `(OI)(CI)` 继承同一条 DACL。
-fn webview_acl_arguments(path: &Path) -> Vec<std::ffi::OsString> {
-    [path.as_os_str().to_owned(), "/grant".into(), "*S-1-15-2-1:(OI)(CI)(RX)".into(), "*S-1-15-2-2:(OI)(CI)(RX)".into(), "/T".into()].into()
-}
-
-/// 一段 DACL（SDDL）里，这两个沙箱主体是不是都能读：有允许项、没有拒绝项。
-/// SDDL 用 SID 写、不带本地化名字，所以这条判断不依赖系统语言，也不必真的
-/// 以沙箱身份试读一次。
-pub fn sandbox_may_read(sddl: &str) -> bool {
-    let mut allowed = [false; WEBVIEW_SANDBOXES.len()];
-    let mut denied = [false; WEBVIEW_SANDBOXES.len()];
-    for ace in sddl.split('(').skip(1) {
-        let fields: Vec<&str> = ace.split(')').next().unwrap_or("").split(';').collect();
-        // ace_type;ace_flags;rights;object_guid;inherit_object_guid;account_sid
-        let (Some(kind), Some(sid)) = (fields.first(), fields.get(5)) else { continue };
-        let kind = kind.trim().to_ascii_uppercase();
-        let sid = sid.trim();
-        let Some(at) = WEBVIEW_SANDBOXES.iter().position(|spellings| spellings.contains(&sid)) else { continue };
-        if kind.starts_with('A') { allowed[at] = true; }
-        if kind.starts_with('D') { denied[at] = true; }
-    }
-    allowed.iter().zip(denied).all(|(allowed, denied)| *allowed && !denied)
-}
-
-/// 目录或文件的 DACL，写成 SDDL；读不出来时 None。
-#[cfg(all(feature = "installed", windows))]
-fn acl_sddl(path: &Path) -> Option<String> {
-    use std::ffi::c_void;
-    #[link(name = "advapi32")]
-    extern "system" {
-        // 与 lhm_setup.rs 里那份声明逐字一致：同一个符号两种签名是 clashing_extern_declarations。
-        fn GetNamedSecurityInfoW(name: *const u16, kind: u32, info: u32, owner: *mut *mut c_void, group: *mut *mut c_void, dacl: *mut *mut c_void, sacl: *mut *mut c_void, descriptor: *mut *mut c_void) -> u32;
-        fn ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor: *mut c_void, revision: u32, info: u32, sddl: *mut *mut u16, len: *mut u32) -> i32;
-    }
-    #[link(name = "kernel32")]
-    extern "system" { fn LocalFree(memory: *mut c_void) -> *mut c_void; }
-    const SE_FILE_OBJECT: u32 = 1;
-    const DACL_SECURITY_INFORMATION: u32 = 0x4;
-    const SDDL_REVISION_1: u32 = 1;
-    let name: Vec<u16> = path.to_string_lossy().encode_utf16().chain(Some(0)).collect();
-    let (mut dacl, mut descriptor) = (std::ptr::null_mut(), std::ptr::null_mut());
-    // SAFETY: 描述符与它转出的文本都由 Windows 分配，各只释放一次；指针在释放前读完。
-    unsafe {
-        let read = GetNamedSecurityInfoW(name.as_ptr(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-            std::ptr::null_mut(), std::ptr::null_mut(), &mut dacl, std::ptr::null_mut(), &mut descriptor);
-        if read != 0 || descriptor.is_null() {
-            if !descriptor.is_null() { LocalFree(descriptor); }
-            return None;
-        }
-        let mut text: *mut u16 = std::ptr::null_mut();
-        let ok = ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &mut text, std::ptr::null_mut()) != 0 && !text.is_null();
-        let out = ok.then(|| {
-            let len = (0..).take_while(|&i| *text.add(i) != 0).count();
-            String::from_utf16_lossy(std::slice::from_raw_parts(text, len))
-        });
-        if !text.is_null() { LocalFree(text.cast()); }
-        LocalFree(descriptor);
-        out
-    }
-}
-
-/// 这两个沙箱主体现在能不能读这套运行时：Some(true) 能、Some(false) 不能、
-/// None 读不出来（按「要授权」处理，与 2.0.2 的保守做法一致）。
-/// 只看目录与真正被加载的那个 exe：目录上的 (OI)(CI) 会被新写进来的子项继承。
-#[cfg(all(feature = "installed", windows))]
-fn webview_sandbox_can_read(directory: &Path) -> Option<bool> {
-    let mut unknown = false;
-    for path in [directory.to_path_buf(), directory.join("msedgewebview2.exe")] {
-        if !path.exists() { continue; }
-        match acl_sddl(&path).map(|sddl| sandbox_may_read(&sddl)) {
-            Some(true) => {}
-            Some(false) => return Some(false),
-            None => unknown = true,
-        }
-    }
-    (!unknown).then_some(true)
-}
-
-/// 授权按需：探测说读得了就什么都不做（很便宜：一次 DACL 读，不 spawn
-/// 子进程、不递归写 256 个文件）；只有读不了（或读不出来）才写一次 DACL。
-/// 返回「这次是否真的写了 DACL」，测试用它区分「探查过」与「授权过」。
-fn ensure_readable(probe: Option<bool>, grant: &mut dyn FnMut() -> Result<(), String>) -> Result<bool, String> {
-    match probe {
-        Some(true) => Ok(false),
-        Some(false) | None => grant().map(|()| true),
-    }
-}
-
-#[cfg(all(feature = "installed", windows))]
-fn ensure_webview_read(directory: &Path) -> Result<bool, String> {
-    let probe = webview_sandbox_can_read(directory);
-    if probe.is_none() {
-        eprintln!("FISH Dock: 读不出内置浏览器运行时的 DACL，按需要授权的处理走");
-    }
-    ensure_readable(probe, &mut || grant_webview_read(directory))
-}
-
-#[cfg(all(feature = "installed", windows))]
-fn grant_webview_read(path: &Path) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    let windows = std::env::var_os("SystemRoot").ok_or("找不到 Windows 系统目录")?;
-    let status = std::process::Command::new(PathBuf::from(windows).join("System32/icacls.exe"))
-        .args(webview_acl_arguments(path)).creation_flags(0x0800_0000)
-        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status()
-        .map_err(|e| format!("无法设置内置浏览器的沙箱读取权限：{e}"))?;
-    if status.success() { Ok(()) } else { Err(format!("无法设置内置浏览器的沙箱读取权限：{status}")) }
 }
 
 #[cfg(feature = "installed")]
@@ -521,7 +371,7 @@ pub fn app_home() -> Result<PathBuf, String> {
     app_home_from(std::env::var_os("FISH_DOCK_APP_HOME"), std::env::var_os("LOCALAPPDATA"))
 }
 
-/// Where the installer expanded Node, WebView2 and the local model service: the
+/// Where the installer expanded Node and the local model service: the
 /// `resources` folder beside the program, unless `FISH_DOCK_RESOURCES` (or its
 /// read-only legacy alias `DSH_FISH_RESOURCES`) points somewhere else (a
 /// development checkout). 2.0.4 T-Q: the resolution lives in
@@ -541,36 +391,24 @@ pub fn component(name: &str) -> Result<PathBuf, String> {
 /// Nothing is unpacked here: the installer expands every file beside the program.
 ///
 /// This is the whole synchronous half of a start (T07). It reads the manifest,
-/// rejects one that is foreign or malformed, stat()s the fourteen files the
-/// program cannot start without, takes the WebView2 licence once, and has the
-/// WebView2 sandbox's read rights checked — not rewritten unless the check says
-/// they are missing (T08). It does **not** hash anything: the per-file
+/// rejects one that is foreign or malformed, and stat()s the three files the
+/// program cannot start without. It does **not** hash anything: the per-file
 /// fingerprints (`verify_pending_at`) are the background thread's work, so the
 /// first frame no longer waits for the 10,513 files / 1.30 GB walk.
+/// Since 2.1.9 the fixed-version WebView2 is gone (the system Evergreen runtime
+/// is used instead, checked by Setup before it runs): there is no licence to
+/// take and no sandbox DACL to grant here.
 /// Errors always say what is missing and that the program must be installed
-/// again: there is no quiet fall-back to a system Node or a system WebView2.
-fn prepare_at(
-    resources: &Path,
-    home: &Path,
-    prompt: &mut dyn FnMut(&Path) -> Result<bool, String>,
-    acl: &mut dyn FnMut(&Path) -> Result<bool, String>,
-) -> Result<(), String> {
+/// again: there is no quiet fall-back to a system Node.
+fn prepare_at(resources: &Path, home: &Path) -> Result<(), String> {
     let manifest = read_manifest(resources)?;
     let files = records(&manifest)?;
     create_directories(home)?;
     check_required(resources, &files)?;
-    let license = files.iter().find(|(name, _)| *name == "licenses/WebView2-Fixed-Version.html")
-        .map(|(_, record)| *record)
-        .ok_or_else(|| reinstall("安装资源缺少 WebView2 分发许可".into()))?;
-    accept_terms(home, &license.sha256, || prompt(&resources.join("licenses/WebView2-Fixed-Version.html")))?;
-    create_directories(&resources.join("webview2"))?;
     create_directories(&webview_directory(home))?;
-    // 固定版 WebView2 的沙箱主体读不到运行时，界面根本建不起来（WebView2 只会
-    // 报“灾难性故障”），所以权限这一步留在同步路径上，而且要说得清怎么修。
-    // 但它是「按需」的：探查到已经读得通就不写 DACL，日常启动不再递归 icacls /T。
-    acl(&resources.join("webview2")).map_err(|reason| {
-        format!("{reason}。内置浏览器需要读取安装目录里的运行时；请把 FISH Dock 安装到你有权限写入的目录后重试（通常是重新运行安装程序）。")
-    })?;
+    // 2.1.9：WebView2 不再随包内置，运行时由系统 Evergreen 提供。缺失时的提示与安装
+    // 由 Setup 安装程序的前置检测负责（Update 包不检测），宿主启动既不检测也不弹窗；
+    // 这里也不再处理固定版的分发许可或沙箱 ACL。webview 用户数据目录照旧建好（见下）。
     Ok(())
 }
 
@@ -598,7 +436,7 @@ fn prepared_directories(prepared: &Prepared) -> Result<(), String> {
 pub fn prepare() -> Result<Prepared, String> {
     let home = app_home()?;
     let resources = resources_directory()?;
-    prepare_at(&resources, &home, &mut |terms| prompt_terms(terms), &mut |webview| ensure_webview_read(webview))?;
+    prepare_at(&resources, &home)?;
     if let Some(override_path) = crate::config::user_data_override() {
         create_directories(&override_path)?;
     } else {
@@ -606,9 +444,8 @@ pub fn prepare() -> Result<Prepared, String> {
         let old = exe.parent().ok_or("找不到程序目录")?.join("wakuwaku-data");
         migrate_data(&old, &home.join("data"))?;
     }
-    // 这两个变量必须在建窗之前就位：窗口创建那一瞬 WebView2 就读它们。
-    // T07 把「全量校验」挪去后台，这一段同步语义保持不变。
-    std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", resources.join("webview2"));
+    // 只保留用户数据目录：窗口创建前必须就位。2.1.9 起不再设置
+    // WEBVIEW2_BROWSER_EXECUTABLE_FOLDER，WebView2 使用系统 Evergreen 运行时。
     std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", webview_directory(&home));
     INSTALLED.set(resources.clone()).map_err(|_| "运行环境重复初始化".to_string())?;
     // 两个目录原样交出去（R2）：后台那半拿着用，不再重新推导一遍。
@@ -663,10 +500,11 @@ mod tests {
     }}
     impl Drop for Temp { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
 
-    /// Writes the files an install leaves behind, plus a manifest describing them.
+    /// Writes the files an install leaves behind, plus the manifest the 2.1.9
+    /// installer writes (schema 2, no `webview2_version`; that key still parses
+    /// when an old install left it behind).
     fn installed(root: &Path, extra: bool, version: &str) -> Manifest {
         let mut names: Vec<String> = REQUIRED.iter().map(|n| n.to_string()).collect();
-        names.push("licenses/WebView2-Fixed-Version.html".into());
         if extra { names.push("licenses/NOTICE.txt".into()); }
         let mut files = Vec::new();
         for name in names {
@@ -676,17 +514,14 @@ mod tests {
             fs::write(&target, &data).unwrap();
             files.push(FileRecord { path: name, bytes: data.len() as u64, sha256: format!("{:x}", Sha256::digest(&data)) });
         }
-        let m = Manifest { schema: 2, product: "DSH-FISH".into(), version: version.into(), architecture: "x86_64".into(), node_version: "24.14.0".into(), webview2_version: "155.0.4283.62".into(), files };
+        let m = Manifest { schema: 2, product: "DSH-FISH".into(), version: version.into(), architecture: "x86_64".into(), node_version: "24.14.0".into(), webview2_version: None, files };
         fs::write(root.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
         m
     }
 
     /// 一次完整的启动，两半都当场跑完（真实启动里第二半在后台线程里跑）。
     fn start(resources: &Path, home: &Path) -> Result<(), String> {
-        let mut prompt = |_: &Path| Ok(true);
-        // 探测说两个沙箱主体都读得通：日常启动的常态。
-        let mut acl = |_: &Path| Ok(false);
-        prepare_at(resources, home, &mut prompt, &mut acl)?;
+        prepare_at(resources, home)?;
         verify_pending_at(resources, home)
     }
 
@@ -707,47 +542,79 @@ mod tests {
         assert_eq!(stamp(path), Some(was), "size+mtime 必须原样按回去");
     }
 
-    // 同步那一半只 stat 十四个必需文件；它的存在本身就是 T07 的证据——全量
+    // 同步那一半只 stat 三个必需文件；它的存在本身就是 T07 的证据——全量
     // 指纹校验在 verify_pending_at 里，真实启动里那是另一个线程。
     // 2.1.2 的事故：手写 resources/manifest.json 时漏了 node_version，启动在反序列化
-    // 这一步就崩了（「missing field `node_version`」），用户装完完全起不来。字段是必填的——
-    // 这条钉住它，将来给 Manifest 加字段也要同步 installer.mjs 的 writeManifest。
-    #[test] fn a_manifest_missing_a_version_field_is_rejected_before_anything_else() {
+    // 这一步就崩了（「missing field `node_version`」），用户装完完全起不来。node_version
+    // 仍是必填的——这条钉住它，将来给 Manifest 加字段也要同步 installer.mjs 的 writeManifest。
+    // 2.1.9 起 webview2_version 反过来是**可选**的：旧清单（2.1.8 及以前）写着它，新清单
+    // 不再写，两种都必须读得动；写入端没有值就整键省略，不写 `null`。
+    #[test] fn a_manifest_missing_node_version_is_rejected_but_webview2_version_is_optional() {
         let partial = r#"{"schema":2,"product":"FISH Dock","version":"2.1.3","architecture":"x86_64","webview2_version":"155.0.4283.62","files":[]}"#;
         let error = serde_json::from_str::<Manifest>(partial).unwrap_err().to_string();
         assert!(error.contains("node_version"), "缺 node_version 必须报出字段名：{error}");
-        let full = r#"{"schema":2,"product":"FISH Dock","version":"2.1.3","architecture":"x86_64","node_version":"24.14.0","webview2_version":"155.0.4283.62","files":[]}"#;
-        assert!(serde_json::from_str::<Manifest>(full).is_ok(), "七个字段齐全必须能解析");
+        // 旧清单：带 webview2_version（2.1.8 及以前写的），仍要能解析，只是不再使用。
+        let old = r#"{"schema":2,"product":"FISH Dock","version":"2.1.8","architecture":"x86_64","node_version":"24.14.0","webview2_version":"155.0.4283.62","files":[]}"#;
+        let old: Manifest = serde_json::from_str(old).expect("旧清单必须能解析");
+        assert_eq!(old.webview2_version.as_deref(), Some("155.0.4283.62"));
+        // 新清单：2.1.9 起不写这个字段，也必须能解析。
+        let new = r#"{"schema":2,"product":"FISH Dock","version":"2.1.9","architecture":"x86_64","node_version":"24.14.0","files":[]}"#;
+        let new: Manifest = serde_json::from_str(new).expect("新清单（不含 webview2_version）必须能解析");
+        assert_eq!(new.webview2_version, None);
+        // 写入端两头都兼容：没有值就整键省略，有值就照写（老包读得动）。
+        let written = serde_json::to_value(&new).unwrap();
+        assert!(written.get("webview2_version").is_none(), "新清单不许写 webview2_version：{written}");
+        let written = serde_json::to_value(&old).unwrap();
+        assert_eq!(written["webview2_version"], "155.0.4283.62", "有值就照写，老包读得动");
+    }
+
+    // 旧安装留下的清单（带 webview2_version，还列着随包 webview2/ 的文件）和新安装的
+    // 清单（不带字段、不列 webview2/）都要能走完一次启动：读清单那侧不依赖这个字段，
+    // 也不再要求任何 webview2/ 资源。
+    #[test] fn both_the_old_and_the_new_manifest_shape_start() {
+        let t = Temp::new(); let root = t.0.join("resources"); fs::create_dir_all(&root).unwrap();
+        let home = t.0.join("home");
+        let manifest = installed(&root, true, "0.3.3");
+        let runtime = b"old fixed runtime";
+        fs::create_dir_all(root.join("webview2")).unwrap();
+        fs::write(root.join("webview2/msedgewebview2.exe"), runtime).unwrap();
+        let mut old = serde_json::to_value(&manifest).unwrap();
+        old["webview2_version"] = serde_json::json!("155.0.4283.62");
+        old["files"].as_array_mut().unwrap().push(serde_json::json!({
+            "path": "webview2/msedgewebview2.exe",
+            "bytes": runtime.len(),
+            "sha256": format!("{:x}", Sha256::digest(runtime)),
+        }));
+        fs::write(root.join("manifest.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        start(&root, &home).expect("旧清单（含 webview2_version 与 webview2/ 文件）必须能启动");
+        assert_eq!(remembered(&home).unwrap().files.len(), 5, "旧清单里的 webview2 文件照常校验");
+        // 新清单：键不存在，也不再列 webview2/ 文件。
+        let new = serde_json::to_value(&manifest).unwrap();
+        assert!(new.get("webview2_version").is_none());
+        fs::write(root.join("manifest.json"), serde_json::to_vec(&new).unwrap()).unwrap();
+        start(&root, &home).expect("新清单（不含 webview2_version）必须能启动");
     }
 
     #[test] fn the_start_checks_the_required_files_and_remembers_a_fingerprint_per_file() {
         let t = Temp::new(); let root = t.0.join("resources"); fs::create_dir_all(&root).unwrap();
         let home = t.0.join("home");
         installed(&root, true, "0.3.3");
-        let prompts = std::cell::Cell::new(0); let probes = std::cell::Cell::new(0); let grants = std::cell::Cell::new(0);
-        let mut prompt = |_: &Path| { prompts.set(prompts.get() + 1); Ok(true) };
-        let mut acl = |_: &Path| {
-            probes.set(probes.get() + 1);
-            ensure_readable(Some(true), &mut || { grants.set(grants.get() + 1); Ok(()) })
-        };
-        prepare_at(&root, &home, &mut prompt, &mut acl).unwrap();
-        assert_eq!((prompts.get(), probes.get(), grants.get()), (1, 1, 0), "首次启动：许可问一次、权限探查一次、读得通就不写 DACL");
+        prepare_at(&root, &home).unwrap();
         assert!(!verified_marker(&home).exists(), "同步那一半不写标记");
         verify_pending_at(&root, &home).unwrap();
         let was = remembered(&home).expect("校验通过要记下指纹");
         assert_eq!(was.schema, MARKER_SCHEMA);
         assert_eq!(was.resources, normalized(&root));
-        assert_eq!(was.files.len(), 6, "4 个必需文件（#73 起不含 windhawk/*）+ 许可原文 + 一个非必需文件");
-        // 日常启动：不再问许可、不再写 DACL、指纹一个没变，所以连标记都不重写。
+        assert_eq!(was.files.len(), 4, "3 个必需文件（node.exe、node/LICENSE、Wakuwaku.txt）+ 一个非必需文件（NOTICE.txt）");
+        // 日常启动：指纹一个没变，所以连标记都不重写。
         let before = fs::read(verified_marker(&home)).unwrap();
-        prepare_at(&root, &home, &mut prompt, &mut acl).unwrap();
+        prepare_at(&root, &home).unwrap();
         verify_pending_at(&root, &home).unwrap();
-        assert_eq!((prompts.get(), probes.get(), grants.get()), (1, 2, 0), "日常启动不得再问许可，也不得重复授权");
         assert_eq!(fs::read(verified_marker(&home)).unwrap(), before, "没变就不该重写标记");
         assert!(stale_paths(&root, &home).is_empty());
         // 必需资源缺失时必须明确提示重装。
         fs::remove_file(root.join("node/node.exe")).unwrap();
-        let error = prepare_at(&root, &home, &mut prompt, &mut acl).unwrap_err();
+        let error = prepare_at(&root, &home).unwrap_err();
         assert!(error.contains("重新安装"), "{error}");
         assert!(error.contains("node/node.exe"), "{error}");
     }
@@ -760,8 +627,7 @@ mod tests {
         let home = t.0.join("home");
         installed(&root, true, "0.3.3");
         fs::write(root.join("licenses/NOTICE.txt"), "tampered").unwrap();
-        let mut prompt = |_: &Path| Ok(true); let mut acl = |_: &Path| Ok(false);
-        prepare_at(&root, &home, &mut prompt, &mut acl).expect("同步那一半只看必需文件");
+        prepare_at(&root, &home).expect("同步那一半只看必需文件");
         let error = verify_pending_at(&root, &home).unwrap_err();
         assert!(error.contains("licenses/NOTICE.txt"), "{error}");
         assert!(error.contains("重新安装"), "{error}");
@@ -779,7 +645,7 @@ mod tests {
         // 内容变了、指纹没变：不重校。真重算哈希这里必然报「校验失败」。
         tamper_keeping_stamp(&notice, b'X');
         assert!(stale_paths(&root, &home).is_empty(), "size+mtime 没变就不该排队重校");
-        prepare_at(&root, &home, &mut |_: &Path| Ok(true), &mut |_: &Path| Ok(false)).unwrap();
+        prepare_at(&root, &home).unwrap();
         verify_pending_at(&root, &home).expect("指纹没变的文件不得重算哈希");
         // 只动 mtime（内容与长度都不变）：必须重校，而且排队的只有这一个。
         let was = stamp(&notice).unwrap();
@@ -790,7 +656,7 @@ mod tests {
         // 长度也变了：同样只重校这一个，并且实测点出它。
         fs::write(&notice, "tampered-and-longer").unwrap();
         assert_eq!(stale_paths(&root, &home), vec!["licenses/NOTICE.txt".to_string()]);
-        prepare_at(&root, &home, &mut |_: &Path| Ok(true), &mut |_: &Path| Ok(false)).expect("非必需文件不影响同步那一半");
+        prepare_at(&root, &home).expect("非必需文件不影响同步那一半");
         let error = verify_pending_at(&root, &home).unwrap_err();
         assert!(error.contains("licenses/NOTICE.txt"), "{error}");
         // 修好（重新写一套资源）：再次通过，标记改成新指纹。
@@ -811,7 +677,7 @@ mod tests {
         manifest.files.reverse();
         fs::write(root.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
         assert!(stale_paths(&root, &home).is_empty(), "清单变了不等于文件变了");
-        prepare_at(&root, &home, &mut |_: &Path| Ok(true), &mut |_: &Path| Ok(false)).unwrap();
+        prepare_at(&root, &home).unwrap();
         verify_pending_at(&root, &home).unwrap();
         assert_eq!(fs::read(verified_marker(&home)).unwrap(), before, "指纹没变，标记不必重写");
         // 内容变了而指纹没变，清单的改动也不会让这份文件被重读一遍。
@@ -928,8 +794,7 @@ mod tests {
 
     #[test] fn missing_install_resources_ask_for_a_reinstall_instead_of_a_fall_back() {
         let t = Temp::new(); let root = t.0.join("missing"); let home = t.0.join("home");
-        let mut prompt = |_: &Path| Ok(true); let mut acl = |_: &Path| Ok(false);
-        let error = prepare_at(&root, &home, &mut prompt, &mut acl).unwrap_err();
+        let error = prepare_at(&root, &home).unwrap_err();
         assert!(error.contains("重新安装"), "{error}");
         assert!(error.contains("manifest.json"), "{error}");
     }
@@ -940,80 +805,26 @@ mod tests {
         let mut m = installed(&root, true, "0.3.3");
         m.files.push(FileRecord { path: "../escape".into(), bytes: 1, sha256: "0".repeat(64) });
         fs::write(root.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
-        let mut prompt = |_: &Path| Ok(true); let mut acl = |_: &Path| Ok(false);
-        assert!(prepare_at(&root, &home, &mut prompt, &mut acl).is_err());
+        assert!(prepare_at(&root, &home).is_err());
         let mut m = installed(&root, true, "0.3.3");
         m.schema = 1;
         fs::write(root.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
-        assert!(prepare_at(&root, &home, &mut prompt, &mut acl).unwrap_err().contains("重新安装"));
-    }
-
-    #[test] fn a_refused_license_stops_the_start_without_remembering_anything() {
-        let t = Temp::new(); let root = t.0.join("resources"); fs::create_dir_all(&root).unwrap();
-        let home = t.0.join("home");
-        installed(&root, true, "0.3.3");
-        let mut prompt = |_: &Path| Ok(false);
-        let mut acl = |_: &Path| panic!("权限探查只能发生在同意许可之后");
-        assert!(prepare_at(&root, &home, &mut prompt, &mut acl).is_err());
-        assert!(!verified_marker(&home).exists());
+        assert!(prepare_at(&root, &home).unwrap_err().contains("重新安装"));
     }
 
     #[test] fn traversal_and_windows_aliases_are_rejected() {
         for s in ["/outside", "../escape", "a/../escape", "C:/escape", "C:escape", "\\\\server\\file", "a\\escape", "a//b", "./a", "NUL", "a/COM1.txt", "a/name.", "a/name ", "a:stream", ""] {
             assert!(safe_relative(s).is_err(), "accepted unsafe path: {s:?}");
         }
-        assert!(safe_relative("webview2/locales/zh-CN.pak").is_ok());
+        assert!(safe_relative("node/licenses/LICENSE.txt").is_ok());
     }
 
     #[test] fn blocked_home_directory_is_reported_without_touching_it() {
         let t = Temp::new(); let root = t.0.join("resources"); fs::create_dir_all(&root).unwrap();
         installed(&root, true, "0.3.3");
         let blocked = t.0.join("blocked"); fs::write(&blocked, "keep").unwrap();
-        let mut prompt = |_: &Path| Ok(true); let mut acl = |_: &Path| Ok(false);
-        assert!(prepare_at(&root, &blocked, &mut prompt, &mut acl).is_err());
+        assert!(prepare_at(&root, &blocked).is_err());
         assert_eq!(fs::read_to_string(blocked).unwrap(), "keep");
-    }
-
-    #[test] fn webview_permissions_are_read_only_and_runtime_scoped() {
-        let path = Path::new("C:/runtime/webview2");
-        let args = webview_acl_arguments(path);
-        assert_eq!(args[0], path.as_os_str());
-        assert_eq!(args[1], "/grant");
-        assert_eq!(args[2], "*S-1-15-2-1:(OI)(CI)(RX)");
-        assert_eq!(args[3], "*S-1-15-2-2:(OI)(CI)(RX)");
-        assert_eq!(args[4], "/T", "递归只在探测到读不了时才用这一次");
-    }
-
-    // T08：授权按需。两个沙箱主体读得通就什么都不写；读不了（或者读不出来，
-    // 与 2.0.2 的保守做法一致）才写一次 DACL。判断只看 SDDL，不看系统语言。
-    #[test] fn the_webview_permission_is_written_only_where_the_sandbox_cannot_read() {
-        let both = "O:BAG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;S-1-15-2-1)(A;OICI;0x1200a9;;;S-1-15-2-2)";
-        assert!(sandbox_may_read(both));
-        // 本机实测的真实写法：S-1-15-2-1 以别名 AC 出现，另一个留在数字形式。
-        let machine = "D:AI(A;OICI;0x1200a9;;;AC)(A;OICI;0x1200a9;;;S-1-15-2-2)(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)";
-        assert!(sandbox_may_read(machine), "AC 就是 S-1-15-2-1，认不出来就会每次启动都白授权一次");
-        assert!(!sandbox_may_read("D:PAI(A;OICI;0x1200a9;;;S-1-15-2-1)"), "只有一个主体读得通不算");
-        assert!(!sandbox_may_read("D:PAI(A;OICI;0x1200a9;;;S-1-15-2-2)(D;OICI;0x1200a9;;;AC)"), "拒绝项一票否决");
-        assert!(!sandbox_may_read("D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"), "没有这两个主体");
-        assert!(!sandbox_may_read(""));
-        let writes = std::cell::Cell::new(0);
-        let mut grant = || { writes.set(writes.get() + 1); Ok(()) };
-        assert!(!ensure_readable(Some(true), &mut grant).unwrap(), "读得通：不写 DACL");
-        assert_eq!(writes.get(), 0, "日常启动不得递归 icacls /T");
-        assert!(ensure_readable(Some(false), &mut grant).unwrap(), "读不了：写一次");
-        assert_eq!(writes.get(), 1);
-        assert!(ensure_readable(None, &mut grant).unwrap(), "读不出来按需要授权处理");
-        assert_eq!(writes.get(), 2);
-    }
-
-    #[test] fn terms_require_acceptance_and_only_remember_the_same_license() {
-        let t = Temp::new();
-        assert!(accept_terms(&t.0, "license-a", || Ok(false)).is_err());
-        assert!(!t.0.join("accepted-runtime-terms").exists());
-        accept_terms(&t.0, "license-a", || Ok(true)).unwrap();
-        accept_terms(&t.0, "license-a", || panic!("accepted terms must not prompt again")).unwrap();
-        assert!(accept_terms(&t.0, "license-b", || Ok(false)).is_err());
-        assert_eq!(fs::read_to_string(t.0.join("accepted-runtime-terms")).unwrap(), "license-a");
     }
 
     #[test] fn old_data_is_copied_and_existing_new_data_wins() {
@@ -1028,58 +839,30 @@ mod tests {
 
     // 同一个 home 换了一套安装资源（另一个目录，或搬过家的安装）：那份“已验证”
     // 只对这一套目录成立，所以按新目录重验一次；同目录的日常启动仍只 stat
-    // 必需文件、权限也只探查不重写。
+    // 必需文件，不重写标记。
     #[test]
     fn a_different_resources_directory_is_verified_again() {
         let t = Temp::new();
         let (a, b) = (t.0.join("a/resources"), t.0.join("b/resources"));
         for root in [&a, &b] { fs::create_dir_all(root).unwrap(); installed(root, true, "0.3.3"); }
         let home = t.0.join("home");
-        let prompts = std::cell::Cell::new(0); let probes = std::cell::Cell::new(0); let grants = std::cell::Cell::new(0);
-        let mut prompt = |_: &Path| { prompts.set(prompts.get() + 1); Ok(true) };
-        let mut acl = |_: &Path| {
-            probes.set(probes.get() + 1);
-            ensure_readable(Some(true), &mut || { grants.set(grants.get() + 1); Ok(()) })
-        };
-        prepare_at(&a, &home, &mut prompt, &mut acl).unwrap();
+        prepare_at(&a, &home).unwrap();
         verify_pending_at(&a, &home).unwrap();
-        assert_eq!((prompts.get(), probes.get(), grants.get()), (1, 1, 0));
-        // 同一套目录再来一次：不重验、不重写标记、不再授权。
-        prepare_at(&a, &home, &mut prompt, &mut acl).unwrap();
+        // 同一套目录再来一次：不重验、不重写标记。
+        prepare_at(&a, &home).unwrap();
         verify_pending_at(&a, &home).unwrap();
-        assert_eq!((prompts.get(), probes.get(), grants.get()), (1, 2, 0), "同目录的日常启动不得重新校验或授权");
         // 另一套目录：整套按新目录重验（非必需文件被改动也点名）。
         fs::write(b.join("licenses/NOTICE.txt"), "tampered").unwrap();
-        prepare_at(&b, &home, &mut prompt, &mut acl).unwrap();
+        prepare_at(&b, &home).unwrap();
         let error = verify_pending_at(&b, &home).unwrap_err();
         assert!(error.contains("licenses/NOTICE.txt"), "{error}");
         assert!(error.contains("重新安装"), "{error}");
         assert_eq!(remembered(&home).unwrap().resources, normalized(&a), "没通过就不能改记新目录");
         // 修好之后：通过，标记改记新目录。
         installed(&b, true, "0.3.3");
-        prepare_at(&b, &home, &mut prompt, &mut acl).unwrap();
+        prepare_at(&b, &home).unwrap();
         verify_pending_at(&b, &home).unwrap();
         assert_eq!(remembered(&home).unwrap().resources, normalized(&b));
-        assert_eq!((prompts.get(), probes.get(), grants.get()), (1, 4, 0), "换目录也不必重新授权（读得通）");
-    }
-
-    // 授权被拒：不能把这一套记成“已验证”，下次启动得再试一次（否则界面会因为
-    // 沙箱读不到运行时建不起来，而程序还以为一切就绪）。
-    #[test]
-    fn a_refused_grant_for_a_new_directory_is_not_remembered() {
-        let t = Temp::new();
-        let (a, b) = (t.0.join("a/resources"), t.0.join("b/resources"));
-        for root in [&a, &b] { fs::create_dir_all(root).unwrap(); installed(root, true, "0.3.3"); }
-        let home = t.0.join("home");
-        let mut prompt = |_: &Path| Ok(true);
-        let mut ok = |_: &Path| Ok(false);
-        prepare_at(&a, &home, &mut prompt, &mut ok).unwrap();
-        verify_pending_at(&a, &home).unwrap();
-        let was = remembered(&home).unwrap();
-        let mut refused = |_: &Path| Err("无法设置内置浏览器的沙箱读取权限：exit code: 5".to_string());
-        let error = prepare_at(&b, &home, &mut prompt, &mut refused).unwrap_err();
-        assert!(error.contains("重新运行安装程序"), "{error}");
-        assert_eq!(remembered(&home).unwrap().resources, was.resources, "被拒的那套目录不能记成已验证");
     }
 
     #[test]
@@ -1087,28 +870,15 @@ mod tests {
         let t = Temp::new(); let root = t.0.join("resources"); fs::create_dir_all(&root).unwrap();
         let home = t.0.join("home");
         installed(&root, true, "0.3.3");
-        let mut prompt = |_: &Path| Ok(true); let mut acl = |_: &Path| Ok(false);
-        prepare_at(&root, &home, &mut prompt, &mut acl).unwrap();
+        prepare_at(&root, &home).unwrap();
         assert!(root.join(REQUIRED[0]).is_file());
-        assert!(root.join("webview2").is_dir());
+        // 2.1.9 起固定版 WebView2 不再是必需资源：三个必需文件里没有它。
+        assert_eq!(REQUIRED, ["node/node.exe", "node/LICENSE", "licenses/Wakuwaku.txt"]);
+        assert!(!REQUIRED.iter().any(|name| name.starts_with("webview2/")));
+        // 安装目录里不再有随包的 WebView2，用户数据目录仍在。
+        assert!(!root.join("webview2").exists(), "不再随包内置 WebView2");
         assert_eq!(webview_directory(&home), home.join("webview"));
         assert!(home.join("webview").is_dir());
-    }
-
-    // 安装目录的 ACL 由安装目录继承的权限决定：icacls 有时会被拒。被拒时
-    // WebView2 建不出界面，所以必须在启动时停下来说清楚怎样修（T08 只是让
-    // 它「按需」发生，报错这一步不变）。
-    #[test]
-    fn a_refused_permission_grant_stops_the_start_and_says_how_to_fix_it() {
-        let t = Temp::new(); let root = t.0.join("resources"); fs::create_dir_all(&root).unwrap();
-        let home = t.0.join("home");
-        installed(&root, true, "0.3.3");
-        let mut prompt = |_: &Path| Ok(true);
-        let mut acl = |_: &Path| Err("无法设置内置浏览器的沙箱读取权限：exit code: 5".to_string());
-        let error = prepare_at(&root, &home, &mut prompt, &mut acl).unwrap_err();
-        assert!(error.contains("沙箱读取权限"), "{error}");
-        assert!(error.contains("重新运行安装程序"), "{error}");
-        assert!(!verified_marker(&home).exists(), "启动没走完，不能留下已校验的记录");
     }
 
     // 2.0.0 的数据根改名：安装器会删旧目录 %LOCALAPPDATA%\DSH-FISH，宿主必须

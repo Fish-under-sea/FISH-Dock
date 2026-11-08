@@ -359,3 +359,186 @@ test('#27 P2 ④：覆盖升级后安装目录只有 FISH-Dock.exe，旧 exe 一
     assert.equal(JSON.parse(fs.readFileSync(path.join(target, 'install-manifest.json'), 'utf8')).version, '2.0.0')
   } finally { fs.rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) }
 })
+
+// ── 2.1.9（#78）：Setup 覆盖 2.1.8，随包固定版 WebView2 的旧文件要清掉 ──────
+// 2.1.8 及以前的安装目录里有 `resources/webview2`（256 个文件）与固定版许可原文；
+// 2.1.9 不再随包分发它们。覆盖安装照旧走 install-update.cjs 的事务链：旧文件先移进
+// 事务暂存、提交成功后才真正丢弃，中途失败全部恢复原位并报错——不另加无事务的
+// RMDir /r（Captain 2026-11-08 确认）。用户数据（%LOCALAPPDATA%\FISH Dock，含
+// webview 里的 Cookies 与设置）不在安装目录里，安装器一个字节都不碰。
+const WEBVIEW2_OLD_FILES = [
+  'resources/webview2/msedgewebview2.exe',
+  'resources/webview2/EBWebView/old.dll',
+  'resources/licenses/WebView2-Fixed-Version.html',
+]
+const WEBVIEW2_OLD_CONTENT = {
+  // 顺序有讲究：固定版许可排在运行时 exe 前面，「旧运行时被占用」那条用例要求
+  // 失败发生前已经有一份旧文件移进事务暂存，回滚时它也得回到原位。
+  'resources/licenses/WebView2-Fixed-Version.html': '<html>fixed version terms</html>',
+  'resources/webview2/msedgewebview2.exe': 'MZ fixed runtime 155.0.4283.62',
+  'resources/webview2/EBWebView/old.dll': 'fixed runtime dll',
+}
+/// 2.1.8 的安装现场 + 2.1.9 的暂存载荷。`ownership` 为 false 时模拟「没有
+/// install-manifest.json」的老安装：更新器只能按 `resources/manifest.json`（legacy）清理。
+async function webviewUpgradeFixture({ ownership = true } = {}) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'fish-webview-'))
+  const installRoot = path.join(base, '安装 目录'), stage = path.join(base, 'stage')
+  fs.mkdirSync(installRoot); fs.mkdirSync(stage)
+  const oldResources = {
+    'resources/node/node.exe': 'node-24',
+    'resources/node/LICENSE': 'node terms',
+    'resources/licenses/Wakuwaku.txt': 'wakuwaku terms',
+    ...WEBVIEW2_OLD_CONTENT,
+  }
+  seed(installRoot, oldResources)
+  // 旧运行资源清单（schema 2）：还写着 webview2_version，文件表里列着随包运行时。
+  seed(installRoot, {
+    'resources/manifest.json': JSON.stringify({
+      schema: 2, product: 'FISH Dock', version: '2.1.8', architecture: 'x86_64',
+      node_version: '24.14.0', webview2_version: '155.0.4283.62',
+      files: Object.entries(oldResources).map(([name, data]) => ({
+        path: name.slice('resources/'.length), bytes: Buffer.byteLength(data), sha256: createHash('sha256').update(data).digest('hex'),
+      })),
+    }),
+  })
+  if (ownership) {
+    seed(installRoot, { 'FISH-Dock.exe': 'MZ 2.1.8 program', 'install-update.cjs': 'old updater', 'install-stop.ps1': 'old stopper' })
+    const owned = ['FISH-Dock.exe', 'install-update.cjs', 'install-stop.ps1', 'resources/manifest.json', ...Object.keys(oldResources)]
+    const rows = owned.map(name => {
+      const bytes = fs.readFileSync(path.join(installRoot, ...name.split('/')))
+      return { path: name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
+    })
+    seed(installRoot, { 'install-manifest.json': JSON.stringify({ schema: 1, product: 'FISH Dock', version: '2.1.8', files: rows }) })
+  }
+  // 用户数据：数据根下的 webview（WebView2 的 Cookies 与存储）与设置，安装器不得碰。
+  seed(path.join(base, 'FISH Dock'), {
+    'webview/Default/Cookies': 'sqlite-cookies',
+    'webview/EBWebView/Local State': '{"profile":true}',
+    'settings.json': '{"dock":"user-settings"}',
+  })
+  // 2.1.9 的新资源：只有 Node、许可说明与清单，没有 webview2/ 与固定版许可。
+  const newResources = {
+    'node/node.exe': 'node-24',
+    'node/LICENSE': 'node terms',
+    'licenses/Wakuwaku.txt': 'wakuwaku terms',
+    'licenses/NOTICE.txt': 'FISH Dock runtime resources',
+    'licenses/runtime-sources.json': '{"schema":1,"node":{}}',
+    'manifest.json': JSON.stringify({ schema: 2, product: 'FISH Dock', version: '2.1.9', architecture: 'x86_64', node_version: '24.14.0', files: [] }),
+  }
+  seed(path.join(stage, 'resources'), newResources)
+  seed(stage, { 'FISH-Dock.exe': 'MZ 2.1.9 program' })
+  fs.copyFileSync(path.join(root, 'scripts/install-update.cjs'), path.join(stage, 'install-update.cjs'))
+  fs.copyFileSync(path.join(root, 'scripts/install-stop.ps1'), path.join(stage, 'install-stop.ps1'))
+  // 新归属清单由生产函数生成，保证和真包同形（含 install-update.cjs / install-stop.ps1）。
+  await writeOwnershipManifest(path.join(stage, 'FISH-Dock.exe'), path.join(stage, 'resources'),
+    Object.keys(newResources), path.join(stage, 'install-manifest.json'), '2.1.9')
+  return { base, installRoot, stage }
+}
+
+test('2.1.9 Setup 覆盖 2.1.8：旧归属清单里的 resources/webview2 经事务清理，webview 用户数据原样保留', async () => {
+  const f = await webviewUpgradeFixture()
+  try {
+    const userBefore = snapshot(path.join(f.base, 'FISH Dock'))
+    const moved = []
+    const io = {
+      ...fs,
+      renameSync(from, to) {
+        if (String(to).includes(path.join('.fish-install-transaction', 'old'))) {
+          moved.push(path.relative(f.installRoot, from).split(path.sep).join('/'))
+        }
+        return fs.renameSync(from, to)
+      },
+    }
+    const result = updater.update(f.stage, f.installRoot, io)
+    for (const name of WEBVIEW2_OLD_FILES) {
+      assert.equal(fs.existsSync(path.join(f.installRoot, ...name.split('/'))), false, `旧文件必须清掉：${name}`)
+      assert.ok(moved.includes(name), `旧文件要先进事务暂存再丢弃，不能就地删：${name}`)
+    }
+    assert.equal(fs.existsSync(path.join(f.installRoot, 'resources/webview2')), false, '空出来的 webview2 目录一并回收')
+    assert.equal(fs.existsSync(path.join(f.installRoot, '.fish-install-transaction')), false, '事务目录随提交收回')
+    assert.deepEqual(snapshot(path.join(f.base, 'FISH Dock')), userBefore,
+      '%LOCALAPPDATA%\\FISH Dock 里的 webview 与设置一个字节都不动')
+    const after = JSON.parse(fs.readFileSync(path.join(f.installRoot, 'install-manifest.json'), 'utf8'))
+    assert.equal(after.version, '2.1.9')
+    assert.equal(after.files.some(file => /webview2|WebView2-Fixed-Version/i.test(file.path)), false, '新归属清单不再列随包 WebView2')
+    assert.ok(result.removed >= WEBVIEW2_OLD_FILES.length, `清理计数要含这三份旧文件：${JSON.stringify(result)}`)
+    assert.ok(result.obsolete >= WEBVIEW2_OLD_FILES.length)
+  } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
+})
+
+test('2.1.9 Setup 覆盖 2.1.8：没有归属清单时按旧 resources/manifest.json 清理随包 WebView2', async () => {
+  const f = await webviewUpgradeFixture({ ownership: false })
+  try {
+    const userBefore = snapshot(path.join(f.base, 'FISH Dock'))
+    const result = updater.update(f.stage, f.installRoot)
+    for (const name of WEBVIEW2_OLD_FILES) {
+      assert.equal(fs.existsSync(path.join(f.installRoot, ...name.split('/'))), false, `legacy 清单里的旧文件也必须清掉：${name}`)
+    }
+    assert.equal(fs.existsSync(path.join(f.installRoot, 'resources/webview2')), false)
+    assert.deepEqual(snapshot(path.join(f.base, 'FISH Dock')), userBefore, '用户数据不受影响')
+    assert.ok(result.obsolete >= WEBVIEW2_OLD_FILES.length, `旧运行资源清单里的 WebView2 文件都算 obsolete：${JSON.stringify(result)}`)
+    assert.equal(fs.existsSync(path.join(f.installRoot, 'install-manifest.json')), true, '新版照常写下归属清单')
+  } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
+})
+
+test('2.1.9 Setup 覆盖 2.1.8：提交阶段锁定安装清单时整体回滚并报错，WebView2 旧文件回到原位', async () => {
+  const f = await webviewUpgradeFixture()
+  try {
+    const before = snapshot(f.installRoot)
+    const userBefore = snapshot(path.join(f.base, 'FISH Dock'))
+    const staging = path.join(f.installRoot, '.fish-install-transaction', 'new')
+    const locked = {
+      ...fs,
+      renameSync(from, to) {
+        if (to === path.join(f.installRoot, 'install-manifest.json') && String(from).startsWith(staging + path.sep)) {
+          throw Object.assign(Error('模拟安装清单被占用'), { code: 'EBUSY' })
+        }
+        return fs.renameSync(from, to)
+      },
+    }
+    assert.throws(() => updater.update(f.stage, f.installRoot, locked), /模拟安装清单被占用/)
+    assert.deepEqual(snapshot(f.installRoot), before, '失败后目录树必须与更新前逐条一致（WebView2 旧文件回滚，不留事务残骸）')
+    assert.deepEqual(snapshot(path.join(f.base, 'FISH Dock')), userBefore, '用户数据一个字节都不能动')
+    assert.equal(fs.existsSync(path.join(f.installRoot, '.fish-install-transaction')), false)
+  } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
+})
+
+// 补验：锁的是旧 WebView2 运行时文件本身，不是 install-manifest.json 的最终提交。
+// 生产逻辑是「先 rename 进事务暂存、提交成功后才真正丢弃」；旧运行时进程占用会让
+// 这一步抛 EBUSY/EACCES。此时必须整次失败并回滚，绝不能因为删不掉就跳过这份旧文件、
+// 把新版本装上去（那会留下两套运行时，而且以后不会再被清理）。
+test('2.1.9 Setup 覆盖 2.1.8：旧 resources/webview2 运行时文件被占用时更新失败并整体回滚', async () => {
+  const f = await webviewUpgradeFixture()
+  try {
+    const before = snapshot(f.installRoot)
+    const userBefore = snapshot(path.join(f.base, 'FISH Dock'))
+    const lockedFile = path.join(f.installRoot, 'resources', 'webview2', 'msedgewebview2.exe')
+    const transaction = path.join(f.installRoot, '.fish-install-transaction', 'old')
+    let attempts = 0
+    const io = {
+      ...fs,
+      // 只命中「旧运行时文件 → 事务暂存」这一步；回滚走的是反方向（暂存 → 原位），不受影响。
+      renameSync(from, to) {
+        if (path.resolve(from) === path.resolve(lockedFile) && String(to).startsWith(transaction + path.sep)) {
+          attempts += 1
+          throw Object.assign(Error('模拟旧 WebView2 运行时文件被占用'), { code: 'EBUSY' })
+        }
+        return fs.renameSync(from, to)
+      },
+    }
+    let failure
+    try { updater.update(f.stage, f.installRoot, io) } catch (error) { failure = error }
+    assert.ok(failure, '旧运行时文件被占用时必须让整次更新失败，不能静默跳过删除后成功')
+    assert.match(failure.message, /模拟旧 WebView2 运行时文件被占用/)
+    assert.equal(attempts, 1, '注入点必须命中：旧运行时文件要在事务里被移走时失败')
+    // 已移走的旧文件、旧 exe 与归属清单全部回到原位；新版一个字节都不留。
+    assert.deepEqual(snapshot(f.installRoot), before, '失败后目录树必须与更新前逐条一致')
+    assert.equal(fs.readFileSync(lockedFile, 'utf8'), 'MZ fixed runtime 155.0.4283.62', '被占用的旧运行时文件回到原位')
+    assert.equal(fs.readFileSync(path.join(f.installRoot, 'resources/licenses/WebView2-Fixed-Version.html'), 'utf8'),
+      '<html>fixed version terms</html>', '失败前已经移进事务暂存的旧许可也要还原')
+    assert.equal(fs.readFileSync(path.join(f.installRoot, 'FISH-Dock.exe'), 'utf8'), 'MZ 2.1.8 program', '失败后不能把新版本留下')
+    assert.equal(JSON.parse(fs.readFileSync(path.join(f.installRoot, 'install-manifest.json'), 'utf8')).version, '2.1.8', '旧归属清单要还原')
+    assert.deepEqual(snapshot(path.join(f.base, 'FISH Dock')), userBefore, '用户数据一个字节都不能动')
+    assert.equal(fs.existsSync(path.join(f.installRoot, '.fish-install-transaction')), false, '事务目录不留残骸')
+  } finally { fs.rmSync(f.base, { recursive: true, force: true }) }
+})

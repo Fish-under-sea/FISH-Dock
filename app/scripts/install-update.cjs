@@ -306,7 +306,7 @@ function update(stage, root, io = fs, options = {}) {
   log(`清理 ${cleaned} 个旧文件（旧归属清单里 ${obsolete.length} 个不再随新版本发行${occupied.length ? `，其中 ${occupied.length} 个路径已被目录或链接占据、按无归属内容保留` : ''}）`);
   if (pruned.length) log(`回收 ${pruned.length} 个空目录：${pruned.join('、')}`);
   if (occupied.length) log('这些路径现在不是普通文件，未删除：' + occupied.map(f => f.path).join('、'));
-  const result = { version: next.version, replaced: changed.length, removed: cleaned, obsolete: obsolete.length, prunedDirs: pruned.length, occupied: occupied.length, needsWebviewAcl: next.files.some(f => f.path.startsWith('resources/webview2/')) && (!receipt || changed.some(f => f.path.startsWith('resources/webview2/'))), ...metrics, elapsedMs: Date.now() - start };
+  const result = { version: next.version, replaced: changed.length, removed: cleaned, obsolete: obsolete.length, prunedDirs: pruned.length, occupied: occupied.length, ...metrics, elapsedMs: Date.now() - start };
   report(SAY.done(result.replaced, metrics.cachedFiles, (result.elapsedMs / 1000).toFixed(1)));
   log(`安装完成：替换 ${result.replaced} 个文件，复用 ${metrics.cachedFiles} 个，耗时 ${(result.elapsedMs / 1000).toFixed(1)} 秒`);
   return result;
@@ -432,7 +432,6 @@ if (require.main === module) {
     // 安装器那一屏只有这一个出口：进度、迁移与结果都从这里出去，全都过 ascii()。
     const report = text => console.log(ascii(text));
     const result = update(stage, root, fs, { report, log, cleanupStage: false });
-    if (result.needsWebviewAcl) fs.writeFileSync(path.join(stage, 'webview-acl-needed'), '1');
     // #27-D：文件事务提交之后才迁移用户数据目录，且只有安装器显式传了 --migrate-home 才动手。
     // 迁移失败不回滚已经装好的程序：旧目录原样保留，落一个标记文件让安装器把话说清楚，
     // 退出码仍是 0（重跑一次安装程序就能补上）。

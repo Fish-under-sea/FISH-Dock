@@ -1,14 +1,15 @@
 <#
 一次构建 DSH-FISH 安装版：准备安装资源 → 编译主程序（feature installed）→ 生成安装包。
 
-安装包在安装时才把主程序、Node、固定版 WebView2 与 Windhawk 展开到用户选的目录；
-日常启动直接使用安装目录里的这些文件，不解压、不整树哈希、不递归授权。
+安装包在安装时才把主程序、Node 与本地模型服务展开到用户选的目录；日常启动直接使用
+安装目录里的这些文件，不解压、不整树哈希、不递归授权。WebView2 自 2.1.9 起改用系统
+Evergreen 运行时、不再随包，Setup 在开始安装前检测它。
 
 用法：
   & FISH本地模型工作台/app/scripts/build-installer.ps1
   & FISH本地模型工作台/app/scripts/build-installer.ps1 -Resources .tools/installer-resources
 
--Resources 指向已准备好的资源目录（含 manifest.json 与 node/webview2/windhawk/licenses）；
+-Resources 指向已准备好的资源目录（含 manifest.json 与 node/licenses）；
 不给时用 -Downloads 里的官方下载件现场准备（需要 node 可执行文件）。
 #>
 param(

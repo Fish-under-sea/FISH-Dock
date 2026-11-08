@@ -246,7 +246,7 @@ pub const KEYS: &[Key] = &[
     // 目录
     Key { name: "dir.app_home", env: ENV_APP_HOME, default: "%LOCALAPPDATA%/FISH Dock", category: Category::Dir, impact: "宿主数据根（WebView 资料、设置、宠物）" },
     Key { name: "dir.unified_root", env: ENV_UNIFIED_HOME, default: "%USERPROFILE%/.fish-dock", category: Category::Dir, impact: "统一数据根（凭据/roster/keys），见 storage_context" },
-    Key { name: "dir.resources", env: ENV_RESOURCES, default: "<exe>/resources", category: Category::Dir, impact: "安装资源（Node/WebView2/LHM）目录，开发期可指向 checkout" },
+    Key { name: "dir.resources", env: ENV_RESOURCES, default: "<exe>/resources", category: Category::Dir, impact: "安装资源（Node 与许可文件）目录，开发期可指向 checkout" },
     Key { name: "dir.user_data", env: ENV_USER_DATA_OVERRIDE, default: "(空=按数据根)", category: Category::Dir, impact: "移植/测试的数据目录覆盖（旧名沿用 WAKUWAKU_USER_DATA）" },
     // 端口
     Key { name: "port.dock", env: ENV_PORT, default: "47213", category: Category::Port, impact: "宿主本地 HTTP 端口（hooks/插件上报），旧 WAKUWAKU_PORT 仍兼容" },

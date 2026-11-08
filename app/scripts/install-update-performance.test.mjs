@@ -75,14 +75,14 @@ test('校验记录损坏时回退摘要验证，丢失或修改的资源得到�
   assert.equal(fs.readFileSync(path.join(f.root, 'resources/runtime.bin'), 'utf8'), 'original')
   assert.ok(result.hashedFiles > 0)
 })
-test('只有首次授权或 WebView2 变化时需要递归授权，其余更新不重复授权', t => {
+// 2.1.9（#78）：运行时改由系统提供，安装器不再做 WebView2 的沙箱 ACL 授权，
+// 结果里也就没有这个标记；更新器也不会在暂存目录落 webview-acl-needed。
+test('更新不再处理 WebView2 授权：结果里没有 ACL 标记，也不写标记文件', t => {
   const f = fixture(t), rows = { 'DSH-FISH.exe': 'program', 'resources/webview2/runtime.bin': 'browser' }
-  release(f.stage, rows); assert.equal(update(f.stage, f.root).needsWebviewAcl, true)
-  assert.equal(update(f.stage, f.root).needsWebviewAcl, false)
-  rows['DSH-FISH.exe'] = 'new-program'; release(f.stage, rows)
-  assert.equal(update(f.stage, f.root).needsWebviewAcl, false)
-  rows['resources/webview2/runtime.bin'] = 'new-browser'; release(f.stage, rows)
-  assert.equal(update(f.stage, f.root).needsWebviewAcl, true)
+  release(f.stage, rows)
+  const result = update(f.stage, f.root)
+  assert.equal('needsWebviewAcl' in result, false, `结果里不该再有 ACL 标记：${JSON.stringify(result)}`)
+  assert.equal(fs.existsSync(path.join(f.stage, 'webview-acl-needed')), false, '暂存目录里不该再落 ACL 标记')
 })
 test('明确显示校验与提交进度，日志数量有上限', t => {
   const f = fixture(t), rows = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`resources/f${i}`, 'synthetic']))
