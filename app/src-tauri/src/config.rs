@@ -196,7 +196,7 @@ const DEFAULT_CRASH_KEEP: usize = 20;
 const ENV_TICKER_MS: &str = "FISH_DOCK_TICKER_MS";
 const DEFAULT_TICKER_MS: u64 = 500;
 const ENV_FULLSCREEN_MS: &str = "FISH_DOCK_FULLSCREEN_MS";
-const DEFAULT_FULLSCREEN_MS: u64 = 1500;
+const DEFAULT_FULLSCREEN_MS: u64 = 300;
 const ENV_QUIET_AFTER_MS: &str = "FISH_DOCK_QUIET_AFTER_MS";
 /// 旧名，保留兼容（优先序低于 `FISH_DOCK_QUIET_AFTER_MS`）。
 const ENV_QUIET_AFTER_MS_LEGACY: &str = "WAKUWAKU_QUIET_AFTER_MS";
@@ -297,7 +297,7 @@ pub const KEYS: &[Key] = &[
     Key { name: "cache.crash_keep", env: ENV_CRASH_KEEP, default: "20", category: Category::Cache, impact: "崩溃报告保留份数上限" },
     // 轮询间隔
     Key { name: "interval.ticker_ms", env: ENV_TICKER_MS, default: "500", category: Category::Interval, impact: "主 ticker 心跳间隔" },
-    Key { name: "interval.fullscreen_ms", env: ENV_FULLSCREEN_MS, default: "1500", category: Category::Interval, impact: "全屏检测轮询间隔" },
+    Key { name: "interval.fullscreen_ms", env: ENV_FULLSCREEN_MS, default: "300", category: Category::Interval, impact: "全屏检测轮询间隔" },
     Key { name: "interval.quiet_after_ms", env: ENV_QUIET_AFTER_MS, default: "90000", category: Category::Interval, impact: "闲置多久进入 quiet（旧 WAKUWAKU_QUIET_AFTER_MS 兼容）" },
     Key { name: "interval.idle_hide_ms", env: ENV_IDLE_HIDE_MS, default: "0", category: Category::Interval, impact: "空闲多久隐藏会话（0/未设=按 idleHideMin 设置；旧 WAKUWAKU_IDLE_HIDE_MS 兼容）" },
     Key { name: "interval.lhm_every_ms", env: ENV_LHM_EVERY_MS, default: "3000", category: Category::Interval, impact: "LHM 传感器轮询（活跃）" },

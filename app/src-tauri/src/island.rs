@@ -11,7 +11,7 @@
 // again, it reaches for her and takes her back.
 //
 // Sizes here are logical (the page's) unless they say physical.
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
@@ -711,6 +711,8 @@ fn create(sh: &Arc<Shared>) {
                     crate::tasks::no_transitions(hwnd.0 as isize);
                 }
                 sh.own_window(&win);
+                // 文件拖放落点窗口（dropwin.rs）
+                crate::dropwin::start(sh.app.clone());
                 // Its renderer gone: told, and the page loaded again (crash.rs).
                 crate::crash::watch(&sh, &win);
             }
@@ -729,6 +731,11 @@ fn create(sh: &Arc<Shared>) {
 // Nothing for the default black look, nor while she is quiet.
 static OVER_MAX: AtomicBool = AtomicBool::new(false);
 static TOP_LIGHT: AtomicU8 = AtomicU8::new(2);
+static PRESS_OUTSIDE: AtomicBool = AtomicBool::new(false);
+// pet（她的角色）小圆窗口的位置缓存：变了才给页面发 pet:pet-rect。
+static PET_LAST: std::sync::Mutex<Option<(i64, i64, i64, i64)>> = std::sync::Mutex::new(None);
+// 按下点在岛窗口区域内、无法判断是否为“外面拖进来”时的计时起点（ms）。
+static HOLD_SINCE: AtomicU64 = AtomicU64::new(0);
 
 pub fn look_over_max(sh: &Arc<Shared>) {
     let looks = sh.setting("islandTopLook");
@@ -775,7 +782,10 @@ const LEAVE_MS: u128 = 600;
 // the stowed band and the edge that calls it down (call_look) follow from
 // this. None before the page said its size, or in another home.
 fn closed_rect(isl: &Island) -> Option<(i32, i32, i32, i32)> {
-    let (w, h) = isl.stow.closed;
+    // 页面若因“岛常驻、不自动收起”（islandHideUnder=false）从未上报过 closed 尺寸，
+    // 用默认胶囊尺寸兜底，保证拖放检测区 closed_rect 仍然成立。
+    let (w0, h0) = isl.stow.closed;
+    let (w, h) = if w0 > 0.0 && h0 > 0.0 { (w0, h0) } else { (500.0, 36.0) };
     if !isl.created || w <= 0.0 || h <= 0.0 {
         return None;
     }
@@ -1164,18 +1174,83 @@ pub fn keep_on_screen(sh: &Shared) {
 pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
     // She is being dragged past: the home is not being hovered.
     let passive = crate::pet::is_dragged(sh);
+    let mut pet_anchor: Option<(f64, f64, f64, f64)> = None;
     let (ignore, pointer, wait, called, came) = {
         let mut isl = sh.island.lock().unwrap();
         if !isl.ready {
             return 500;
         }
         if !isl.shown {
+            crate::dropwin::note_drag(None);
             (isl.ct.force(Mode::Pass), None, 500, None, false)
         } else {
             let (pos, size, sf, page_sf, held) = (isl.pos, isl.size, isl.sf(), isl.page_sf(), isl.holding);
             let solid = std::mem::take(&mut isl.solid);
             let seen = isl.ct.look(cursor, pos, size, sf, page_sf, held, passive && !held, &solid);
-            isl.solid = solid;
+            isl.solid = solid.clone();
+            // 拖文件到岛上：窗口透明（WS_EX_TRANSPARENT）时的系统拖放命中会跳过 wry 的
+            // drop target；设成不穿透，命中的又是 WebView2 渲染面（无 OLE target）。故
+            // 让岛保持穿透，由独立的 plain 窗口 dropwin.rs 覆盖胶囊上方收 WM_DROPFILES。
+            let pill = closed_rect(&isl);
+            let psf = page_sf;
+            let pad = (12.0 * sf) as i32;
+            // 检测区只在“胶囊”和“子子灵动岛”周围一圈，不再覆盖大片桌面。
+            let mut rects: Vec<(i32, i32, i32, i32)> = Vec::new();
+            if let Some(r) = pill { rects.push(r); }
+            // 子岛小球锚定在 pet（她的角色）那个小圆窗口的左上角外侧。
+            let ball = (36.0 * page_sf) as i32;
+            let pet = sh.app.get_webview_window("pet").and_then(|w| match (w.outer_position(), w.outer_size()) {
+                (Ok(p), Ok(s)) => Some((p.x, p.y, s.width, s.height)),
+                _ => None,
+            });
+            if let Some((px, py, pw, ph)) = pet {
+                let ax = (px - pos.0) as f64 / page_sf;
+                let ay = (py - pos.1) as f64 / page_sf;
+                pet_anchor = Some((ax, ay, pw as f64 / page_sf, ph as f64 / page_sf));
+                let bx = px - ball - ((2.0 * page_sf) as i32);
+                rects.push((bx, py, ball, ball));
+            } else if let Some(r) = pill {
+                let gap = (8.0 * sf) as i32;
+                rects.push((r.0 - gap - ball, r.1, ball, ball));
+            }
+            for s in solid.iter() {
+                let x = pos.0 + (s[0] * psf) as i32;
+                let y = pos.1 + (s[1] * psf) as i32;
+                let w = (s[2] * psf) as i32;
+                let h = (s[3] * psf) as i32;
+                if w > 2 && h > 2 { rects.push((x, y, w, h)); }
+            }
+            let mut hit: Option<(i32, i32, i32, i32)> = None;
+            for r in rects.iter() {
+                if crate::pointer::within(cursor, (r.0, r.1), (r.2, r.3), pad) {
+                    hit = Some((r.0 - pad, r.1 - pad, r.2 + pad * 2, r.3 + pad * 2));
+                    break;
+                }
+            }
+            let zone = hit;
+            let down = crate::pet::any_down().unwrap_or(false);
+            let over_zone = zone.is_some();
+            let now = crate::now_ms() as u64;
+            let mut drag_on_island = false;
+            if !down {
+                PRESS_OUTSIDE.store(false, Ordering::SeqCst);
+                HOLD_SINCE.store(0, Ordering::SeqCst);
+            } else if !over_zone {
+                PRESS_OUTSIDE.store(true, Ordering::SeqCst);
+                HOLD_SINCE.store(0, Ordering::SeqCst);
+            } else if PRESS_OUTSIDE.load(Ordering::SeqCst) {
+                drag_on_island = true;
+            } else {
+                // 按下点可能本来就在岛窗口区域内（从顶部窗口/顶部图标拖出），观察不到“外面按下”；
+                // 用“按住超过 260ms”区分真实拖拽与一次点击，避免 click 被 dropwin 抢走。
+                let s = HOLD_SINCE.load(Ordering::SeqCst);
+                if s == 0 {
+                    HOLD_SINCE.store(now, Ordering::SeqCst);
+                } else if now.saturating_sub(s) >= 260 {
+                    drag_on_island = true;
+                }
+            }
+            crate::dropwin::note_drag(if drag_on_island { zone } else { None });
             if isl.ct.calmed() {
                 sh.log(&format!("island: mouse mode bouncing, calmed: cursor {cursor:?}, window {pos:?} {size:?}, scale {sf}"));
             }
@@ -1183,17 +1258,27 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
             // looked at often wherever the pointer is, so they take the
             // mouse soon after the pointer comes onto them from afar (a
             // press at once went under the edit bar, #53).
-            let wait = if held || isl.ct.over { 50 } else if seen.forward || isl.editing || !isl.solid.is_empty() { 30 } else if seen.near { 80 } else { 200 };
+            let wait = if drag_on_island { 40 } else if held || isl.ct.over { 50 } else if seen.forward || isl.editing || !isl.solid.is_empty() { 30 } else if seen.near { 80 } else { 200 };
             // Out of the way of a window: the pointer calling it down. And
             // the pointer just come near it: a window come under it since
             // the last look is looked for now, before a press reaches it.
             let called = call_look(&mut isl, cursor, passive, std::time::Instant::now(), || crate::pet::any_down().unwrap_or(false));
             let was_near = std::mem::replace(&mut isl.stow.near, seen.near);
             let came = seen.near && !was_near && isl.stow.closed.0 > 0.0;
-            (seen.ignore, seen.pointer, wait, called, came)
+            let ignore = if drag_on_island { Some(true) } else { seen.ignore };
+            (ignore, seen.pointer, wait, called, came)
         }
     };
     set_ignore(sh, ignore);
+    if let Some(a) = pet_anchor {
+        let sig = (a.0.round() as i64, a.1.round() as i64, a.2.round() as i64, a.3.round() as i64);
+        let mut last = PET_LAST.lock().unwrap();
+        if *last != Some(sig) {
+            *last = Some(sig);
+            drop(last);
+            let _ = sh.app.emit_to("island", "pet:pet-rect", json!({ "x": a.0, "y": a.1, "w": a.2, "h": a.3 }));
+        }
+    }
     if let Some(at) = pointer {
         let _ = sh.app.emit_to("island", "pet:pointer", at);
     }

@@ -386,7 +386,7 @@
             // Gone, or let go of: the mouse is the page's again.
             dragged = []
           }
-          for (const fn of fileDrags) fn(type, at)
+          for (const fn of fileDrags) fn(type, at, payload?.paths || null)
         },
         { target },
       ),
