@@ -114,8 +114,16 @@ pub(crate) fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     #[link(name = "kernel32")]
     unsafe extern "system" { fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32; }
-    let from: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
-    let to: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
+    // Rust 的 fs 支持长路径，裸 Win32 调用仍需扩展路径。只规范化已存在的
+    // 父目录：目标文件可以尚未创建，且不跟随最终文件处的链接去替换别处。
+    fn wide_file(path: &Path) -> std::io::Result<Vec<u16>> {
+        let name = path.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "替换路径必须指向文件"))?;
+        let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+        let full = fs::canonicalize(parent)?.join(name);
+        Ok(full.as_os_str().encode_wide().chain(Some(0)).collect())
+    }
+    let from = wide_file(from)?;
+    let to = wide_file(to)?;
     if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0x1 | 0x8) } == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
 }
 #[cfg(not(windows))]
@@ -207,6 +215,34 @@ mod tests {
         assert_eq!(resolve_root(&home, Some(&setting), Some(&environment)).unwrap(), setting);
         assert!(resolve_root(&home, Some(Path::new("relative/.fish-dock")), None).is_err());
         assert!(resolve_root(&home, Some(Path::new("")), None).is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn replace_handles_long_windows_paths_atomically() {
+        let base = root();
+        let directory = base.join("中文 空格").join("long-directory-".repeat(5)).join("nested-directory-".repeat(5));
+        fs::create_dir_all(&directory).unwrap();
+        let from = directory.join("待发布.tmp");
+        let to = directory.join("目标.bin");
+        assert!(to.as_os_str().len() > 260);
+        fs::write(&from, b"first").unwrap();
+        replace(&from, &to).unwrap();
+        assert!(!from.exists());
+        assert_eq!(fs::read(&to).unwrap(), b"first");
+        fs::write(&from, b"second").unwrap();
+        replace(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"second");
+        // 源不存在时不能破坏已有目标。
+        assert!(replace(&from, &to).is_err());
+        assert_eq!(fs::read(&to).unwrap(), b"second");
+        let occupied = directory.join("occupied");
+        fs::create_dir(&occupied).unwrap();
+        fs::write(occupied.join("kept"), b"kept").unwrap();
+        fs::write(&from, b"pending").unwrap();
+        assert!(replace(&from, &occupied).is_err());
+        assert_eq!(fs::read(&from).unwrap(), b"pending");
+        assert_eq!(fs::read(occupied.join("kept")).unwrap(), b"kept");
+        fs::remove_dir_all(base.parent().unwrap().parent().unwrap()).unwrap();
     }
     #[test]
     fn official_names_are_bound_to_catalog_identity() {
