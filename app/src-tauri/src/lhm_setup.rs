@@ -2400,7 +2400,32 @@ mod tests {
         assert!(sddl.contains("OICI"), "{sddl}");
         let wrote = std::fs::write(dir.join("planted.dll"), b"x");
         assert_eq!(wrote.is_ok(), imp::is_elevated(), "{wrote:?}");
-        let _ = std::fs::remove_file(dir.join("planted.dll"));
+        // 安全断言完成后，利用自建目录所有者的 WRITE_DAC 恢复清理权限。
+        // 仅此测试路径；不改变产品的管理员专属目录策略。
+        {
+            use std::{ffi::c_void, os::windows::ffi::OsStrExt};
+            #[link(name = "advapi32")]
+            extern "system" {
+                fn ConvertStringSecurityDescriptorToSecurityDescriptorW(text: *const u16, revision: u32, descriptor: *mut *mut c_void, size: *mut u32) -> i32;
+                fn GetSecurityDescriptorDacl(descriptor: *mut c_void, present: *mut i32, dacl: *mut *mut c_void, defaulted: *mut i32) -> i32;
+                fn SetNamedSecurityInfoW(name: *const u16, kind: u32, info: u32, owner: *mut c_void, group: *mut c_void, dacl: *mut c_void, sacl: *mut c_void) -> u32;
+            }
+            #[link(name = "kernel32")]
+            extern "system" { fn LocalFree(memory: *mut c_void) -> *mut c_void; }
+            let path: Vec<u16> = std::fs::canonicalize(&dir).unwrap().as_os_str().encode_wide().chain(Some(0)).collect();
+            // OW 只给当前对象的所有者，不给 Everyone 或普通用户组。
+            let cleanup: Vec<u16> = "D:P(A;;FA;;;OW)".encode_utf16().chain(Some(0)).collect();
+            unsafe {
+                let mut descriptor = std::ptr::null_mut();
+                assert_ne!(ConvertStringSecurityDescriptorToSecurityDescriptorW(cleanup.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()), 0);
+                let (mut present, mut defaulted, mut dacl) = (0, 0, std::ptr::null_mut());
+                let got = GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted) != 0 && present != 0 && !dacl.is_null();
+                let result = if got { SetNamedSecurityInfoW(path.as_ptr(), 1, 0x4 | 0x8000_0000, std::ptr::null_mut(), std::ptr::null_mut(), dacl, std::ptr::null_mut()) } else { 87 };
+                LocalFree(descriptor);
+                assert_eq!(result, 0, "恢复自建夹具清理权限失败");
+            }
+        }
+        if wrote.is_ok() { std::fs::remove_file(dir.join("planted.dll")).unwrap(); }
         std::fs::remove_dir(&dir).unwrap();
     }
 
