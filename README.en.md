@@ -1,19 +1,19 @@
-﻿<div align="center">
+<div align="center">
 <p>
 <a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark.png"><img src="assets/readme/key-zh-zh-light.png" width="74" alt="中文"></picture></a>
 <a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark.png"><img src="assets/readme/key-en-zh-light.png" width="108" alt="English"></picture></a>
 <a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-en-dark.png"><img src="assets/readme/key-start-en-light.png" width="126" alt="Get started"></picture></a>
 </p>
-<h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark.png"><img src="assets/readme/hero-en-light.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
+<h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark-v220.png"><img src="assets/readme/hero-en-light-v220.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark.png"><img src="assets/readme/stat-version-en-light.png" width="23%" alt="Current version v2.1.9"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark-v220.png"><img src="assets/readme/stat-version-en-light-v220.png" width="23%" alt="Current version v2.2.0"></picture></a>
 <a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
 <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v2.png"><img src="assets/readme/stat-channels-en-light-v2.png" width="23%" alt="Three independent official plugins"></picture></a>
 </p>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="app/docs/release-2.1.9.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
+<a href="app/docs/release-2.2.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark.png"><img src="assets/readme/key-issues-en-light.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
@@ -21,8 +21,8 @@
 <table>
 <tr>
 <td>
-<p><strong>2.1.9 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
-<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.1.9.md">Release notes</a></p>
+<p><strong>2.2.0 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
+<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.2.0.md">Release notes</a></p>
 </td>
 <td width="232" align="center" valign="middle">
 <picture>
@@ -64,55 +64,27 @@ This section is only about entry points and operations; capability detail is abo
 
 Business code, plugin packages and the store catalog are maintained in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins); this repository owns the desktop host, SDK, installer, plugin management and Windhawk.
 
-**2.1.9** adds file staging and native drag-and-drop targets to child islands (#76/#77), and switches to the system Evergreen WebView2 Runtime (#78). Setup checks it before installing; if missing, it offers the official download page and exits. Update itself does not check, prompt for, or install WebView2. Upgrades transactionally remove the installer-owned Fixed Version runtime while preserving WebView user data and settings. This is a host-only release; plugins are unchanged. See the [2.1.9 notes](app/docs/release-2.1.9.md).
+- **2.2.0**: plugins explicitly request native windows outside Dock and provide their own UI. No request means no second window. Removes the hardcoded staging UI and persistent dot; in-app upgrades use Setup. **This is the final release with both Setup and Update; later releases provide Setup only.** [Full notes](app/docs/release-2.2.0.md).
+- **2.1.9**: uses system Evergreen WebView2 and transactionally removes old bundled runtime files while preserving user data. [Full notes](app/docs/release-2.1.9.md).
+- **2.1.8**: restores the system proxy when Clash exits and adds host proxy recovery. [Full notes](app/docs/release-2.1.8.md).
+- **2.1.7**: fixes the slim-update baseline at 2.1.0 to cover supported older versions. [Full notes](app/docs/release-2.1.7.md).
 
-**2.1.8** fixes the network going out when Clash is closed: the system proxy is put back on all five exits (kernel stopped, plugin disabled, Dock quit, Dock killed, plugin killed), with the order changed to "proxy first, kernel second"; the host gains `--proxy-heal` (a logon + every-five-minutes task that does nothing without a lease) and a heal before killing a plugin, so a crash no longer needs you to reopen Dock; the deactivate budget goes from 5 s to 30 s while quitting stays on the 6 s quick path. A failed slim update now falls back by itself: it downloads the full installer for the same version, checks its digest and hands over to it (a progress window that does not depend on WebView2, with resume, cancel and retry). Plugins: Clash fixes stop order, bad leases, half-dead kernels and the TUN host watchdog, and its watchdog now runs from the Task Scheduler only while the proxy is taken over; Magpie fixes #47 (a replaced plugin host made a provider look removed). See the [2.1.8 notes](app/docs/release-2.1.8.md).
-
-**2.1.7** re-issues the update package with **2.1.0 as its baseline**: every install from 2.1.0 through 2.1.6 can now take the in-app update in one step, and the package stays a slim diff (a three-file payload, about 30 MB). The 2.1.6 update was diffed only against the previous release, so on 2.1.0/2.1.1 the older `resources/licenses/runtime-sources.json` was neither in the payload nor matching the new digest — the installer stopped with “base resources missing” and rolled back. This release moves the diff origin to the oldest supported version and keeps that baseline manifest in the repo with a self-check. Full notes: [2.1.7 release notes](app/docs/release-2.1.7.md).
-
-**2.1.6** fixes the root cause of “plugin autostart fails on the first launch”: the host no longer serves plugin-to-host storage callbacks only while it happens to be waiting on that plugin's reply. A resident callback thread serves them at any time, so the storage reads a plugin issues right after `activate` no longer sit until the 30-second SDK timeout (on this machine both plugins once failed in the same millisecond). The SDK also drops late replies for already-expired request ids instead of closing the session, and the leftover **Windhawk section is removed from the Appearance page** (backend kept). Full notes: [2.1.6 release notes](app/docs/release-2.1.6.md).
-
-**2.1.5** reverts the part of 2.1.4 that broke startup: removing the Windhawk section from the Appearance page left Dock unable to open, so it is restored to its 2.1.3 shape. The other two fixes stay: **the system proxy now wins** over a stale `HTTP(S)_PROXY` (so Dock reaches the primary source instead of falling back to mirrors), and **plugin download fallback no longer downgrades** below the version you already have. Full notes: [2.1.5 release notes](app/docs/release-2.1.5.md).
-
-**2.0.4** is a revision release: host 2.0.4, compatible with plugins 2.1.x (Clash and Magpie 2.1.3, Feishu 2.1.0). It closes issues #63, #65, #66 and #67 and regresses #64. Plugin autostart becomes a single scheduler — one shared budget per attempt (60 s cold, 10 s warm), a 180-second lifecycle per round, one in-flight attempt per plugin, two plugins in parallel, and late results dropped by generation — so a backup-time pause no longer spawns a second instance. Resource fetching moves into one picker layer: the origin first, configured mirrors as candidates, retried per proxy way, all sharing a single total budget and landing through a unique temporary file plus an atomic rename; the update package downloads through it too, and pet lists, details, posters and previews are fetched and cached by the host. Pet now raises a notice when a new version is found. The plugin card More menu becomes a full-row action list, npm discovery search pages correctly on short pages via `nextFrom`, and http/https links in plugin pages open through a host-mediated channel (all other schemes are refused). OFM is fully unwired, legacy naming is cleaned up, and the Agent session API (`/v1`) plus `agent-core` land. See the [2.0.4 release notes](app/docs/release-2.0.4.md) for the full text and known limitations.
-
-**2.0.3** is a patch release: host 2.0.3, compatible with plugins 2.1.x (Clash and Magpie 2.1.3, Feishu 2.1.0). It finishes nine of the ten plugin-startup tasks (T02 stays for 2.1.0): resource verification now keys on a per-file size+mtime fingerprint and the full hash pass leaves the first-frame path, with the WebView2 grant done on demand (T06/T07/T08); plugin verification gains a size+mtime snapshot cache and plugin pages no longer hold the global lock (T03/T09); plugin calls get tiered timeouts (5 s warm, 20 s cold) with one retry on a cold failure (T04); the maintenance thread and install/uninstall/enable/autostart all serialise on one upper-level mutex, so maintenance can no longer delete a version directory an install is still writing (t19). The plugin card is rebuilt as well: state collapses into `● Running · v2.1.2 → v2.1.3`, the only solid button is Update, and cards with a feature page drop from four rows to three. See the [2.0.3 release notes](app/docs/release-2.0.3.md) for the full text and the twelve known limitations.
-
-**2.0.2** is a patch release: host 2.0.2, compatible with plugins 2.1.x. It fixes the three ways plugins went wrong silently — no logs, no diagnosis, no reliable stop. Plugin `stderr` is no longer discarded: it is written to `host/plugin-logs/<plugin-id>.log` (1 MB per file, two kept, redacted before writing), failures are persisted as structured JSON in `host/plugin-failures.log` with exit code and log path, and plugin cards gain an "Open plugin logs" action. Plugin pages no longer disappear when the process is not running — the tab stays, shows the reason, and offers a Start button. Liveness now means "process alive plus handshake answers", and orphan kernel reclamation checks pid, real start time and controller reachability together, so a recycled pid is no longer killed. See the [2.0.2 release notes](app/docs/release-2.0.2.md).
-
-**2.0.1** is a maintenance release: host 2.0.1, compatible with plugins 2.1.x (Magpie is at 2.1.1). The notes area gets a Refresh control even when it has content, About refetches after 5 minutes, and note titles no longer repeat the version; a global-shortcut recorder is added; plugin update and uninstall are transactional (old version directories pruned, uninstall thorough but keeps user data) with autostart taking effect live; untitled windows get taskbar buttons, tray icon clicks work, and the context menu is trimmed; the workspace self-heals after a display change and the taskbar stops floating at 110% text; hang stack capture and a WebView2-termination fix. The OFM local model is retired from the store (installed users can still enable or uninstall it), and model capabilities are provided by the Magpie plugin; agy island approvals and the memory issues move to 2.1.0. See the [2.0.1 release notes](app/docs/release-2.0.1.md).
-
-**2.0.0** finishes the legacy-name work. Every version position — `tauri.conf.json`, `Cargo.toml`, the Claude Code plugin manifest, the installer and these documents — is now `2.0.0`, and the old executable is no longer kept as a rollback copy. Legacy names split three ways: internal identities (the uninstall entry, the executable name, the Run value and command-line switches) are untouched; user-facing names (the Task Scheduler author and description, the user data directory) become `FISH Dock`; old uninstall entries and run values pointing at the old executable are removed on install once they are proven ours. The user data directory migrates to `%LOCALAPPDATA%\FISH Dock` and the old one is deleted right after the copy verifies; if the migration does not finish, the old directory stays exactly as it was. Both the full installer and the compact update package are published, with checksums, at [v2.0.0](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.0.0).
-
-### Earlier changes
-
-- GitHub device-flow refresh credentials are encrypted and renewed automatically. Temporary network errors keep the saved session; Star revalidation is distinct from signing out. Legacy sessions without saved refresh credentials require one new sign-in.
-- Installer transactions remove only verified obsolete owned files. Unchanged installed resources reuse verification records; changed files and cross-volume copies are checked.
-- Whole-configuration backup includes host settings, layouts, extension registration and persistent namespace configuration and secrets. Preview, before-copies and rollback protect restores.
-- Device-code prompts are smaller, scroll internally and no longer use heavy shadows or a full-window dim backdrop. Temporary sign-in pinning can be released manually; the island position is restored.
-- Feishu, Clash and Magpie are independent plugins. Use Settings → Plugins to sign in to GitHub and verify your star on the main FISH Dock repository. Official installation actions and feature pages become available after both checks. Installed plugins are enabled automatically; service credentials still require configuration. The desktop installer does not preinstall business plugins.
-- Plugin manifests, resources, platform and storage identity are validated. A failed update rolls back to the previously installed version and data during the transaction; no old version is kept afterwards.
-- Magpie retains its native management UI in a larger embedded window; its management server, model gateway and embedding proxy use separate loopback ports.
-- Feishu and Clash offer one- and two-column layouts. Tabs support ordering, horizontal scrolling and mouse dragging.
-- Opening a plugin no longer forces persistent pinning or always-on-top. GitHub sign-in uses an expiring temporary focus state, copies the device code before opening your browser, and polls for completion. Closing or cancelling restores manual preferences.
-- Application confirmations stay inside Dock. Fullscreen exit restores visibility; explicit wake-up and approval prompts also work while another application is fullscreen.
-- About and plugin cards provide update checks. Store access has a GitHub API fallback and validated offline cache. Package sizes automatically use KB, MB or GB.
-- Settings restore the last tab and retain saved mode, position and display choices.
-- Configuration lives in one place, `app/src-tauri/src/config.rs` (49 keys / 9 categories), every key overridable via `FISH_DOCK_*`; legacy `WAKUWAKU_*` is still read. Two self-check scripts, `scripts/check-hardcoded.mjs` and `scripts/check-contrast.mjs`, are wired into the test run.
-- Naming: crate, artifacts, identifiers, CLI flags and placeholders are all FISH Dock; legacy names stay read-only, and install/update remove old executables and old scheduled-task entries.
+See [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases) for earlier versions and complete changes.
 
 ## Install
 
-Choose the package for the published version and verify it with `SHA256SUMS.txt` from that same release.
+**2.2.0 is the final release with both Setup and Update; later releases provide Setup only.** Choose the package for the published version and verify it with `SHA256SUMS.txt` from that same release.
 
 | Package | When to use it |
 | --- | --- |
-| `FISH-Dock-Setup-2.1.9.exe` | First installation or repair; includes Node.js. **Requires the system Evergreen WebView2 Runtime.** If missing, Setup offers the official download page and exits without installing dependencies. |
-| `FISH-Dock-Update-2.1.9.exe` | **2.1.0 and later** can all take it (the diff origin is pinned at 2.1.0); 2.0.x should use the Setup package. |
+| `FISH-Dock-Setup-2.2.0.exe` | First installation or repair; includes Node.js. **Requires the system Evergreen WebView2 Runtime.** If missing, Setup offers the official download page and exits without installing dependencies. |
+| `FISH-Dock-Update-2.2.0.exe` | **2.1.0 through 2.1.9** can use this transition package (the diff origin is pinned at 2.1.0); 2.0.x should use the Setup package. |
 
- Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 but no longer bundles Fixed Version WebView2 or its license as of 2.1.9. It uses the system Evergreen runtime. Upgrades remove installer-owned old runtime files and preserve `%LOCALAPPDATA%/FISH Dock/webview`. Update does not check system dependencies; ensure Evergreen is available before upgrading. If a failed Update hands over to the full Setup, Setup still performs its own prerequisite check. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files); 2.1.6 removes the leftover Windhawk section from the Appearance page. The installer is currently unsigned.
+ Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 but no longer bundles Fixed Version WebView2 or its license as of 2.1.9. It uses the system Evergreen runtime. Upgrades remove installer-owned old runtime files and preserve `%LOCALAPPDATA%/FISH Dock/webview`. Update does not check system dependencies; ensure Evergreen is available before upgrading. If Update fails, use the same-version Setup manually; the installer no longer downloads a different package. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files); 2.1.6 removes the leftover Windhawk section from the Appearance page. The installer is currently unsigned.
 
-Installed releases support manual checks in About and Updates, plus checks after launch and daily. If the GitHub API is unavailable, checks fall back to reading the official release page's version information (still surfaced in-app). Upgrade with a package installer in-app rather than replacing the host executable; only Setup may offer an external official download page when WebView2 is missing. Same-version revisions do not trigger a version-number notification; download the revised package and verify the latest checksum.
+Installed releases support manual checks in About and Updates, plus checks after launch and daily. If the GitHub API is unavailable, checks fall back to reading the official release page's version information (still surfaced in-app). From host 2.2.0 onward, in-app updates download and verify Setup; only Setup may offer an external official download page when WebView2 is missing. Same-version revisions do not trigger a version-number notification; download the revised package and verify the latest checksum.
+
+Older hosts that have not passed through 2.2.0 should download Setup manually for a later Setup-only release.
 
 ## Data
 
@@ -127,6 +99,8 @@ cargo run --locked --no-default-features --manifest-path app/src-tauri/Cargo.tom
 node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js'
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
+
+Plugin code, packaging and the catalog live in the [official plugin repository](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Start with the [developer guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md). For native windows outside Dock, see the [Hook guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md), [host API notes](app/docs/plugin-windows-2.2.0.md) and [complete protocol example](sdk/examples/window-file-drop/README.md).
 
 Build inputs are pinned in `app/scripts/runtime-sources.json`. Prepare a new resource directory with `prepare-installer.mjs`, then build with `build-installer.ps1` and NSIS. See the Chinese README for detailed storage and build instructions.
 

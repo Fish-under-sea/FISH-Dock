@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 <p>
   <a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark.png"><img src="assets/readme/key-zh-zh-light.png" alt="中文" height="40"></picture></a>
@@ -7,12 +7,12 @@
 </p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark.png">
-  <img src="assets/readme/hero-zh-light.png" alt="FISH Dock：桌面与模型工作台" width="1448">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark-v220.png">
+  <img src="assets/readme/hero-zh-light-v220.png" alt="FISH Dock：桌面与模型工作台" width="1448">
 </picture>
 
 <p>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark.png"><img src="assets/readme/stat-version-zh-light.png" alt="VERSION：当前版本 2.1.9" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark-v220.png"><img src="assets/readme/stat-version-zh-light-v220.png" alt="VERSION：当前版本 2.2.0" width="23%"></picture></a>
   <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
   <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
@@ -23,7 +23,7 @@
 
 <p>
   <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="app/docs/release-2.1.9.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
+  <a href="app/docs/release-2.2.0.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
@@ -76,49 +76,34 @@
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器与插件管理。
 
-2.1.9 功能与运行时升级：**#76/#77 子灵动岛支持文件暂存与原生拖放落点**；**#78 改用系统 Evergreen WebView2**，不再随包携带固定版。Setup 在安装前检测，缺失时提示官方下载页并中止；Update 自身不检测、不提示、不安装 WebView2。覆盖升级按清单清理旧随包运行时与许可文件，保留用户 WebView 资料与配置，失败可回滚。本次只升级宿主，插件不变。完整说明见 [2.1.9 更新记录](app/docs/release-2.1.9.md)。
+- **2.2.0**：插件通过 Hook 按需请求 Dock 外部原生窗口，自行绘制业务界面；无请求不创建第二窗口。移除硬编码暂存条与常驻小球，应用内更新改用 Setup。**本版最后一次同时发布 Setup 和 Update，之后仅发布 Setup。** [完整说明](app/docs/release-2.2.0.md)。
+- **2.1.9**：改用系统 Evergreen WebView2，安装事务清理旧随包运行时并保留用户资料。[完整说明](app/docs/release-2.1.9.md)。
+- **2.1.8**：修复 Clash 退出后的系统代理恢复，并补充宿主代理自愈。[完整说明](app/docs/release-2.1.8.md)。
+- **2.1.7**：精简更新基线固定为 2.1.0，覆盖受支持旧版。[完整说明](app/docs/release-2.1.7.md)。
 
-2.1.8 断网修复版：宿主 2.1.8，兼容插件 2.x（官方目录 2.3.4：Clash / Magpie / 飞书）。**关掉 Clash 不再断网**：系统代理在「停内核 / 停用插件 / 退出 Dock / 强杀 Dock / 强杀插件」五种情况下都会被还回去，排序改成「先还代理、再收内核」；宿主新增 `--proxy-heal`（登录时 + 每 5 分钟一次的计划任务，无租约零动作）与 kill 前兜底，崩溃后不再需要你手动重开 Dock；停用预算 5 秒 → 30 秒，关程序仍走 6 秒的快速路径。**精简更新包失败自动兜底**：失败分支会把同版本完整安装包下载下来、校验摘要、交给它覆盖安装（独立于 WebView2 的进度窗，支持续传、取消与重试）。插件侧同步：Clash 修停止顺序/坏租约/半死内核/TUN 宿主看门狗，看门狗改任务计划拉起、只在代理接管期间存在；Magpie 修 #47（换代理后 provider 被说成「你移除了它」）。完整说明见 [2.1.8 更新记录](app/docs/release-2.1.8.md)。
-
-2.1.7 更新修复版：宿主 2.1.7，兼容插件 2.x。**更新包以 2.1.0 为基线重出**：2.1.0 到 2.1.6 的用户点「应用内更新」都能一次升上来，包体仍是精简差分（三个文件的载荷，安装包约 30 MB）。2.1.6 的更新包只按上一版做差，2.1.0/2.1.1 的 `resources/licenses/runtime-sources.json` 与新版摘要不同、又不在载荷里，装到一半会报「基础资源缺失」并回滚——这一版把差分起点前移到最老的受支持版本，并把这份基线清单入库自检。完整说明见 [2.1.7 更新记录](app/docs/release-2.1.7.md)。
-
-2.1.6 修复版：宿主 2.1.6，兼容插件 2.x。修掉**插件自启「第一次起不来」的根因**——宿主把「插件 → 宿主」的存储回调从请求窗口里解耦，改由常驻线程随时服务：冷启时插件在 `activate` 之后发出的存储调用不再干等 30 秒直到超时（本机实测两个插件曾在同一毫秒一起报「宿主调用超时」）。同一版让 SDK 丢弃作废编号的迟到回执，一次超时不再把插件会话打死；外观页残留的 **Windhawk 设置面整体移除**（后端能力保留）。完整说明见 [2.1.6 更新记录](app/docs/release-2.1.6.md)。
-
-2.1.5 回退版：宿主 2.1.5，兼容插件 2.x。**2.1.4 删掉外观页的 Windhawk 设置面之后 Dock 打不开**，这一版把它原样恢复成 2.1.3 的形态；其余两项保留：**系统代理优先**（环境里残留的 `HTTP(S)_PROXY` 不再顶掉 Windows 系统代理，主源能连上就不回退镜像）；**插件下载失败的回退不再降级**（以当前已装版本为下限）。完整说明见 [2.1.5 更新记录](app/docs/release-2.1.5.md)。
-
-2.1.0 功能版：宿主 2.1.0，兼容插件 2.x（官方目录当前 2.2.0：Clash / Magpie / 飞书）。这一版收了主仓四条 OPEN issue 与一条历史欠账：#68 插件下载在**三源全灭时按来源回退上一可用版本**（目录抢跑不再等于必失败，回退仍严格校验摘要）；#69 插件卡下半区压到 105px、标题 17px/600、**Dock 弹窗锁滚动**；#70 自启失败记录带阶段与耗时、手动启用补一次**锁外**退避重试；附加的国内镜像欠账落地为「配了才启用」的 Gitee 通道 + 一份**实测**来源矩阵。完整说明、安装包与已知限制见 [2.1.0 更新记录](app/docs/release-2.1.0.md)。
-
-2.0.4 修订版：宿主 2.0.4，兼容插件 2.1.x（Clash 与 Magpie 2.1.3、飞书 2.1.0）。这一版收了 #63、#65、#66、#67 四条 issue 并回归 #64：插件自启改为单一调度器（冷 60 秒／热 10 秒一次共用预算、整轮 180 秒、每插件单在途、最多两插件并发、迟到结果按代次丢弃），修掉备份暂停时的二次拉起；资源获取统一到择源层（原站优先、镜像候选、按代理路重试、一条总预算、唯一临时文件与原子落地），更新包下载同源，pet 的资源改由宿主取回缓存；检查到新版本时 pet 会弹提醒；插件页「更多」改整行动作列表、npm 检索支持短页续翻；插件页外链经宿主受控通道打开（只认 http/https）；OFM 业务彻底解耦、旧命名清理，Agent 会话 API（`/v1`）与 `agent-core` 就位。完整说明与已知限制见 [2.0.4 更新记录](app/docs/release-2.0.4.md)。
-
-2.0.3 补丁版：宿主 2.0.3，兼容插件 2.1.x（Clash 与 Magpie 2.1.3、飞书 2.1.0）。这一版把插件启动链路的任务书做完九项（T02 留 2.1.0）：资源校验判据改逐文件 size+mtime 指纹、全量哈希移出首启关键路径、WebView2 授权改为按需（T06/T07/T08）；插件校验加 size+mtime 快照缓存、插件页面入口不再持全局锁（T03/T09）；插件调用超时分冷/热两档（热 5 s、冷 20 s），冷态失败重试一次（T04）；维护线程与安装/卸载/启停收进同一把上层互斥，不再有「维护线程删掉正在写入的版本目录」这类竞态（t19）。插件页卡面同时重做：状态收成一条 `● 运行中 · v2.1.2 → v2.1.3`，卡内只留一颗实心「更新」，带功能页的卡从 4 行压到 3 行。完整说明与 12 条已知限制见 [2.0.3 更新记录](app/docs/release-2.0.3.md)。
-
-2.0.2 补丁版：宿主 2.0.2，兼容插件 2.1.x。这一版只修插件的「看不见、查不到、停不掉」：插件 stderr 不再被丢弃，落盘到 `host/plugin-logs/<插件 id>.log`（单文件 1 MB、留 2 份、写入前脱敏），失败记录结构化进 `host/plugin-failures.log`（含退出码与日志路径），插件卡新增「打开插件日志」；插件未运行时标签页不再消失，点进去能看到原因并当场「启动」；运行态判据从「进程存活」改为「进程存活 + 握手可应答」，残留内核回收改按 pid + 启动时刻 + 控制器可达三重判定，不再误杀被复用的 pid。完整说明见 [2.0.2 更新记录](app/docs/release-2.0.2.md)。
-
-2.0.1 维护版：宿主 2.0.1，兼容插件 2.1.x（Magpie 已到 2.1.1）。设置页公告区有内容时也有「刷新」，打开关于页超 5 分钟自动重取，公告标题不再重复版本号；新增全局快捷键与设置页录制节（被占用有提示、30 秒重试后放弃）；插件更新/卸载走事务（旧版目录清零、卸载彻底但保留用户数据）、自启动运行中即时生效；无标题窗口也有任务栏按钮、托盘图标点击可用、右键菜单精简；换显示器或改缩放后工作区自愈、文字 110% 下任务栏不再上浮；卡死抓栈、WebView2 被外部结束不再误报。商店里 OFM 本地模型已下架（已装用户仍可启用/卸载），模型能力由 Magpie 插件提供；agy 岛上审批与内存账转 2.1.0。完整说明见 [2.0.1 更新记录](app/docs/release-2.0.1.md)。
-
-`2.0.0` 收口批：宿主把所有版本位统一为 `2.0.0`（`tauri.conf.json`、`Cargo.toml`、Claude Code 插件清单、安装器与 README），旧版 exe 不再留作回滚副本。设置页按规格重排为 5 页固定分节（回归测试读规格文件比对）；插件卡的自启动改为三态气泡按钮（红「关闭自启动」/ 蓝「随 Dock 启动」/ 绿「无需自启动」）；关于页品牌图首位居中可点进官网，公告只显示最新版本与新特性要点、完整说明折叠，源为 GitHub → Gitee → 本地缓存且应用内更新。配置收敛到单一入口 `app/src-tauri/src/config.rs`（49 键 / 9 类，全部支持 `FISH_DOCK_*` 环境变量覆盖，旧 `WAKUWAKU_*` 仍可读），并新增 `scripts/check-hardcoded.mjs`（硬编码）与 `scripts/check-contrast.mjs`（对比度）两个自查脚本、均接入测试。
-
-命名上 crate / 产物 / identifier / CLI 旗标 / 占位符统一为 FISH Dock 命名，旧名只读兼容；内部身份（卸载表登记名、主程序文件名、Run 值与命令行开关）一个字没动，给人看的名字（任务计划里的作者与说明、用户数据目录）换成 `FISH Dock`，旧卸载登记与指向旧 exe 的自启动值在安装时按归属清理，安装与更新会清理旧 exe 与旧任务计划项。用户数据目录迁到 `%LOCALAPPDATA%\FISH Dock` 后直接删除旧目录，没迁完就原样保留并提示。完整变化见 [2.0.0 更新记录](app/docs/release-2.0.0.md)。
+更早版本及完整变更见 [发行记录](https://github.com/Fish-under-sea/FISH-Dock/releases)。
 
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark-v3.png"><img src="assets/readme/section-install-light-v3.png" alt="INSTALL · 安装" width="100%"></picture></h2>
 
-**FISH Dock 2.1.9** 提供完整安装包和精简更新包。下载及校验文件见 [v2.1.9 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9)。
+**FISH Dock 2.2.0** 是最后一个提供完整安装包和精简更新包的版本，之后仅发布 Setup。下载及校验文件见 [v2.2.0 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0)。
 
 | 安装包 | 使用场景 |
 | --- | --- |
-| `FISH-Dock-Setup-2.1.9.exe` | 首次安装、基础资源缺失或修复安装，含 Node.js；**需系统已安装 Evergreen WebView2**，缺失时提示官方下载页并退出，不自动安装依赖。 |
-| `FISH-Dock-Update-2.1.9.exe` | **2.1.0 及以上**都能直接用（差分起点固定为 2.1.0）；2.0.x 请用 Setup 覆盖安装。 |
+| `FISH-Dock-Setup-2.2.0.exe` | 首次安装、基础资源缺失或修复安装，含 Node.js；**需系统已安装 Evergreen WebView2**，缺失时提示官方下载页并退出，不自动安装依赖。 |
+| `FISH-Dock-Update-2.2.0.exe` | **2.1.0 至 2.1.9** 可用于过渡升级（差分起点固定为 2.1.0）；2.0.x 请用 Setup 覆盖安装。 |
 
-1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
+1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0) 选择已发布版本的对应安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源，不再弹出随包固定版 WebView2 的许可确认。
 3. 打开「插件」页，点击「GitHub 登录」。Dock 内弹窗显示验证码及实际复制结果；在系统浏览器中粘贴并确认，Dock 自动检查授权。等待期间可单独解除临时锁定／置顶，也可取消验证。旧版账号若未保存续期凭据，升级后需重新登录一次；新授权随后自动续期。
 4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
 5. 点击「检查更新」读取官方目录，按需安装 [FISH Dock Official Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。新插件安装成功即启用；凭据和服务参数仍需各自配置。
 6. 官方商店目前只有**三个插件**：**飞书**、**Clash**、**Magpie**（具体版本以官方目录为准；要求宿主 ≥ 2.0.0）。OFM 自 2026-10-25 起暂停维护，已从商店下架——已安装的用户仍可在「已安装」里启用或卸载。
 
-安装包包含 Node.js 24.14.0；**2.1.9 起使用系统 Evergreen WebView2，不再内置固定版运行时及其许可文件**。升级会清理安装器归属的旧运行时，保留 `%LOCALAPPDATA%/FISH Dock/webview` 用户资料。Update 不检查系统依赖，升级前请确保系统 Evergreen 可用；如果精简更新失败后转交完整 Setup，则仍按 Setup 的前置检测处理。**2.1.2 起不再内置 Windhawk 引擎与 LLVM-MinGW 编译器**（原始 557.8 MB / 8413 个文件），2.1.6 起外观页也移除了 Windhawk 设置面。安装包当前未做 Authenticode 签名。
+安装包包含 Node.js 24.14.0；**2.1.9 起使用系统 Evergreen WebView2，不再内置固定版运行时及其许可文件**。升级会清理安装器归属的旧运行时，保留 `%LOCALAPPDATA%/FISH Dock/webview` 用户资料。Update 不检查系统依赖，升级前请确保系统 Evergreen 可用；精简更新失败后请手动使用同版 Setup，安装器不再自动下载另一种安装包。**2.1.2 起不再内置 Windhawk 引擎与 LLVM-MinGW 编译器**（原始 557.8 MB / 8413 个文件），2.1.6 起外观页也移除了 Windhawk 设置面。安装包当前未做 Authenticode 签名。
 
-正式安装版在「关于」和「软件更新」均可检查官方新版本，并在启动后及每天自动检查。GitHub API 受限时自动改读官方 Release 的版本信息（仍在应用内提示）；新版通过完整安装包或精简更新包在应用内升级，不单独替换宿主 EXE；仅 Setup 检测到缺少 WebView2 时，可由用户选择打开官方依赖下载页。同版本修订不会因为版本号相同自动提示，请从 Release 重新下载安装并核对最新 SHA-256。
+正式安装版在「关于」和「软件更新」均可检查官方新版本，并在启动后及每天自动检查。GitHub API 受限时自动改读官方 Release 的版本信息（仍在应用内提示）；2.2.0 宿主后续仅下载并校验完整 Setup 在应用内升级，不单独替换宿主 EXE；仅 Setup 检测到缺少 WebView2 时，可由用户选择打开官方依赖下载页。同版本修订不会因为版本号相同自动提示，请从 Release 重新下载安装并核对最新 SHA-256。
+
+停留在 2.2.0 之前、未经过本次过渡版本的旧宿主，遇到后续单包发行时，请直接下载该版 Setup 覆盖升级。
 
 <h2 id="data"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-data-dark-v3.png"><img src="assets/readme/section-data-light-v3.png" alt="DATA · 数据边界" width="100%"></picture></h2>
 
@@ -141,6 +126,8 @@ cargo run --locked --no-default-features --manifest-path app/src-tauri/Cargo.tom
 node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js'
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
+
+插件业务源码、打包与商店目录维护在 [官方插件仓](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。开发插件先读 [开发者指南](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md)；外部原生窗口接入见 [Hook 文档](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md)、[宿主接口说明](app/docs/plugin-windows-2.2.0.md) 与 [完整协议示例](sdk/examples/window-file-drop/README.md)。SDK 与宿主接口由本仓维护，业务界面由插件提供。
 
 构建输入固定在 `app/scripts/runtime-sources.json`；资源目录由 `prepare-installer.mjs` 准备，再用 `build-installer.ps1` 与 NSIS 打包。
 

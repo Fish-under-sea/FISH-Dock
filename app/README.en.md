@@ -1,8 +1,8 @@
 <p align="center"><img src="src-tauri/icons/fish-dock.png" width="112" alt="FISH Dock icon"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">A place for AI sessions to dock, and model connections to come together.</p>
-<p align="center"><strong>2.1.9</strong> · Windows x64 · MIT-licensed code</p>
-<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-2.1.9.md">Release notes</a></p>
+<p align="center"><strong>2.2.0</strong> · Windows x64 · MIT-licensed code</p>
+<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-2.2.0.md">Release notes</a></p>
 
 > **A derivative integration, not an official upstream release.** FISH Dock builds on the desktop and AI-session experience of [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku); model capabilities are provided by the Magpie plugin, with plugins, plugin packages and the store catalog maintained by [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Original authors, copyrights, and licenses are credited below.
 
@@ -20,9 +20,9 @@ This repository contains the desktop host, plugin SDK, storage and runtime manag
 
 **Local does not mean offline model inference.** The workspace, proxy, and stored data run on your computer. Model requests still go to the selected provider. Eligibility, quotas, pricing, and availability are controlled by those providers. This project does not promise unlimited usage, permanently free access, or bypasses for provider restrictions.
 
-## New in 2.1.9
+## New in 2.2.0
 
-This host-only release leaves plugin versions unchanged. It includes child-island file staging and native drop targets (#76/#77), and switches to the system Evergreen WebView2 Runtime (#78). Setup checks for the runtime before installation and offers the official download page if it is missing, then exits. Update itself does not check, prompt for, or install WebView2. Upgrades transactionally remove the old installer-owned Fixed Version runtime and license files; failures roll back, and `%LOCALAPPDATA%/FISH Dock/webview` user data and settings remain intact. See the [2.1.9 release notes](docs/release-2.1.9.md) for package hashes and verification limits.
+Plugins explicitly request native windows outside Dock and provide their own UI; no request means no second window. Removes the hardcoded staging UI. This is the final Setup + Update release; later releases provide Setup only. Host 2.2.0 uses Setup for in-app upgrades, without falling back to another package. See the [2.2.0 notes](docs/release-2.2.0.md) for changes and verification limits.
 
 ## New in 2.0.0
 
@@ -54,7 +54,7 @@ See the [2.0.0 release notes](docs/release-2.0.0.md) for verification scope.
 
 Target: **Windows 10/11 x64**. System-taskbar integration mainly targets Windows 11; other Windows releases and third-party taskbar software require separate verification.
 
-1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.1.9) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-2.1.9.exe` is for first installation or repair; `FISH-Dock-Update-2.1.9.exe` is for an existing installation with intact base resources.
+1. Choose a published version from [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0) and check the matching `SHA256SUMS.txt`. `FISH-Dock-Setup-2.2.0.exe` is for first installation or repair; `FISH-Dock-Update-2.2.0.exe` is for an existing installation with intact base resources.
 2. Fully exit the previous version from the tray. Run the installer and choose a destination. Fresh installs default to `%LOCALAPPDATA%\Programs\FISH Dock`; upgrades reuse the registered directory instead of moving it.
 3. Start **FISH Dock** from the desktop or Start menu. Node.js is bundled; WebView2 uses the system Evergreen Runtime, while Windhawk and business plugins must be obtained separately. If Evergreen is missing, Setup offers its official download page and exits; Update itself does not check dependencies.
 4. The first launch verifies runtime resources without a Fixed Version WebView2 license prompt. Later launches use installed files without repeatedly extracting the runtime.
