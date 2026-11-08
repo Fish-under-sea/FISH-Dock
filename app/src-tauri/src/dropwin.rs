@@ -209,6 +209,7 @@ mod imp {
             log(&format!("dropwin: WM_DROPFILES got {} path(s): {:?}", paths.len(), paths));
             if let Some(app) = APP.get() {
                 let _ = app.emit_to("island", "pet:drag-drop", json!({ "paths": paths }));
+                crate::island_panel::forward_drop_all(&paths);
             }
             ShowWindow(hwnd, 0);
             return 0;

@@ -11,6 +11,12 @@ pub struct Manifest {
     // 行为钩子（#22）：插件声明它接受哪些宿主提供的官方开关；插件自己不必
     // 再画一遍。旧包没有这一段，按默认（全 false）读。
     #[serde(default)] pub behaviors: Behaviors,
+    // 声明式岛子面板（manifest 里 "islandSub"）：插件声明它在主灵动岛旁贡献哪类子面板
+    // （如 "stash"）。宿主据此在检测到「该插件已启用且声明了 subtype」时挂载对应子岛；
+    // 未声明就不出现。旧包没有这一段，按默认 None（无子岛）读。以后新类型只加组件，不改此处。
+    #[serde(default)] pub island_sub: Option<String>,
+    // 声明式岛子面板（"islandPanel"）：见 IslandPanel；None=该插件不提供子岛面板。
+    #[serde(default)] pub island_panel: Option<IslandPanel>,
     pub files: BTreeMap<String, String>,
 }
 // Behaviors 是插件声明接的宿主钩子。autostart：接受「随 Dock 启动就拉起本机
@@ -19,6 +25,18 @@ pub struct Manifest {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Behaviors { #[serde(default)] pub autostart: bool }
+// 声明式岛子面板（manifest 里 "islandPanel"）：插件提供自己的面板页，宿主在独立原生窗口
+// 里加载它、转发拖放/锚点事件、按需创建关闭、停用/卸载时回收。子岛 UI 完全由插件渲染，
+// 宿主不再内置任何具体子岛界面（对应上游 2.2.0 通用 Hook 规范）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct IslandPanel {
+    pub page: String,
+    #[serde(default = "default_anchor")] pub anchor: String,
+    #[serde(default)] pub width: Option<u32>,
+    #[serde(default)] pub height: Option<u32>,
+}
+pub fn default_anchor() -> String { "left".into() }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Storage { pub directory: String, pub data_schema: u32 }
@@ -63,7 +81,10 @@ impl Manifest {
         crate::storage::namespace(data_root, &self.id, &self.storage.directory, source)?;
         if self.platforms.is_empty() || self.platforms.len() > 8 || !self.platforms.iter().any(|p| p == platform) { return Err("插件不支持当前系统与架构".into()); }
         if !["node", "native"].contains(&self.backend.runtime.as_str()) || self.backend.args.len() > 32 || self.backend.args.iter().any(|s| s.len() > 1024 || s.contains('\0')) { return Err("插件后端启动声明无效".into()); }
-        if self.capabilities.len() > 16 || self.capabilities.iter().any(|c| !["storage", "events", "network", "services", "system-proxy"].contains(&c.as_str())) { return Err("插件声明了当前宿主不支持的能力".into()); }
+        if self.capabilities.len() > 16 || self.capabilities.iter().any(|c| !["storage", "events", "network", "services", "system-proxy", "windows", "file-drop"].contains(&c.as_str())) { return Err("插件声明了当前宿主不支持的能力".into()); }
+        // islandSub：可选的岛子面板类型标识（小写字母/数字/连字符，≤32）。未知类型由前端忽略，
+        // 宿主不枚举——让以后新插件声明新子面板类型时无需改校验。
+        if let Some(sub) = &self.island_sub { if sub.is_empty() || sub.len() > 32 || !sub.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') { return Err("插件声明的岛子面板类型无效".into()); } }
         let mut seen = HashSet::new();
         if self.capabilities.iter().any(|s| !seen.insert(s)) { return Err("插件能力重复".into()); }
         let mut names = HashSet::new();
@@ -78,13 +99,18 @@ impl Manifest {
         for page in &self.pages {
             if page.id.is_empty() || page.id.len() > 64 || !page.id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') || !ids.insert(&page.id) || page.title.trim().is_empty() || page.title.len() > 80 || page.title.chars().any(char::is_control) || !self.files.contains_key(&page.entry) || !page.entry.ends_with(".html") { return Err("插件页面入口、标题或 ID 无效".into()); }
         }
+        if let Some(panel) = &self.island_panel {
+            if !self.pages.iter().any(|p| p.id == panel.page) { return Err("插件声明的岛子面板页未在 pages 中注册".into()); }
+            if !["left", "right", "top", "bottom"].contains(&panel.anchor.as_str()) { return Err("插件声明的岛子面板锚点无效".into()); }
+            if panel.width.is_some_and(|w| w == 0 || w > 4000) || panel.height.is_some_and(|h| h == 0 || h > 4000) { return Err("插件声明的岛子面板尺寸无效".into()); }
+        }
         Ok(())
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> Manifest { Manifest { schema: 1, id: "acme.weather".into(), name: "合成天气".into(), version: "1.2.3".into(), host_api: 1, platforms: vec!["windows-x86_64".into()], storage: Storage { directory: ".plugin.acme.weather".into(), data_schema: 1 }, backend: Backend { runtime: "node".into(), entry: "backend.mjs".into(), args: vec![] }, capabilities: vec!["storage".into()], pages: vec![Page { id: "weather".into(), title: "天气".into(), entry: "page.html".into() }], behaviors: Behaviors::default(), files: BTreeMap::from([("backend.mjs".into(), "0".repeat(64)), ("page.html".into(), "1".repeat(64))]) } }
+    fn fixture() -> Manifest { Manifest { schema: 1, id: "acme.weather".into(), name: "合成天气".into(), version: "1.2.3".into(), host_api: 1, platforms: vec!["windows-x86_64".into()], storage: Storage { directory: ".plugin.acme.weather".into(), data_schema: 1 }, backend: Backend { runtime: "node".into(), entry: "backend.mjs".into(), args: vec![] }, capabilities: vec!["storage".into()], pages: vec![Page { id: "weather".into(), title: "天气".into(), entry: "page.html".into() }], island_sub: None, island_panel: None, behaviors: Behaviors::default(), files: BTreeMap::from([("backend.mjs".into(), "0".repeat(64)), ("page.html".into(), "1".repeat(64))]) } }
     #[test] fn valid_manifest_and_paths_are_portable() {
         let root = std::env::temp_dir().join("fish-manifest-contract");
         let manifest = fixture();

@@ -93,6 +93,14 @@ pub async fn extension_manage(window:WebviewWindow,action:String,id:Option<Strin
             "logs"=>{let directory=crate::plugin_runtime::log_directory(&context);std::fs::create_dir_all(&directory).map_err(|_|"插件日志目录创建失败")?;if !crate::tasks::launch(directory.to_string_lossy().as_ref()){return Err("插件日志目录打开失败".into());}},
             _=>return Err("插件管理操作无效".into()),
         }
+        // 2.2.0 规范：停用/卸载/更新后回收该插件的所有窗口与拖放订阅。
+        if matches!(action.as_str(), "enabled" | "uninstall" | "install") {
+            drop(runner);
+            crate::island_panel::close_for(&id);
+            let mut runner = crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?;
+            let _=runner.view(&manager)?;drop(runner);
+            return view(context);
+        }
         let _=runner.view(&manager)?;drop(runner);
         view(context)
     }).await.map_err(|_|"插件管理任务意外结束")?
@@ -164,6 +172,31 @@ pub async fn extension_call(window:WebviewWindow,id:String,method:String,params:
     trusted(&window)?;
     tauri::async_runtime::spawn_blocking(move||{let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;crate::github_access::require_plugin(context,&id)?;crate::plugin_runtime::CURRENT.lock().map_err(|_|"插件运行锁不可用")?.call(&id,&method,params)}).await.map_err(|_|"插件请求任务意外结束")?
 }
+// 岛子面板独立窗口（island-panel-*）专用的桥命令：来源校验只认「island-panel- 前缀 + fish-plugin.localhost」，
+// 与设置面板的 island 窗口隔离。业务调用复用 plugin_page::call（票据已按插件绑定、随停用/卸载作废）。
+fn trusted_panel(window:&WebviewWindow)->Result<(),String>{
+ let url=window.url().map_err(|_|"面板窗口来源读取失败")?;
+ if window.label().starts_with("island-panel-") && url.scheme()=="http" && url.host_str()==Some("fish-plugin.localhost"){Ok(())}else{Err("插件面板仅允许子岛面板窗口调用".into())}
+}
+#[tauri::command]
+pub async fn island_panel_call(window:WebviewWindow,ticket:String,method:String,params:Value)->Result<Value,String>{
+ trusted_panel(&window)?;
+ tauri::async_runtime::spawn_blocking(move||crate::plugin_page::call(&ticket,&method,params)).await.map_err(|_|"插件面板请求任务意外结束")?
+}
+#[tauri::command]
+pub fn island_panel_ready(_window:WebviewWindow,_ticket:String)->Result<(),String>{Ok(())}
+#[tauri::command]
+pub async fn island_panel_close_ticket(window:WebviewWindow,ticket:String)->Result<(),String>{
+ trusted_panel(&window)?;
+ crate::plugin_page::close(&ticket);
+ crate::island_panel::close_by_ticket(&ticket);
+ Ok(())
+}
+#[tauri::command]
+pub async fn island_panels(window:WebviewWindow)->Result<Value,String>{
+ trusted(&window)?;
+ tauri::async_runtime::spawn_blocking(||crate::island_panel::list_panels()).await.map_err(|_|"面板列表任务意外结束")?
+}
 #[tauri::command]
 pub async fn extension_page(window:WebviewWindow,key:String)->Result<Value,String>{trusted(&window)?;tauri::async_runtime::spawn_blocking(move||crate::plugin_page::open(&key)).await.map_err(|_|"插件页面任务意外结束")?}
 #[tauri::command]
@@ -171,6 +204,36 @@ pub fn extension_page_close(window:WebviewWindow,ticket:String)->Result<(),Strin
 #[tauri::command]
 pub async fn extension_page_call(window:WebviewWindow,ticket:String,method:String,params:Value)->Result<Value,String>{trusted(&window)?;tauri::async_runtime::spawn_blocking(move||crate::plugin_page::call(&ticket,&method,params)).await.map_err(|_|"插件页面请求意外结束")?}
 
+// 声明式岛子面板（island.sub）：返回「已启用且 manifest 声明了 islandSub」的插件清单
+// [{id, sub}]，供主灵动岛前端据此决定挂载哪类子岛、并把数据请求发到对应插件。
+// 只读注册表（不碰 GitHub/目录），轻量、可高频轮询。
+#[tauri::command]
+pub async fn extension_island_subs(window:WebviewWindow)->Result<Value,String>{
+    trusted(&window)?;
+    tauri::async_runtime::spawn_blocking(||{
+        let context=crate::storage_context::current().ok_or("存储上下文未就绪")?;
+        let manager=Manager{context};
+        let mut out=Vec::new();
+        for installed in manager.list()? {
+            if installed.enabled { if let Some(sub)=installed.manifest.island_sub.as_deref() { out.push(json!({"id":installed.manifest.id,"sub":sub})); } }
+        }
+        Ok::<Value,String>(json!(out))
+    }).await.map_err(|_|"岛子面板探测任务意外结束")?
+}
+// 声明式岛子面板：为声明了 islandPanel 的插件开/关一个独立原生窗口（加载其自带面板页）。
+#[tauri::command]
+pub fn island_panel_open(window:WebviewWindow,id:String)->Result<Value,String>{
+    // 必须在 UI 主线程创建 WebView2 窗口：Tauri 的同步命令在主线程执行，
+    // async 命令跑在 tokio 线程会导致 0x8007139F。这里同步执行。
+    trusted(&window)?;
+    crate::island_panel::open(&window,&id)
+}
+#[tauri::command]
+pub async fn island_panel_close(window:WebviewWindow,id:String)->Result<(),String>{
+    trusted(&window)?;
+    crate::island_panel::close(&id);
+    Ok(())
+}
 pub fn resume(){
     std::thread::spawn(||{
         let Some(context)=crate::storage_context::current()else{return};

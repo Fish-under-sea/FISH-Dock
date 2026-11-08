@@ -92,6 +92,10 @@ pub fn call(ticket:&str,method:&str,params:serde_json::Value)->Result<serde_json
   if url.scheme()!="http"||url.host_str()!=Some("127.0.0.1")||!url.username().is_empty()||url.password().is_some()||url.port().map(u64::from)!=state["port"].as_u64(){return Err("服务就绪地址无效".into());}
   return Ok(serde_json::json!({"url":url.as_str()}));
  }
+ // 2.2.0 通用 Hook：页面侧的窗口/拖放订阅（插件必须声明 windows / file-drop 能力）。
+ if method.starts_with("dock.windows.") || method.starts_with("dock.fileDrop.") {
+  return crate::island_panel::page_call(&grant.id,&installed.manifest.capabilities,method,&params);
+ }
  crate::plugin_runtime::call_outside(&grant.id,method,params)
 }
 fn resource(ticket:&str,name:&str)->Result<(Vec<u8>,&'static str),String>{
@@ -117,7 +121,10 @@ fn resource(ticket:&str,name:&str)->Result<(Vec<u8>,&'static str),String>{
  Ok((bytes,mime))
 }
 pub fn serve(label:&str,request:tauri::http::Request<Vec<u8>>)->tauri::http::Response<Vec<u8>>{
- let result=if label!="island"||request.method()!=tauri::http::Method::GET {Err("页面请求来源无效".into())}else{route(request.uri().path()).and_then(|(ticket,name)|resource(ticket,name))};
+ // 允许 island 设置页与「岛子面板」独立窗口（island-panel-*）取插件资源；票据本身已按
+ // 插件绑定并随停用/卸载作废，放行 label 不降低安全性。
+ let ok_label=label=="island"||label.starts_with("island-panel-");
+ let result=if !ok_label||request.method()!=tauri::http::Method::GET {Err("页面请求来源无效".into())}else{route(request.uri().path()).and_then(|(ticket,name)|resource(ticket,name))};
  let (status,body,mime)=match result {Ok((bytes,mime))=>(200,bytes,mime),Err(_)=>(403,b"Extension resource unavailable".to_vec(),"text/plain; charset=utf-8")};
  tauri::http::Response::builder().status(status).header("Content-Type",mime).header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff").header("Referrer-Policy","no-referrer").header("Content-Security-Policy","default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'").body(body).expect("固定响应头")
 }

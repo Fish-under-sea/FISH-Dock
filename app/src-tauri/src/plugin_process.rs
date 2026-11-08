@@ -119,10 +119,11 @@ impl Process {
             let input=input.clone();
             let namespace=namespace.clone();
             let capabilities=row.manifest.capabilities.clone();
+            let plugin_id=row.manifest.id.clone();
             std::thread::spawn(move||{
                 for value in callback_rx {
                     let method=value.get("method").and_then(Value::as_str).unwrap_or_default();
-                    let result=storage_call(&namespace,&capabilities,method,&value["params"]);
+                    let result=if method.starts_with("host.windows.")||method.starts_with("host.fileDrop.") {crate::island_panel::backend_call(&plugin_id,&capabilities,method,&value["params"])}else{storage_call(&namespace,&capabilities,method,&value["params"])};
                     let response=match result{Ok(result)=>json!({"id":value["id"],"result":result}),Err(_)=>json!({"id":value["id"],"error":{"code":"HOST_OPERATION_FAILED","message":"宿主操作失败，请检查存储类别与声明能力"}})};
                     if input.send(response).is_err(){break}
                 }

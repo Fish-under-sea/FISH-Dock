@@ -2,6 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Her page, the island's, her bars' and the desktop widgets': events from the Rust side",
-  "windows": ["pet", "island", "bar-*", "barpop", "desk-*"],
+  "windows": ["pet", "island", "bar-*", "barpop", "desk-*", "island-panel-*"],
+  "remote": { "urls": ["http://fish-plugin.localhost/*"] },
   "permissions": ["core:default"]
 }

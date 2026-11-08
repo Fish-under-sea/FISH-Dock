@@ -1,17 +1,24 @@
-// 插件浏览器 SDK：只连接父页面，所有业务调用由票据锁定当前插件。
+// 插件浏览器 SDK：iframe 模式连父页面（postMessage）；独立窗口模式（island-panel-*）走 Tauri IPC。
+// 所有业务调用由票据锁定当前插件。
 ;(function () {
   const ticket = location.pathname.split('/')[1]
+  // 独立窗口模式判定：顶层窗口 + Tauri 全局可用（子岛面板 island-panel-* 走这条）。
+  const TAURI = (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') ? window.__TAURI__ : null
+  const STANDALONE = !!TAURI && window.parent === window
   let sequence = 0
   const pending = new Map()
+  function applyTheme(row) {
+    const palette = row.colors || {}
+    for (const [name, value] of Object.entries(palette)) if (/^--dock-[a-z-]+$/.test(name) && typeof value === 'string' && /^(#[a-f\d]{3,8}|rgba?\([\d.,%\s]+\))$/i.test(value)) document.documentElement.style.setProperty(name, value)
+    document.documentElement.dataset.dockTheme = row.mode === 'light' ? 'light' : 'dark'
+    const title = document.getElementById('title')
+    if (title && typeof row.title === 'string') title.textContent = row.title
+  }
   window.addEventListener('message', event => {
     const row = event.data
     if (event.source !== parent || !row || row.ticket !== ticket) return
     if (row.type === 'fish:theme') {
-      const palette = row.colors || {}
-      for (const [name, value] of Object.entries(palette)) if (/^--dock-[a-z-]+$/.test(name) && typeof value === 'string' && /^(#[a-f\d]{3,8}|rgba?\([\d.,%\s]+\))$/i.test(value)) document.documentElement.style.setProperty(name, value)
-      document.documentElement.dataset.dockTheme = row.mode === 'light' ? 'light' : 'dark'
-      const title = document.getElementById('title')
-      if (title && typeof row.title === 'string') title.textContent = row.title
+      applyTheme(row)
       return
     }
     if (row.type !== 'fish:result') return
@@ -41,6 +48,10 @@
   // 桥内部发送（不对外暴露）：openExternal / 可信点击走这里，绕不过上面的保留拒绝，因为
   // 只有闭包内的这两条路径能拿到它。
   function send(method, params = {}) {
+    // 独立窗口模式：直接走 Tauri IPC（票据校验与业务调用都在宿主 island_panel_call 内完成）。
+    if (STANDALONE) {
+      return Promise.resolve(TAURI.core.invoke('island_panel_call', { ticket, method, params })).catch(err => { throw failure(err && err.message ? err.message : err) })
+    }
     if (pending.size >= 32) return Promise.reject(new Error('插件页面请求过多，请稍后重试'))
     const id = ++sequence
     return new Promise((resolve, reject) => {
@@ -58,6 +69,8 @@
     return main ? Math.ceil(main.getBoundingClientRect().height) : 0
   }
   function reportLayout() {
+    // 独立窗口的尺寸由宿主按 manifest 决定，不向父页面报高度。
+    if (STANDALONE) return
     const height = measure()
     if (!(height > 0)) return
     const key = `${height}:${layout}`
@@ -95,6 +108,11 @@
   function announce() {
     if (announced) return
     announced = true
+    if (STANDALONE) {
+      // 独立窗口：告诉宿主已就绪（可选），主题走 fish:theme 事件推送。
+      Promise.resolve(TAURI.core.invoke('island_panel_ready', { ticket })).catch(() => {})
+      return
+    }
     parent.postMessage({ type: 'fish:ready', ticket }, '*')
     reportLayout()   // 能测就测；解析早期高度为 0 时静默跳过，DOMContentLoaded 再补
     watch()
@@ -160,5 +178,42 @@
     deliver(href).catch(() => {})                            // 宿主拒绝时静默：外链失败不该炸页面
   }
   document.addEventListener('click', onClick, true)
-  Object.defineProperty(window, 'FishDock', { value: Object.freeze({ call, setLayout, openExternal }), writable: false, configurable: false })
+  // ---- 对外 API --------------------------------------------------------------
+  // 事件监听：独立窗口走 Tauri 事件；iframe 走父页面 postMessage（fish:event）。
+  function listenEvent(name, cb) {
+    if (STANDALONE && TAURI.event && TAURI.event.listen) {
+      TAURI.event.listen(name, e => { try { cb(e && e.payload) } catch (_) {} })
+      return
+    }
+    window.addEventListener('message', ev => {
+      const row = ev.data
+      if (ev.source !== parent || !row || row.ticket !== ticket) return
+      if (row.type === 'fish:event' && row.name === name) { try { cb(row.payload) } catch (_) {} }
+    })
+  }
+  // 2.2.0 通用 Hook：窗口与拖放（页面侧，iframe 与独立窗口都可用）。
+  const windows = {
+    open: options => send('dock.windows.open', options || {}),
+    update: (handle, options) => send('dock.windows.update', Object.assign({ key: handle }, options || {})),
+    close: handle => send('dock.windows.close', { key: handle }),
+    list: () => send('dock.windows.list', {}),
+    onEvent: cb => listenEvent('plugin.windowEvent', cb),
+  }
+  const fileDrop = {
+    subscribe: (scope = 'dock', handle = '') => send('dock.fileDrop.subscribe', { scope, handle }),
+    unsubscribe: (scope = 'dock') => send('dock.fileDrop.unsubscribe', { scope }),
+    onEvent: cb => listenEvent('plugin.windowEvent', cb),
+  }
+  const api = { call, setLayout, openExternal, windows, fileDrop, windowSelf: (() => { try { return new URLSearchParams(location.search).get('wkey') } catch (_) { return null } })() }
+  if (STANDALONE) {
+    // 独立窗口模式的子岛面板 API：接收宿主转发的拖放/锚点事件，或请求关窗。
+    const listen = (name, cb) => TAURI.event.listen(name, e => { try { cb(e && e.payload) } catch (_) {} })
+    api.island = {
+      onDrop: cb => listen('fish:island-drop', cb),
+      onAnchor: cb => listen('fish:island-anchor', cb),
+      close: () => Promise.resolve(TAURI.core.invoke('island_panel_close_ticket', { ticket })).catch(() => {}),
+    }
+    listen('fish:theme', applyTheme)
+  }
+  Object.defineProperty(window, 'FishDock', { value: Object.freeze(api), writable: false, configurable: false })
 })()

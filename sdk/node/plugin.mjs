@@ -30,8 +30,8 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     if (bytes.length > maxLine || output.writableLength > maxLine * 4) { close(); throw new Error('插件通信队列或帧超过限制'); }
     output.write(bytes);
   }
-  function host(method, params) {
-    if (!hello?.capabilities.includes('storage')) return Promise.reject(new Error('插件未声明存储能力'));
+  function host(method, params, capability = 'storage') {
+    if (!hello?.capabilities.includes(capability)) return Promise.reject(new Error(`插件未声明 ${capability} 能力`));
     if (closed || pending.size >= 64) return Promise.reject(new Error('宿主请求队列已满或已关闭'));
     const requestId = `sdk-${++sequence}`;
     return new Promise((resolve, reject) => {
@@ -65,6 +65,16 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
         if (typeof value !== 'string') throw new Error('存储写入内容应为文本');
         await host('host.storage.write', { ...file(category,name), value });
       },
+    }),
+    windows: Object.freeze({
+      async open(options = {}) { return host('host.windows.open', options, 'windows'); },
+      async update(handle, options = {}) { return host('host.windows.update', { key: handle, ...options }, 'windows'); },
+      async close(handle) { return host('host.windows.close', { key: handle }, 'windows'); },
+      async list() { return host('host.windows.list', {}, 'windows'); },
+    }),
+    fileDrop: Object.freeze({
+      async subscribe(scope = 'dock', handle = '') { return host('host.fileDrop.subscribe', { scope, handle }, 'file-drop'); },
+      async unsubscribe(scope = 'dock') { return host('host.fileDrop.unsubscribe', { scope }, 'file-drop'); },
     }),
   });
   async function dispatch(row) {

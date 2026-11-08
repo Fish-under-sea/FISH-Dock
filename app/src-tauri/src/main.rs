@@ -104,6 +104,7 @@ mod plugin_dependencies;
 mod github_access;
 mod tab_order;
 mod plugin_page;
+mod island_panel;
 mod windhawk_source;
 mod windhawk_collection;
 mod windhawk;
@@ -1885,6 +1886,13 @@ fn main() {
             plugin_api::extension_cancel,
             plugin_api::extension_auth,
             plugin_api::extension_call,
+            plugin_api::extension_island_subs,
+            plugin_api::island_panel_open,
+            plugin_api::island_panel_close,
+            plugin_api::island_panel_call,
+            plugin_api::island_panel_ready,
+            plugin_api::island_panel_close_ticket,
+            plugin_api::island_panels,
             plugin_api::extension_page,
             plugin_api::extension_page_close,
             plugin_api::extension_page_call,
@@ -1970,6 +1978,7 @@ fn main() {
         ])
         .on_menu_event(|app, event| tray::on_menu(&shared(app), event.id().as_ref()))
         .setup(move |app| {
+            crate::island_panel::init(app.handle());
             // On macOS she is an accessory, as a menu-bar app is: no Dock icon,
             // and the menu bar is never hers, even while her settings are open.
             #[cfg(target_os = "macos")]
@@ -2388,6 +2397,7 @@ fn main() {
                 mail::stop_all(&sh);
                 // The plugins' side services (plugin_api): no node.exe left.
                 plugin_api::shutdown();
+                crate::island_panel::shutdown();
                 sh.log("quitting: done");
             }
         });
