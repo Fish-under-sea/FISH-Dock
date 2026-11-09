@@ -150,6 +150,8 @@ mod tray;
 mod updates;
 mod wallpaper;
 mod webview_runtime;
+#[cfg(test)]
+mod test_env;
 mod widgets;
 mod winkeys;
 

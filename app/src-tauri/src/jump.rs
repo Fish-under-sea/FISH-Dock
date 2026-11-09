@@ -791,12 +791,22 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_outermost_process_above_this_one() {
-        // Above this test: cargo, a shell, a terminal… up to what all run under.
-        let top = outermost_of(std::process::id(), "no such app.exe");
-        assert_ne!(top, std::process::id());
-        assert!(chain_of(std::process::id()).iter().any(|&(pid, _)| pid == top) || chain_of(top).len() == 1);
         // None such: itself.
         assert_eq!(outermost_of(u32::MAX - 3, "no such app.exe"), u32::MAX - 3);
+        // Above this test: cargo, a shell, a terminal… up to what all run under.
+        // Built under a folder labelled Low (DSH's workspace, #80) the test
+        // runs at low integrity; its snapshot leaves out every process above
+        // that integrity, so the climb stops at the last low one it sees
+        // (itself, or a low cargo above it). Then only that it stays on its
+        // own chain holds. She runs at medium integrity and climbs as below.
+        let top = outermost_of(std::process::id(), "no such app.exe");
+        if crate::test_env::low_integrity() {
+            assert!(top == std::process::id() || chain_of(std::process::id()).iter().any(|&(pid, _)| pid == top), "{top} off its own chain");
+            eprintln!("the_outermost_process_above_this_one: low integrity, stopped at {top}; the full climb is not checked");
+            return;
+        }
+        assert_ne!(top, std::process::id());
+        assert!(chain_of(std::process::id()).iter().any(|&(pid, _)| pid == top) || chain_of(top).len() == 1);
     }
 
     // DeepSeek Harness's hook (wakuwaku ← pwsh ← runner ← host ← the app,

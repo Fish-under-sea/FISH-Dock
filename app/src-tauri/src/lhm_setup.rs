@@ -2432,6 +2432,11 @@ mod tests {
     // This machine looked at as the settings look, read-only: its processes,
     // LHM's task, the Run value, winget's and Scoop's folders, PawnIO, the
     // .NET desktop runtimes; and ShellExecuteEx's struct as Windows sizes it.
+    // Built under a folder labelled Low (DSH's workspace, #81) the test runs
+    // at low integrity and the Task Scheduler's root folder answers
+    // 0x80070003 while \Microsoft opens. She runs at medium integrity, where
+    // it opens (her logon and proxy-heal tasks live there). At low integrity
+    // the task is only printed.
     #[cfg(windows)]
     #[test]
     fn this_machine_is_looked_at() {
@@ -2439,7 +2444,11 @@ mod tests {
         let running = imp::running();
         let task = crate::logon::xml(TASK);
         println!("running: {running:?}; task: {:?}; elsewhere: {:?}; PawnIO: {:?}; desktop runtimes: {:?}", task.as_ref().map(|t| t.as_ref().map(|x| crate::logon::seen(x).program)), imp::elsewhere(), imp::pawnio(), imp::desktop_runtimes());
-        assert!(task.is_ok(), "{task:?}");
+        if crate::test_env::low_integrity() {
+            eprintln!("this_machine_is_looked_at: low integrity; the Task Scheduler's root folder is not required ({task:?})");
+        } else {
+            assert!(task.is_ok(), "{task:?}");
+        }
         assert!(imp::elsewhere().iter().all(|(_, p)| p.is_file()));
     }
 
