@@ -1,8 +1,8 @@
 <p align="center"><img src="src-tauri/icons/fish-dock.png" width="112" alt="FISH Dock 图标"></p>
 <h1 align="center">FISH Dock</h1>
 <p align="center">AI 会话有处停靠，模型连接集中管理。</p>
-<p align="center"><strong>2.2.0</strong> · Windows x64 · MIT 代码许可</p>
-<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-2.2.0.md">更新记录</a></p>
+<p align="center"><strong>2.2.1</strong> · Windows x64 · MIT 代码许可</p>
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-2.2.1.md">更新记录</a></p>
 
 > **这是二次开发集成，不是上游官方发行版。** FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 的桌面与 AI 会话体验；模型能力由 Magpie 插件提供，插件、插件包与商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。原作者、版权和许可证见「来源与致谢」。
 
@@ -19,6 +19,10 @@
 | 保存模式、位置与屏幕，每次启动播放入场 | 按需启动独立服务，退出时回收自己的进程 |
 
 **「本地」不等于本机离线推理。** 工作台、代理和数据在本机运行；模型请求仍发送到所选渠道的服务商。资格、额度、计费和可用性由服务商决定。本项目不承诺永久免费、无限额度或绕过服务限制。
+
+## 2.2.1 更新
+
+修复版，只发布 Setup：WebView2 正在更新时启动不再崩溃，并清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。完整说明见 [2.2.1 更新记录](docs/release-2.2.1.md)。
 
 ## 2.2.0 更新
 
@@ -54,7 +58,7 @@
 
 适用平台：**Windows 10/11 x64**。系统任务栏集成主要面向 Windows 11；其他系统版本与第三方任务栏软件组合需要单独验证。
 
-1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.0) 选择已发布版本的安装包并核对同版本 `SHA256SUMS.txt`。`FISH-Dock-Setup-2.2.0.exe` 用于首装或修复；`FISH-Dock-Update-2.2.0.exe` 适用于基础资源完整的已有安装。
+1. 从 [本项目 Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1) 下载安装包并核对同版本 `SHA256SUMS.txt`。2.2.1 只提供 `FISH-Dock-Setup-2.2.1.exe`，用于首装、修复及覆盖升级；2.2.0 是最后一个同时提供 Update 精简更新包的版本。
 2. 从托盘完全退出旧版，再运行安装器并选择目录。新安装默认 `%LOCALAPPDATA%\Programs\FISH Dock`；已有安装沿用登记目录覆盖升级，不自动搬迁。
 3. 通过桌面或开始菜单启动 **FISH Dock**。安装包包含 Node.js；WebView2 使用系统 Evergreen 运行时，Windhawk 与业务插件需另行准备。首次安装若缺少 Evergreen，Setup 会提示官方下载页并中止；Update 本身不检测依赖。
 4. 首次启动会校验运行资源，不再要求确认随包固定版 WebView2 许可；后续直接使用安装目录中的文件。
