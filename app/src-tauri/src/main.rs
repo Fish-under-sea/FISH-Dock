@@ -149,6 +149,7 @@ mod tokens;
 mod tray;
 mod updates;
 mod wallpaper;
+mod webview_runtime;
 mod widgets;
 mod winkeys;
 
@@ -1835,6 +1836,18 @@ fn main() {
     let runtime = Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("a runtime")));
     tauri::async_runtime::set(runtime.handle().clone());
 
+    // #85：Tauri 只在构建运行时那一刻问一次 WebView2，问不到就在 setup 里 panic。
+    // 先清掉旧版遗留的失效固定目录、等系统运行时换版本完成；真没有才明确报错退出。
+    let mut webview_notes = Vec::new();
+    if let Err(error) = webview_runtime::ensure(&mut |line| webview_notes.push(line)) {
+        let message = format!("找不到可用的 Microsoft Edge WebView2 运行时（{error}）。请安装或修复 WebView2 Evergreen 运行时后再打开 FISH Dock。");
+        #[cfg(feature = "installed")]
+        runtime::show_failure(&message);
+        #[cfg(not(feature = "installed"))]
+        eprintln!("FISH Dock: {message}");
+        return;
+    }
+
     tauri::Builder::default()
         .register_asynchronous_uri_scheme_protocol("fish-plugin", |context, request, responder| {
             let label = context.webview_label().to_owned();
@@ -2077,6 +2090,7 @@ fn main() {
             let cleared = cleared.as_ref().map(|note| format!("; the mark of her last quit taken away ({note})")).unwrap_or_default();
             sh.log(&format!("started by: {started_by}{cleared}"));
             sh.log(&format!("displays: {}", sh.screens().describe()));
+            for note in &webview_notes { sh.log(note); }
             // How long after the logon, and start at login kept to where she is now.
             sh.keep_login(at_login);
             taskbar::recover(&sh);
