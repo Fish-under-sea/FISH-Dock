@@ -1176,15 +1176,12 @@ fn terminal_event(rec: &Rec, reason: &str, output: Option<&std::sync::mpsc::Sync
         let _ = app.emit_to("island", "plugin:window-event", full);
     }
 }
-/// 用户只关闭窗口，插件会话继续运行。
+/// 用户只关闭窗口，插件会话继续运行。会话仍有效，destroy_record 按当前会话
+/// 正常通知一次；这里不再叠加 terminal_event（那是给已撤销旧会话的补发，#83）。
 pub fn close_windows(reason: &str) {
-    let (retired, outputs) = {
-        let mut book = book();
-        (std::mem::take(&mut book.windows), book.outputs.clone())
-    };
+    let retired = std::mem::take(&mut book().windows);
     crate::dropwin::changed();
     for (_, rec) in retired {
-        terminal_event(&rec, reason, outputs.get(&rec.plugin));
         destroy_record(rec, reason);
     }
 }
@@ -1564,6 +1561,7 @@ mod tests {
         assert!(generation_fresh("synthetic-close-windows", session.generation), "关闭窗口不应撤销设置页与后端会话");
         assert_eq!(dock_subscription().as_deref(), Some("synthetic-dock"));
         assert_eq!(input.try_recv().unwrap()["params"]["reason"], "user");
+        assert!(input.try_recv().is_err(), "一次关闭只应通知一次 closed（#83）");
         notify_backend("synthetic-close-windows", session.generation, json!({"event":"ready"})).unwrap();
         assert_eq!(input.try_recv().unwrap()["params"]["event"], "ready");
         let mut registry = book();
