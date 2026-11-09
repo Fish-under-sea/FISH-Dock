@@ -5,7 +5,10 @@ use crate::storage_context::{Identity, Namespace};
 const JOURNAL: &str = "tmp/version-transaction.json";
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Journal { schema: u32, before: Identity, after: Identity, old: BTreeMap<String, Vec<u8>> }
+// old 记录换版本前的说明原文；None 表示那份说明原本就不在（#86：插件清理 tmp 时
+// 删掉过）。说明由宿主生成，initialize 会重建，缺失不该挡住换版本。2.2.0 写的旧
+// 日志值都是字节数组，按 Some 读入。
+struct Journal { schema: u32, before: Identity, after: Identity, old: BTreeMap<String, Option<Vec<u8>>> }
 pub fn change(namespace: &Namespace, version: &str, schema: u32) -> Result<Namespace, String> {
     let _lock = crate::storage_context::EDIT.lock().map_err(|_| "版本事务锁不可用")?;
     recover_unlocked(namespace.path())?;
@@ -17,10 +20,10 @@ pub fn change(namespace: &Namespace, version: &str, schema: u32) -> Result<Names
     if before.plugin_version == version { return Ok(namespace.clone()); }
     crate::storage_transaction::recover_unlocked(namespace)?;
     let mut after = before.clone(); after.plugin_version = version.into();
-    let mut old = BTreeMap::from([("storage.json".into(),bytes)]);
+    let mut old = BTreeMap::from([("storage.json".into(),Some(bytes))]);
     for category in std::iter::once("").chain(crate::storage::CATEGORIES.iter().copied()) {
         let name = if category.is_empty() { "README.md".to_owned() } else { format!("{category}/README.md") };
-        old.insert(name.clone(),crate::identity_store::read_optional(&namespace.path().join(name))?.ok_or("缺少旧版本目录说明")?);
+        old.insert(name.clone(),crate::identity_store::read_optional(&namespace.path().join(name))?);
     }
     let journal = Journal { schema:1,before,after,old };
     namespace.atomic(&namespace.path().join(JOURNAL),&serde_json::to_vec(&journal).map_err(|_| "版本事务编码失败")?)?;
@@ -45,7 +48,7 @@ fn finish(root: &Path, journal: Journal) -> Result<Namespace, String> {
     let correct = if before.plugin_id == "host" { before.directory == "host" && root.file_name().and_then(|n| n.to_str()) == Some("host") } else { crate::storage::namespace(root.parent().ok_or("缺少数据根")?,&before.plugin_id,&before.directory,source)? == root };
     crate::plugin_manifest::version(&before.plugin_version)?; crate::plugin_manifest::version(&after.plugin_version)?;
     let names: std::collections::BTreeSet<String> = std::iter::once("README.md".to_owned()).chain(std::iter::once("storage.json".into())).chain(crate::storage::CATEGORIES.iter().map(|c|format!("{c}/README.md"))).collect();
-    if !correct || journal.schema != 1 || before.plugin_id != after.plugin_id || before.directory != after.directory || before.data_schema == 0 || before.data_schema != after.data_schema || journal.old.keys().cloned().collect::<std::collections::BTreeSet<_>>() != names || journal.old.values().any(|b| b.len() > 1024*1024) { return Err("版本事务归属或说明文件列表无效".into()); }
+    if !correct || journal.schema != 1 || before.plugin_id != after.plugin_id || before.directory != after.directory || before.data_schema == 0 || before.data_schema != after.data_schema || journal.old.keys().cloned().collect::<std::collections::BTreeSet<_>>() != names || !matches!(journal.old.get("storage.json"), Some(Some(_))) || journal.old.values().flatten().any(|b| b.len() > 1024*1024) { return Err("版本事务归属或说明文件列表无效".into()); }
     let marker = root.join("storage.json");
     let current: Identity = serde_json::from_slice(&crate::identity_store::read_optional(&marker)?.ok_or("存储归属记录缺失")?).map_err(|_| "存储归属记录损坏")?;
     if &current != before && &current != after { return Err("版本事务与当前存储归属冲突".into()); }
@@ -80,5 +83,23 @@ mod tests {
         assert_eq!(fs::read(new.path().join("USER-NOTES.md")).unwrap(),b"kept");
         assert!(change(&new,"2.0.0",2).is_err());
         fs::remove_dir_all(new.path().parent().unwrap()).unwrap();
+    }
+    // #86：插件自己清理 tmp 时删掉了宿主写的目录说明。说明是宿主生成的记账文件，
+    // 缺失时按「原本没有」记入日志并由 initialize 重建，不让换版本失败。
+    #[test] fn upgrade_rebuilds_a_missing_readme() {
+        let ns = fixture(); ns.write("credentials","fixture.json",b"synthetic-kept").unwrap();
+        fs::remove_file(ns.path().join("tmp/README.md")).unwrap();
+        let new = change(&ns,"1.1.0",1).unwrap();
+        assert!(fs::read_to_string(new.path().join("tmp/README.md")).unwrap().contains("1.1.0"));
+        assert_eq!(new.read("credentials","fixture.json").unwrap().unwrap(),b"synthetic-kept");
+        assert!(!new.path().join(JOURNAL).exists());
+        fs::remove_dir_all(new.path().parent().unwrap()).unwrap();
+    }
+    // 2.2.0 写下、中断未完成的旧日志：值都是字节数组，新宿主照样读入并完成。
+    #[test] fn a_journal_from_before_reads_as_present_files() {
+        let identity = Identity { plugin_id:"acme.weather".into(),directory:".plugin.acme.weather".into(),plugin_version:"1.0.0".into(),data_schema:1 };
+        let text = serde_json::json!({"schema":1,"before":identity,"after":identity,"old":{"README.md":[35,10]}}).to_string();
+        let journal: Journal = serde_json::from_str(&text).unwrap();
+        assert_eq!(journal.old["README.md"].as_deref(), Some(&b"#\n"[..]));
     }
 }
