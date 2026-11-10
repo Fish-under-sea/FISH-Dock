@@ -10,7 +10,33 @@ pub struct Installed { pub manifest: Manifest, pub digest: String, pub official:
 fn desired_autostart() -> bool { true }
 #[derive(Default,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Registry { schema: u32, entries: BTreeMap<String, Installed> }
+struct Registry {
+    schema: u32,
+    // 条目逐条读：一个插件坏了只丢它自己，不让整张表变成「损坏」。
+    // 曾经是一条 deny_unknown_fields 的 JSON，条目里多一个字段就全表失败，
+    // 表现是所有插件一起不启动（2.2.x 的实测故障）。
+    #[serde(deserialize_with = "tolerant_entries")]
+    entries: BTreeMap<String, Installed>,
+}
+
+/// 逐条反序列化注册表条目：坏的那条跳过并记一句日志，其余照常返回。
+///
+/// 为什么不在 Manifest 层解决就算完：Manifest 只认识「已知退役字段」，
+/// 未来任何一个新字段、任何一次结构变动都可能再次让某条读不出来。注册表的
+/// 韧性必须保证到「一条坏不影响其他条」，否则用户会看到「所有插件都没了」。
+fn tolerant_entries<'de, D>(deserializer: D) -> Result<BTreeMap<String, Installed>, D::Error>
+where D: serde::Deserializer<'de> {
+    let raw = BTreeMap::<String, serde_json::Value>::deserialize(deserializer)?;
+    let mut kept = BTreeMap::new();
+    for (id, value) in raw {
+        match serde_json::from_value::<Installed>(value) {
+            Ok(row) => { kept.insert(id, row); }
+            // 日志只写插件 ID 与 serde 的错误类型，不写清单内容（可能含用户路径）。
+            Err(error) => eprintln!("FISH Dock: 插件注册表条目 {id} 无法读取，已跳过：{error}"),
+        }
+    }
+    Ok(kept)
+}
 // InstallNotice 是一次安装没能收尾、被回滚掉之后留在插件卡上的一句话：
 // 哪一版、为什么、改用哪条路装（#21）。落盘在 config/plugin-install-notices.json，
 // 同一个插件只留最后一条，装成功即清掉。
@@ -1723,5 +1749,70 @@ mod tests {
         assert!(!current.exists(),"卸载之后这一版的快照也没有归属了");
         assert!(other.is_file(),"卸载不许误伤别的插件");
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    // 故障现场（2.2.2 实测）：注册表里两个官方插件的 manifest 还带着 2.1.x 的
+    // islandSub / islandPanel。deny_unknown_fields 让**整张注册表**反序列化失败，
+    // 于是 list() 报「插件安装注册表损坏」、插件列表为空、所有插件都不启动
+    // （Clash 不跑 → 7895 不通 → 主仓 Star 校验走死端口）。已装的旧插件不能因为
+    // 宿主升级就失效，所以这两个键必须容忍。
+    #[test]
+    fn registry_survives_retired_island_fields_in_an_entry() {
+        let entry = serde_json::json!({
+            "manifest": {
+                "schema": 1, "id": "fish.clash", "name": "Clash 代理", "version": "2.2.0", "hostApi": 1,
+                "platforms": [platform()],
+                "storage": {"directory": ".fishplugin-clash", "dataSchema": 1},
+                "backend": {"runtime": "node", "entry": "backend.mjs"},
+                "capabilities": ["storage"],
+                "behaviors": {"autostart": true},
+                "files": {"backend.mjs": "0".repeat(64)},
+                "islandSub": null,
+                "islandPanel": null
+            },
+            "digest": "0".repeat(64), "official": true, "enabled": true, "autostart": true
+        });
+        let bytes = serde_json::to_vec(&serde_json::json!({"schema":1,"entries":{"fish.clash":entry}})).unwrap();
+        let registry: Registry = serde_json::from_slice(&bytes).expect("一个条目的退役字段不该让整张注册表读不出来");
+        assert_eq!(registry.entries.len(), 1, "条目要都还在，不能因为一个字段整表作废");
+        assert!(registry.entries.contains_key("fish.clash"));
+    }
+
+    // 真正未知的字段：**该条目**被跳过并记日志，但整表仍然读得出来，
+    // 其余插件照常工作。拼错的字段名不会静默装上，也不会连累别的插件。
+    #[test]
+    fn a_broken_entry_is_skipped_without_taking_the_whole_table() {
+        let good = serde_json::json!({
+            "manifest": {
+                "schema": 1, "id": "fish.clash", "name": "Clash 代理", "version": "2.2.0", "hostApi": 1,
+                "platforms": [platform()],
+                "storage": {"directory": ".fishplugin-clash", "dataSchema": 1},
+                "backend": {"runtime": "node", "entry": "backend.mjs"},
+                "files": {"backend.mjs": "0".repeat(64)}
+            },
+            "digest": "0".repeat(64), "official": true, "enabled": true
+        });
+        let typo = serde_json::json!({
+            "manifest": {
+                "schema": 1, "id": "fish.magpie", "name": "Magpie 网关", "version": "2.2.1", "hostApi": 1,
+                "platforms": [platform()],
+                "storage": {"directory": ".fishplugin-magpie", "dataSchema": 1},
+                "backend": {"runtime": "node", "entry": "backend.mjs"},
+                "files": {"backend.mjs": "1".repeat(64)},
+                "capabilites": ["storage"]
+            },
+            "digest": "1".repeat(64), "official": true, "enabled": true
+        });
+        let bytes = serde_json::to_vec(&serde_json::json!({"schema":1,"entries":{"fish.clash":good,"fish.magpie":typo}})).unwrap();
+        let registry: Registry = serde_json::from_slice(&bytes).expect("坏条目不该让整张表读不出来");
+        assert!(registry.entries.contains_key("fish.clash"), "好的条目必须保住");
+        assert!(!registry.entries.contains_key("fish.magpie"), "拼错字段的条目被跳过，不静默装上");
+    }
+
+    // 注册表顶层结构坏了（不是某一条）仍然报错：那是文件本身不可信。
+    #[test]
+    fn a_corrupt_registry_header_still_fails() {
+        let bytes = serde_json::to_vec(&serde_json::json!({"schema":1,"entries":{},"somethingElse":true})).unwrap();
+        assert!(serde_json::from_slice::<Registry>(&bytes).is_err(), "注册表顶层含未知字段必须报错");
     }
 }
