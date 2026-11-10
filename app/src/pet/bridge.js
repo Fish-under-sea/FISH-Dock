@@ -108,6 +108,10 @@
     onUnder: on('island:under'),
     onCalled: on('island:called'),
     stow: (stowed, width, height) => send('island_stow', { stowed: stowed === true, width: Number(width) || 0, height: Number(height) || 0 }),
+    // 2.2.2：外部窗口 Hook 的按需上报。只有宿主说有插件在听时（island:watch-dock），
+    // 页面才需要上报视图形态、胶囊尺寸与指针；否则这些调用一次都不该发生。
+    view: name => send('island_view', { name: String(name || '') }),
+    onWatchDock: on('island:watch-dock'),
     // Something opened up from her taskbar's strip: its window over any
     // other that has come over it (island.rs raise, zhoupengjie/Wakuwaku#55).
     raise: () => send('island_raise'),

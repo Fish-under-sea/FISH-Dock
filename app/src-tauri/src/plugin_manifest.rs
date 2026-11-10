@@ -65,7 +65,7 @@ impl Manifest {
         if !["node", "native"].contains(&self.backend.runtime.as_str()) || self.backend.args.len() > 32 || self.backend.args.iter().any(|s| s.len() > 1024 || s.contains('\0')) { return Err("插件后端启动声明无效".into()); }
         // 2.2.0：`windows`（外部原生窗口）与 `file-drop`（接收文件拖入路径）都是独立
         // 能力，不与 `storage` 捆绑；没声明的插件既开不了窗也收不到路径。
-        if self.capabilities.len() > 16 || self.capabilities.iter().any(|c| !["storage", "events", "network", "services", "system-proxy", "windows", "file-drop"].contains(&c.as_str())) { return Err("插件声明了当前宿主不支持的能力".into()); }
+        if self.capabilities.len() > 16 || self.capabilities.iter().any(|c| !["storage", "events", "network", "services", "system-proxy", "windows", "file-drop", "dock"].contains(&c.as_str())) { return Err("插件声明了当前宿主不支持的能力".into()); }
         let mut seen = HashSet::new();
         if self.capabilities.iter().any(|s| !seen.insert(s)) { return Err("插件能力重复".into()); }
         let mut names = HashSet::new();

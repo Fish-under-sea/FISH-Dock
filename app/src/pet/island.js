@@ -305,6 +305,11 @@
   // still on it opens it no more, until it has left and come back.
   let dismissed = false
   let view = ''
+  // 2.2.2：宿主是否有插件在听主岛事件（island:watch-dock）。为 false 时
+  // 下面的上报一行都不执行——不装插件、装了不启用、或启用没订阅的用户
+  // 走的是与 2.2.1 完全相同的路径。
+  let watchDock = false
+  let lastSentView = ''
   let clockTimer
   let blinkTimer
   let herClip = null
@@ -1368,6 +1373,19 @@
   window.pet.onCalled(({ on } = {}) => {
     calledDown = on === true
     setStow()
+  })
+  // 2.2.2：宿主说「有插件开始/停止听主岛事件」。开始听时补报一次当前视图，
+  // 免得订阅者要等到下一次形态切换才知道现状；停止后不再上报。
+  window.pet.onWatchDock(({ on } = {}) => {
+    watchDock = on === true
+    if (!watchDock) {
+      lastSentView = ''
+      return
+    }
+    if (view && view !== lastSentView) {
+      lastSentView = view
+      window.pet.view(view)
+    }
   })
 
   function setSize({ width, height }) {
@@ -4899,6 +4917,13 @@
       settingsFrom = null
     }
     island.dataset.view = view
+    // 2.2.2：视图形态上报给宿主，供外部窗口 Hook 的 dock.rect() 读。
+    // 只有宿主说有插件在听时才发（watchDock），且只在真的变化时发一次——
+    // update() 有几十处调用点，去重后实际 IPC 次数等于视图切换次数。
+    if (watchDock && view !== lastSentView) {
+      lastSentView = view
+      window.pet.view(view)
+    }
     // Closing on the taskbar, the blur under it goes first, then it shrinks.
     const late = plateSent && home() === 'taskbar' && view === 'compact' && was !== 'compact' && !stillMotion() ? PLATE_OUT_MS : 0
     holdGround(was, late)

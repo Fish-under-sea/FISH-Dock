@@ -1076,6 +1076,8 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
     let sh = shared(&app);
     if is_island(&window) {
         island::set_room(&sh, &measured);
+        // 2.2.2：room 变化会改变主岛窗口尺寸，胶囊位置随之变化（C3）。
+        plugin_window::dock_state_changed();
     } else {
         let size = match (measured["width"].as_f64(), measured["height"].as_f64()) {
             (Some(w), Some(h)) if w > 0.0 && h > 0.0 => Some((w.ceil(), h.ceil())),
@@ -1185,6 +1187,18 @@ async fn island_raise(app: AppHandle, window: WebviewWindow) {
 async fn island_stow(app: AppHandle, window: WebviewWindow, stowed: bool, width: f64, height: f64) {
     if is_island(&window) {
         island::set_stow(&shared(&app), stowed, width, height);
+        // 2.2.2：胶囊尺寸或滑出状态变了，外部窗口要能跟（C3）。没有订阅者时
+        // dock_state_changed 的快照比较会直接返回，不产生任何工作。
+        plugin_window::dock_state_changed();
+    }
+}
+
+// 2.2.2：页面报告当前视图形态（compact / expanded / settings / ask）。
+// 只有宿主说有插件在听时页面才会发（island:watch-dock），这里再兜一层。
+#[tauri::command]
+async fn island_view(app: AppHandle, window: WebviewWindow, name: String) {
+    if is_island(&window) {
+        island::set_view(&shared(&app), &name);
     }
 }
 
@@ -1873,6 +1887,7 @@ fn main() {
             island_editing,
             island_seat,
             island_stow,
+            island_view,
             island_raise,
             island_plate,
             island_release,

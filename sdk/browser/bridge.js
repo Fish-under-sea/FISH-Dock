@@ -26,6 +26,7 @@
   //   fileDrop：enter / leave（不含路径）与 drop（含 paths，仅本插件收到）。
   const windowListeners = new Set()
   const dropListeners = new Set()
+  const dockListeners = new Set()
   function listen(set, listener) {
     if (typeof listener !== 'function') throw new TypeError('事件监听器必须是函数')
     set.add(listener)
@@ -35,7 +36,12 @@
     for (const listener of [...windowListeners]) {
       try { listener(payload) } catch (error) { console.error('FishDock windows listener', error) }
     }
-    if (payload.event === 'fileDrop') {
+    if (payload.event === 'dock') {
+    for (const listener of [...dockListeners]) {
+      try { listener(payload) } catch (error) { console.error('FishDock dock listener', error) }
+    }
+  }
+  if (payload.event === 'fileDrop') {
       for (const listener of [...dropListeners]) {
         try { listener(payload) } catch (error) { console.error('FishDock fileDrop listener', error) }
       }
@@ -80,6 +86,22 @@
       return !!(result && result.unsubscribed)
     },
     onEvent: listener => listen(dropListeners, listener),
+  })
+  // 2.2.2：主岛几何与状态。rect() 读实时快照；onEvent 订阅后宿主才开始按需
+  // 上报（没有任何订阅者时主岛页面不上报，零开销）。
+  const dock = Object.freeze({
+    async rect() {
+      return send('dock.dock.rect', {})
+    },
+    async onEvent(listener) {
+      if (typeof listener !== 'function') throw new Error('事件监听器必须是函数')
+      const off = listen(dockListeners, listener)
+      await send('dock.dock.subscribe', {})
+      return async () => {
+        off()
+        try { await send('dock.dock.unsubscribe', {}) } catch { /* 页面已关：宿主已清理 */ }
+      }
+    },
   })
   // 宿主保留 Escape 出口：透明浮窗没有原生关闭按钮时，页面里按 Escape 也要能真正关掉。
   document.addEventListener('keydown', event => {
@@ -229,5 +251,5 @@
     deliver(href).catch(() => {})                            // 宿主拒绝时静默：外链失败不该炸页面
   }
   document.addEventListener('click', onClick, true)
-  Object.defineProperty(window, 'FishDock', { value: Object.freeze({ call, setLayout, openExternal, windows, fileDrop }), writable: false, configurable: false })
+  Object.defineProperty(window, 'FishDock', { value: Object.freeze({ call, setLayout, openExternal, windows, fileDrop, dock }), writable: false, configurable: false })
 })()

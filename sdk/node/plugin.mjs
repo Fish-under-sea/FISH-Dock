@@ -49,7 +49,7 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
   }
   // 外部原生窗口与定向拖入（2.2.0）：与浏览器 SDK 同一套协议方法，宿主侧同一套
   // 权限、代次与句柄检查。句柄是宿主给的字符串，插件不能自造，也不从中读身份。
-  const listeners = { windows: new Set(), fileDrop: new Set() };
+  const listeners = { windows: new Set(), fileDrop: new Set(), dock: new Set() };
   function listen(kind, listener) {
     if (typeof listener !== 'function') throw new TypeError('事件监听器必须是函数');
     listeners[kind].add(listener);
@@ -90,12 +90,32 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     },
     onEvent: listener => listen('fileDrop', listener),
   });
+  // 2.2.2：主岛几何与状态（只读 + 事件订阅）。rect() 一次读实时快照；
+  // onEvent 订阅后宿主才开始按需上报（没有任何订阅者时页面不上报，零开销）。
+  const dock = Object.freeze({
+    // 返回 { window, capsule, state:{view,stowed,hidden,fullscreen}, scale }；
+    // capsule 在页面还没报过胶囊尺寸时为 null。
+    async rect() {
+      return hostFor('dock', 'host.dock.rect', {});
+    },
+    async onEvent(listener) {
+      if (typeof listener !== 'function') throw new TypeError('事件监听器必须是函数');
+      const off = listen('dock', listener);
+      await hostFor('dock', 'host.dock.subscribe', {});
+      return async () => {
+        off();
+        try { await hostFor('dock', 'host.dock.unsubscribe', {}); } catch { /* 会话已关：宿主那边已经清干净 */ }
+      };
+    },
+  });
   const context = Object.freeze({
     get dataDirectory() { return hello?.dataDirectory; },
     get storageIdentity() { return hello?.storage; },
     // 2.2.0：外部原生窗口与定向拖入（与浏览器 SDK 同名同义）。
     windows,
     fileDrop,
+    // 2.2.2：主岛几何与状态。
+    dock,
     secrets: Object.freeze({
       async read(category, name) {
         const params=file(category,name);if(!['credentials','keys'].includes(category))throw new Error('加密凭据仅允许 credentials 或 keys 类别');

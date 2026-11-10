@@ -105,6 +105,11 @@ pub struct Island {
     pub for_asks: bool,
     // The page told it is up over an app full screen for them alone (over_full).
     over_full: bool,
+    // 2.2.2：页面当前的视图形态（compact / expanded / settings / ask），由页面
+    // 在 dataset.view 变化时上报（set_view）。外部窗口 Hook 的 dock.rect() 读它。
+    view: &'static str,
+    // 2.2.2（C5）：指针上一次是否落在胶囊上。只在跨过边界时通知外部窗口。
+    pointer_on: bool,
     // Settings asked for before its page was up: the page they open on.
     pending: Option<String>,
     // On the taskbar, her seat along the strip from its start (logical: from
@@ -803,6 +808,76 @@ fn closed_rect(isl: &Island) -> Option<(i32, i32, i32, i32)> {
     Some((x, isl.pos.1 + top, w, h))
 }
 
+// ---------------------------------------------------------------------------------------
+// 2.2.2：给外部窗口 Hook 读的几何与状态（只读，不改变任何绘制）
+// ---------------------------------------------------------------------------------------
+
+/// 主岛的实时几何与状态，供 `plugin_window` 的 `dock.rect()` 与几何事件使用。
+/// 只读快照：不改动 `island` 的任何字段，也不触发重排。
+#[derive(Clone, Debug, PartialEq)]
+pub struct DockSnapshot {
+    /// 主岛窗口矩形（物理像素）：非任务栏形态下宽 = 工作区宽、高 132 逻辑像素。
+    pub window: Option<(i32, i32, i32, i32)>,
+    /// 可见胶囊矩形（物理像素）；页面还没报过尺寸时为 None。
+    pub capsule: Option<(i32, i32, i32, i32)>,
+    /// 页面视图形态：compact / expanded / settings / ask。
+    pub view: &'static str,
+    /// 已滑出屏幕（isl-stowed）。
+    pub stowed: bool,
+    /// Dock 全局隐藏。
+    pub hidden: bool,
+    /// 有窗口全屏，主岛避让（over-full）。
+    pub fullscreen: bool,
+    /// 该屏 DPI。
+    pub scale: f64,
+}
+
+/// 读一次主岛的几何与状态。**纯读**：只拿锁复制字段，不写、不触发任何副作用。
+pub fn snapshot(sh: &Shared) -> DockSnapshot {
+    let isl = sh.island.lock().unwrap_or_else(|poison| poison.into_inner());
+    let window = if isl.created && isl.size.0 > 0 && isl.size.1 > 0 {
+        Some((isl.pos.0, isl.pos.1, isl.size.0, isl.size.1))
+    } else {
+        None
+    };
+    DockSnapshot {
+        window,
+        capsule: closed_rect(&isl),
+        // 页面还没上报过（或上报了不认识的值）时按 compact 算：那是默认形态。
+        view: if isl.view.is_empty() { "compact" } else { isl.view },
+        stowed: isl.stow.stowed,
+        hidden: !isl.shown,
+        fullscreen: isl.over_full,
+        scale: isl.sf(),
+    }
+}
+
+/// 页面报告当前视图形态（`island.js` 设 `dataset.view` 之后调用）。
+/// 只认四个已知值，其余忽略——页面永远不该让宿主存下一个奇怪的状态。
+pub fn set_view(sh: &Shared, name: &str) {
+    let view: &'static str = match name {
+        "compact" => "compact",
+        "expanded" => "expanded",
+        "settings" => "settings",
+        "ask" => "ask",
+        _ => return,
+    };
+    let changed = {
+        let mut isl = sh.island.lock().unwrap_or_else(|poison| poison.into_inner());
+        let previous = if isl.view.is_empty() { "compact" } else { isl.view };
+        if previous == view {
+            false
+        } else {
+            isl.view = view;
+            true
+        }
+    };
+    // 只有真的变了才通知外部窗口：视图切换是低频事件，但仍要去重。
+    if changed {
+        crate::plugin_window::dock_state_changed();
+    }
+}
+
 // A window under the closed island, or none now: told the page as it
 // changes (island:under).
 pub fn look_under(sh: &Arc<Shared>) {
@@ -1188,6 +1263,11 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
         }
         if !isl.shown {
             crate::dropwin::note_drag(None);
+            // 2.2.2（C5）：主岛不在了，指针也就不在胶囊上。
+            if isl.pointer_on {
+                isl.pointer_on = false;
+                crate::plugin_window::dock_pointer_changed(false);
+            }
             (isl.ct.force(Mode::Pass), None, 500, None, false)
         } else {
             let (pos, size, sf, page_sf, held) = (isl.pos, isl.size, isl.sf(), isl.page_sf(), isl.holding);
@@ -1198,6 +1278,17 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
             // drop target；设成不穿透，命中的又是 WebView2 渲染面（无 OLE target）。故
             // 让岛保持穿透，由独立的 plain 窗口 dropwin.rs 覆盖胶囊上方收 WM_DROPFILES。
             let pill = closed_rect(&isl);
+            // 2.2.2（C5）：指针是否落在胶囊上。宿主本来就在轮询光标，用胶囊矩形
+            // 直接判断即可，不依赖页面的 hover 状态（那个是页面自己算的，且为
+            // 了开合逻辑会有延迟）。只在跨过边界时通知外部窗口。
+            {
+                let on = pill.is_some_and(|r| crate::pointer::within(cursor, (r.0, r.1), (r.2, r.3), 0));
+                let was = isl.pointer_on;
+                if on != was {
+                    isl.pointer_on = on;
+                    crate::plugin_window::dock_pointer_changed(on);
+                }
+            }
             let psf = page_sf;
             let pad = (12.0 * sf) as i32;
             // 检测区只在“胶囊”和“子子灵动岛”周围一圈，不再覆盖大片桌面。

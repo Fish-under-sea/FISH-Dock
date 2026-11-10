@@ -375,12 +375,12 @@ mod imp {
             let target = point.and_then(|point| native_target(point, &live_zones(), hwnd)).filter(|target| Some(target) == active.as_ref());
             match target {
                 Some(Target::Dock(handle)) => {
-                    if let Err(error) = crate::plugin_window::deliver_dock(&handle, &paths) {
+                    if let Err(error) = crate::plugin_window::deliver_dock_at(&handle, &paths, point) {
                         log(&format!("dropwin: {} path(s) dropped: {error}", paths.len()));
                     }
                 }
                 Some(Target::Window(handle)) => {
-                    if let Err(error) = crate::plugin_window::deliver_window(&handle, &paths) {
+                    if let Err(error) = crate::plugin_window::deliver_window_at(&handle, &paths, point) {
                         log(&format!("dropwin: {} path(s) dropped: {error}", paths.len()));
                     }
                 }

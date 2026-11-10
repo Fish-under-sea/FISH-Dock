@@ -14,7 +14,7 @@
 //! 等页面就绪用 Condvar 的 `wait_timeout`（等待时释放 BOOK），创建/关闭都由别的
 //! 线程推进，不会出现「持锁等自己」。
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
@@ -31,19 +31,144 @@ const PER_PLUGIN: usize = 4;
 const TOTAL: usize = 16;
 const KEY_MAX: usize = 64;
 const TITLE_MAX: usize = 80;
-const WIDTH_MIN: f64 = 160.0;
+const WIDTH_MIN: f64 = 32.0;
 const WIDTH_MAX: f64 = 2400.0;
-const HEIGHT_MIN: f64 = 80.0;
+const HEIGHT_MIN: f64 = 32.0;
 const HEIGHT_MAX: f64 = 1600.0;
 const OFFSET_LIMIT: f64 = 20000.0;
 const WIDTH_DEFAULT: f64 = 420.0;
 const HEIGHT_DEFAULT: f64 = 320.0;
+
+/// 2.2.2（B2）：窗口的哪条边/角贴住锚点。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Align {
+    RightTop, RightCenter, RightBottom,
+    LeftTop, LeftCenter, LeftBottom,
+    TopCenter, BottomCenter,
+}
+
+impl Align {
+    fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "right-top" => Self::RightTop,
+            "right-center" => Self::RightCenter,
+            "right-bottom" => Self::RightBottom,
+            "left-top" => Self::LeftTop,
+            "left-center" => Self::LeftCenter,
+            "left-bottom" => Self::LeftBottom,
+            "top-center" => Self::TopCenter,
+            "bottom-center" => Self::BottomCenter,
+            _ => return None,
+        })
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::RightTop => "right-top",
+            Self::RightCenter => "right-center",
+            Self::RightBottom => "right-bottom",
+            Self::LeftTop => "left-top",
+            Self::LeftCenter => "left-center",
+            Self::LeftBottom => "left-bottom",
+            Self::TopCenter => "top-center",
+            Self::BottomCenter => "bottom-center",
+        }
+    }
+    /// 按对齐方式把窗口左上角放到锚点 (px, py) 上。
+    fn offset(self, (px, py): (i32, i32), (width, height): (i32, i32)) -> (i32, i32) {
+        match self {
+            Self::RightTop => (px - width, py),
+            Self::RightCenter => (px - width, py - height / 2),
+            Self::RightBottom => (px - width, py - height),
+            Self::LeftTop => (px, py),
+            Self::LeftCenter => (px, py - height / 2),
+            Self::LeftBottom => (px, py - height),
+            Self::TopCenter => (px - width / 2, py),
+            Self::BottomCenter => (px - width / 2, py - height),
+        }
+    }
+}
+
+/// 2.2.2（B2）：锚点相对哪个矩形——主岛窗口还是可见胶囊。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AnchorBase {
+    /// 2.2.1 的行为：相对主岛窗口（铺满工作区宽）。
+    Window,
+    /// 相对可见胶囊；胶囊尺寸未知时回落到 Window。
+    Capsule,
+}
+
+impl AnchorBase {
+    fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "window" => Self::Window,
+            "capsule" => Self::Capsule,
+            _ => return None,
+        })
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::Window => "window",
+            Self::Capsule => "capsule",
+        }
+    }
+}
+
+/// 2.2.2（E6）：窗口层级。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ZOrder {
+    /// 2.2.1 的行为：普通顶层窗口，不置顶。
+    Normal,
+    /// 置顶，且排在主岛窗口之上（主岛本身是 always_on_top）。
+    AboveDock,
+}
+
+impl ZOrder {
+    fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "normal" => Self::Normal,
+            "above-dock" => Self::AboveDock,
+            _ => return None,
+        })
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::AboveDock => "above-dock",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor {
     DockLeft,
     DockBottom,
     Screen,
+}
+
+/// 2.2.2：窗口宽度。`Dock` 表示跟随可见胶囊当前宽度（C4）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Width {
+    Fixed(f64),
+    /// 跟随主岛胶囊宽度；`max` 是内容可增长到的上限（逻辑像素），None = 恒定等宽。
+    Dock { max: Option<f64> },
+}
+
+impl Width {
+    /// 算出实际逻辑宽度。`capsule` 是胶囊的逻辑宽度；拿不到时回落到默认值。
+    fn resolve(self, capsule: Option<f64>) -> f64 {
+        match self {
+            Width::Fixed(value) => value,
+            Width::Dock { max } => {
+                // 胶囊宽度未知时用默认宽度，绝不让窗口塌成 0。
+                let base = capsule.unwrap_or(WIDTH_DEFAULT).max(WIDTH_MIN).min(WIDTH_MAX);
+                match max {
+                    // max 小于胶囊宽时按胶囊宽算：语义是「可增长到」，不是「缩到」。
+                    Some(limit) => base.min(limit.max(base)).min(WIDTH_MAX),
+                    None => base,
+                }
+            }
+        }
+    }
 }
 
 impl Anchor {
@@ -70,12 +195,18 @@ pub struct Options {
     pub key: String,
     pub page: String,
     pub title: Option<String>,
-    pub width: f64,
+    pub width: Width,
     pub height: f64,
     pub anchor: Anchor,
+    /// 2.2.2（B2）：窗口哪条边/角贴住锚点。
+    pub align: Align,
+    /// 2.2.2（B2）：锚点相对主岛窗口还是可见胶囊。
+    pub anchor_base: AnchorBase,
     pub offset_x: f64,
     pub offset_y: f64,
     pub transparent: bool,
+    /// 2.2.2（E6）：'normal' 或 'above-dock'（置顶，压在主岛之上）。
+    pub z_order: ZOrder,
 }
 
 fn finite(value: &Value) -> Option<f64> {
@@ -92,7 +223,7 @@ impl Options {
     pub fn parse(params: &Value) -> Result<Self, String> {
         let object = params.as_object().ok_or("插件窗口参数应为对象")?;
         for name in object.keys() {
-            if !["key", "page", "title", "width", "height", "anchor", "offsetX", "offsetY", "transparent"].contains(&name.as_str()) {
+            if !["key", "page", "title", "width", "height", "anchor", "offsetX", "offsetY", "transparent", "maxWidth", "align", "anchorBase", "zOrder"].contains(&name.as_str()) {
                 return Err("插件窗口参数含未知字段".into());
             }
         }
@@ -126,11 +257,49 @@ impl Options {
                 },
             }
         };
-        let width = size("width", WIDTH_DEFAULT, WIDTH_MIN, WIDTH_MAX)?;
+        // 2.2.2（C4）：width 可以是数字，也可以是 'dock'（跟随胶囊宽度）。
+        let width = match object.get("width") {
+            None => Width::Fixed(WIDTH_DEFAULT),
+            Some(Value::String(text)) if text == "dock" => Width::Dock { max: None },
+            Some(value) => match finite(value) {
+                Some(number) if (WIDTH_MIN..=WIDTH_MAX).contains(&number) => Width::Fixed(number),
+                Some(_) => return Err(format!("插件窗口 width 超出范围（{WIDTH_MIN}–{WIDTH_MAX} 逻辑像素）或 'dock'")),
+                None => return Err("插件窗口 width 必须是有限数或 'dock'".into()),
+            },
+        };
+        // maxWidth 只在 width:'dock' 时有意义；其余情况忽略（不报错，避免插件
+        // 为了兼容旧宿主而分支）。范围同 width。
+        let max_width = match (object.get("maxWidth"), width) {
+            (Some(value), Width::Dock { .. }) => match finite(value) {
+                Some(number) if (WIDTH_MIN..=WIDTH_MAX).contains(&number) => Some(number),
+                Some(_) => return Err(format!("插件窗口 maxWidth 超出范围（{WIDTH_MIN}–{WIDTH_MAX} 逻辑像素）")),
+                None => return Err("插件窗口 maxWidth 必须是有限数".into()),
+            },
+            _ => None,
+        };
+        let width = match width {
+            Width::Dock { .. } => Width::Dock { max: max_width },
+            other => other,
+        };
         let height = size("height", HEIGHT_DEFAULT, HEIGHT_MIN, HEIGHT_MAX)?;
         let anchor = match object.get("anchor") {
             None => Anchor::DockBottom,
             Some(value) => value.as_str().and_then(Anchor::parse).ok_or("插件窗口 anchor 只支持 dock-left、dock-bottom、screen")?,
+        };
+        // 2.2.2（B2）：align 缺省按 anchor 取旧版等价的对齐，保证不写这个字段时
+        // 位置与 2.2.1 一模一样。
+        let align = match object.get("align") {
+            None => match anchor {
+                Anchor::DockLeft => Align::RightCenter,
+                _ => Align::LeftTop,
+            },
+            Some(value) => value.as_str().and_then(Align::parse).ok_or(
+                "插件窗口 align 只支持 right-top、right-center、right-bottom、left-top、left-center、left-bottom、top-center、bottom-center",
+            )?,
+        };
+        let anchor_base = match object.get("anchorBase") {
+            None => AnchorBase::Window,
+            Some(value) => value.as_str().and_then(AnchorBase::parse).ok_or("插件窗口 anchorBase 只支持 window、capsule")?,
         };
         let offset = |name: &str| -> Result<f64, String> {
             match object.get(name) {
@@ -149,7 +318,11 @@ impl Options {
             Some(Value::Bool(value)) => *value,
             Some(_) => return Err("插件窗口 transparent 应为布尔值".into()),
         };
-        Ok(Self { key: key.into(), page: page.into(), title, width, height, anchor, offset_x, offset_y, transparent })
+        let z_order = match object.get("zOrder") {
+            None => ZOrder::Normal,
+            Some(value) => value.as_str().and_then(ZOrder::parse).ok_or("插件窗口 zOrder 只支持 normal、above-dock")?,
+        };
+        Ok(Self { key: key.into(), page: page.into(), title, width, height, anchor, align, anchor_base, offset_x, offset_y, transparent, z_order })
     }
 }
 
@@ -177,11 +350,18 @@ struct Rec {
     ticket: String,
     url: String,
     anchor: Anchor,
+    /// 2.2.2（B2）：窗口哪条边/角贴住锚点。
+    align: Align,
+    /// 2.2.2（B2）：锚点相对主岛窗口还是可见胶囊。
+    anchor_base: AnchorBase,
     offset_x: f64,
     offset_y: f64,
-    width: f64,
+    /// 2.2.2（C4）：固定宽度，或跟随胶囊宽度。
+    width: Width,
     height: f64,
     transparent: bool,
+    /// 2.2.2（E6）：窗口层级。
+    z_order: ZOrder,
     state: State,
     /// 窗口当前是否显示（被 Dock 全局隐藏时为 false）。
     shown: bool,
@@ -207,6 +387,8 @@ struct Book {
     sessions: BTreeMap<String, u64>,
     outputs: BTreeMap<String, std::sync::mpsc::SyncSender<Value>>,
     dock_hidden: bool,
+    /// 2.2.2：订阅了主岛几何/状态事件的插件 → 代次。空表示没人听。
+    dock_watchers: BTreeMap<String, u64>,
 }
 
 impl Book {
@@ -251,7 +433,7 @@ impl Book {
     }
 }
 
-static BOOK: Mutex<Book> = Mutex::new(Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false });
+static BOOK: Mutex<Book> = Mutex::new(Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() });
 /// 上一次看到的 Dock 外框：变了才重排锚定窗口（主岛的移动/尺寸事件很密）。
 static DOCK_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
 static READY: Condvar = Condvar::new();
@@ -407,8 +589,11 @@ pub fn page(plugin: &str, digest: &str, generation: u64, _host: &str, method: &s
         "dock.windows.update" => update(&context, plugin, generation, params),
         "dock.windows.close" => close_owned(plugin, generation, params, "plugin"),
         "dock.windows.list" => list(&context, plugin, generation),
-        "dock.fileDrop.subscribe" => subscribe(&context, plugin, generation, params),
-        "dock.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
+        "dock.fileDrop.subscribe" => subscribe(&context, plugin, generation, params),        "dock.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
+        // 2.2.2：主岛几何与状态（只读接口 + 事件订阅）
+        "dock.dock.rect" => { let context = crate::storage_context::current().ok_or("存储尚未就绪")?; dock_rect_for(&context, plugin) },
+        "dock.dock.subscribe" => { let context = crate::storage_context::current().ok_or("存储尚未就绪")?; subscribe_dock_for(&context, plugin, generation) },
+        "dock.dock.unsubscribe" => unsubscribe_dock(plugin),
         _ => Err("插件窗口方法无效".into()),
     }
 }
@@ -425,8 +610,10 @@ pub fn backend(context: &Context, plugin: &str, generation: u64, method: &str, p
         "host.windows.update" => update(context, plugin, generation, params),
         "host.windows.close" => close_owned(plugin, generation, params, "plugin"),
         "host.windows.list" => list(context, plugin, generation),
-        "host.fileDrop.subscribe" => subscribe(context, plugin, generation, params),
-        "host.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
+        "host.fileDrop.subscribe" => subscribe(context, plugin, generation, params),        "host.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
+        "host.dock.rect" => dock_rect_for(context, plugin),
+        "host.dock.subscribe" => subscribe_dock_for(context, plugin, generation),
+        "host.dock.unsubscribe" => unsubscribe_dock(plugin),
         _ => Err("插件窗口方法无效".into()),
     }
 }
@@ -450,8 +637,8 @@ fn open(context: &Context, plugin: &str, digest: &str, generation: u64, params: 
         handle: String::new(), plugin: plugin.into(), digest: digest.into(), generation,
         key: options.key.clone(), page: options.page.clone(), title,
         label: String::new(), ticket: String::new(), url: String::new(),
-        anchor: options.anchor, offset_x: options.offset_x, offset_y: options.offset_y,
-        width: options.width, height: options.height, transparent: options.transparent,
+        anchor: options.anchor, align: options.align, anchor_base: options.anchor_base, offset_x: options.offset_x, offset_y: options.offset_y,
+        width: options.width, height: options.height, transparent: options.transparent, z_order: options.z_order,
         state: State::Pending, shown: false, hidden_by_dock: false, rect: None, drop: None,
     })?;
     let (handle, label) = (reserved.handle, reserved.label);
@@ -527,7 +714,7 @@ fn build(handle: &str) -> Result<(), String> {
         if !book().windows.contains_key(&snapshot.handle) { return Err("窗口创建已取消".into()); }
         let win = WebviewWindowBuilder::new(&app, &snapshot.label, WebviewUrl::App("window/window.html".into()))
             .title(&snapshot.title)
-            .inner_size(snapshot.width, snapshot.height)
+            .inner_size(snapshot.width.resolve(capsule_width_logical(&app)), snapshot.height)
             // 透明浮窗允许插件自己画形状与按钮；此时没有原生标题栏，只剩宿主 Escape 与托盘出口。
             .decorations(!snapshot.transparent)
             .transparent(snapshot.transparent)
@@ -537,6 +724,8 @@ fn build(handle: &str) -> Result<(), String> {
             // 默认不占任务栏，也不抢当前焦点（显示走 SWP_NOACTIVATE）。
             .skip_taskbar(true)
             .focused(false)
+            // 2.2.2（E6）：above-dock 要压在主岛之上，主岛本身是 always_on_top。
+            .always_on_top(snapshot.z_order == ZOrder::AboveDock)
             .visible(false)
             .build()
             .map_err(|error| format!("插件窗口创建失败：{error}"))?;
@@ -551,6 +740,17 @@ fn build(handle: &str) -> Result<(), String> {
     })?
 }
 
+/// 2.2.2（C4）：主岛胶囊的逻辑宽度，供 `width:'dock'` 用。
+/// 物理像素 → 逻辑像素按主岛页面的 page_sf 换算；拿不到时返回 None，
+/// 由 `Width::resolve` 回落到默认宽度。
+fn capsule_width_logical(app: &AppHandle) -> Option<f64> {
+    let shared = crate::shared(app);
+    let snapshot = crate::island::snapshot(&shared);
+    let (_, _, width, _) = snapshot.capsule?;
+    let sf = if snapshot.scale > 0.0 { snapshot.scale } else { 1.0 };
+    Some(width as f64 / sf)
+}
+
 fn place(win: &WebviewWindow, rec: &Rec) -> Result<(), String> {
     let app = win.app_handle();
     let sf = win.scale_factor().unwrap_or(1.0).max(0.5);
@@ -560,7 +760,9 @@ fn place(win: &WebviewWindow, rec: &Rec) -> Result<(), String> {
         (Ok(pos), Ok(size)) => Some((pos.x, pos.y, size.width as i32, size.height as i32)),
         _ => None,
     });
-    let (x, y, width, height) = placement(rec, &screens, dock, sf);
+    let capsule = crate::shared(app);
+    let capsule = crate::island::snapshot(&capsule).capsule;
+    let (x, y, width, height) = placement(rec, &screens, dock, capsule, sf);
     win.set_size(tauri::PhysicalSize::new(width as u32, height as u32)).map_err(|_| "插件窗口尺寸设置失败")?;
     win.set_position(tauri::PhysicalPosition::new(x, y)).map_err(|_| "插件窗口位置设置失败")?;
     // set_size 指客户区；原生标题栏和边框也必须留在工作区。
@@ -582,7 +784,7 @@ fn fit_outer(area: crate::screen::Area, (x,y): (i32,i32), (iw,ih): (u32,u32), (o
      y.clamp(area.y, area.y + (area.h - (ih + border_h) as i32).max(0)), iw, ih)
 }
 
-fn placement(rec: &Rec, screens: &crate::screen::Screens, dock: Option<(i32, i32, i32, i32)>, fallback_sf: f64) -> (i32, i32, i32, i32) {
+fn placement(rec: &Rec, screens: &crate::screen::Screens, dock: Option<(i32, i32, i32, i32)>, capsule: Option<(i32, i32, i32, i32)>, fallback_sf: f64) -> (i32, i32, i32, i32) {
     let base = screens.primary.or_else(|| screens.near(0, 0));
     let target = if rec.anchor == Anchor::Screen {
         let sf = base.map_or(fallback_sf, |area| area.sf);
@@ -592,7 +794,9 @@ fn placement(rec: &Rec, screens: &crate::screen::Screens, dock: Option<(i32, i32
         dock.and_then(|(x,y,w,h)| screens.near(x+w/2,y+h/2)).or(base)
     };
     let sf = target.map_or(fallback_sf, |area| area.sf).max(0.5);
-    let width = ((rec.width * sf).round() as i32).min(target.map_or(i32::MAX, |a| a.w.max(1)));
+    // 2.2.2（C4）：width:'dock' 跟随胶囊当前宽度。胶囊是物理像素，先换成逻辑。
+    let capsule_logical = capsule.map(|(_, _, w, _)| w as f64 / sf);
+    let width = ((rec.width.resolve(capsule_logical) * sf).round() as i32).min(target.map_or(i32::MAX, |a| a.w.max(1)));
     let height = ((rec.height * sf).round() as i32).min(target.map_or(i32::MAX, |a| a.h.max(1)));
     let (x, y) = match rec.anchor {
         Anchor::Screen => {
@@ -600,17 +804,32 @@ fn placement(rec: &Rec, screens: &crate::screen::Screens, dock: Option<(i32, i32
             let screen_sf = base.map_or(fallback_sf, |a| a.sf).max(0.5);
             (origin.0 + (rec.offset_x * screen_sf).round() as i32, origin.1 + (rec.offset_y * screen_sf).round() as i32)
         }
-        Anchor::DockLeft | Anchor::DockBottom => match dock {
-            Some((dx, dy, _dw, dh)) => match rec.anchor {
-                Anchor::DockLeft => (dx - width - (rec.offset_x * sf).round() as i32, dy + (dh - height) / 2 + (rec.offset_y * sf).round() as i32),
-                _ => (dx + (rec.offset_x * sf).round() as i32, dy + dh + (rec.offset_y * sf).round() as i32),
-            },
-            // 没有 Dock 窗口（主岛还没建）时退到主显示器工作区中央，不让窗口跑到屏幕外。
-            None => {
-                let area = screens.primary;
-                area.map(|a| (a.x + (a.w - width) / 2, a.y + (a.h - height) / 2)).unwrap_or((0, 0))
+        Anchor::DockLeft | Anchor::DockBottom => {
+            // 2.2.2（B2）：anchorBase 决定基准。缺省 window 保持 2.2.1 的行为；
+            // capsule 让窗口贴可见胶囊；胶囊尺寸还没上报时回落到窗口。
+            let reference = match rec.anchor_base {
+                AnchorBase::Capsule => capsule.or(dock),
+                AnchorBase::Window => dock,
+            };
+            match reference {
+                Some((rx, ry, rw, rh)) => {
+                    // 锚点：dock-left 取基准的左缘中点，dock-bottom 取基准的左下角。
+                    // 这两个点与 2.2.1 的默认 align（right-center / left-top）配合，
+                    // 算出来的位置与旧版完全一致。
+                    let point = match rec.anchor {
+                        Anchor::DockLeft => (rx, ry + rh / 2),
+                        _ => (rx, ry + rh),
+                    };
+                    let point = (point.0 + (rec.offset_x * sf).round() as i32, point.1 + (rec.offset_y * sf).round() as i32);
+                    rec.align.offset(point, (width, height))
+                }
+                // 没有 Dock 窗口（主岛还没建）时退到主显示器工作区中央，不让窗口跑到屏幕外。
+                None => {
+                    let area = screens.primary;
+                    area.map(|a| (a.x + (a.w - width) / 2, a.y + (a.h - height) / 2)).unwrap_or((0, 0))
+                }
             }
-        },
+        }
     };
     let (x, y) = target.map_or((x,y), |area| (
         x.clamp(area.x, area.x + area.w.max(width) - width),
@@ -629,6 +848,9 @@ fn geometry_of(win: &WebviewWindow) -> Option<(i32, i32, i32, i32)> {
 fn window_event(win: &WebviewWindow, event: &WindowEvent) {
     match event {
         WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => geometry_changed(win),
+        // 2.2.2（E2）：本窗口的焦点变化，向上发给插件。「点窗口外部」收不到，
+        // 用这个近似——文档里写明。
+        WindowEvent::Focused(on) => focus_changed(win, *on),
         WindowEvent::Destroyed => { let _ = close_label(win.label(), "destroyed"); }
         WindowEvent::CloseRequested { api, .. } => {
             // 点原生关闭按钮 = 用户关闭：真正销毁，不缩成小球、也不自动重开。
@@ -640,6 +862,20 @@ fn window_event(win: &WebviewWindow, event: &WindowEvent) {
         }
         _ => {}
     }
+}
+
+/// 2.2.2（E2）：窗口得到/失去焦点，发给插件。「点窗口外部」拿不到（独立原生
+/// 窗口收不到窗口外的指针事件），插件只能用 blur 近似实现「点外面收起」。
+fn focus_changed(win: &WebviewWindow, focused: bool) {
+    let label = win.label();
+    let target = {
+        let book = book();
+        book.windows.values().find(|rec| rec.label == label).map(|rec| (rec.plugin.clone(), rec.generation, rec.handle.clone()))
+    };
+    let Some((plugin, generation, handle)) = target else { return };
+    let payload = json!({"event": if focused {"focus"} else {"blur"}, "handle": handle});
+    emit(&plugin, generation, Some(label), payload.clone());
+    let _ = notify_backend(&plugin, generation, payload);
 }
 
 fn geometry_changed(win: &WebviewWindow) {
@@ -804,12 +1040,24 @@ fn apply_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
 fn validate_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
         let object = params.as_object().ok_or("插件窗口更新参数应为对象")?;
         for name in object.keys() {
-            if !["handle", "width", "height", "anchor", "offsetX", "offsetY", "title"].contains(&name.as_str()) {
+            if !["handle", "width", "height", "anchor", "offsetX", "offsetY", "title", "maxWidth", "align", "anchorBase", "zOrder"].contains(&name.as_str()) {
                 return Err("插件窗口更新参数含未知字段".into());
             }
         }
         if let Some(width) = object.get("width") {
-            rec.width = finite(width).filter(|v| (WIDTH_MIN..=WIDTH_MAX).contains(v)).ok_or("插件窗口宽度超出范围")?;
+            // 2.2.2（C4）：update 也接受 'dock'，与 open 同一套语义。
+            rec.width = match width {
+                Value::String(text) if text == "dock" => Width::Dock { max: None },
+                value => Width::Fixed(finite(value).filter(|v| (WIDTH_MIN..=WIDTH_MAX).contains(v)).ok_or("插件窗口宽度超出范围（或为 'dock'）")?),
+            };
+        }
+        if let Some(limit) = object.get("maxWidth") {
+            let value = finite(limit).filter(|v| (WIDTH_MIN..=WIDTH_MAX).contains(v)).ok_or("插件窗口 maxWidth 超出范围")?;
+            rec.width = match rec.width {
+                Width::Dock { .. } => Width::Dock { max: Some(value) },
+                // 固定宽度下调 maxWidth：静默忽略，不让插件为此分支。
+                other => other,
+            };
         }
         if let Some(height) = object.get("height") {
             rec.height = finite(height).filter(|v| (HEIGHT_MIN..=HEIGHT_MAX).contains(v)).ok_or("插件窗口高度超出范围")?;
@@ -817,11 +1065,20 @@ fn validate_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
         if let Some(anchor) = object.get("anchor") {
             rec.anchor = anchor.as_str().and_then(Anchor::parse).ok_or("插件窗口 anchor 只支持 dock-left、dock-bottom、screen")?;
         }
+        if let Some(align) = object.get("align") {
+            rec.align = align.as_str().and_then(Align::parse).ok_or("插件窗口 align 取值无效")?;
+        }
+        if let Some(base) = object.get("anchorBase") {
+            rec.anchor_base = base.as_str().and_then(AnchorBase::parse).ok_or("插件窗口 anchorBase 只支持 window、capsule")?;
+        }
         if let Some(offset) = object.get("offsetX") {
             rec.offset_x = finite(offset).filter(|v| v.abs() <= OFFSET_LIMIT).ok_or("插件窗口 offsetX 超出范围")?;
         }
         if let Some(offset) = object.get("offsetY") {
             rec.offset_y = finite(offset).filter(|v| v.abs() <= OFFSET_LIMIT).ok_or("插件窗口 offsetY 超出范围")?;
+        }
+        if let Some(z_order) = object.get("zOrder") {
+            rec.z_order = z_order.as_str().and_then(ZOrder::parse).ok_or("插件窗口 zOrder 只支持 normal、above-dock")?;
         }
         if let Some(title) = object.get("title") {
             let text = title.as_str().map(str::trim).filter(|t| !t.is_empty() && t.chars().count() <= TITLE_MAX && !t.chars().any(char::is_control)).ok_or("插件窗口标题无效")?;
@@ -872,14 +1129,23 @@ fn list(context: &Context, plugin: &str, generation: u64) -> Result<Value, Strin
 }
 
 fn view(rec: &Rec) -> Value {
+    // 2.2.2（C4）：width:'dock' 对外报成 "dock"，固定宽度报数字——插件据此判断
+    // 宿主有没有接管宽度，不必自己猜。
+    let width = match rec.width {
+        Width::Fixed(value) => json!(value),
+        Width::Dock { .. } => json!("dock"),
+    };
     json!({
         "handle":rec.handle,
         "key":rec.key,
         "page":rec.page,
         "title":rec.title,
         "anchor":rec.anchor.name(),
-        "width":rec.width,
+        "align":rec.align.name(),
+        "anchorBase":rec.anchor_base.name(),
+        "width":width,
         "height":rec.height,
+        "maxWidth":match rec.width { Width::Dock { max } => json!(max), _ => Value::Null },
         "transparent":rec.transparent,
         "ready":rec.state == State::Ready,
         "visible":rec.shown && !rec.hidden_by_dock,
@@ -1107,6 +1373,11 @@ fn validate_drop(paths: &[String]) -> Result<(), String> {
 
 /// 交付窗口拖入：只给这个窗口的所有者。窗口已关/已隐藏/换版时丢弃，不转给别人。
 pub fn deliver_window(handle: &str, paths: &[String]) -> Result<(), String> {
+    deliver_window_at(handle, paths, None)
+}
+
+/// 2.2.2（E1）：带落点坐标的窗口拖入。`point` 是屏幕物理坐标（光标位置）。
+pub fn deliver_window_at(handle: &str, paths: &[String], point: Option<(i32, i32)>) -> Result<(), String> {
     validate_drop(paths)?;
     let target = {
         let book = book();
@@ -1114,17 +1385,34 @@ pub fn deliver_window(handle: &str, paths: &[String]) -> Result<(), String> {
         if !book.fresh(&rec.plugin, rec.generation) || rec.state != State::Ready || !rec.shown || rec.hidden_by_dock {
             return Err("窗口已关闭、隐藏或实例已变化，本次拖入已丢弃".into());
         }
-        (rec.plugin.clone(), rec.label.clone(), rec.handle.clone(), rec.generation)
+        (rec.plugin.clone(), rec.label.clone(), rec.handle.clone(), rec.generation, rec.rect)
     };
-    let (plugin, label, handle, generation) = target;
+    let (plugin, label, handle, generation, rect) = target;
     log(&format!("file drop -> {} path(s) for {plugin} window {}", paths.len(), short(&handle)));
-    let payload = json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"window","paths":paths});
+    let payload = json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"window","paths":paths,
+        "position":drop_position(point, rect)});
     emit(&plugin, generation, Some(&label), payload.clone());
-    notify_backend(&plugin, generation, json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"window","paths":paths}))
+    notify_backend(&plugin, generation, payload)
+}
+
+/// 2.2.2（E1）：落点坐标。`screen` 是物理像素；`client` 是相对这个窗口的物理像素
+/// （减去窗口原点），插件可直接用于页面内定位。拿不到任一值就整体给 null。
+fn drop_position(point: Option<(i32, i32)>, rect: Option<(i32, i32, i32, i32)>) -> Value {
+    let Some((x, y)) = point else { return Value::Null };
+    let client = rect.map(|(rx, ry, _, _)| json!({"x": x - rx, "y": y - ry}));
+    json!({
+        "screen": {"x": x, "y": y},
+        "client": client.unwrap_or(Value::Null),
+    })
 }
 
 /// 交付主 Dock 拖入：只给订阅者（独占）。没有订阅者时不上报，也不广播。
 pub fn deliver_dock(subscription: &str, paths: &[String]) -> Result<(), String> {
+    deliver_dock_at(subscription, paths, None)
+}
+
+/// 2.2.2（E1）：带落点坐标的主 Dock 拖入。
+pub fn deliver_dock_at(subscription: &str, paths: &[String], point: Option<(i32, i32)>) -> Result<(), String> {
     validate_drop(paths)?;
     let (plugin, generation, handle) = {
         let book = book();
@@ -1136,9 +1424,12 @@ pub fn deliver_dock(subscription: &str, paths: &[String]) -> Result<(), String> 
         return Err("订阅者的实例已变化，本次拖入已丢弃".into());
     }
     log(&format!("file drop -> {} path(s) for {plugin} dock", paths.len()));
-    let payload = json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"dock","paths":paths});
+    // 主 Dock 订阅没有对应窗口，`client` 以胶囊矩形为参照。
+    let capsule = app().ok().map(|app| crate::island::snapshot(&crate::shared(app)).capsule).flatten();
+    let payload = json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"dock","paths":paths,
+        "position":drop_position(point, capsule)});
     emit(&plugin, generation, None, payload.clone());
-    notify_backend(&plugin, generation, json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"dock","paths":paths}))
+    notify_backend(&plugin, generation, payload)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1272,6 +1563,166 @@ pub fn screens_changed() {
     rearrange(true);
 }
 
+// ---------------------------------------------------------------------------------------
+// 2.2.2：主岛几何与状态订阅（dock.onEvent）
+// ---------------------------------------------------------------------------------------
+
+/// 订阅了 `dock.onEvent` 的插件数。**这是「按需启用」的唯一开关**：
+/// 计数为 0 时主岛页面不上报任何东西（§1.3），因此不装插件、装了不启用、
+/// 或启用但没订阅的用户，新增代码一行都不执行。
+static DOCK_WATCHERS: AtomicUsize = AtomicUsize::new(0);
+/// 上一次推给插件的快照，用来去重：只在真的变了才发事件。
+static LAST_DOCK: Mutex<Option<crate::island::DockSnapshot>> = Mutex::new(None);
+
+/// 有没有插件在听主岛事件。主岛页面据此决定要不要上报（`island:watch-dock`）。
+pub fn dock_watchers() -> usize {
+    DOCK_WATCHERS.load(Ordering::SeqCst)
+}
+
+/// 订阅/退订 `dock.onEvent`。从 0 变 1 时通知页面开始上报，回到 0 时停止。
+fn watch_dock(add: bool) {
+    let before = if add {
+        DOCK_WATCHERS.fetch_add(1, Ordering::SeqCst)
+    } else {
+        let current = DOCK_WATCHERS.load(Ordering::SeqCst);
+        if current == 0 {
+            0
+        } else {
+            DOCK_WATCHERS.fetch_sub(1, Ordering::SeqCst) - 1
+        }
+    };
+    let after = DOCK_WATCHERS.load(Ordering::SeqCst);
+    // 只在跨过 0 边界时告诉页面：1 → 2 不必再说一次。
+    if (before == 0) != (after == 0) {
+        if after == 0 {
+            *LAST_DOCK.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        }
+        tell_page_watch(after > 0);
+    }
+}
+
+/// 告诉主岛页面开/关按需上报。页面未创建时静默失败（它起来后会自己问一次）。
+fn tell_page_watch(on: bool) {
+    let Ok(app) = app() else { return };
+    let _ = app.emit_to("island", "island:watch-dock", json!({"on": on}));
+}
+
+/// 主岛的几何或状态变了：重排锚定窗口，并把新快照推给订阅者。
+/// 由 `island.rs` 在胶囊尺寸、视图形态、stow、全屏避让变化时调用。
+pub fn dock_state_changed() {
+    let Ok(app) = app() else { return };
+    let shared = crate::shared(app);
+    let snapshot = crate::island::snapshot(&shared);
+    {
+        let mut last = LAST_DOCK.lock().unwrap_or_else(|p| p.into_inner());
+        if last.as_ref() == Some(&snapshot) {
+            return;
+        }
+        *last = Some(snapshot.clone());
+    }
+    rearrange(false);
+    broadcast_dock(&snapshot);
+}
+
+/// 把快照推给每个订阅了 dock 事件的插件（按所有者定向，不广播给没订阅的）。
+fn broadcast_dock(snapshot: &crate::island::DockSnapshot) {
+    let targets: Vec<(String, u64)> = {
+        let book = book();
+        book.dock_watchers.iter().filter(|(plugin, generation)| book.fresh(plugin, **generation)).map(|(plugin, generation)| (plugin.clone(), *generation)).collect()
+    };
+    if targets.is_empty() {
+        return;
+    }
+    let payload = json!({"event":"dock","type":"geometry","rect":dock_rect_value(snapshot)});
+    for (plugin, generation) in targets {
+        emit(&plugin, generation, None, payload.clone());
+        let _ = notify_backend(&plugin, generation, payload.clone());
+    }
+}
+
+/// 2.2.2（C5）：指针进入/离开主岛胶囊。由 `island.rs` 的轮询在跨边界时调用。
+pub fn dock_pointer_changed(on: bool) {
+    let targets: Vec<(String, u64)> = {
+        let book = book();
+        book.dock_watchers.iter().filter(|(plugin, generation)| book.fresh(plugin, **generation)).map(|(plugin, generation)| (plugin.clone(), *generation)).collect()
+    };
+    if targets.is_empty() {
+        return;
+    }
+    let payload = json!({"event":"dock","type":"pointer","action": if on {"enter"} else {"leave"}});
+    for (plugin, generation) in targets {
+        emit(&plugin, generation, None, payload.clone());
+        let _ = notify_backend(&plugin, generation, payload.clone());
+    }
+}
+
+/// 把快照整理成插件看到的形状。`window` 与 `capsule` 都是物理像素。
+pub fn dock_rect_value(snapshot: &crate::island::DockSnapshot) -> Value {
+    let rect = |value: Option<(i32, i32, i32, i32)>| match value {
+        Some((x, y, width, height)) => json!({"x":x,"y":y,"width":width,"height":height}),
+        None => Value::Null,
+    };
+    json!({
+        "window": rect(snapshot.window),
+        "capsule": rect(snapshot.capsule),
+        "state": {
+            "view": snapshot.view,
+            "stowed": snapshot.stowed,
+            "hidden": snapshot.hidden,
+            "fullscreen": snapshot.fullscreen,
+        },
+        "scale": snapshot.scale,
+    })
+}
+
+/// `dock.rect()`：读一次实时快照。页面与后端两条入口共用。
+fn dock_rect() -> Result<Value, String> {
+    let app = app()?;
+    let shared = crate::shared(app);
+    Ok(dock_rect_value(&crate::island::snapshot(&shared)))
+}
+
+/// 2.2.2：主岛几何/状态接口要求插件声明 `dock` 能力（只读，但与外部窗口
+/// 分开授权——不需要开窗的插件也能只要几何）。
+fn require_dock(context: &Context, plugin: &str) -> Result<(), String> {
+    let row = installed(context, plugin)?;
+    require_capability(&row, "dock", "插件未声明 dock 能力")
+}
+
+fn dock_rect_for(context: &Context, plugin: &str) -> Result<Value, String> {
+    require_dock(context, plugin)?;
+    dock_rect()
+}
+
+fn subscribe_dock_for(context: &Context, plugin: &str, generation: u64) -> Result<Value, String> {
+    require_dock(context, plugin)?;
+    subscribe_dock(plugin, generation)
+}
+
+/// `dock.onEvent(listener)` 的后端侧登记：订阅即计入 watcher。
+fn subscribe_dock(plugin: &str, generation: u64) -> Result<Value, String> {
+    {
+        let mut book = book();
+        if !book.fresh(plugin, generation) {
+            return Err("插件会话已撤销".into());
+        }
+        if book.dock_watchers.insert(plugin.to_string(), generation).is_some() {
+            // 同一个插件重复订阅：幂等，不再加计数。
+            return Ok(json!({"subscribed":true}));
+        }
+    }
+    watch_dock(true);
+    Ok(json!({"subscribed":true}))
+}
+
+fn unsubscribe_dock(plugin: &str) -> Result<Value, String> {
+    let removed = { book().dock_watchers.remove(plugin).is_some() };
+    if removed {
+        watch_dock(false);
+    }
+    Ok(json!({"subscribed":false}))
+}
+
 fn rearrange(include_screen: bool) {
     let targets: Vec<Rec> = { book().windows.values().filter(|rec| include_screen || rec.anchor != Anchor::Screen).cloned().collect() };
     if targets.is_empty() {
@@ -1389,7 +1840,7 @@ mod tests {
     #[test]
     fn options_carry_defaults_and_only_known_fields() {
         let parsed = options(json!({"key":"panel","page":"main"})).unwrap();
-        assert_eq!((parsed.width, parsed.height), (WIDTH_DEFAULT, HEIGHT_DEFAULT));
+        assert_eq!((parsed.width, parsed.height), (Width::Fixed(WIDTH_DEFAULT), HEIGHT_DEFAULT));
         assert_eq!(parsed.anchor, Anchor::DockBottom);
         assert_eq!((parsed.offset_x, parsed.offset_y), (0.0, 0.0));
         assert!(!parsed.transparent);
@@ -1420,13 +1871,13 @@ mod tests {
     // 配额与「同 key 复用」是两条独立判据：都必须在 BOOK 里成立。
     #[test]
     fn quota_is_per_plugin_and_global() {
-        let mut book = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false };
+        let mut book = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() };
         assert_eq!(book.per_plugin("acme.weather"), 0);
         for index in 0..PER_PLUGIN {
             book.windows.insert(format!("h{index}"), Rec {
                 handle: format!("h{index}"), plugin: "acme.weather".into(), digest: "d".into(), generation: 1, key: format!("k{index}"),
                 page: "main".into(), title: "t".into(), label: format!("plugin-win-{index}"), ticket: String::new(), url: String::new(),
-                anchor: Anchor::DockBottom, offset_x: 0.0, offset_y: 0.0, width: 420.0, height: 320.0, transparent: false,
+                anchor: Anchor::DockBottom, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal,
                 state: State::Ready, shown: true, hidden_by_dock: false, rect: None, drop: None,
             });
         }
@@ -1439,11 +1890,11 @@ mod tests {
     #[test]
     fn drop_routing_only_reaches_the_owner() {
         // 只有「订阅了 + 已就绪 + 显示着 + 代次还有效」的窗口才进命中区。
-        let mut book = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false };
+        let mut book = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() };
         let record = |handle: &str, drop: bool, state: State, shown: bool| Rec {
             handle: handle.into(), plugin: "acme.weather".into(), digest: "d".into(), generation: 1, key: handle.into(),
             page: "main".into(), title: "t".into(), label: format!("plugin-win-{handle}"), ticket: "t".into(), url: "u".into(),
-            anchor: Anchor::DockBottom, offset_x: 0.0, offset_y: 0.0, width: 420.0, height: 320.0, transparent: false,
+            anchor: Anchor::DockBottom, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal,
             state, shown, hidden_by_dock: false, rect: Some((10, 10, 100, 100)), drop: if drop { Some(format!("drop-{handle}")) } else { None },
         };
         book.windows.insert("a".into(), record("a", true, State::Ready, true));
@@ -1462,14 +1913,14 @@ mod tests {
         Rec {
             handle: String::new(), plugin: plugin.into(), digest: "digest".into(), generation: 1, key: key.into(),
             page: "main".into(), title: "面板".into(), label: String::new(), ticket: String::new(), url: String::new(),
-            anchor: Anchor::DockLeft, offset_x: 0.0, offset_y: 0.0, width: 420.0, height: 320.0, transparent: false,
+            anchor: Anchor::DockLeft, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal,
             state: State::Pending, shown: false, hidden_by_dock: false, rect: None, drop: None,
         }
     }
 
     #[test]
     fn reservation_is_atomic_for_duplicate_keys_and_quotas() {
-        let registry = std::sync::Arc::new(Mutex::new(Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false }));
+        let registry = std::sync::Arc::new(Mutex::new(Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() }));
         {
             let mut registry = registry.lock().unwrap();
             registry.sessions.insert("acme.notes".into(), 1);
@@ -1501,7 +1952,7 @@ mod tests {
 
     #[test]
     fn revoked_session_cannot_reserve_or_retire_its_replacement() {
-        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false };
+        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() };
         registry.sessions.insert("acme.notes".into(), 1);
         let first = registry.reserve(pending_record("acme.notes", "panel")).unwrap().0;
         assert_eq!(registry.retire("acme.notes", Some(1)).len(), 1);
@@ -1608,7 +2059,7 @@ mod tests {
         assert!(apply_update(&mut rec, &json!({"width":500,"height":-1})).is_err());
         assert_eq!(view(&rec), original, "后续字段无效时不得提前写入宽度");
         apply_update(&mut rec, &json!({"width":500,"height":260})).unwrap();
-        assert_eq!(rec.width, 500.0);
+        assert_eq!(rec.width, Width::Fixed(500.0));
         assert_eq!(rec.height, 260.0);
     }
 
@@ -1619,13 +2070,13 @@ mod tests {
         let second = Area { x:-1600, y:0, w:1600, h:900, sf:2.0, mon:(-1600,0,1600,960) };
         let screens = Screens { areas:vec![primary,second], primary:Some(primary) };
         let mut rec = pending_record("acme.notes", "panel");
-        let (_, _, width, height) = placement(&rec, &screens, Some((-800,100,400,60)), 1.0);
+        let (_, _, width, height) = placement(&rec, &screens, Some((-800,100,400,60)), None, 1.0);
         assert_eq!((width,height),(840,640), "目标屏幕 DPI 决定逻辑尺寸");
         let (x,y,iw,ih) = fit_outer(second, (-1000,800), (1600,900), (1616,939));
         assert_eq!((iw,ih),(1584,861), "工作区须扣除原生标题栏和边框");
         assert!(x>=second.x && y>=second.y && x+iw as i32+16<=second.x+second.w && y+ih as i32+39<=second.y+second.h);
-        rec.width=2400.0; rec.height=1600.0;
-        let (x,y,w,h) = placement(&rec, &screens, Some((-800,100,400,60)), 1.0);
+        rec.width = Width::Fixed(2400.0); rec.height=1600.0;
+        let (x,y,w,h) = placement(&rec, &screens, Some((-800,100,400,60)), None, 1.0);
         assert!(x>=second.x && y>=second.y && x+w<=second.x+second.w && y+h<=second.y+second.h, "超大窗口仍须包含在工作区: {:?}", (x,y,w,h));
     }
 
@@ -1637,18 +2088,18 @@ mod tests {
         let mut rec = pending_record("synthetic-screen", "panel");
         rec.anchor = Anchor::Screen; rec.offset_x = -800.0; rec.offset_y = 100.0;
         let before = Screens { areas:vec![primary,second], primary:Some(primary) };
-        let (x,_,w,_) = placement(&rec,&before,None,1.0);
+        let (x,_,w,_) = placement(&rec,&before,None,None,1.0);
         assert!(x < 0); assert_eq!(w,840);
         let smaller = Area { x:40, y:20, w:900, h:600, sf:1.5, mon:(0,0,960,720) };
         let after = Screens { areas:vec![smaller], primary:Some(smaller) };
-        let (x,y,w,h) = placement(&rec,&after,None,1.0);
+        let (x,y,w,h) = placement(&rec,&after,None,None,1.0);
         assert_eq!(w,630,"新屏幕 DPI 用于逻辑宽度");
         assert!(x>=smaller.x && y>=smaller.y && x+w<=smaller.x+smaller.w && y+h<=smaller.y+smaller.h);
     }
 
     #[test]
     fn reservation_inherits_dock_hidden_state() {
-        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::from([("acme.notes".into(), 1)]), outputs: BTreeMap::new(), dock_hidden: true };
+        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::from([("acme.notes".into(), 1)]), outputs: BTreeMap::new(), dock_hidden: true, dock_watchers: BTreeMap::new() };
         let rec = registry.reserve(pending_record("acme.notes", "panel")).unwrap().0;
         assert!(rec.hidden_by_dock);
         assert!(!rec.shown);
@@ -1659,7 +2110,7 @@ mod tests {
         let rec = Rec {
             handle: "h".into(), plugin: "acme.weather".into(), digest: "d".into(), generation: 7, key: "panel".into(),
             page: "main".into(), title: "面板".into(), label: "plugin-win-9".into(), ticket: "secret-ticket".into(), url: "http://plugin/page".into(),
-            anchor: Anchor::DockLeft, offset_x: 8.0, offset_y: 0.0, width: 500.0, height: 240.0, transparent: true,
+            anchor: Anchor::DockLeft, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 8.0, offset_y: 0.0, width: Width::Fixed(500.0), height: 240.0, transparent: true, z_order: ZOrder::Normal,
             state: State::Ready, shown: true, hidden_by_dock: false, rect: None, drop: None,
         };
         let view = view(&rec);
@@ -1681,5 +2132,124 @@ mod tests {
         for path in &paths {
             assert!(!line.contains(path), "日志不许出现完整路径");
         }
+    }
+
+    // -----------------------------------------------------------------------------------
+    // 2.2.2 新增能力的验收
+    // -----------------------------------------------------------------------------------
+
+    // B1：下限降到 32×32，36 px 的球终于能做成窗口；但仍拒绝 31 与 0。
+    #[test]
+    fn tiny_windows_are_accepted_down_to_32() {
+        let ok = Options::parse(&json!({"key":"ball","page":"main","width":36.0,"height":36.0})).unwrap();
+        assert_eq!((ok.width, ok.height), (Width::Fixed(36.0), 36.0), "36 px 球必须能建窗");
+        for bad in [json!({"key":"ball","page":"main","width":31.0}), json!({"key":"ball","page":"main","height":0.0})] {
+            assert!(Options::parse(&bad).is_err(), "小于 32 仍须拒绝: {bad}");
+        }
+    }
+
+    // C4：width:'dock' 取胶囊宽度；maxWidth 只能放宽不能收紧。
+    #[test]
+    fn dock_width_follows_the_capsule_and_max_only_grows() {
+        // 胶囊 300 逻辑像素：等宽就是 300（不走默认值）。
+        assert_eq!(Width::Dock { max: None }.resolve(Some(300.0)), 300.0);
+        // 给了上限 600：当前胶囊 300 仍按胶囊算，不会自己变宽。
+        assert_eq!(Width::Dock { max: Some(600.0) }.resolve(Some(300.0)), 300.0);
+        // 上限小于胶囊时必须按胶囊算——语义是「可增长到」，不能缩到比胶囊还窄。
+        assert_eq!(Width::Dock { max: Some(100.0) }.resolve(Some(300.0)), 300.0);
+        // 胶囊尺寸未知（页面还没上报）时回落到默认宽度，绝不塌成 0。
+        assert_eq!(Width::Dock { max: None }.resolve(None), WIDTH_DEFAULT);
+        // 固定宽度不受胶囊影响。
+        assert_eq!(Width::Fixed(420.0).resolve(Some(300.0)), 420.0);
+    }
+
+    // C4：open 与 update 都接受 'dock'，view 对外报 "dock" 而不是数字。
+    #[test]
+    fn dock_width_round_trips_through_options_and_view() {
+        let options = Options::parse(&json!({"key":"bar","page":"main","width":"dock","maxWidth":600,"height":240})).unwrap();
+        assert_eq!(options.width, Width::Dock { max: Some(600.0) });
+        let mut rec = pending_record("acme.notes", "bar");
+        rec.width = options.width;
+        assert_eq!(view(&rec)["width"], "dock", "插件要能看出宿主接管了宽度");
+        assert_eq!(view(&rec)["maxWidth"], 600.0);
+        // update 也能切回固定宽度。
+        validate_update(&mut rec, &json!({"width":500})).unwrap();
+        assert_eq!(rec.width, Width::Fixed(500.0));
+        assert_eq!(view(&rec)["width"], 500.0);
+    }
+
+    // B2：align 的八种组合把窗口左上角放在锚点的正确方位上。
+    #[test]
+    fn align_places_the_window_on_the_right_corner() {
+        let point = (100, 200);
+        let size = (40, 20);
+        assert_eq!(Align::RightTop.offset(point, size), (60, 200));
+        assert_eq!(Align::RightCenter.offset(point, size), (60, 190));
+        assert_eq!(Align::RightBottom.offset(point, size), (60, 180));
+        assert_eq!(Align::LeftTop.offset(point, size), (100, 200));
+        assert_eq!(Align::LeftCenter.offset(point, size), (100, 190));
+        assert_eq!(Align::LeftBottom.offset(point, size), (100, 180));
+        assert_eq!(Align::TopCenter.offset(point, size), (80, 200));
+        assert_eq!(Align::BottomCenter.offset(point, size), (80, 180));
+    }
+
+    // B2：不写 align / anchorBase 时，位置必须与 2.2.1 完全一致（向后兼容）。
+    #[test]
+    fn default_align_reproduces_the_2_2_1_position() {
+        let options = Options::parse(&json!({"key":"panel","page":"main","width":160,"height":80})).unwrap();
+        assert_eq!(options.align, Align::LeftTop, "dock-bottom 缺省沿用 2.2.1 的左下角");
+        assert_eq!(options.anchor_base, AnchorBase::Window, "缺省仍锚主岛窗口，不是胶囊");
+        let left = Options::parse(&json!({"key":"panel","page":"main","width":160,"height":80,"anchor":"dock-left"})).unwrap();
+        assert_eq!(left.align, Align::RightCenter, "dock-left 缺省沿用 2.2.1 的右缘居中");
+    }
+
+    // B2：anchorBase:'capsule' 时以胶囊为准，胶囊未知则回落到窗口。
+    #[test]
+    fn capsule_base_uses_the_capsule_and_falls_back_to_the_window() {
+        use crate::screen::{Area, Screens};
+        let primary = Area { x:0, y:0, w:1920, h:1040, sf:1.0, mon:(0,0,1920,1080) };
+        let screens = Screens { areas:vec![primary], primary:Some(primary) };
+        let mut rec = pending_record("acme.notes", "ball");
+        rec.width = Width::Fixed(36.0); rec.height = 36.0;
+        rec.anchor = Anchor::DockLeft; rec.align = Align::RightCenter; rec.anchor_base = AnchorBase::Capsule;
+        // 主岛窗口铺满工作区；胶囊只有 300 宽、位于 810..1110，顶边 y=8。
+        // dock-left 的锚点是基准左缘的中点：胶囊 (810, 8+36/2) = (810, 26)。
+        // 窗口高 36 与胶囊等高时，RightCenter 恰好把球顶对齐胶囊顶：y = 26-18 = 8。
+        let window = Some((0, 0, 1920, 132));
+        let capsule = Some((810, 8, 300, 36));
+        let (x, y, _, _) = placement(&rec, &screens, window, capsule, 1.0);
+        assert_eq!((x, y), (774, 8), "球右缘贴胶囊左缘、球顶贴胶囊顶：810-36=774, 26-18=8");
+        // 换成 RightTop 则贴的是锚点本身（胶囊左缘中点），y 就是 26。
+        rec.align = Align::RightTop;
+        assert_eq!(placement(&rec, &screens, window, capsule, 1.0).1, 26, "RightTop 贴锚点本身");
+        // 胶囊尺寸还没上报：回落到主岛窗口，行为等于 2.2.1。窗口左缘在 0，
+        // 窗口宽 36 时算出的 x = 0-36 = -36，随后被工作区约束夹回左缘 0。
+        rec.align = Align::RightCenter;
+        let (fallback_x, fallback_y, _, _) = placement(&rec, &screens, window, None, 1.0);
+        assert_eq!(fallback_x, 0, "没有胶囊时按窗口左缘算，再被工作区夹回左缘");
+        assert_eq!(fallback_y, 48, "垂直按窗口 132 高中点 66 再减半高 18");
+    }
+
+    // C1：快照把两个矩形分开给，且视图形态未上报时按 compact 算。
+    #[test]
+    fn dock_snapshot_reports_window_and_capsule_separately() {
+        let snapshot = crate::island::DockSnapshot {
+            window: Some((0, 0, 1920, 132)),
+            capsule: Some((810, 8, 300, 36)),
+            view: "expanded",
+            stowed: false,
+            hidden: false,
+            fullscreen: false,
+            scale: 1.0,
+        };
+        let value = dock_rect_value(&snapshot);
+        assert_eq!(value["window"]["width"], 1920, "窗口矩形是工作区宽");
+        assert_eq!(value["capsule"]["width"], 300, "胶囊矩形是可见宽度");
+        assert_eq!(value["capsule"]["x"], 810);
+        assert_eq!(value["state"]["view"], "expanded");
+        assert_eq!(value["state"]["stowed"], false);
+        // 胶囊未知时给 null，不给一个假矩形（2.2.0 起就不再兜底 500×36）。
+        let unknown = crate::island::DockSnapshot { capsule: None, ..snapshot };
+        assert!(dock_rect_value(&unknown)["capsule"].is_null());
     }
 }
