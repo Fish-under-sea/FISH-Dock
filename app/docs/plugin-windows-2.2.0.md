@@ -219,37 +219,43 @@ export default createPlugin({
 
 ## 10. 已知缺口（issue #87 逐条核对）
 
-下表是 2.2.1 的实际能力边界，按 [issue #87](https://github.com/Fish-under-sea/FISH-Dock/issues/87) 的编号排列。
-「结论」一列区分**实现缺失**（规范写了、代码没有）与**规范未提供**（需要新增）。
+下表按 [issue #87](https://github.com/Fish-under-sea/FISH-Dock/issues/87) 的编号排列。「2.2.2」列标 ✅ 的是 2.2.2 已补齐的项，详见 `release-2.2.2.md`。
 
-| 编号 | 结论 | 现状与依据 |
+| 编号 | 2.2.2 | 结论与依据 |
 | --- | --- | --- |
-| A1 SDK 缺 `onEvent` | 与实现不符 | `sdk/node/plugin.mjs:79`、`:91` 均有；2.2.0 起就有。旧行号对应 2.1.9 的 SDK |
-| A2 强制 `events` 能力 | 与实现不符 | `:140` 的检查只作用于 `plugin.event`；窗口与拖入走 `plugin.windowEvent`（`:145-158`），按 `windows`/`file-drop` 放行 |
-| A3 载荷缺 `scope`/`handle` | 与实现不符 | `plugin_window.rs:1074`/`:1082`/`:1089`/`:1121`/`:1139` 五个载荷都带 `scope` 与 `handle`，`enter`/`leave` 已实现 |
-| A4 插件窗口不是 drop target | 与实现不符 | `dropwin.rs:83-89` 命中区含 `drop_rects()`；`:407`、`:413-419` 测试钉住层级与遮挡 |
-| B1 更小窗口 / `fitContent` | 实现缺失 | `plugin_window.rs:34-37`：宽 ≥160、高 ≥80 |
-| B2 锚点对齐语义 | 实现缺失 | 见 §7.1 |
-| B3 drag-out | 规范未提供 | 无接口 |
-| B4 透明区点击穿透 | 实现缺失 | `transparent` 只改窗口样式（`:532-533`），无逐像素命中 |
-| B5 内容驱动高度 | 部分 | `update(handle,{height})` 可用，无 `fitContent` |
-| C1 读主岛几何 | 规范未提供 | 无 `dock.rect()` |
-| C2 订阅主岛几何/状态 | 规范未提供 | 事件表只有四个事件 |
-| C3 `dock-left` 随主岛重排 | 机制在但不生效 | 见 §7.2 |
-| C4 `width:'dock'` | 规范未提供 | 宽度只能固定值 |
-| C5 主岛交互 → 子岛收缩 | 规范未提供 | 无主岛 hover/click 事件 |
-| D1/D2 打开内部插件页 | 规范未提供 | 页面桥白名单见 `plugin_page.rs:80-110` |
-| E1 落点坐标 | 规范未提供 | `drop` 载荷无 `position` |
-| E2 失焦/点外部 | 规范未提供 | `window_event`（`:629-643`）不向上发焦点事件 |
-| E3 完整状态枚举 | 规范未提供 | 依赖 C1/C2 |
-| E4 动画期间胶囊矩形 | 规范未提供 | 见 §7.2 |
-| E5 长条等宽 | 与 C4 同一项 | 合并处理 |
-| E6 room 预留与 z-order | 部分 | 主岛 room 是页面→宿主（`island.rs:79`、`:1313-1321`），插件无法申报；无 `zOrder` |
-| E7 跨窗口动画 | 规范未提供 | 无全屏动画层 |
+| A1 SDK 缺 `onEvent` | — | 与实现不符：`sdk/node/plugin.mjs:79`、`:91` 自 2.2.0 起就有 |
+| A2 强制 `events` 能力 | — | 与实现不符：检查只作用于 `plugin.event`；窗口与拖入走 `plugin.windowEvent` |
+| A3 载荷缺 `scope`/`handle` | — | 与实现不符：五个载荷都带 `scope` 与 `handle` |
+| A4 插件窗口不是 drop target | — | 与实现不符：`dropwin.rs` 命中区含 `drop_rects()` |
+| B1 更小窗口 | ✅ | 下限降到 32×32；仍无 `fitContent` |
+| B2 锚点对齐 | ✅ | 新增 `align`（八种）与 `anchorBase`（window/capsule）；缺省保持 2.2.1 |
+| B3 drag-out | ❌ | 无接口（OLE 源侧未实现） |
+| B4 透明区点击穿透 | ❌ | 无逐像素命中；`transparent` 仍只改窗口样式 |
+| B5 内容驱动高度 | ⚠️ | `windows.update({height})` 可用，无 `fitContent` |
+| C1 读主岛几何 | ✅ | `dock.rect()` 同时返回窗口与胶囊矩形、状态枚举 |
+| C2 订阅主岛几何/状态 | ✅ | `dock.onEvent`，`type:'geometry'` |
+| C3 `dock-left` 随主岛重排 | ✅ | 重排触发源从主岛窗口矩形改为胶囊矩形 |
+| C4 `width:'dock'` | ✅ | 绑胶囊宽度，`maxWidth` 表达可增长上限 |
+| C5 主岛指针事件 | ✅ | `dock.onEvent` 的 `type:'pointer'`（宿主轮询光标判胶囊命中） |
+| D1/D2 打开内部插件页 | ❌ | 页面桥白名单仍无开页入口 |
+| E1 落点坐标 | ✅ | `drop` 载荷新增 `position.{screen,client}` |
+| E2 失焦/点外部 | ⚠️ | 新增 `focus`/`blur`（本窗口焦点）；「点窗口外部」仍拿不到 |
+| E3 完整状态枚举 | ✅ | `compact`/`expanded`/`settings`/`ask` + `stowed`/`hidden`/`fullscreen` |
+| E4 动画期间胶囊矩形 | ❌ | 滑出是页面内 transform；只在 `stowed` 切换时推一次状态 |
+| E5 长条等宽 | ✅ | 与 C4 同一项，已随 C4 解决 |
+| E6 z-order | ⚠️ | 新增 `zOrder:'above-dock'`；room 申报仍不做 |
+| E7 跨窗口动画 | ❌ | 不支持，建议改为窗口内动画 |
 
 A 组四条不是「实现缺失」，核对基准不同：A1/A2 引用的行号属于 2.1.9 的 SDK，
 A3/A4 引用的 `island_panel.rs` 在本仓任何版本都不存在（`forward_drop_all` 也是 0 命中），
 实际代码在 `plugin_window.rs` 与 `dropwin.rs`。
+
+### 10.1 2.2.2 新增接口的宿主侧约束
+
+- **按需启用**：`DOCK_WATCHERS` 计数为 0 时，主岛页面不上报任何东西。不装插件、装了不启用、启用但没订阅 `dock.onEvent` 的用户，新增代码一行都不执行。
+- **快照比较**：`dock_state_changed()` 先与 `LAST_DOCK` 比较，没变直接返回，避免重复重排与重复推送。
+- **能力**：`dock.rect` / `dock.onEvent` 要求清单声明 `dock` 能力（与 `windows` 分开）。
+- **作用对象**：所有改动只作用于插件窗口；`plugin_window.rs` 对主岛窗口只有读取（`:place` 与 `dock_changed`），没有任何 `set_size`/`set_position`。
 
 ## 11. 未在本轮验证的部分
 

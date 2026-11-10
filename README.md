@@ -12,7 +12,7 @@
 </picture>
 
 <p>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark-v221.png"><img src="assets/readme/stat-version-zh-light-v221.png" alt="VERSION：当前版本 2.2.1" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.2"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark-v221.png"><img src="assets/readme/stat-version-zh-light-v221.png" alt="VERSION：当前版本 2.2.1" width="23%"></picture></a>
   <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
   <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
@@ -23,7 +23,7 @@
 
 <p>
   <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="app/docs/release-2.2.1.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
+  <a href="app/docs/release-2.2.2.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
@@ -76,22 +76,24 @@
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器与插件管理。
 
-- **2.2.1**：修复 WebView2 正在更新时启动崩溃，清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。仅发布 Setup。[完整说明](app/docs/release-2.2.1.md)。
+- **2.2.1**：修复 WebView2 正在更新时启动崩溃，清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。仅发布 Setup。[完整说明](app/docs/release-2.2.2.md)。
 - **2.2.0**：插件通过 Hook 按需请求 Dock 外部原生窗口，自行绘制业务界面；无请求不创建第二窗口。移除硬编码暂存条与常驻小球，应用内更新改用 Setup。**本版最后一次同时发布 Setup 和 Update，之后仅发布 Setup。** [完整说明](app/docs/release-2.2.0.md)。
 - **2.1.9**：改用系统 Evergreen WebView2，安装事务清理旧随包运行时并保留用户资料。[完整说明](app/docs/release-2.1.9.md)。
 - **2.1.8**：修复 Clash 退出后的系统代理恢复，并补充宿主代理自愈。[完整说明](app/docs/release-2.1.8.md)。
+
+- **2.2.2**：补齐外部原生窗口 Hook：主岛几何/状态读取与订阅、窗口宽度跟随胶囊、锚点对齐语义、窗口下限降到 32×32、拖入落点坐标、窗口焦点事件、`zOrder`。**主岛外观不变**，新增上报按需启用。仅发布 Setup。[完整说明](app/docs/release-2.2.2.md)。
 
 更早版本及完整变更见 [发行记录](https://github.com/Fish-under-sea/FISH-Dock/releases)。
 
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark-v3.png"><img src="assets/readme/section-install-light-v3.png" alt="INSTALL · 安装" width="100%"></picture></h2>
 
-**FISH Dock 2.2.1** 只提供完整安装包 Setup；2.2.0 是最后一个同时提供 Update 精简更新包的版本。下载及校验文件见 [v2.2.1 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1)。
+**FISH Dock 2.2.2** 只提供完整安装包 Setup；2.2.0 是最后一个同时提供 Update 精简更新包的版本。下载及校验文件见 [v2.2.2 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.2)。
 
 | 安装包 | 使用场景 |
 | --- | --- |
-| `FISH-Dock-Setup-2.2.1.exe` | 首次安装、修复安装、2.2.0 应用内更新及旧版覆盖升级，含 Node.js；**需系统已安装 Evergreen WebView2**，缺失时提示官方下载页并退出，不自动安装依赖。 |
+| `FISH-Dock-Setup-2.2.2.exe` | 首次安装、修复安装、2.2.0 应用内更新及旧版覆盖升级，含 Node.js；**需系统已安装 Evergreen WebView2**，缺失时提示官方下载页并退出，不自动安装依赖。 |
 
-1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1) 下载安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
+1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.2) 下载安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源，不再弹出随包固定版 WebView2 的许可确认。
 3. 打开「插件」页，点击「GitHub 登录」。Dock 内弹窗显示验证码及实际复制结果；在系统浏览器中粘贴并确认，Dock 自动检查授权。等待期间可单独解除临时锁定／置顶，也可取消验证。旧版账号若未保存续期凭据，升级后需重新登录一次；新授权随后自动续期。
 4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
