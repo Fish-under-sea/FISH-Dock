@@ -310,6 +310,8 @@
   // 走的是与 2.2.1 完全相同的路径。
   let watchDock = false
   let lastSentView = ''
+  // 2.2.3（E4）：滑出动画逐帧上报的时长。transition 是 220ms，多留尾巴。
+  const CAPSULE_TRACK_MS = 320
   let clockTimer
   let blinkTimer
   let herClip = null
@@ -1363,7 +1365,36 @@
     }
     // The blur under it goes with it, and comes back once it is down, the
     // ground as solid as DEEP_OP till then, as when it opens.
-    if (on !== was) placePlate(!on)
+    if (on !== was) {
+      placePlate(!on)
+      // 2.2.3（E4）：滑出/滑回是页面内的 CSS transform，宿主窗口不动，
+      // 所以光靠 anchorChanged 跟不到胶囊。动画这一小段里逐帧把胶囊外框报上去，
+      // 订阅者才能真的「跟手」。没有插件在听时一行都不执行。
+      if (watchDock) trackCapsule()
+    }
+  }
+
+  // 动画期间逐帧上报胶囊外框（页面视口坐标）。CSS transition 是 220ms，
+  // 多留一点尾巴，结束后报一次 null 让宿主回到自己的算法。
+  let capsuleTrack = 0
+  function trackCapsule() {
+    const start = performance.now()
+    if (!capsuleTrack) {
+      const step = () => {
+        if (!watchDock) { capsuleTrack = 0; window.pet.capsuleRect(null); return }
+        const row = document.getElementById('island-row') || island
+        const rect = row.getBoundingClientRect()
+        window.pet.capsuleRect({ x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+        if (performance.now() - start < CAPSULE_TRACK_MS) {
+          capsuleTrack = requestAnimationFrame(step)
+        } else {
+          capsuleTrack = 0
+          // 动画结束：交还给宿主的 closed_rect，避免停在最后一帧。
+          window.pet.capsuleRect(null)
+        }
+      }
+      capsuleTrack = requestAnimationFrame(step)
+    }
   }
 
   window.pet.onUnder(({ on } = {}) => {

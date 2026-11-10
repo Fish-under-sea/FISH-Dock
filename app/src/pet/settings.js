@@ -3615,6 +3615,10 @@
       partToShow = next
     } else if (TABS.includes(next)) {
       tab = next
+    } else if (extensionPanel.pages().some(page => page.key === next)) {
+      // 2.2.3（D2）：外部窗口通过 dock.openPage 请求打开本插件的内部页。
+      // key 与 ExtensionPanel.pages() 同形（pluginId/pageId），直接当标签页用。
+      tab = next
     }
     const wasOpen = isOpen
     const revision = ++openRevision

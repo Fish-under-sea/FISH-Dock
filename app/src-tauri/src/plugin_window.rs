@@ -14,7 +14,7 @@
 //! 等页面就绪用 Condvar 的 `wait_timeout`（等待时释放 BOOK），创建/关闭都由别的
 //! 线程推进，不会出现「持锁等自己」。
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
@@ -37,6 +37,9 @@ const HEIGHT_MIN: f64 = 32.0;
 const HEIGHT_MAX: f64 = 1600.0;
 const OFFSET_LIMIT: f64 = 20000.0;
 const WIDTH_DEFAULT: f64 = 420.0;
+/// 2.2.3（B4）：一个窗口最多几块可点区域。够长条上排几十个 chip，又不至于让
+/// 命中判定变成 CPU 热点。
+const MAX_HIT_RECTS: usize = 256;
 const HEIGHT_DEFAULT: f64 = 320.0;
 
 /// 2.2.2（B2）：窗口的哪条边/角贴住锚点。
@@ -138,6 +141,31 @@ impl ZOrder {
     }
 }
 
+/// 2.2.3（B4）：窗口的鼠标命中方式。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HitTest {
+    /// 2.2.1 的行为：整块窗口矩形都接住鼠标（透明像素也接）。
+    Window,
+    /// 只接住 `hitRects` 给的区域，其余穿过去点到下面的主岛或桌面。
+    Opaque,
+}
+
+impl HitTest {
+    fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "window" => Self::Window,
+            "opaque" => Self::Opaque,
+            _ => return None,
+        })
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::Window => "window",
+            Self::Opaque => "opaque",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor {
     DockLeft,
@@ -207,6 +235,10 @@ pub struct Options {
     pub transparent: bool,
     /// 2.2.2（E6）：'normal' 或 'above-dock'（置顶，压在主岛之上）。
     pub z_order: ZOrder,
+    /// 2.2.3（B4）：命中方式。'opaque' 时只接住 `hit_rects` 给的区域。
+    pub hit_test: HitTest,
+    /// 可点区域（页面逻辑像素 x,y,w,h）。空表示整窗可点。
+    pub hit_rects: Vec<[f64; 4]>,
 }
 
 fn finite(value: &Value) -> Option<f64> {
@@ -223,7 +255,7 @@ impl Options {
     pub fn parse(params: &Value) -> Result<Self, String> {
         let object = params.as_object().ok_or("插件窗口参数应为对象")?;
         for name in object.keys() {
-            if !["key", "page", "title", "width", "height", "anchor", "offsetX", "offsetY", "transparent", "maxWidth", "align", "anchorBase", "zOrder"].contains(&name.as_str()) {
+            if !["key", "page", "title", "width", "height", "anchor", "offsetX", "offsetY", "transparent", "maxWidth", "align", "anchorBase", "zOrder", "hitTest", "hitRects"].contains(&name.as_str()) {
                 return Err("插件窗口参数含未知字段".into());
             }
         }
@@ -322,7 +354,36 @@ impl Options {
             None => ZOrder::Normal,
             Some(value) => value.as_str().and_then(ZOrder::parse).ok_or("插件窗口 zOrder 只支持 normal、above-dock")?,
         };
-        Ok(Self { key: key.into(), page: page.into(), title, width, height, anchor, align, anchor_base, offset_x, offset_y, transparent, z_order })
+        let hit_test = match object.get("hitTest") {
+            None => HitTest::Window,
+            Some(value) => value.as_str().and_then(HitTest::parse).ok_or("插件窗口 hitTest 只支持 window、opaque")?,
+        };
+        // 区域一律按逻辑像素收：取值必须是有限数，免得一个 NaN 让命中判定恒假。
+        let hit_rects = match object.get("hitRects") {
+            None => Vec::new(),
+            Some(value) => {
+                let list = value.as_array().ok_or("插件窗口 hitRects 应为矩形数组")?;
+                if list.len() > MAX_HIT_RECTS { return Err(format!("插件窗口 hitRects 最多 {MAX_HIT_RECTS} 块")); }
+                let mut rects = Vec::with_capacity(list.len());
+                for item in list {
+                    let parts = item.as_array().ok_or("插件窗口 hitRects 的每一项应为 [x,y,w,h]")?;
+                    if parts.len() != 4 { return Err("插件窗口 hitRects 的每一项应为 [x,y,w,h]".into()); }
+                    let mut rect = [0.0f64; 4];
+                    for (i, part) in parts.iter().enumerate() {
+                        rect[i] = part.as_f64().filter(|v| v.is_finite()).ok_or("插件窗口 hitRects 含非有限数")?;
+                    }
+                    if rect[2] <= 0.0 || rect[3] <= 0.0 { return Err("插件窗口 hitRects 的宽高必须为正".into()); }
+                    rects.push(rect);
+                }
+                rects
+            }
+        };
+        if hit_test == HitTest::Opaque && hit_rects.is_empty() {
+            // 说好了只命中不透明区却没给区域：按「整窗可点」处理太意外，
+            // 按「全穿透」又会让窗口点不到。直接拒绝，让插件给出区域。
+            return Err("插件窗口 hitTest:'opaque' 需要同时给出 hitRects".into());
+        }
+        Ok(Self { key: key.into(), page: page.into(), title, width, height, anchor, align, anchor_base, offset_x, offset_y, transparent, z_order, hit_test, hit_rects })
     }
 }
 
@@ -362,6 +423,9 @@ struct Rec {
     transparent: bool,
     /// 2.2.2（E6）：窗口层级。
     z_order: ZOrder,
+    /// 2.2.3（B4）：命中方式与可点区域；`Window` 时不登记任何规则。
+    hit_test: HitTest,
+    hit_rects: Vec<[f64; 4]>,
     state: State,
     /// 窗口当前是否显示（被 Dock 全局隐藏时为 false）。
     shown: bool,
@@ -387,8 +451,6 @@ struct Book {
     sessions: BTreeMap<String, u64>,
     outputs: BTreeMap<String, std::sync::mpsc::SyncSender<Value>>,
     dock_hidden: bool,
-    /// 2.2.2：订阅了主岛几何/状态事件的插件 → 代次。空表示没人听。
-    dock_watchers: BTreeMap<String, u64>,
 }
 
 impl Book {
@@ -433,7 +495,7 @@ impl Book {
     }
 }
 
-static BOOK: Mutex<Book> = Mutex::new(Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() });
+static BOOK: Mutex<Book> = Mutex::new(Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false });
 /// 上一次看到的 Dock 外框：变了才重排锚定窗口（主岛的移动/尺寸事件很密）。
 static DOCK_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
 static READY: Condvar = Condvar::new();
@@ -452,7 +514,7 @@ pub fn install(app: AppHandle) {
     let _ = MAIN.set(std::thread::current().id());
 }
 
-fn app() -> Result<&'static AppHandle, String> {
+pub(crate) fn app_handle() -> Result<&'static AppHandle, String> {
     APP.get().ok_or_else(|| "宿主窗口服务尚未就绪".to_string())
 }
 
@@ -491,7 +553,7 @@ where
     R: Send + 'static,
     F: FnOnce() -> R + Send + 'static,
 {
-    let app = app()?.clone();
+    let app = app_handle()?.clone();
     if MAIN.get() == Some(&std::thread::current().id()) {
         return Ok(work());
     }
@@ -509,7 +571,7 @@ fn post_main<F>(work: F)
 where
     F: FnOnce() + Send + 'static,
 {
-    let Ok(app) = app() else { return };
+    let Ok(app) = app_handle() else { return };
     let app = app.clone();
     if MAIN.get() == Some(&std::thread::current().id()) {
         work();
@@ -589,11 +651,12 @@ pub fn page(plugin: &str, digest: &str, generation: u64, _host: &str, method: &s
         "dock.windows.update" => update(&context, plugin, generation, params),
         "dock.windows.close" => close_owned(plugin, generation, params, "plugin"),
         "dock.windows.list" => list(&context, plugin, generation),
-        "dock.fileDrop.subscribe" => subscribe(&context, plugin, generation, params),        "dock.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
-        // 2.2.2：主岛几何与状态（只读接口 + 事件订阅）
-        "dock.dock.rect" => { let context = crate::storage_context::current().ok_or("存储尚未就绪")?; dock_rect_for(&context, plugin) },
-        "dock.dock.subscribe" => { let context = crate::storage_context::current().ok_or("存储尚未就绪")?; subscribe_dock_for(&context, plugin, generation) },
-        "dock.dock.unsubscribe" => unsubscribe_dock(plugin),
+        // 2.2.3（B3）：页面里拖动文件出去
+        "dock.windows.beginDragOut" => begin_drag_out(plugin, generation, params),
+        "dock.fileDrop.subscribe" => subscribe(&context, plugin, generation, params),
+        "dock.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
+        // 2.2.2：主岛几何与状态归 plugin_dock，窗口模块只做转发。
+        "dock.dock.rect" | "dock.dock.subscribe" | "dock.dock.unsubscribe" | "dock.dock.openPage" => crate::plugin_dock::page(plugin, method, params),
         _ => Err("插件窗口方法无效".into()),
     }
 }
@@ -610,10 +673,11 @@ pub fn backend(context: &Context, plugin: &str, generation: u64, method: &str, p
         "host.windows.update" => update(context, plugin, generation, params),
         "host.windows.close" => close_owned(plugin, generation, params, "plugin"),
         "host.windows.list" => list(context, plugin, generation),
-        "host.fileDrop.subscribe" => subscribe(context, plugin, generation, params),        "host.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
-        "host.dock.rect" => dock_rect_for(context, plugin),
-        "host.dock.subscribe" => subscribe_dock_for(context, plugin, generation),
-        "host.dock.unsubscribe" => unsubscribe_dock(plugin),
+        "host.fileDrop.subscribe" => subscribe(context, plugin, generation, params),
+        "host.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
+        "host.dock.rect" | "host.dock.subscribe" | "host.dock.unsubscribe" | "host.dock.openPage" => crate::plugin_dock::backend(context, plugin, generation, method, params),
+        // 2.2.3（B3）：把本窗口里的文件拖回资源管理器。
+        "host.windows.beginDragOut" => begin_drag_out(plugin, generation, params),
         _ => Err("插件窗口方法无效".into()),
     }
 }
@@ -638,7 +702,7 @@ fn open(context: &Context, plugin: &str, digest: &str, generation: u64, params: 
         key: options.key.clone(), page: options.page.clone(), title,
         label: String::new(), ticket: String::new(), url: String::new(),
         anchor: options.anchor, align: options.align, anchor_base: options.anchor_base, offset_x: options.offset_x, offset_y: options.offset_y,
-        width: options.width, height: options.height, transparent: options.transparent, z_order: options.z_order,
+        width: options.width, height: options.height, transparent: options.transparent, z_order: options.z_order, hit_test: options.hit_test, hit_rects: options.hit_rects.clone(),
         state: State::Pending, shown: false, hidden_by_dock: false, rect: None, drop: None,
     })?;
     let (handle, label) = (reserved.handle, reserved.label);
@@ -709,7 +773,7 @@ fn build(handle: &str) -> Result<(), String> {
         let book = book();
         book.windows.get(handle).cloned().ok_or_else(|| "窗口记录已消失".to_string())?
     };
-    let app = app()?.clone();
+    let app = app_handle()?.clone();
     on_main(move || -> Result<(), String> {
         if !book().windows.contains_key(&snapshot.handle) { return Err("窗口创建已取消".into()); }
         let win = WebviewWindowBuilder::new(&app, &snapshot.label, WebviewUrl::App("window/window.html".into()))
@@ -736,6 +800,15 @@ fn build(handle: &str) -> Result<(), String> {
             return Err("窗口创建已取消".into());
         }
         if let Err(error) = place(&win, &snapshot) { let _ = win.destroy(); return Err(error); }
+        // 2.2.3（B4）：只有 hitTest:'opaque' 的窗口才登记命中规则。
+        // 其余窗口连登记都不做，plugin_hit 的规则表为空 → 主循环不会调 poll，
+        // 与 2.2.2 的指针节奏一模一样。
+        if snapshot.hit_test == HitTest::Opaque {
+            crate::plugin_hit::watch(&snapshot.label, snapshot.hit_rects.clone());
+            if let Some(rect) = geometry_of(&win) {
+                crate::plugin_hit::place(&snapshot.label, Some(rect), win.scale_factor().unwrap_or(1.0));
+            }
+        }
         Ok(())
     })?
 }
@@ -898,6 +971,9 @@ fn geometry_changed(win: &WebviewWindow) {
         let book = book();
         book.windows.values().find(|rec| rec.label == label).map(|rec| (rec.plugin.clone(), rec.generation))
     };
+    // 2.2.3（B4）：命中测试要窗口外框与缩放；这里顺手喂给它，免得每帧再问窗口。
+    let scale = win.scale_factor().unwrap_or(1.0);
+    crate::plugin_hit::place(label, Some(rect), scale);
     if let Some((plugin, generation)) = plugin {
         emit(&plugin, generation, Some(label), payload.clone());
         let _ = notify_backend(&plugin, generation, payload);
@@ -942,7 +1018,7 @@ pub fn ready(label: &str) -> Result<Value, String> {
     };
     let (handle, plugin, generation, hidden) = target;
     READY.notify_all();
-    let app = app()?.clone();
+    let app = app_handle()?.clone();
     if !hidden {
         let label = label.to_string();
         on_main(move || {
@@ -1003,11 +1079,14 @@ pub fn close_handle(handle: &str, reason: &str) -> Result<(), String> {
 
 fn destroy_record(rec: Rec, reason: &str) {
     crate::dropwin::changed();
+    // 2.2.3（B4）：命中规则必须跟着窗口一起撤，否则规则表会留下一个永远
+    // 找不到窗口的条目，指针循环还得为它每 40ms 醒一次。
+    crate::plugin_hit::forget(&rec.label);
     READY.notify_all();
     if !rec.ticket.is_empty() {
         crate::plugin_page::close(&rec.ticket);
     }
-    if let Ok(app) = app() {
+    if let Ok(app) = app_handle() {
         let app = app.clone();
         let label = rec.label.clone();
         // 释放 WebView：调用 destroy 而不是 hide，绝不保留隐藏 renderer。停用/卸载
@@ -1040,7 +1119,7 @@ fn apply_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
 fn validate_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
         let object = params.as_object().ok_or("插件窗口更新参数应为对象")?;
         for name in object.keys() {
-            if !["handle", "width", "height", "anchor", "offsetX", "offsetY", "title", "maxWidth", "align", "anchorBase", "zOrder"].contains(&name.as_str()) {
+            if !["handle", "width", "height", "anchor", "offsetX", "offsetY", "title", "maxWidth", "align", "anchorBase", "zOrder", "hitTest", "hitRects"].contains(&name.as_str()) {
                 return Err("插件窗口更新参数含未知字段".into());
             }
         }
@@ -1080,6 +1159,29 @@ fn validate_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
         if let Some(z_order) = object.get("zOrder") {
             rec.z_order = z_order.as_str().and_then(ZOrder::parse).ok_or("插件窗口 zOrder 只支持 normal、above-dock")?;
         }
+        // 2.2.3（B4）：插件可以在运行中改可点区域（内容变了、chip 增减）。
+        if let Some(hit_test) = object.get("hitTest") {
+            rec.hit_test = hit_test.as_str().and_then(HitTest::parse).ok_or("插件窗口 hitTest 只支持 window、opaque")?;
+        }
+        if let Some(value) = object.get("hitRects") {
+            let list = value.as_array().ok_or("插件窗口 hitRects 应为矩形数组")?;
+            if list.len() > MAX_HIT_RECTS { return Err(format!("插件窗口 hitRects 最多 {MAX_HIT_RECTS} 块")); }
+            let mut rects = Vec::with_capacity(list.len());
+            for item in list {
+                let parts = item.as_array().ok_or("插件窗口 hitRects 的每一项应为 [x,y,w,h]")?;
+                if parts.len() != 4 { return Err("插件窗口 hitRects 的每一项应为 [x,y,w,h]".into()); }
+                let mut rect = [0.0f64; 4];
+                for (i, part) in parts.iter().enumerate() {
+                    rect[i] = part.as_f64().filter(|v| v.is_finite()).ok_or("插件窗口 hitRects 含非有限数")?;
+                }
+                if rect[2] <= 0.0 || rect[3] <= 0.0 { return Err("插件窗口 hitRects 的宽高必须为正".into()); }
+                rects.push(rect);
+            }
+            rec.hit_rects = rects;
+        }
+        if rec.hit_test == HitTest::Opaque && rec.hit_rects.is_empty() {
+            return Err("插件窗口 hitTest:'opaque' 需要同时给出 hitRects".into());
+        }
         if let Some(title) = object.get("title") {
             let text = title.as_str().map(str::trim).filter(|t| !t.is_empty() && t.chars().count() <= TITLE_MAX && !t.chars().any(char::is_control)).ok_or("插件窗口标题无效")?;
             rec.title = text.to_string();
@@ -1103,7 +1205,7 @@ fn update(context: &Context, plugin: &str, generation: u64, params: &Value) -> R
         rec.clone()
     };
     // 资源所有者（plugin/digest/page/ticket）不在这里的写入范围里：update 只能动自己窗口的几何。
-    let app = app()?.clone();
+    let app = app_handle()?.clone();
     let for_main = snapshot.clone();
     on_main(move || -> Result<(), String> {
         // 排队期间可能已有更新或撤销；只应用登记表里的当前值。
@@ -1114,10 +1216,43 @@ fn update(context: &Context, plugin: &str, generation: u64, params: &Value) -> R
         let win = app.get_webview_window(&current.label).ok_or("插件窗口尚未创建")?;
         win.set_title(&current.title).map_err(|_| "插件窗口标题设置失败")?;
         place(&win, &current)?;
+        // 2.2.3（B4）：命中区域或命中方式可能刚改过，按当前值重新登记/撤销。
+        if current.hit_test == HitTest::Opaque {
+            crate::plugin_hit::watch(&current.label, current.hit_rects.clone());
+            crate::plugin_hit::place(&current.label, geometry_of(&win), win.scale_factor().unwrap_or(1.0));
+        } else {
+            crate::plugin_hit::forget(&current.label);
+        }
         Ok(())
     })??;
     let _ = context;
     Ok(view(&snapshot))
+}
+
+/// 2.2.3（B3）：把本窗口里的文件交给系统的 OLE 拖放，用户松手即落在资源管理器。
+///
+/// 只接受**本插件自己的窗口句柄**：跨插件的句柄在这里也过不去，与 close/update
+/// 同一套归属检查。路径的合法性（存在、绝对、总量）由 `plugin_drag::check` 管。
+fn begin_drag_out(plugin: &str, generation: u64, params: &Value) -> Result<Value, String> {
+    let handle = handle_of(params)?;
+    {
+        let book = book();
+        let rec = book.windows.get(handle).ok_or("插件窗口不存在或已关闭")?;
+        if rec.plugin != plugin { return Err("这个插件窗口不属于当前插件".into()); }
+        if rec.generation != generation || !book.fresh(plugin, generation) {
+            return Err("插件实例代次已变化，本次拖出已丢弃".into());
+        }
+        if rec.state != State::Ready || !rec.shown {
+            return Err("窗口还没显示，无法从它拖出".into());
+        }
+    }
+    let paths: Vec<String> = params.get("paths").and_then(Value::as_array)
+        .ok_or("beginDragOut 需要 paths 数组")?
+        .iter()
+        .map(|item| item.as_str().map(str::to_owned).ok_or("beginDragOut 的 paths 只能是字符串"))
+        .collect::<Result<_, _>>()?;
+    crate::plugin_drag::begin(paths)?;
+    Ok(json!({"started": true}))
 }
 
 fn list(context: &Context, plugin: &str, generation: u64) -> Result<Value, String> {
@@ -1146,6 +1281,9 @@ fn view(rec: &Rec) -> Value {
         "width":width,
         "height":rec.height,
         "maxWidth":match rec.width { Width::Dock { max } => json!(max), _ => Value::Null },
+        "zOrder":rec.z_order.name(),
+        "hitTest":rec.hit_test.name(),
+        "hitRects":rec.hit_rects,
         "transparent":rec.transparent,
         "ready":rec.state == State::Ready,
         "visible":rec.shown && !rec.hidden_by_dock,
@@ -1251,8 +1389,8 @@ fn unsubscribe_inner(plugin: &str, generation: u64, params: &Value) -> Result<Va
 // 定向交付与事件
 // ---------------------------------------------------------------------------------------
 
-fn emit(plugin: &str, generation: u64, label: Option<&str>, payload: Value) {
-    let Ok(app) = app() else { return };
+pub(crate) fn emit(plugin: &str, generation: u64, label: Option<&str>, payload: Value) {
+    let Ok(app) = app_handle() else { return };
     if !generation_fresh(plugin, generation) { return; }
     let mut full = payload;
     if let Some(object) = full.as_object_mut() {
@@ -1267,7 +1405,7 @@ fn emit(plugin: &str, generation: u64, label: Option<&str>, payload: Value) {
     let _ = app.emit_to("island", "plugin:window-event", full);
 }
 
-fn notify_backend(plugin: &str, generation: u64, payload: Value) -> Result<(), String> {
+pub(crate) fn notify_backend(plugin: &str, generation: u64, payload: Value) -> Result<(), String> {
     let output = {
         let book = book();
         if !book.fresh(plugin, generation) { return Err("插件会话已撤销，事件未交付".into()); }
@@ -1425,7 +1563,7 @@ pub fn deliver_dock_at(subscription: &str, paths: &[String], point: Option<(i32,
     }
     log(&format!("file drop -> {} path(s) for {plugin} dock", paths.len()));
     // 主 Dock 订阅没有对应窗口，`client` 以胶囊矩形为参照。
-    let capsule = app().ok().map(|app| crate::island::snapshot(&crate::shared(app)).capsule).flatten();
+    let capsule = app_handle().ok().map(|app| crate::island::snapshot(&crate::shared(app)).capsule).flatten();
     let payload = json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"dock","paths":paths,
         "position":drop_position(point, capsule)});
     emit(&plugin, generation, None, payload.clone());
@@ -1448,6 +1586,9 @@ fn revoke_generation(plugin: &str, generation: Option<u64>, reason: &str) {
         let output = book.outputs.get(plugin).cloned();
         (book.retire(plugin, generation), output)
     };
+    // 订阅表不归这里管（窗口域与主岛域分开），但撤销一个实例时它必须跟着清：
+    // 否则插件被卸载后订阅残留，watchers() 永远不回落，主岛页面会一直上报。
+    crate::plugin_dock::forget(plugin);
     crate::dropwin::changed();
     for rec in retired {
         terminal_event(&rec, reason, output.as_ref());
@@ -1459,7 +1600,7 @@ fn revoke_generation(plugin: &str, generation: Option<u64>, reason: &str) {
 fn terminal_event(rec: &Rec, reason: &str, output: Option<&std::sync::mpsc::SyncSender<Value>>) {
     let payload = json!({"event":"closed","handle":rec.handle,"reason":reason});
     if let Some(output) = output { let _ = send_backend(output, &rec.plugin, payload.clone()); }
-    if let Ok(app) = app() {
+    if let Ok(app) = app_handle() {
         let mut full = payload;
         full["plugin"] = json!(rec.plugin);
         full["generation"] = json!(rec.generation);
@@ -1521,7 +1662,7 @@ pub fn set_dock_hidden(hidden: bool) {
     if changes.is_empty() {
         return;
     }
-    let Ok(app) = app() else { return };
+    let Ok(app) = app_handle() else { return };
     let app = app.clone();
     let labels: Vec<String> = changes.iter().map(|(label, _)| label.clone()).collect();
     post_main(move || {
@@ -1545,7 +1686,7 @@ pub fn set_dock_hidden(hidden: bool) {
 /// 主 Dock 移动/换屏/DPI 变化之后重排所有锚定窗口（不通过扩大主岛来容纳）。
 /// 只在 Dock 的外框真的变了才做：主岛的移动/尺寸事件很密，重复重排既费主线程也没意义。
 pub fn dock_changed() {
-    let rect = app().ok().and_then(|app| app.get_webview_window("island")).and_then(|island| geometry_of(&island));
+    let rect = app_handle().ok().and_then(|app| app.get_webview_window("island")).and_then(|island| geometry_of(&island));
     let Some(rect) = rect else { return };
     {
         let mut last = DOCK_RECT.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -1563,172 +1704,13 @@ pub fn screens_changed() {
     rearrange(true);
 }
 
-// ---------------------------------------------------------------------------------------
-// 2.2.2：主岛几何与状态订阅（dock.onEvent）
-// ---------------------------------------------------------------------------------------
-
-/// 订阅了 `dock.onEvent` 的插件数。**这是「按需启用」的唯一开关**：
-/// 计数为 0 时主岛页面不上报任何东西（§1.3），因此不装插件、装了不启用、
-/// 或启用但没订阅的用户，新增代码一行都不执行。
-static DOCK_WATCHERS: AtomicUsize = AtomicUsize::new(0);
-/// 上一次推给插件的快照，用来去重：只在真的变了才发事件。
-static LAST_DOCK: Mutex<Option<crate::island::DockSnapshot>> = Mutex::new(None);
-
-/// 有没有插件在听主岛事件。主岛页面据此决定要不要上报（`island:watch-dock`）。
-pub fn dock_watchers() -> usize {
-    DOCK_WATCHERS.load(Ordering::SeqCst)
-}
-
-/// 订阅/退订 `dock.onEvent`。从 0 变 1 时通知页面开始上报，回到 0 时停止。
-fn watch_dock(add: bool) {
-    let before = if add {
-        DOCK_WATCHERS.fetch_add(1, Ordering::SeqCst)
-    } else {
-        let current = DOCK_WATCHERS.load(Ordering::SeqCst);
-        if current == 0 {
-            0
-        } else {
-            DOCK_WATCHERS.fetch_sub(1, Ordering::SeqCst) - 1
-        }
-    };
-    let after = DOCK_WATCHERS.load(Ordering::SeqCst);
-    // 只在跨过 0 边界时告诉页面：1 → 2 不必再说一次。
-    if (before == 0) != (after == 0) {
-        if after == 0 {
-            *LAST_DOCK.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        }
-        tell_page_watch(after > 0);
-    }
-}
-
-/// 告诉主岛页面开/关按需上报。页面未创建时静默失败（它起来后会自己问一次）。
-fn tell_page_watch(on: bool) {
-    let Ok(app) = app() else { return };
-    let _ = app.emit_to("island", "island:watch-dock", json!({"on": on}));
-}
-
-/// 主岛的几何或状态变了：重排锚定窗口，并把新快照推给订阅者。
-/// 由 `island.rs` 在胶囊尺寸、视图形态、stow、全屏避让变化时调用。
-pub fn dock_state_changed() {
-    let Ok(app) = app() else { return };
-    let shared = crate::shared(app);
-    let snapshot = crate::island::snapshot(&shared);
-    {
-        let mut last = LAST_DOCK.lock().unwrap_or_else(|p| p.into_inner());
-        if last.as_ref() == Some(&snapshot) {
-            return;
-        }
-        *last = Some(snapshot.clone());
-    }
-    rearrange(false);
-    broadcast_dock(&snapshot);
-}
-
-/// 把快照推给每个订阅了 dock 事件的插件（按所有者定向，不广播给没订阅的）。
-fn broadcast_dock(snapshot: &crate::island::DockSnapshot) {
-    let targets: Vec<(String, u64)> = {
-        let book = book();
-        book.dock_watchers.iter().filter(|(plugin, generation)| book.fresh(plugin, **generation)).map(|(plugin, generation)| (plugin.clone(), *generation)).collect()
-    };
-    if targets.is_empty() {
-        return;
-    }
-    let payload = json!({"event":"dock","type":"geometry","rect":dock_rect_value(snapshot)});
-    for (plugin, generation) in targets {
-        emit(&plugin, generation, None, payload.clone());
-        let _ = notify_backend(&plugin, generation, payload.clone());
-    }
-}
-
-/// 2.2.2（C5）：指针进入/离开主岛胶囊。由 `island.rs` 的轮询在跨边界时调用。
-pub fn dock_pointer_changed(on: bool) {
-    let targets: Vec<(String, u64)> = {
-        let book = book();
-        book.dock_watchers.iter().filter(|(plugin, generation)| book.fresh(plugin, **generation)).map(|(plugin, generation)| (plugin.clone(), *generation)).collect()
-    };
-    if targets.is_empty() {
-        return;
-    }
-    let payload = json!({"event":"dock","type":"pointer","action": if on {"enter"} else {"leave"}});
-    for (plugin, generation) in targets {
-        emit(&plugin, generation, None, payload.clone());
-        let _ = notify_backend(&plugin, generation, payload.clone());
-    }
-}
-
-/// 把快照整理成插件看到的形状。`window` 与 `capsule` 都是物理像素。
-pub fn dock_rect_value(snapshot: &crate::island::DockSnapshot) -> Value {
-    let rect = |value: Option<(i32, i32, i32, i32)>| match value {
-        Some((x, y, width, height)) => json!({"x":x,"y":y,"width":width,"height":height}),
-        None => Value::Null,
-    };
-    json!({
-        "window": rect(snapshot.window),
-        "capsule": rect(snapshot.capsule),
-        "state": {
-            "view": snapshot.view,
-            "stowed": snapshot.stowed,
-            "hidden": snapshot.hidden,
-            "fullscreen": snapshot.fullscreen,
-        },
-        "scale": snapshot.scale,
-    })
-}
-
-/// `dock.rect()`：读一次实时快照。页面与后端两条入口共用。
-fn dock_rect() -> Result<Value, String> {
-    let app = app()?;
-    let shared = crate::shared(app);
-    Ok(dock_rect_value(&crate::island::snapshot(&shared)))
-}
-
-/// 2.2.2：主岛几何/状态接口要求插件声明 `dock` 能力（只读，但与外部窗口
-/// 分开授权——不需要开窗的插件也能只要几何）。
-fn require_dock(context: &Context, plugin: &str) -> Result<(), String> {
-    let row = installed(context, plugin)?;
-    require_capability(&row, "dock", "插件未声明 dock 能力")
-}
-
-fn dock_rect_for(context: &Context, plugin: &str) -> Result<Value, String> {
-    require_dock(context, plugin)?;
-    dock_rect()
-}
-
-fn subscribe_dock_for(context: &Context, plugin: &str, generation: u64) -> Result<Value, String> {
-    require_dock(context, plugin)?;
-    subscribe_dock(plugin, generation)
-}
-
-/// `dock.onEvent(listener)` 的后端侧登记：订阅即计入 watcher。
-fn subscribe_dock(plugin: &str, generation: u64) -> Result<Value, String> {
-    {
-        let mut book = book();
-        if !book.fresh(plugin, generation) {
-            return Err("插件会话已撤销".into());
-        }
-        if book.dock_watchers.insert(plugin.to_string(), generation).is_some() {
-            // 同一个插件重复订阅：幂等，不再加计数。
-            return Ok(json!({"subscribed":true}));
-        }
-    }
-    watch_dock(true);
-    Ok(json!({"subscribed":true}))
-}
-
-fn unsubscribe_dock(plugin: &str) -> Result<Value, String> {
-    let removed = { book().dock_watchers.remove(plugin).is_some() };
-    if removed {
-        watch_dock(false);
-    }
-    Ok(json!({"subscribed":false}))
-}
 
 fn rearrange(include_screen: bool) {
     let targets: Vec<Rec> = { book().windows.values().filter(|rec| include_screen || rec.anchor != Anchor::Screen).cloned().collect() };
     if targets.is_empty() {
         return;
     }
-    let Ok(app) = app() else { return };
+    let Ok(app) = app_handle() else { return };
     let app = app.clone();
     post_main(move || {
         for requested in targets {
@@ -1871,13 +1853,13 @@ mod tests {
     // 配额与「同 key 复用」是两条独立判据：都必须在 BOOK 里成立。
     #[test]
     fn quota_is_per_plugin_and_global() {
-        let mut book = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() };
+        let mut book = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false };
         assert_eq!(book.per_plugin("acme.weather"), 0);
         for index in 0..PER_PLUGIN {
             book.windows.insert(format!("h{index}"), Rec {
                 handle: format!("h{index}"), plugin: "acme.weather".into(), digest: "d".into(), generation: 1, key: format!("k{index}"),
                 page: "main".into(), title: "t".into(), label: format!("plugin-win-{index}"), ticket: String::new(), url: String::new(),
-                anchor: Anchor::DockBottom, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal,
+                anchor: Anchor::DockBottom, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal, hit_test: HitTest::Window, hit_rects: Vec::new(),
                 state: State::Ready, shown: true, hidden_by_dock: false, rect: None, drop: None,
             });
         }
@@ -1890,11 +1872,11 @@ mod tests {
     #[test]
     fn drop_routing_only_reaches_the_owner() {
         // 只有「订阅了 + 已就绪 + 显示着 + 代次还有效」的窗口才进命中区。
-        let mut book = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() };
+        let mut book = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false };
         let record = |handle: &str, drop: bool, state: State, shown: bool| Rec {
             handle: handle.into(), plugin: "acme.weather".into(), digest: "d".into(), generation: 1, key: handle.into(),
             page: "main".into(), title: "t".into(), label: format!("plugin-win-{handle}"), ticket: "t".into(), url: "u".into(),
-            anchor: Anchor::DockBottom, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal,
+            anchor: Anchor::DockBottom, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal, hit_test: HitTest::Window, hit_rects: Vec::new(),
             state, shown, hidden_by_dock: false, rect: Some((10, 10, 100, 100)), drop: if drop { Some(format!("drop-{handle}")) } else { None },
         };
         book.windows.insert("a".into(), record("a", true, State::Ready, true));
@@ -1913,14 +1895,14 @@ mod tests {
         Rec {
             handle: String::new(), plugin: plugin.into(), digest: "digest".into(), generation: 1, key: key.into(),
             page: "main".into(), title: "面板".into(), label: String::new(), ticket: String::new(), url: String::new(),
-            anchor: Anchor::DockLeft, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal,
+            anchor: Anchor::DockLeft, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal, hit_test: HitTest::Window, hit_rects: Vec::new(),
             state: State::Pending, shown: false, hidden_by_dock: false, rect: None, drop: None,
         }
     }
 
     #[test]
     fn reservation_is_atomic_for_duplicate_keys_and_quotas() {
-        let registry = std::sync::Arc::new(Mutex::new(Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() }));
+        let registry = std::sync::Arc::new(Mutex::new(Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false }));
         {
             let mut registry = registry.lock().unwrap();
             registry.sessions.insert("acme.notes".into(), 1);
@@ -1952,7 +1934,7 @@ mod tests {
 
     #[test]
     fn revoked_session_cannot_reserve_or_retire_its_replacement() {
-        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false, dock_watchers: BTreeMap::new() };
+        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false };
         registry.sessions.insert("acme.notes".into(), 1);
         let first = registry.reserve(pending_record("acme.notes", "panel")).unwrap().0;
         assert_eq!(registry.retire("acme.notes", Some(1)).len(), 1);
@@ -2099,7 +2081,7 @@ mod tests {
 
     #[test]
     fn reservation_inherits_dock_hidden_state() {
-        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::from([("acme.notes".into(), 1)]), outputs: BTreeMap::new(), dock_hidden: true, dock_watchers: BTreeMap::new() };
+        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::from([("acme.notes".into(), 1)]), outputs: BTreeMap::new(), dock_hidden: true };
         let rec = registry.reserve(pending_record("acme.notes", "panel")).unwrap().0;
         assert!(rec.hidden_by_dock);
         assert!(!rec.shown);
@@ -2110,7 +2092,7 @@ mod tests {
         let rec = Rec {
             handle: "h".into(), plugin: "acme.weather".into(), digest: "d".into(), generation: 7, key: "panel".into(),
             page: "main".into(), title: "面板".into(), label: "plugin-win-9".into(), ticket: "secret-ticket".into(), url: "http://plugin/page".into(),
-            anchor: Anchor::DockLeft, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 8.0, offset_y: 0.0, width: Width::Fixed(500.0), height: 240.0, transparent: true, z_order: ZOrder::Normal,
+            anchor: Anchor::DockLeft, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 8.0, offset_y: 0.0, width: Width::Fixed(500.0), height: 240.0, transparent: true, z_order: ZOrder::Normal, hit_test: HitTest::Window, hit_rects: Vec::new(),
             state: State::Ready, shown: true, hidden_by_dock: false, rect: None, drop: None,
         };
         let view = view(&rec);
@@ -2228,28 +2210,5 @@ mod tests {
         let (fallback_x, fallback_y, _, _) = placement(&rec, &screens, window, None, 1.0);
         assert_eq!(fallback_x, 0, "没有胶囊时按窗口左缘算，再被工作区夹回左缘");
         assert_eq!(fallback_y, 48, "垂直按窗口 132 高中点 66 再减半高 18");
-    }
-
-    // C1：快照把两个矩形分开给，且视图形态未上报时按 compact 算。
-    #[test]
-    fn dock_snapshot_reports_window_and_capsule_separately() {
-        let snapshot = crate::island::DockSnapshot {
-            window: Some((0, 0, 1920, 132)),
-            capsule: Some((810, 8, 300, 36)),
-            view: "expanded",
-            stowed: false,
-            hidden: false,
-            fullscreen: false,
-            scale: 1.0,
-        };
-        let value = dock_rect_value(&snapshot);
-        assert_eq!(value["window"]["width"], 1920, "窗口矩形是工作区宽");
-        assert_eq!(value["capsule"]["width"], 300, "胶囊矩形是可见宽度");
-        assert_eq!(value["capsule"]["x"], 810);
-        assert_eq!(value["state"]["view"], "expanded");
-        assert_eq!(value["state"]["stowed"], false);
-        // 胶囊未知时给 null，不给一个假矩形（2.2.0 起就不再兜底 500×36）。
-        let unknown = crate::island::DockSnapshot { capsule: None, ..snapshot };
-        assert!(dock_rect_value(&unknown)["capsule"].is_null());
     }
 }

@@ -105,6 +105,9 @@ mod github_access;
 mod tab_order;
 mod plugin_page;
 mod plugin_window;
+mod plugin_dock;
+mod plugin_hit;
+mod plugin_drag;
 mod windhawk_source;
 mod windhawk_collection;
 mod windhawk;
@@ -1015,7 +1018,13 @@ fn is_island(window: &WebviewWindow) -> bool {
 #[tauri::command]
 async fn pet_ready(app: AppHandle, window: WebviewWindow) {
     let sh = shared(&app);
-    if is_island(&window) { island::ready(&sh) } else { pet::ready(&sh) }
+    if is_island(&window) {
+        island::ready(&sh);
+        // 2.2.2：页面可能在插件订阅**之后**才建起来（Dock 刚启动时就是这样），
+        // 那样 `island:watch-dock` 的开开关它从没收到过。就绪时按当前订阅数补一次，
+        // 订阅为空时这里发的是 false，与页面默认值一致，不产生任何副作用。
+        crate::plugin_dock::sync_island_watch();
+    } else { pet::ready(&sh) }
     let views = sh.asks.lock().unwrap().views();
     let _ = app.emit_to(window.label(), "pet:asks", views);
 }
@@ -1077,7 +1086,7 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
     if is_island(&window) {
         island::set_room(&sh, &measured);
         // 2.2.2：room 变化会改变主岛窗口尺寸，胶囊位置随之变化（C3）。
-        plugin_window::dock_state_changed();
+        island::hook_changed();
     } else {
         let size = match (measured["width"].as_f64(), measured["height"].as_f64()) {
             (Some(w), Some(h)) if w > 0.0 && h > 0.0 => Some((w.ceil(), h.ceil())),
@@ -1188,8 +1197,8 @@ async fn island_stow(app: AppHandle, window: WebviewWindow, stowed: bool, width:
     if is_island(&window) {
         island::set_stow(&shared(&app), stowed, width, height);
         // 2.2.2：胶囊尺寸或滑出状态变了，外部窗口要能跟（C3）。没有订阅者时
-        // dock_state_changed 的快照比较会直接返回，不产生任何工作。
-        plugin_window::dock_state_changed();
+        // hook_changed 里的快照比较会直接返回，不产生任何工作。
+        island::hook_changed();
     }
 }
 
@@ -1199,6 +1208,14 @@ async fn island_stow(app: AppHandle, window: WebviewWindow, stowed: bool, width:
 async fn island_view(app: AppHandle, window: WebviewWindow, name: String) {
     if is_island(&window) {
         island::set_view(&shared(&app), &name);
+    }
+}
+
+// 2.2.3（E4）：滑出动画期间页面逐帧上报胶囊外框；null 交还宿主自己的算法。
+#[tauri::command]
+async fn island_capsule_rect(app: AppHandle, window: WebviewWindow, rect: Option<Value>) {
+    if is_island(&window) {
+        island::set_capsule_rect(&shared(&app), rect.as_ref());
     }
 }
 
@@ -1888,6 +1905,7 @@ fn main() {
             island_seat,
             island_stow,
             island_view,
+    island_capsule_rect,
             island_raise,
             island_plate,
             island_release,
@@ -2166,7 +2184,13 @@ fn main() {
                 // desk.rs), the looks are someone's at once, not a turn later.
                 let quiet = pointer.check_quiet();
                 let wait = match at {
-                    (Some(her), Some(home)) => pet::poll(&pointer, her).min(island::poll(&pointer, home)).min(desk::poll(&pointer, home)),
+                    (Some(her), Some(home)) => {
+                        let mut wait = pet::poll(&pointer, her).min(island::poll(&pointer, home)).min(desk::poll(&pointer, home));
+                        // 2.2.3（B4）：插件窗口的透明区穿透。没有窗口登记命中规则时
+                        // watching() 为 false，这里连 poll 都不调，指针循环的节奏与 2.2.2 一致。
+                        if crate::plugin_hit::watching() { wait = wait.min(crate::plugin_hit::poll(home)); }
+                        wait
+                    }
                     _ => 200,
                 };
                 let wait = if quiet { wait.max(1000) } else { wait };

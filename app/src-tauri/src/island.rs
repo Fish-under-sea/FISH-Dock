@@ -110,6 +110,10 @@ pub struct Island {
     view: &'static str,
     // 2.2.2（C5）：指针上一次是否落在胶囊上。只在跨过边界时通知外部窗口。
     pointer_on: bool,
+    // 2.2.3（E4）：滑出动画期间页面逐帧上报的胶囊外框（物理像素），带一个时间戳。
+    // None 时用 closed_rect 的静止位置；时间戳过期也视为失效——页面崩溃或被
+    // 系统暂停时 rAF 会停，不能让胶囊永远停在某一帧上。
+    capsule_anim: Option<((i32, i32, i32, i32), u64)>,
     // Settings asked for before its page was up: the page they open on.
     pending: Option<String>,
     // On the taskbar, her seat along the strip from its start (logical: from
@@ -201,6 +205,17 @@ struct Stow {
 }
 
 impl Island {
+    /// 动画期间上报的胶囊外框，只在足够新的时候采用。
+    ///
+    /// 页面用 `requestAnimationFrame` 逐帧上报，但 rAF 在窗口不可见时会被系统
+    /// 暂停、页面崩溃时更是直接停掉。没有这道时效判断，胶囊就会永久停在最后
+    /// 一帧的位置上，订阅者看到的几何从此是错的。
+    fn fresh_capsule_anim(&self) -> Option<(i32, i32, i32, i32)> {
+        let (rect, at) = self.capsule_anim?;
+        // 动画本身 220ms，上报循环 320ms；给到 1 秒的宽容，之后交还 closed_rect。
+        ((crate::now_ms() as u64).saturating_sub(at) <= 1000u64).then_some(rect)
+    }
+
     fn sf(&self) -> f64 {
         if self.sf > 0.0 { self.sf } else { 1.0 }
     }
@@ -694,7 +709,10 @@ fn create(sh: &Arc<Shared>) {
                     // 2.2.0 §5：Dock 动了/换了屏/DPI 变了，锚定在它旁边的插件窗口跟着重排，
                     // 不通过扩大主岛来容纳它们。
                     if let WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } = event {
-                        crate::plugin_window::dock_changed();
+                        // 2.2.3：主岛自己动了/换屏了/DPI 变了，锚定窗口要重排，
+                        // **订阅者也要收到新的几何**——这正是 dock.onEvent 的用途之一。
+                        // 只调 dock_changed 会让订阅者一直拿着旧位置。
+                        hook_changed();
                     }
                     // Not when it is her own window being shown (Shared::show_window).
                     if let WindowEvent::Focused(false) = event {
@@ -842,7 +860,7 @@ pub fn snapshot(sh: &Shared) -> DockSnapshot {
     };
     DockSnapshot {
         window,
-        capsule: closed_rect(&isl),
+        capsule: isl.fresh_capsule_anim().or_else(|| closed_rect(&isl)),
         // 页面还没上报过（或上报了不认识的值）时按 compact 算：那是默认形态。
         view: if isl.view.is_empty() { "compact" } else { isl.view },
         stowed: isl.stow.stowed,
@@ -850,6 +868,46 @@ pub fn snapshot(sh: &Shared) -> DockSnapshot {
         fullscreen: isl.over_full,
         scale: isl.sf(),
     }
+}
+
+/// 主岛的几何或状态变了：重排锚定在它旁边的插件窗口，并把快照推给订阅者。
+/// 两个消费者分属 `plugin_window`（窗口）与 `plugin_dock`（主岛订阅），
+/// 这里只做一次分发，免得每个调用点各写一遍、漏掉一个。
+pub fn hook_changed() {
+    crate::plugin_window::dock_changed();
+    crate::plugin_dock::notify_changed();
+}
+
+/// 2.2.3（E4）：滑出动画期间页面逐帧上报的胶囊外框（物理像素）。
+///
+/// 收起/唤醒的滑出是页面内的 CSS `transform`，主岛窗口本身不移动，所以
+/// `closed_rect` 在动画期间给出的是静止位置——订阅者会看到「跳一下」而不是跟手。
+/// 页面在动画那一小段里逐帧报真实外框，这里换算成物理像素存下来，`snapshot`
+/// 优先用它；`None` 表示交还给宿主自己的算法。
+pub fn set_capsule_rect(sh: &Shared, rect: Option<&Value>) {
+    let (pos, page_sf) = {
+        let isl = sh.island.lock().unwrap_or_else(|poison| poison.into_inner());
+        (isl.pos, isl.page_sf())
+    };
+    let converted = rect.and_then(|value| {
+        let num = |key: &str| value.get(key).and_then(Value::as_f64).filter(|v| v.is_finite());
+        let (x, y, w, h) = (num("x")?, num("y")?, num("width")?, num("height")?);
+        if w <= 0.0 || h <= 0.0 {
+            return None;
+        }
+        // 页面坐标 → 物理：页面原点在窗口原点，按页面缩放换算。
+        Some((
+            pos.0 + (x * page_sf).round() as i32,
+            pos.1 + (y * page_sf).round() as i32,
+            (w * page_sf).round() as i32,
+            (h * page_sf).round() as i32,
+        ))
+    });
+    {
+        let mut isl = sh.island.lock().unwrap_or_else(|poison| poison.into_inner());
+        isl.capsule_anim = converted.map(|rect| (rect, crate::now_ms() as u64));
+    }
+    hook_changed();
 }
 
 /// 页面报告当前视图形态（`island.js` 设 `dataset.view` 之后调用）。
@@ -874,7 +932,7 @@ pub fn set_view(sh: &Shared, name: &str) {
     };
     // 只有真的变了才通知外部窗口：视图切换是低频事件，但仍要去重。
     if changed {
-        crate::plugin_window::dock_state_changed();
+        hook_changed();
     }
 }
 
@@ -994,6 +1052,12 @@ pub fn ready(sh: &Arc<Shared>) {
         isl.ready = true;
         let closed = isl.stow.closed;
         isl.stow = Stow { closed, ..Stow::default() };
+        // 2.2.3（E4）：新页面还没跑过任何动画，上一帧的胶囊外框必须丢掉，
+        // 否则订阅者会拿到崩溃前那个值（时效判断要等一秒才兜底）。
+        isl.capsule_anim = None;
+        // 2.2.3（C5）：新页面的指针不可能还停在胶囊上；状态跟着归零，
+        // 免得下次真的离开时因为「看起来没变」而漏发 leave。
+        isl.pointer_on = false;
         isl.pending.take()
     };
     crate::fullscreen::ask();
@@ -1266,7 +1330,7 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
             // 2.2.2（C5）：主岛不在了，指针也就不在胶囊上。
             if isl.pointer_on {
                 isl.pointer_on = false;
-                crate::plugin_window::dock_pointer_changed(false);
+                crate::plugin_dock::notify_pointer(false);
             }
             (isl.ct.force(Mode::Pass), None, 500, None, false)
         } else {
@@ -1286,7 +1350,7 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
                 let was = isl.pointer_on;
                 if on != was {
                     isl.pointer_on = on;
-                    crate::plugin_window::dock_pointer_changed(on);
+                    crate::plugin_dock::notify_pointer(on);
                 }
             }
             let psf = page_sf;

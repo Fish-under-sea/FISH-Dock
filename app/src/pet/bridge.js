@@ -111,6 +111,8 @@
     // 2.2.2：外部窗口 Hook 的按需上报。只有宿主说有插件在听时（island:watch-dock），
     // 页面才需要上报视图形态、胶囊尺寸与指针；否则这些调用一次都不该发生。
     view: name => send('island_view', { name: String(name || '') }),
+    // 2.2.3（E4）：滑出动画期间逐帧上报胶囊外框（页面视口坐标）；null 表示交还宿主。
+    capsuleRect: rect => send('island_capsule_rect', { rect: rect || null }),
     onWatchDock: on('island:watch-dock'),
     // Something opened up from her taskbar's strip: its window over any
     // other that has come over it (island.rs raise, zhoupengjie/Wakuwaku#55).

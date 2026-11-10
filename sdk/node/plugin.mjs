@@ -76,6 +76,13 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
       const result = await hostFor('windows', 'host.windows.list', {});
       return result?.windows ?? [];
     },
+    // 2.2.3（B3）：把本窗口里的文件拖回资源管理器（系统 OLE 拖放）。
+    // 立即返回；会话在宿主线程里跑到用户松手。
+    async beginDragOut(handle, paths) {
+      if (!Array.isArray(paths) || paths.length === 0) throw new Error('beginDragOut 需要文件路径数组');
+      const result = await hostFor('windows', 'host.windows.beginDragOut', { handle: handleOf(handle, '窗口'), paths: paths.map(String) });
+      return !!result?.started;
+    },
     onEvent: listener => listen('windows', listener),
   });
   const fileDrop = Object.freeze({
@@ -106,6 +113,13 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
         off();
         try { await hostFor('dock', 'host.dock.unsubscribe', {}); } catch { /* 会话已关：宿主那边已经清干净 */ }
       };
+    },
+    // 2.2.3（D2）：在 Dock 设置面板里打开本插件的内部页。
+    // 这是「设置里的那一页」，不是再开一个外部窗口；pageId 必须是本插件
+    // pages[] 里登记过的 id。
+    async openPage(pageId) {
+      if (typeof pageId !== 'string' || !pageId) throw new Error('openPage 需要一个页面 ID');
+      return hostFor('dock', 'host.dock.openPage', { page: pageId });
     },
   });
   const context = Object.freeze({

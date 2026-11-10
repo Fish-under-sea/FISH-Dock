@@ -73,6 +73,12 @@
       const result = await send('dock.windows.list', {})
       return (result && result.windows) || []
     },
+    // 2.2.3（B3）：把本窗口里的文件拖回资源管理器（系统 OLE 拖放）。
+    async beginDragOut(handle, paths) {
+      if (!Array.isArray(paths) || paths.length === 0) throw new Error('beginDragOut 需要文件路径数组')
+      const result = await send('dock.windows.beginDragOut', { handle: handleOf(handle, '窗口'), paths: paths.map(String) })
+      return !!(result && result.started)
+    },
     onEvent: listener => listen(windowListeners, listener),
   })
   const fileDrop = Object.freeze({
@@ -101,6 +107,11 @@
         off()
         try { await send('dock.dock.unsubscribe', {}) } catch { /* 页面已关：宿主已清理 */ }
       }
+    },
+    // 2.2.3（D2）：请 Dock 在设置面板里打开本插件的内部页（不是新开外部窗口）。
+    async openPage(pageId) {
+      if (typeof pageId !== 'string' || !pageId) throw new Error('openPage 需要一个页面 ID')
+      return send('dock.dock.openPage', { page: pageId })
     },
   })
   // 宿主保留 Escape 出口：透明浮窗没有原生关闭按钮时，页面里按 Escape 也要能真正关掉。
