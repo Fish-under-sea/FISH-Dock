@@ -221,7 +221,7 @@ export default createPlugin({
 
 下表按 [issue #87](https://github.com/Fish-under-sea/FISH-Dock/issues/87) 的编号排列。「2.2.2」列标 ✅ 的是 2.2.2 已补齐的项，详见 `release-2.2.2.md`。
 
-| 编号 | 2.2.2 | 结论与依据 |
+| 编号 | 2.2.3 | 结论与依据 |
 | --- | --- | --- |
 | A1 SDK 缺 `onEvent` | — | 与实现不符：`sdk/node/plugin.mjs:79`、`:91` 自 2.2.0 起就有 |
 | A2 强制 `events` 能力 | — | 与实现不符：检查只作用于 `plugin.event`；窗口与拖入走 `plugin.windowEvent` |
@@ -229,21 +229,21 @@ export default createPlugin({
 | A4 插件窗口不是 drop target | — | 与实现不符：`dropwin.rs` 命中区含 `drop_rects()` |
 | B1 更小窗口 | ✅ | 下限降到 32×32；仍无 `fitContent` |
 | B2 锚点对齐 | ✅ | 新增 `align`（八种）与 `anchorBase`（window/capsule）；缺省保持 2.2.1 |
-| B3 drag-out | ❌ | 无接口（OLE 源侧未实现） |
-| B4 透明区点击穿透 | ❌ | 无逐像素命中；`transparent` 仍只改窗口样式 |
-| B5 内容驱动高度 | ⚠️ | `windows.update({height})` 可用，无 `fitContent` |
+| B3 drag-out | ✅ | 2.2.3：`beginDragOut` 用 OLE `DoDragDrop` + `CF_HDROP` |
+| B4 透明区点击穿透 | ✅ | 2.2.3：`hitTest:'opaque'` + `hitRects`，其余像素穿透 |
+| B5 内容驱动高度 | ⚠️ | `windows.update({height})` 可用，仍无 `fitContent` |
 | C1 读主岛几何 | ✅ | `dock.rect()` 同时返回窗口与胶囊矩形、状态枚举 |
 | C2 订阅主岛几何/状态 | ✅ | `dock.onEvent`，`type:'geometry'` |
 | C3 `dock-left` 随主岛重排 | ✅ | 重排触发源从主岛窗口矩形改为胶囊矩形 |
 | C4 `width:'dock'` | ✅ | 绑胶囊宽度，`maxWidth` 表达可增长上限 |
 | C5 主岛指针事件 | ✅ | `dock.onEvent` 的 `type:'pointer'`（宿主轮询光标判胶囊命中） |
-| D1/D2 打开内部插件页 | ❌ | 页面桥白名单仍无开页入口 |
+| D1/D2 打开内部插件页 | ✅ | 2.2.3：`dock.openPage(pageId)` |
 | E1 落点坐标 | ✅ | `drop` 载荷新增 `position.{screen,client}` |
-| E2 失焦/点外部 | ⚠️ | 新增 `focus`/`blur`（本窗口焦点）；「点窗口外部」仍拿不到 |
+| E2 失焦/点外部 | ⚠️ | `focus`/`blur`（本窗口焦点）已有；「点窗口外部」仍拿不到 |
 | E3 完整状态枚举 | ✅ | `compact`/`expanded`/`settings`/`ask` + `stowed`/`hidden`/`fullscreen` |
-| E4 动画期间胶囊矩形 | ❌ | 滑出是页面内 transform；只在 `stowed` 切换时推一次状态 |
+| E4 动画期间胶囊矩形 | ✅ | 2.2.3：动画约 320ms 内页面逐帧上报，带 1 秒时效 |
 | E5 长条等宽 | ✅ | 与 C4 同一项，已随 C4 解决 |
-| E6 z-order | ⚠️ | 新增 `zOrder:'above-dock'`；room 申报仍不做 |
+| E6 z-order | ⚠️ | `zOrder:'above-dock'` 已有；room 申报仍不做 |
 | E7 跨窗口动画 | ❌ | 不支持，建议改为窗口内动画 |
 
 A 组四条不是「实现缺失」，核对基准不同：A1/A2 引用的行号属于 2.1.9 的 SDK，
@@ -255,7 +255,25 @@ A3/A4 引用的 `island_panel.rs` 在本仓任何版本都不存在（`forward_d
 - **按需启用**：`DOCK_WATCHERS` 计数为 0 时，主岛页面不上报任何东西。不装插件、装了不启用、启用但没订阅 `dock.onEvent` 的用户，新增代码一行都不执行。
 - **快照比较**：`dock_state_changed()` 先与 `LAST_DOCK` 比较，没变直接返回，避免重复重排与重复推送。
 - **能力**：`dock.rect` / `dock.onEvent` 要求清单声明 `dock` 能力（与 `windows` 分开）。
-- **作用对象**：所有改动只作用于插件窗口；`plugin_window.rs` 对主岛窗口只有读取（`:place` 与 `dock_changed`），没有任何 `set_size`/`set_position`。
+- **作用对象**：所有改动只作用于插件窗口；`plugin_window.rs` 对主岛窗口只有读取（`place` 与 `dock_changed`），没有任何 `set_size`/`set_position`。
+
+### 10.2 2.2.3 的模块边界
+
+2.2.3 把三件事从 `plugin_window.rs` 拆成独立模块，各自管自己的状态：
+
+| 模块 | 只管这些 | 不碰这些 |
+| --- | --- | --- |
+| `plugin_window.rs` | 窗口开/关/位置、拖入路由、事件投递原语 | 主岛订阅表、命中规则、拖出会话 |
+| `plugin_dock.rs` | 主岛快照、订阅表、几何/指针事件分发 | 任何窗口的创建与移动 |
+| `plugin_hit.rs` | 插件窗口的鼠标命中与 `set_ignore_cursor_events` | 主岛自己的穿透（那是 `pointer.rs`） |
+| `plugin_drag.rs` | 一次 OLE 拖放会话 | 任何窗口状态 |
+
+依赖是单向的：后三者用 `plugin_window` 的事件投递原语（`emit` / `notify_backend`）与只读的 `app_handle()`，`plugin_window` 不反过来依赖它们的内部状态。
+
+两道生命周期保证：
+
+- **订阅表不会泄漏**：`revoke_generation`（停用/卸载/换版/崩溃）调用 `plugin_dock::forget`，所以「按需上报」的计数一定回落到 0。
+- **规则表不会泄漏**：`destroy_record` 调用 `plugin_hit::forget`，且 `poll` 每次顺手清掉窗口已不存在的条目——否则指针循环会为一条死记录每 40ms 醒一次。
 
 ## 11. 未在本轮验证的部分
 
