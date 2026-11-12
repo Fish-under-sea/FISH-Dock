@@ -147,7 +147,7 @@ if self.seen > 0 && self.at[(self.seen + TUG_TIMES - 1) % TUG_TIMES] == tick {
    （第四处 2.0.2 漏了，见下）→ `2.0.3`。
 9. `UPSTREAM.json` —— `version` → `2.0.3`、`selectedUpstreamThrough` → `ab0eb65a`、`selectedChanges` 补四项、
    **删掉一条一直写错的**（`5a0fee56` 被列为「已选」，但本仓没有可附着的审批代码）。
-10. `app/docs/release-2.0.3.md`。
+10. `docs/release-2.0.3.md`。
 
 ## 五之二、顺带查出的两条既有缺陷（非上游带来）
 

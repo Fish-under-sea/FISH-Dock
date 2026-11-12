@@ -13,7 +13,7 @@
 </p>
 <p>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="app/docs/release-2.2.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
+<a href="docs/release-2.2.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
 <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark.png"><img src="assets/readme/key-issues-en-light.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
@@ -22,7 +22,7 @@
 <tr>
 <td>
 <p><strong>2.2.3 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
-<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="app/docs/release-2.2.3.md">Release notes</a></p>
+<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="docs/release-2.2.3.md">Release notes</a></p>
 </td>
 <td width="232" align="center" valign="middle">
 <picture>
@@ -64,10 +64,10 @@ This section is only about entry points and operations; capability detail is abo
 
 Business code, plugin packages and the store catalog are maintained in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins); this repository owns the desktop host, SDK, installer, plugin management and Windhawk.
 
-- **2.2.1**: no longer crashes at launch while WebView2 is being updated, and clears a stale runtime folder variable left by older versions; plugin version changes no longer fail after a plugin cleans `tmp`; closing plugin windows from the tray notifies once. Setup only. [Full notes](app/docs/release-2.2.3.md).
-- **2.2.0**: plugins explicitly request native windows outside Dock and provide their own UI. No request means no second window. Removes the hardcoded staging UI and persistent dot; in-app upgrades use Setup. **This is the final release with both Setup and Update; later releases provide Setup only.** [Full notes](app/docs/release-2.2.0.md).
-- **2.1.9**: uses system Evergreen WebView2 and transactionally removes old bundled runtime files while preserving user data. [Full notes](app/docs/release-2.1.9.md).
-- **2.1.8**: restores the system proxy when Clash exits and adds host proxy recovery. [Full notes](app/docs/release-2.1.8.md).
+- **2.2.1**: no longer crashes at launch while WebView2 is being updated, and clears a stale runtime folder variable left by older versions; plugin version changes no longer fail after a plugin cleans `tmp`; closing plugin windows from the tray notifies once. Setup only. [Full notes](docs/release-2.2.3.md).
+- **2.2.0**: plugins explicitly request native windows outside Dock and provide their own UI. No request means no second window. Removes the hardcoded staging UI and persistent dot; in-app upgrades use Setup. **This is the final release with both Setup and Update; later releases provide Setup only.** [Full notes](docs/release-2.2.0.md).
+- **2.1.9**: uses system Evergreen WebView2 and transactionally removes old bundled runtime files while preserving user data. [Full notes](docs/release-2.1.9.md).
+- **2.1.8**: restores the system proxy when Clash exits and adds host proxy recovery. [Full notes](docs/release-2.1.8.md).
 
 See [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases) for earlier versions and complete changes.
 
@@ -99,7 +99,7 @@ node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js'
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
 
-Plugin code, packaging and the catalog live in the [official plugin repository](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Start with the [developer guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md). For native windows outside Dock, see the [Hook guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md), [host API notes](app/docs/plugin-windows-2.2.0.md) and [complete protocol example](sdk/examples/window-file-drop/README.md).
+Plugin code, packaging and the catalog live in the [official plugin repository](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Start with the [developer guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md). For native windows outside Dock, see the [Hook guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md), [host API notes](docs/plugin-windows-2.2.0.md) and [complete protocol example](sdk/examples/window-file-drop/README.md).
 
 Build inputs are pinned in `app/scripts/runtime-sources.json`. Prepare a new resource directory with `prepare-installer.mjs`, then build with `build-installer.ps1` and NSIS. See the Chinese README for detailed storage and build instructions.
 

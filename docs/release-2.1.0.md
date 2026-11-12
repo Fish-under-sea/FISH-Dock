@@ -38,7 +38,7 @@
 - `url.gitee_repo` 仍是「配了才启用」，默认空；`updates::endpoints()` 在配置后加入 Gitee 候选。
 - `sources::picks` 增 Gitee 附件候选（仅配置时生效），`candidates()` 排序语义与共用 deadline 未改。
 - **行为变化（请留意）**：`allowed()` 从纯前缀比较收窄为「前缀 + 边界字符」。原先配 `…/FISH-Dock` 会连带放行 `…/FISH-DOCK-Plugins`（同名前缀），现在只放行边界匹配的地址。**只收窄，不放宽。**
-- 新增 `app/docs/domestic-mirror-matrix-2026-11-04.md`：六类资源逐项实测。结论摘要——raw 文件是唯一开箱即有免费国内镜像的一类（`stable.json` 在 raw.githubusercontent 与 jsDelivr 三域名字节与 sha256 完全相同）；npm 官方与 npmmirror 的 tarball 四项校验全同；**pet 图库 DNS 污染级不可达且无任何已确认镜像**；Windhawk / LHM 无免费国内镜像。缺口如实标注，不编地址、不要求用户自建服务。
+- 新增 `docs/domestic-mirror-matrix-2026-11-04.md`：六类资源逐项实测。结论摘要——raw 文件是唯一开箱即有免费国内镜像的一类（`stable.json` 在 raw.githubusercontent 与 jsDelivr 三域名字节与 sha256 完全相同）；npm 官方与 npmmirror 的 tarball 四项校验全同；**pet 图库 DNS 污染级不可达且无任何已确认镜像**；Windhawk / LHM 无免费国内镜像。缺口如实标注，不编地址、不要求用户自建服务。
 - **Gitee 现状（不吹）**：主仓 Gitee 有 13 个 tags 但**没有任何 Release 附件**（`releases` API 返回 `[]`，具体附件 URL 全 404）；插件仓 Gitee 的匿名可见性两次探测结果相反（待人工确认）。因此本版**仍以 GitHub Release 为唯一发行源**，Gitee 通道保持默认关闭。
 
 ## 五、安装包

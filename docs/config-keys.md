@@ -22,7 +22,7 @@
 | `url.official_site` | `https://h5.metaapp.cn/online/h5/BUsvkkbBiAq2pF2Ttx4j/1.0.2/6/index.html` | `FISH_DOCK_OFFICIAL_SITE` | URL | 官网地址：关于页品牌图彩蛋点开的那一页。**当前默认值是临时落地页**，正式官网上线后只改 `config.rs` 的 `OFFICIAL_SITE_DEFAULT`（或设这个环境变量），前端不动 |
 | `url.raw_mirror` | `(空)` | `FISH_DOCK_RAW_MIRROR` | URL | 2.0.4 T-F：raw.githubusercontent.com 文件的前缀镜像（sources::picks 候选；空＝只走原站） |
 | `url.gh_proxy` | `(空)` | `FISH_DOCK_GH_PROXY` | URL | 2.0.4 T-F：GitHub Release 资产下载的前缀加速（sources::picks 候选；空＝不加） |
-| `url.gitee_repo` | `https://gitee.com/Fish-under-sea/FISH-Dock` | `FISH_DOCK_GITEE_REPO` | URL | **2.1.1（#72）：默认启用**主仓 Gitee 镜像（Gitee 侧已有 `FISH-Dock-Update-<ver>.exe` + `.sha256`，实测摘要与 GitHub 逐字相同），自动检查更新因此会同时问 GitHub 与 Gitee；写 `off` / `none` / `0` 关掉（空白＝没覆盖，仍是默认仓库）。附加条目 A（2026-11-04）：同一个键还驱动 `sources::picks` 的「Gitee 附件」候选（`<gitee_repo>/releases/download/<tag>/<file>`，**只映射同名项目**——插件仓是另一个 repo，不会被改指过来），并决定 `updates::allowed` 的放行边界（前缀 + 边界字符，同名前缀的别的仓不放行）。只认 `https://gitee.com/<owner>/<repo>` 这一形态，写坏＝没配。实测口径与缺口见 `app/docs/domestic-mirror-matrix-2026-11-04.md` |
+| `url.gitee_repo` | `https://gitee.com/Fish-under-sea/FISH-Dock` | `FISH_DOCK_GITEE_REPO` | URL | **2.1.1（#72）：默认启用**主仓 Gitee 镜像（Gitee 侧已有 `FISH-Dock-Update-<ver>.exe` + `.sha256`，实测摘要与 GitHub 逐字相同），自动检查更新因此会同时问 GitHub 与 Gitee；写 `off` / `none` / `0` 关掉（空白＝没覆盖，仍是默认仓库）。附加条目 A（2026-11-04）：同一个键还驱动 `sources::picks` 的「Gitee 附件」候选（`<gitee_repo>/releases/download/<tag>/<file>`，**只映射同名项目**——插件仓是另一个 repo，不会被改指过来），并决定 `updates::allowed` 的放行边界（前缀 + 边界字符，同名前缀的别的仓不放行）。只认 `https://gitee.com/<owner>/<repo>` 这一形态，写坏＝没配。实测口径与缺口见 `docs/domestic-mirror-matrix-2026-11-04.md` |
 | `url.pet_mirror` | `(空)` | `FISH_DOCK_PET_MIRROR` | URL | 2.0.4 T-F：宠物图库图片的前缀镜像（fetch 的预览候选；空＝保留原站） |
 | `timeout.net_connect_ms` | `15000` | `FISH_DOCK_NET_CONNECT_MS` | 超时 | 所有 web 请求的 TCP 连接层预算 |
 | `timeout.net_head_ms` | `30000` | `FISH_DOCK_NET_HEAD_MS` | 超时 | 所有 web 请求的响应头预算 |
@@ -106,7 +106,7 @@
 
 ## Gitee 双仓路径与镜像键的默认值口径（附加条目 A，2026-11-04）
 
-- **双仓路径**（与工作区 `AGENTS.md` §八同源；实测证据见 `app/docs/domestic-mirror-matrix-2026-11-04.md`）：
+- **双仓路径**（与工作区 `AGENTS.md` §八同源；实测证据见 `docs/domestic-mirror-matrix-2026-11-04.md`）：
   - Dock 宿主：GitHub `https://github.com/Fish-under-sea/FISH-Dock`（发行与摘要权威）／Gitee `https://gitee.com/Fish-under-sea/FISH-Dock`（国内仓库入口）。
   - 官方插件：GitHub `https://github.com/Fish-under-sea/FISH-DOCK-Plugins`（`catalog/stable.json` 的 `url` 全部指向它的 Release）／Gitee `https://gitee.com/Fish-under-sea/FISH-DOCK-Plugins`。⚠️ 2026-11-04 实测该 Gitee 仓**匿名 API 404、raw 403**（`AGENTS.md` §八记的「200」已不成立，需人工确认可见性），**不作为 `.fish-plugin` 下载源**。
 - **默认值口径**（2.1.1 起有一条例外）：`url.raw_mirror` / `url.gh_proxy` / `url.pet_mirror` 默认全空，空＝「没配」＝**不加候选**，getter 不以任何内置地址兜底（`RAW_MIRROR_DEFAULT=""` 与 `text(ENV_*, "")`）。**`url.gitee_repo` 是例外**：它自 2.1.1（#72）起有内置默认值 `GITEE_REPO_DEFAULT`（主仓 Gitee 镜像），关闭用 `off` / `none` / `0`——空串在这套 getter 里的既定语义是「没覆盖，用默认」，不能兼作开关。`mirror.prefer` 默认 `auto`（原地址优先、镜像兜底），无候选时 `domestic` 自然回落原地址。

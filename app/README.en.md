@@ -2,7 +2,7 @@
 <h1 align="center">FISH Dock</h1>
 <p align="center">A place for AI sessions to dock, and model connections to come together.</p>
 <p align="center"><strong>2.2.1</strong> · Windows x64 · MIT-licensed code</p>
-<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="docs/release-2.2.1.md">Release notes</a></p>
+<p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1">Downloads</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">Issues</a> · <a href="../docs/release-2.2.1.md">Release notes</a></p>
 
 > **A derivative integration, not an official upstream release.** FISH Dock builds on the desktop and AI-session experience of [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku); model capabilities are provided by the Magpie plugin, with plugins, plugin packages and the store catalog maintained by [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Original authors, copyrights, and licenses are credited below.
 
@@ -22,11 +22,11 @@ This repository contains the desktop host, plugin SDK, storage and runtime manag
 
 ## New in 2.2.1
 
-A fix release, Setup only: no crash at launch while WebView2 is being updated, and a stale runtime folder variable left by older versions is cleared; plugin version changes no longer fail after a plugin cleans `tmp`; closing plugin windows from the tray notifies once. See the [2.2.1 notes](docs/release-2.2.1.md).
+A fix release, Setup only: no crash at launch while WebView2 is being updated, and a stale runtime folder variable left by older versions is cleared; plugin version changes no longer fail after a plugin cleans `tmp`; closing plugin windows from the tray notifies once. See the [2.2.1 notes](../docs/release-2.2.1.md).
 
 ## New in 2.2.0
 
-Plugins explicitly request native windows outside Dock and provide their own UI; no request means no second window. Removes the hardcoded staging UI. This is the final Setup + Update release; later releases provide Setup only. Host 2.2.0 uses Setup for in-app upgrades, without falling back to another package. See the [2.2.0 notes](docs/release-2.2.0.md) for changes and verification limits.
+Plugins explicitly request native windows outside Dock and provide their own UI; no request means no second window. Removes the hardcoded staging UI. This is the final Setup + Update release; later releases provide Setup only. Host 2.2.0 uses Setup for in-app upgrades, without falling back to another package. See the [2.2.0 notes](../docs/release-2.2.0.md) for changes and verification limits.
 
 ## New in 2.0.0
 
@@ -52,7 +52,7 @@ These existing capabilities are retained:
 - About/plugin update checks, catalog API fallback and readable KB/MB/GB package sizes.
 - Connects to Windhawk installed by the user; retains native management pages, draggable tabs and configurable columns.
 
-See the [2.0.0 release notes](docs/release-2.0.0.md) for verification scope.
+See the [2.0.0 release notes](../docs/release-2.0.0.md) for verification scope.
 
 ## Installation and Updates
 
@@ -132,7 +132,7 @@ node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <prepared-directory> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
 ```
 
-Pinned versions and digests are in [runtime-sources.json](scripts/runtime-sources.json). Actual tests, environment limits, and historical artifacts are in the [build record](docs/installer-build.md). The installer includes no model weights or Rust/MSVC environment for building Dock. Windhawk and its LLVM-MinGW compiler are no longer bundled as of 2.1.2.
+Pinned versions and digests are in [runtime-sources.json](scripts/runtime-sources.json). Actual tests, environment limits, and historical artifacts are in the [build record](../docs/installer-build.md). The installer includes no model weights or Rust/MSVC environment for building Dock. Windhawk and its LLVM-MinGW compiler are no longer bundled as of 2.1.2.
 
 ## Sources and Credits
 

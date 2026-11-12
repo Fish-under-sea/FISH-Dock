@@ -367,7 +367,7 @@ fn allowed(url: &str) -> bool {
 // `url` 是不是就在 `repo` 这个仓库里：前缀比较（大小写不敏感）之后**还要求一个
 // 边界**（`/`、`?` 或 `#`）。
 //
-// 附加条目 A 的实测矩阵（`app/docs/domestic-mirror-matrix-2026-11-04.md` §4.2）
+// 附加条目 A 的实测矩阵（`docs/domestic-mirror-matrix-2026-11-04.md` §4.2）
 // 撞到的正是纯前缀比较的坑：`config::gitee_repo()` 会去掉尾部 `/`，于是配了
 // `https://gitee.com/Fish-under-sea/FISH-Dock` 之后，`…/FISH-DOCK-Plugins`（插件仓，
 // 同名前缀）也会被判成「在放行范围内」——等于用户配了一个仓，白名单却悄悄覆盖了
@@ -2245,7 +2245,7 @@ mod tests {
 
     // —— 附加条目 A / S2：Gitee 更新候选与 Gitee 附件候选都「配了才启用」 ——
     //
-    // 实测口径（2026-11-04，`app/docs/domestic-mirror-matrix-2026-11-04.md`）：
+    // 实测口径（2026-11-04，`docs/domestic-mirror-matrix-2026-11-04.md`）：
     // Gitee 主仓 `https://gitee.com/Fish-under-sea/FISH-Dock` 匿名 API 200、tags 13 个
     // （v1.0.0…v2.0.4），但 `/api/v5/.../releases` 返回 `[]`、`/releases` 页面里
     // `releases/download` 与 `releases/tag` 命中 0 条、`releases/download/v2.0.4/<资产>`

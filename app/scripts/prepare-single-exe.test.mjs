@@ -10,10 +10,10 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 test('便携单 EXE 的构建入口已移除，只保留安装包这一条构建链', () => {
-  for (const retired of ['scripts/build-single-exe.ps1', 'scripts/prepare-single-exe.mjs', 'docs/single-exe-build.md', 'docs/specs/2026-10-19-single-exe-design.md']) {
+  for (const retired of ['scripts/build-single-exe.ps1', 'scripts/prepare-single-exe.mjs', '../docs/single-exe-build.md', '../docs/specs/2026-10-19-single-exe-design.md']) {
     assert.equal(existsSync(path.join(root, retired)), false, `${retired} 属于退役的便携单 EXE 链，不应保留`)
   }
-  for (const kept of ['scripts/prepare-installer.mjs', 'scripts/installer.mjs', 'scripts/build-installer.ps1', 'docs/installer-build.md']) {
+  for (const kept of ['scripts/prepare-installer.mjs', 'scripts/installer.mjs', 'scripts/build-installer.ps1', '../docs/installer-build.md']) {
     assert.equal(existsSync(path.join(root, kept)), true, `${kept} 是安装版构建入口，必须存在`)
   }
 })

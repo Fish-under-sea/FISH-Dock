@@ -23,7 +23,7 @@
 
 <p>
   <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="app/docs/release-2.2.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
+  <a href="docs/release-2.2.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
   <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
@@ -76,14 +76,14 @@
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器与插件管理。
 
-- **2.2.1**：修复 WebView2 正在更新时启动崩溃，清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。仅发布 Setup。[完整说明](app/docs/release-2.2.3.md)。
-- **2.2.0**：插件通过 Hook 按需请求 Dock 外部原生窗口，自行绘制业务界面；无请求不创建第二窗口。移除硬编码暂存条与常驻小球，应用内更新改用 Setup。**本版最后一次同时发布 Setup 和 Update，之后仅发布 Setup。** [完整说明](app/docs/release-2.2.0.md)。
-- **2.1.9**：改用系统 Evergreen WebView2，安装事务清理旧随包运行时并保留用户资料。[完整说明](app/docs/release-2.1.9.md)。
-- **2.1.8**：修复 Clash 退出后的系统代理恢复，并补充宿主代理自愈。[完整说明](app/docs/release-2.1.8.md)。
+- **2.2.1**：修复 WebView2 正在更新时启动崩溃，清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。仅发布 Setup。[完整说明](docs/release-2.2.3.md)。
+- **2.2.0**：插件通过 Hook 按需请求 Dock 外部原生窗口，自行绘制业务界面；无请求不创建第二窗口。移除硬编码暂存条与常驻小球，应用内更新改用 Setup。**本版最后一次同时发布 Setup 和 Update，之后仅发布 Setup。** [完整说明](docs/release-2.2.0.md)。
+- **2.1.9**：改用系统 Evergreen WebView2，安装事务清理旧随包运行时并保留用户资料。[完整说明](docs/release-2.1.9.md)。
+- **2.1.8**：修复 Clash 退出后的系统代理恢复，并补充宿主代理自愈。[完整说明](docs/release-2.1.8.md)。
 
-- **2.2.2**：补齐外部原生窗口 Hook：主岛几何/状态读取与订阅、窗口宽度跟随胶囊、锚点对齐语义、窗口下限降到 32×32、拖入落点坐标、窗口焦点事件、`zOrder`。**主岛外观不变**，新增上报按需启用。仅发布 Setup。[完整说明](app/docs/release-2.2.3.md)。
+- **2.2.2**：补齐外部原生窗口 Hook：主岛几何/状态读取与订阅、窗口宽度跟随胶囊、锚点对齐语义、窗口下限降到 32×32、拖入落点坐标、窗口焦点事件、`zOrder`。**主岛外观不变**，新增上报按需启用。仅发布 Setup。[完整说明](docs/release-2.2.3.md)。
 
-- **2.2.3**：外部窗口 Hook 补齐拖出（`beginDragOut`）、透明区穿透（`hitRects`）、内部页打开（`openPage`）与动画跟手；修掉旧插件清单退役字段导致整张注册表读不出来的升级故障。**主岛外观不变**。[完整说明](app/docs/release-2.2.3.md)。
+- **2.2.3**：外部窗口 Hook 补齐拖出（`beginDragOut`）、透明区穿透（`hitRects`）、内部页打开（`openPage`）与动画跟手；修掉旧插件清单退役字段导致整张注册表读不出来的升级故障。**主岛外观不变**。[完整说明](docs/release-2.2.3.md)。
 
 更早版本及完整变更见 [发行记录](https://github.com/Fish-under-sea/FISH-Dock/releases)。
 
@@ -130,7 +130,7 @@ node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js'
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
 
-插件业务源码、打包与商店目录维护在 [官方插件仓](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。开发插件先读 [开发者指南](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md)；外部原生窗口接入见 [Hook 文档](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md)、[宿主接口说明](app/docs/plugin-windows-2.2.0.md) 与 [完整协议示例](sdk/examples/window-file-drop/README.md)。SDK 与宿主接口由本仓维护，业务界面由插件提供。
+插件业务源码、打包与商店目录维护在 [官方插件仓](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。开发插件先读 [开发者指南](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md)；外部原生窗口接入见 [Hook 文档](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md)、[宿主接口说明](docs/plugin-windows-2.2.0.md) 与 [完整协议示例](sdk/examples/window-file-drop/README.md)。SDK 与宿主接口由本仓维护，业务界面由插件提供。
 
 构建输入固定在 `app/scripts/runtime-sources.json`；资源目录由 `prepare-installer.mjs` 准备，再用 `build-installer.ps1` 与 NSIS 打包。
 

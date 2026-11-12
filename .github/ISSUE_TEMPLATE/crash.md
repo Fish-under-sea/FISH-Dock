@@ -21,7 +21,7 @@ FISH Dock 的「关于 → 崩溃报告」可以生成预填内容：
 - [ ] **版本（Milestone）**：右侧栏 Milestone 挂 `2.1.2` 这种号；维护者必挂，非维护者写「非维护者」：
 - [ ] **侧边栏六项**：Assignees / Labels / Projects（本仓未启用写「无」）/ Milestone / Relationships / Development 逐项补齐：
 
-规则全文见 [CONTRIBUTING.md](../blob/main/.github/CONTRIBUTING.md)。
+规则全文见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 ## 版本与系统
 

@@ -497,14 +497,14 @@ pub fn fetch_to_file(url: &str, timeout: Duration, limit: u64, out: &Path) -> Re
 
 - `runtime.rs:534-538`、`windhawk_bundle.rs` 等实际资源路径统一调用 `config::resources_override()`；`FISH_DOCK_RESOURCES` 成为新名，`DSH_FISH_RESOURCES` 仅作为受限旧别名。
 - `WAKUWAKU_*`、`DSH_FISH_*` 的读取按用途分类：产品兼容、开发测试、历史迁移。每个旧入口必须有新入口优先级、弃用说明和测试；没有新入口的测试专用变量不得进入产品配置面。
-- `config.rs::KEYS`、`app/docs/config-keys.md`、README 和安装器清单从同一事实源核对；补齐冷启动、sources、镜像和资源路径键，修正 2.0.0/2.0.1/49 键等过时描述。
+- `config.rs::KEYS`、`docs/config-keys.md`、README 和安装器清单从同一事实源核对；补齐冷启动、sources、镜像和资源路径键，修正 2.0.0/2.0.1/49 键等过时描述。
 - 更新测试环境变量到 `FISH_DOCK_*` 或 `FISH_DOCK_TEST_*`；仅在迁移测试中保留旧名，并确保旧名不会覆盖新名。
 
 验收：对每个 `KEYS` 条目做“元数据—getter—调用点—测试”四项核对；新旧环境变量优先级、空白值、相对路径和资源目录不存在均有测试；installed 构建不再直接读取未登记的旧资源键。
 
 ## 12 T-R：旧材料分层、发布契约与总验收门
 
-- 把 `app/docs/installer-build.md`、1.x/2.0.x 历史 release 文档、`app/relay/` 部署材料、旧预览包和 `app/examples/` 逐项标为“活动文档 / 历史归档 / 测试夹具 / 可删除文件”；更新 SECURITY.md、SOURCE.md、配置文档和中英文 README 的当前入口，历史 release 原文只加归档边界，不直接删除有归属或可复现价值的材料。
+- 把 `docs/installer-build.md`、1.x/2.0.x 历史 release 文档、`app/relay/` 部署材料、旧预览包和 `app/examples/` 逐项标为“活动文档 / 历史归档 / 测试夹具 / 可删除文件”；更新 SECURITY.md、SOURCE.md、配置文档和中英文 README 的当前入口，历史 release 原文只加归档边界，不直接删除有归属或可复现价值的材料。
 - `app/examples/widgets/` 先按 T-K 解除 `include_bytes!`、参数契约测试和 fixture 依赖，再按删除白名单退役；`src-tauri/examples/` 单独盘点，不能与 widgets 目录混删。
 - 测试入口覆盖 Rust workspace、Rust integration/ignored 分类、`app/test/*.test.js`、`app/test/*.test.mjs`、`app/scripts/*test.mjs`、SDK 测试和安装器测试；环境性失败必须记录实际错误、命令和豁免边界。
 - 版本 2.0.4 核对 `Cargo.toml`、`tauri.conf.json`、插件 manifest、安装器资源 manifest、README 生成物、Setup/Update 文件名和 `.sha256`；构建包内容必须再次扫描 OFM 载荷、上游活动输出和本机绝对路径。

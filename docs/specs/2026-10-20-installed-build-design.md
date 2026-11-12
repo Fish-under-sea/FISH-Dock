@@ -51,7 +51,7 @@ README 里描述的用户数据位置（`%LOCALAPPDATA%\DSH-FISH` 与 `%USERPROF
 
 ## 5. 资源来源与安全
 
-Node.js 与 WebView2 固定版只用官方发布件，版本与 SHA-256 锁在 [运行时来源清单](../../scripts/runtime-sources.json)；构建时先核对摘要再解包，不信任之前的解压目录。固定版 WebView2 不依赖系统安装，也不自动获得 Evergreen 更新；安全修补靠重新打包发布安装包。安装版禁止安装上游 Wakuwaku 的在线更新，避免被不含安装资源的程序覆盖。
+Node.js 与 WebView2 固定版只用官方发布件，版本与 SHA-256 锁在 [运行时来源清单](../../app/scripts/runtime-sources.json)；构建时先核对摘要再解包，不信任之前的解压目录。固定版 WebView2 不依赖系统安装，也不自动获得 Evergreen 更新；安全修补靠重新打包发布安装包。安装版禁止安装上游 Wakuwaku 的在线更新，避免被不含安装资源的程序覆盖。
 
 不关闭 Windows 安全功能，不绕过 UAC、SmartScreen 或杀毒检查。安装到用户目录、按当前用户安装，不需要管理员权限。
 

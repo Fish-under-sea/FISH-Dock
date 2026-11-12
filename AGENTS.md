@@ -6,16 +6,16 @@
 
 ## 零、先认出当前用户，再读你的本机覆盖
 
-本仓把「跨机器规则」与「本机事实」分成两层：本文件是前者，`app/docs/agents/local/<用户名>.md` 是后者，**两者都入库**，每个作者维护自己那份。
+本仓把「跨机器规则」与「本机事实」分成两层：本文件是前者，`docs/agents/local/<用户名>.md` 是后者，**两者都入库**，每个作者维护自己那份。
 
 开工前按顺序做：
 
 1. 取当前用户名：PowerShell 里 `$env:USERNAME`（同时可看 `$env:USERPROFILE` 确认用户目录）。
-2. 转成小写、空格与非 ASCII 字符替换为 `-`，得到文件名，读 `app/docs/agents/local/<该名>.md`。
-   - 本机 `USERNAME=Fish` → 读 `app/docs/agents/local/fish.md`。
-3. 文件不存在：复制 `app/docs/agents/local/_template.md` 为 `<你的名字>.md`，填完随你的一次正常提交一起入库，**不要只留在本地**。
+2. 转成小写、空格与非 ASCII 字符替换为 `-`，得到文件名，读 `docs/agents/local/<该名>.md`。
+   - 本机 `USERNAME=Fish` → 读 `docs/agents/local/fish.md`。
+3. 文件不存在：复制 `docs/agents/local/_template.md` 为 `<你的名字>.md`，填完随你的一次正常提交一起入库，**不要只留在本地**。
 4. 两层冲突时的优先级：**路径、工具链、凭据、缓存位置以本机覆盖为准；规则、契约、发布口径以本文件为准。**
-5. 拿不准用户名的规范写法，看 `app/docs/agents/README.md`。
+5. 拿不准用户名的规范写法，看 `docs/agents/README.md`。
 
 不要凭猜测套用别人的本机文件：别人的盘符和令牌位置在你的机器上不成立。
 
@@ -27,7 +27,7 @@
 | `app/src-tauri/src/` | 按关注点分文件：`config.rs`、`updates.rs`、`sources.rs`、`plugin_store.rs`、`plugins.rs`、`installer` 相关、`crash.rs`、`mail/`、`plugins/` |
 | `app/src/pet/` | 前端（宠物与岛上的页面） |
 | `app/scripts/` | 构建、安装、发布、渲染、校验脚本（`installer.mjs`、`prepare-installer.mjs`、`gitee-release.ps1`、`build-*.ps1`、各 `*.test.mjs`） |
-| `app/docs/` | 开发说明、计划、发行说明、规格、审计（见第二节） |
+| `docs/` | 开发说明、计划、发行说明、规格、审计（见第二节） |
 | `sdk/` | 对外 SDK（`browser/`、`node/`、`examples/`） |
 | `tools/` | 仓库级渲染与校验脚本（`render-readme.mjs`、`check-readme.mjs`、`render-sections.mjs`） |
 | `.github/` | issue 模板与 `CONTRIBUTING.md`（提交规则唯一出处） |
@@ -38,14 +38,14 @@
 
 | 你要做的事 | 先读 |
 | --- | --- |
-| 理解宿主架构、hook、更新、崩溃、岛 | `app/docs/DEVELOPMENT.md`（内容最全，按小节查） |
-| 动安装器 / 出包 | `app/docs/installer-build.md`、`app/scripts/installer.mjs`、`app/scripts/installer.test.mjs` |
-| 动配置键或环境变量 | `app/docs/config-keys.md` |
-| 发版 | `app/docs/release-<ver>.md`（模板照抄上一版） |
-| 查历史决策与欠账 | `app/docs/plan-*.md`、`app/docs/audit-*.md` |
-| 国内镜像口径 | `app/docs/domestic-mirror-matrix-2026-11-04.md` |
+| 理解宿主架构、hook、更新、崩溃、岛 | `docs/DEVELOPMENT.md`（内容最全，按小节查） |
+| 动安装器 / 出包 | `docs/installer-build.md`、`app/scripts/installer.mjs`、`app/scripts/installer.test.mjs` |
+| 动配置键或环境变量 | `docs/config-keys.md` |
+| 发版 | `docs/release-<ver>.md`（模板照抄上一版） |
+| 查历史决策与欠账 | `docs/plan-*.md`、`docs/audit-*.md` |
+| 国内镜像口径 | `docs/domestic-mirror-matrix-2026-11-04.md` |
 | 提 issue / PR | `.github/CONTRIBUTING.md` |
-| 本机环境 | `app/docs/agents/local/<用户名>.md` |
+| 本机环境 | `docs/agents/local/<用户名>.md` |
 
 ## 三、摘要与清单的权威来源
 
@@ -68,13 +68,13 @@
    - `-SkipManifest` 必加，否则 `rebuild-manifest` 会把 product 退回旧值。
    - **`-Baseline` 固定用 2.1.0 那份，不随版本滚动**：2.1.0/2.1.1 的 `resources/licenses/runtime-sources.json` 与 2.1.2 之后不同，只拿上一版做基线时它既不进载荷、现场校验又对不上，老用户点应用内更新会报「基础资源缺失」并回滚（2.1.6 的实测故障，2.1.7 修）。
    - 脚本自己设 `CARGO_NET_OFFLINE=true`；`makensis` 偶发 `deflate() failed (-4)` 属瞬时错误，清半成品重跑一次即可，不要当产品缺陷。
-   - 双包构建脚本不在本仓，位置写在你自己的 `app/docs/agents/local/<用户名>.md` 里。
+   - 双包构建脚本不在本仓，位置写在你自己的 `docs/agents/local/<用户名>.md` 里。
 3. **验包**：用 7-Zip 跑 `7z t`（可执行文件路径见本机覆盖），再核对 `<exe>.sha256` 与实际字节。
 4. **包内实物必须看**：装出来的 `resources/manifest.json`、`licenses/NOTICE.txt` 这类**生成型文件**，每次出包都要从包里抽出来核对一次（历史上就因 NOTICE 带了退役组件引用返工过）。
 5. **发布**：
 
    ```powershell
-   gh release create v<ver> --repo Fish-under-sea/FISH-Dock --title <标题> --notes-file app/docs/release-<ver>.md --target main <Setup> <Setup.sha256> <Update> <Update.sha256> SHA256SUMS.txt
+   gh release create v<ver> --repo Fish-under-sea/FISH-Dock --title <标题> --notes-file docs/release-<ver>.md --target main <Setup> <Setup.sha256> <Update> <Update.sha256> SHA256SUMS.txt
    ```
 
    - Update 包以 **2.1.0** 为基线，2.1.0 及以上都能直接升（2.0.x 跨越了改名与 Windhawk 下线，仍用 Setup）；发布说明里写清覆盖范围。
@@ -84,7 +84,7 @@
 
 - 版本唯一权威：`app/src-tauri/tauri.conf.json` 与 `app/src-tauri/Cargo.toml`（必须同版）。
 - README 的版本卡与头图由 `tools/render-readme.mjs` 渲染（从 `tauri.conf.json` 读取），**禁止手改 PNG**；改完用 `read_image` 确认两个版本号都对。
-- 发版要同步：`README.md`、`README.en.md` 的当前版本 / Release 链接 / 包名，并新增 `app/docs/release-<ver>.md`；历史变更条目保持原样。
+- 发版要同步：`README.md`、`README.en.md` 的当前版本 / Release 链接 / 包名，并新增 `docs/release-<ver>.md`；历史变更条目保持原样。
 
 ## 六、环境坑（跨机器通用的部分）
 
@@ -126,5 +126,5 @@
 - 提交用中文 conventional（`chore(release): …` / `fix(plugin): …` / `docs(...): …`），一个提交只做一件事。
 - `.work/`、`target/`、`dist/`、`*.exe` 不进库；`.work/` 只放一次性产物。
 - **禁用 `git clean -fdx`**，删东西按白名单逐项删。
-- 改本文件或 `app/docs/agents/` 下的内容，随**改动它的那次功能提交**一起带上，不为文档单独开一个空转提交。
-- `AGENTS.local.md` 这种只在本机生效、不入库的写法已废弃；本机事实一律写进 `app/docs/agents/local/<用户名>.md` 并入库。
+- 改本文件或 `docs/agents/` 下的内容，随**改动它的那次功能提交**一起带上，不为文档单独开一个空转提交。
+- `AGENTS.local.md` 这种只在本机生效、不入库的写法已废弃；本机事实一律写进 `docs/agents/local/<用户名>.md` 并入库。

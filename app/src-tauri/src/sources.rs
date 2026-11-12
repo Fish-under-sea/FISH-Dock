@@ -14,7 +14,7 @@
 //!   Gitee 侧目前只有 tags、没有发行版本（`releases` API 返回 `[]`，
 //!   `releases/download/<tag>/<file>` 实测 404），所以这条映射**配了也常落空**，
 //!   靠 [`candidates`] 的失败回落兜住；实测证据见
-//!   `app/docs/domestic-mirror-matrix-2026-11-04.md`。
+//!   `docs/domestic-mirror-matrix-2026-11-04.md`。
 //! - 缺口如实标注，不伪造镜像：pet 图库（`codex-pets.net`，实测 DNS 污染级不可达）、
 //!   Windhawk、LHM 都**没有已确认的免费国内镜像**，它们只有原地址 + 系统代理这一路；
 //!   `url.pet_mirror` / `url.gh_proxy` 默认空就是空，不拿第三方站点冒充官方镜像，

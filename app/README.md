@@ -2,7 +2,7 @@
 <h1 align="center">FISH Dock</h1>
 <p align="center">AI 会话有处停靠，模型连接集中管理。</p>
 <p align="center"><strong>2.2.1</strong> · Windows x64 · MIT 代码许可</p>
-<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="docs/release-2.2.1.md">更新记录</a></p>
+<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.1">下载</a> · <a href="https://github.com/Fish-under-sea/FISH-Dock/issues">反馈</a> · <a href="../docs/release-2.2.1.md">更新记录</a></p>
 
 > **这是二次开发集成，不是上游官方发行版。** FISH Dock 基于 [Wakuwaku](https://github.com/zhoupengjie/Wakuwaku) 的桌面与 AI 会话体验；模型能力由 Magpie 插件提供，插件、插件包与商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。原作者、版权和许可证见「来源与致谢」。
 
@@ -22,11 +22,11 @@
 
 ## 2.2.1 更新
 
-修复版，只发布 Setup：WebView2 正在更新时启动不再崩溃，并清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。完整说明见 [2.2.1 更新记录](docs/release-2.2.1.md)。
+修复版，只发布 Setup：WebView2 正在更新时启动不再崩溃，并清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。完整说明见 [2.2.1 更新记录](../docs/release-2.2.1.md)。
 
 ## 2.2.0 更新
 
-插件通过 Hook 按需创建 Dock 外部原生窗口并绘制业务页面；无请求不创建第二窗口。移除硬编码暂存 UI。2.2.0 是最后的 Setup + Update 双包发行，之后仅发布 Setup；2.2.0 宿主应用内更新只使用 Setup，失败不再自动下载另一种安装包。完整变化与验证边界见 [2.2.0 更新记录](docs/release-2.2.0.md)。
+插件通过 Hook 按需创建 Dock 外部原生窗口并绘制业务页面；无请求不创建第二窗口。移除硬编码暂存 UI。2.2.0 是最后的 Setup + Update 双包发行，之后仅发布 Setup；2.2.0 宿主应用内更新只使用 Setup，失败不再自动下载另一种安装包。完整变化与验证边界见 [2.2.0 更新记录](../docs/release-2.2.0.md)。
 
 ## 2.0.0 更新
 
@@ -52,7 +52,7 @@
 - 插件中心和「关于」支持检查更新，目录含 GitHub API 回退，包大小自动换算单位。
 - 可连接用户自行安装的 Windhawk；保留原生插件管理页、标签拖动及单双栏布局。
 
-完整变化和验证边界见 [2.0.0 更新记录](docs/release-2.0.0.md)。
+完整变化和验证边界见 [2.0.0 更新记录](../docs/release-2.0.0.md)。
 
 ## 安装与更新
 
@@ -132,7 +132,7 @@ node --test "test/*.test.js" "scripts/*.test.mjs"
 ./scripts/build-installer.ps1 -Resources <资源目录> -Cargo <cargo.exe> -Node <node.exe> -Makensis <makensis.exe>
 ```
 
-版本和官方摘要锁定在 [runtime-sources.json](scripts/runtime-sources.json)。测试证据、环境限制和历史包见 [安装版构建记录](docs/installer-build.md)。安装包不含模型权重，也不含开发 Dock 所需的 Rust／MSVC 环境；Windhawk 与 LLVM-MinGW 编译器自 2.1.2 起不再随包。
+版本和官方摘要锁定在 [runtime-sources.json](scripts/runtime-sources.json)。测试证据、环境限制和历史包见 [安装版构建记录](../docs/installer-build.md)。安装包不含模型权重，也不含开发 Dock 所需的 Rust／MSVC 环境；Windhawk 与 LLVM-MinGW 编译器自 2.1.2 起不再随包。
 
 ## 来源与致谢
 

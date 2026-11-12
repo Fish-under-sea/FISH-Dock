@@ -36,7 +36,7 @@
 
 - `app/src-tauri/tauri.conf.json` 与 `app/src-tauri/Cargo.toml`：**2.1.1**（同版）。
 - `app/integrations/claude-code/.claude-plugin/plugin.json`：**2.1.1**。它此前停在 **2.0.4**，而 `one_version_everywhere` 要求三处一致——2.1.0 那版漏了这一处，本版把这条测试修回绿。
-- `AGENTS.md` §八 与 `app/docs/config-keys.md` 同步（Gitee 现状从「有 tags 无附件」改为「有 v2.1.0 发行资产、默认启用」）。
+- `AGENTS.md` §八 与 `docs/config-keys.md` 同步（Gitee 现状从「有 tags 无附件」改为「有 v2.1.0 发行资产、默认启用」）。
 - README 的版本卡与发行段由 `tools/render-readme.mjs` 从 `tauri.conf.json` 渲染，出包时统一重渲染，不手改 PNG。
 
 ## 四、测试
