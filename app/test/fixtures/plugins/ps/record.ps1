@@ -12,13 +12,13 @@
 # ci-none devserver pomodoro countdown countdown-days countdown-bad stretch
 param(
   [Parameter(Mandatory)][string]$Scenario,
-  # The repository (this file is four folders down in it).
-  [string]$Repo = (Resolve-Path (Join-Path $PSScriptRoot '../../../..')).Path,
+  # The repository (this file is five folders down in it).
+  [string]$Repo = (Resolve-Path (Join-Path $PSScriptRoot '../../../../..')).Path,
   [Parameter(Mandatory)][string]$Out
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-$fx = Join-Path $Repo 'test/fixtures/plugins'
+$fx = Join-Path $Repo 'app/test/fixtures/plugins'
 $ex = Join-Path $Repo 'examples/widgets'
 $global:posts = [System.Collections.Generic.List[object]]::new()
 $global:t0 = [datetime]'2026-10-18 09:00:00'

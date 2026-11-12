@@ -11,7 +11,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { test } = require('node:test')
 
-const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'omp', 'fish-dock.ts'), 'utf8')
+const SOURCE = fs.readFileSync(path.join(__dirname, '..', '..', 'integrations', 'omp', 'fish-dock.ts'), 'utf8')
 let loads = 0
 
 // The file as she writes it (connection.rs omp_extension), on this port.

@@ -15,7 +15,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { test } = require('node:test')
 
-const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'dsh', 'fish-dock.js'), 'utf8')
+const SOURCE = fs.readFileSync(path.join(__dirname, '..', '..', 'integrations', 'dsh', 'fish-dock.js'), 'utf8')
 const load = () => import('data:text/javascript,' + encodeURIComponent(SOURCE))
 
 // Her port: what came, in order. answer(event): what she gives back for it

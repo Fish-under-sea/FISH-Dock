@@ -368,7 +368,7 @@ pub fn codex_pets() -> PathBuf {
 // rather than becoming a relative path that would resolve against her cwd.
 pub fn pet_dirs(dir: &Path) -> Vec<PathBuf> {
     let mut dirs = vec![dir.join("pets")];
-    if let Some(tree) = in_tree(1, "pets") { dirs.push(tree); }
+    if let Some(tree) = in_tree(2, "pets") { dirs.push(tree); }
     dirs.push(codex_pets());
     dirs
 }
@@ -486,6 +486,18 @@ mod tests {
             }
         }
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn source_pets_follow_repository_layout_without_moving_user_data() {
+        let user = Path::new("synthetic-user-data");
+        let dirs = pet_dirs(user);
+        assert_eq!(dirs[0], user.join("pets"));
+        let repository_pets = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().join("pets");
+        assert_eq!(dirs[1], repository_pets);
+        assert!(dirs[1].join("claude-chan/pet.json").is_file());
+        assert_eq!(dirs[2], codex_pets());
     }
 
     #[test]

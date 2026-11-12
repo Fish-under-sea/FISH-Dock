@@ -8,7 +8,7 @@ const http = require('node:http')
 const path = require('node:path')
 const { test } = require('node:test')
 
-const TEMPLATE = fs.readFileSync(path.join(__dirname, '..', 'integrations', 'opencode', 'fish-dock.js'), 'utf8')
+const TEMPLATE = fs.readFileSync(path.join(__dirname, '..', '..', 'integrations', 'opencode', 'fish-dock.js'), 'utf8')
 
 // The plugin as she writes it for a port.
 const load = port => import('data:text/javascript,' + encodeURIComponent(TEMPLATE.replace('const PORT = 47213', `const PORT = ${port}`)))

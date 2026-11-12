@@ -6,7 +6,7 @@ const path = require('node:path')
 const { test } = require('node:test')
 const { pathToFileURL } = require('node:url')
 
-const load = () => import(pathToFileURL(path.join(__dirname, '..', 'relay', 'relay.js')))
+const load = () => import(pathToFileURL(path.join(__dirname, '..', '..', 'relay', 'relay.js')))
 
 const REPORT = {
   v: 1,

@@ -11,12 +11,6 @@ src-tauri/resources/ofm/
 # Her settings, pets and logs when run from source (see src-tauri/src/data.rs).
 data/
 
-# Downloaded pets are their authors' work
-pets/*
-!pets/.gitkeep
-# Except the default pet, carried in the exe (fetch.rs seed_default_pet).
-!pets/claude-chan/
-
 # Left from the Electron build, if still around locally
 node_modules/
 dist/
@@ -25,11 +19,3 @@ out/
 *.log
 .DS_Store
 Thumbs.db
-
-# Art and research stay local: others' characters, fan art, references.
-# Only the note about them goes in (see art/README.md).
-art/*
-!art/README.md
-
-# The Thunderbird extension, packed (integrations/thunderbird/build.ps1)
-integrations/thunderbird/*.xpi

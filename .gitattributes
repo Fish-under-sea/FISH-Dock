@@ -1,0 +1,2 @@
+# 示例脚本由 Unix shell 直接运行，迁移后仍保持 LF。
+examples/widgets/waku text eol=lf

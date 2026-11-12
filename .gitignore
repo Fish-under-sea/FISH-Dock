@@ -53,4 +53,20 @@ Thumbs.db
 !/build/review/*.md
 
 # 壁纸原图改随 Release 附件发布（32.6 MB，占已跟踪量 63%），仓库不再跟踪
-app/wallpapers/*.png
+wallpapers/*.png
+
+# 运行期素材与集成产物：目录已从 app/ 提到仓库根，规则跟着上移
+# 下载的宠物是作者们的作品，只有默认那只随 exe 分发（fetch.rs seed_default_pet）
+pets/*
+!pets/.gitkeep
+!pets/claude-chan/
+# 美术与调查资料只留说明（art/README.md）
+art/*
+!art/README.md
+# Thunderbird 扩展打包产物（integrations/thunderbird/build.ps1）
+integrations/thunderbird/*.xpi
+
+# 一次性材料与会话交接不入库
+.work/
+**/handoff/
+**/*handoff*.md

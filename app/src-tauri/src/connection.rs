@@ -975,7 +975,7 @@ pub fn write_agy_hooks(action: &str) -> Result<(), String> {
 // folder, as OpenCode 2.0.29 finds it: OPENCODE_CONFIG_DIR, else
 // $XDG_CONFIG_HOME/opencode, else ~/.config/opencode (on Windows too).
 
-const OPENCODE_PLUGIN: &str = include_str!("../../integrations/opencode/fish-dock.js");
+const OPENCODE_PLUGIN: &str = include_str!("../../../integrations/opencode/fish-dock.js");
 // The template's first line: ours, whatever port it was written with.
 const OPENCODE_MARK: &str = "// fish-dock-opencode-plugin";
 // 旧版同名插件的首行：仍是本产品写的，但按 stale 重写。
@@ -1118,7 +1118,7 @@ pub fn write_opencode_plugin(action: &str, port: u16) -> Result<(), String> {
 pub const OMP_FILE: &str = "fish-dock.ts";
 // 旧版扩展文件名：只读识别，安装时备份后移除，避免同一份被加载两次。
 pub const LEGACY_OMP_FILE: &str = "wakuwaku.ts";
-const OMP_SOURCE: &str = include_str!("../../integrations/omp/fish-dock.ts");
+const OMP_SOURCE: &str = include_str!("../../../integrations/omp/fish-dock.ts");
 
 fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from)
@@ -1503,8 +1503,8 @@ pub fn write_zcode_hooks(action: &str) -> Result<(), String> {
 // layers (dsh-hmr), so a row added while it runs may load at once.
 
 pub const DSH_FLAG: &str = "--fish-dock-dsh-hook";
-const DSH_PLUGIN: &str = include_str!("../../integrations/dsh/fish-dock.js");
-const DSH_PACKAGE: &str = include_str!("../../integrations/dsh/package.json");
+const DSH_PLUGIN: &str = include_str!("../../../integrations/dsh/fish-dock.js");
+const DSH_PACKAGE: &str = include_str!("../../../integrations/dsh/package.json");
 // Its folder in DSH's home, its file there, and the row's name for it: its
 // path beside the patch file.
 const DSH_DIR: &str = "fish-dock";

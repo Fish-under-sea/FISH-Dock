@@ -13,8 +13,8 @@ pub const DEFAULT_PET: &str = "claude-chan";
 // work of ZipZipPipe's character, as its pet.json says), carried in the exe:
 // written into her pets on the first run, nothing to download (codex-pets.net
 // slow or out of reach, in China above all). The gallery gets the others.
-const DEFAULT_SHEET: &[u8] = include_bytes!("../../pets/claude-chan/spritesheet.webp");
-const DEFAULT_JSON: &str = include_str!("../../pets/claude-chan/pet.json");
+const DEFAULT_SHEET: &[u8] = include_bytes!("../../../pets/claude-chan/spritesheet.webp");
+const DEFAULT_JSON: &str = include_str!("../../../pets/claude-chan/pet.json");
 
 // The default pet into <dir>/claude-chan/, whole (put_pet). Its pet.json
 // read back.
