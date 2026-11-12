@@ -33,7 +33,7 @@ const gitinfo = require('./gitinfo')
 const HERE = __dirname
 const REPO = path.join(HERE, '..', '..')
 // Her code, as a side has it; and the harness that draws it.
-const PRODUCT = ['src/pet', 'src/shared', 'pets/claude-chan']
+const PRODUCT = ['app/src/pet', 'app/src/shared', 'pets/claude-chan']
 const HARNESS = 'tools/preview'
 // A channel differing by more than this is a change; fewer pixels than NOISE changed is none.
 const TOLERANCE = 24
@@ -158,6 +158,13 @@ function archive(ref, paths, into) {
   if (r.status !== 0) throw new Error(`tar: ${r.stderr}`)
 }
 
+// 迁移前的 Git ref 把宠物放在 app/pets；统一成当前预览器读取的根目录。
+function normalizeLayout(root) {
+  const oldPets = path.join(root, 'app', 'pets')
+  const pets = path.join(root, 'pets')
+  if (!fs.existsSync(pets) && fs.existsSync(oldPets)) fs.renameSync(oldPets, pets)
+}
+
 function copyDir(from, to) {
   fs.mkdirSync(to, { recursive: true })
   for (const e of fs.readdirSync(from, { withFileTypes: true })) {
@@ -276,16 +283,19 @@ function main() {
   console.log(`${beforeLabel}\n${afterLabel}\ninto ${out}`)
 
   try {
-    // After: this checkout, or the ref's code with its own harness.
+    // 两侧统一使用当前预览器和场景，避免历史目录布局影响截图对比。
+    const archivedProduct = [...PRODUCT, 'app/pets/claude-chan']
     let afterRoot = REPO
     if (o.head) {
       afterRoot = path.join(temp, 'after')
-      archive(o.head, [...PRODUCT, HARNESS], afterRoot)
+      archive(o.head, archivedProduct, afterRoot)
+      normalizeLayout(afterRoot)
+      copyDir(path.join(REPO, HARNESS), path.join(afterRoot, HARNESS))
     }
-    // Before: the base's code, drawn by the after side's harness.
     const beforeRoot = path.join(temp, 'before')
-    archive(o.base, PRODUCT, beforeRoot)
-    copyDir(path.join(afterRoot, HARNESS), path.join(beforeRoot, HARNESS))
+    archive(o.base, archivedProduct, beforeRoot)
+    normalizeLayout(beforeRoot)
+    copyDir(path.join(REPO, HARNESS), path.join(beforeRoot, HARNESS))
 
     const shots = { before: path.join(out, 'before'), after: path.join(out, 'after') }
     for (const side of ['before', 'after']) {
@@ -329,7 +339,7 @@ function main() {
   }
 }
 
-module.exports = { readPng, diffImages, judge, parseArgs, picks, indexPage, TOLERANCE, NOISE }
+module.exports = { readPng, diffImages, judge, parseArgs, picks, indexPage, normalizeLayout, TOLERANCE, NOISE }
 
 if (require.main === module) {
   try {

@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const assets = path.join(root, 'assets/readme')
 const heroVariant = process.env.README_VARIANT || ''
 const outputPrefix = process.env.README_OUTPUT_PREFIX || ''

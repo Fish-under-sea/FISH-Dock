@@ -32,7 +32,7 @@
   const HERE = new URL('.', document.currentScript.src).href
   const IN_REPO = /\/tools\/preview\/$/.test(new URL(HERE).pathname)
   const ROOT = new URL(IN_REPO ? '../../' : '../', HERE).href
-  const PAGES = new URL(IN_REPO ? 'src/pet/' : 'pet/', ROOT).href
+  const PAGES = new URL(IN_REPO ? 'app/src/pet/' : 'pet/', ROOT).href
   const ASSETS = IN_REPO ? new URL('assets/', HERE).href : new URL('assets/', ROOT).href
   const Q = new URLSearchParams(location.search)
   const HOST_PAGE = window.WAKU_HOST_PAGE === true

@@ -3,26 +3,34 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..')
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..')
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex')
-const files=['README.md','README.en.md','app/README.md','app/README.en.md']
+const files=['README.md','README.en.md','app/README.md','app/README.en.md','AGENTS.md']
+// 连同分类后的文档和工具说明检查，避免首页通过而迁移后的深层链接失效。
+for (const dir of ['docs','tools']) {
+  for (const entry of fs.readdirSync(path.join(root,dir),{recursive:true})) {
+    if(entry.endsWith('.md'))files.push(path.join(dir,entry))
+  }
+}
 // 版本锚点只有一个来源：宿主元数据。文档里写的必须是当前版本，不在检查脚本里
 // 另存一份字面量——否则升版本时脚本和文档会一起漂，谁也没拦住。
 const version=JSON.parse(fs.readFileSync(path.join(root,'app/src-tauri/tauri.conf.json'),'utf8')).version
 for(const file of files){
   const text=fs.readFileSync(path.join(root,file),'utf8')
-  assert.match(text,new RegExp(version.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')),`${file} 没有写当前版本 ${version}`)
+  if (['README.md','README.en.md'].includes(file)) assert.match(text,new RegExp(version.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')),`${file} 没有写当前版本 ${version}`)
   assert.ok(!text.includes('\u001b'),'文档不含终端控制符')
-  for(const match of text.matchAll(/(?:\]\(|(?:src|srcset|href)=")([^\s")]+)/g)){
+  const rendered=text.replace(/^```[^\n]*\n[\s\S]*?^```\s*$/gm,'').replace(/`[^`\n]*`/g,'')
+  for(const match of rendered.matchAll(/(?:\]\(|(?:src|srcset|href)=")([^\s")]+)/g)){
     const link=match[1]
-    if(/^(?:https?:|mailto:|data:|#)/.test(link))continue
+    if(/^(?:https?:|mailto:|data:)/.test(link))continue
     const [relative,fragment]=link.split('#')
-    const dest=path.resolve(root,path.dirname(file),relative)
-    assert.ok(dest.startsWith(root+path.sep),`引用越界 ${file}`)
+    const dest=path.resolve(root,path.dirname(file),relative||path.basename(file))
+    assert.ok(dest===root||dest.startsWith(root+path.sep),`引用越界 ${file}: ${link}`)
     assert.ok(fs.existsSync(dest),`缺失引用 ${file}: ${link}`)
     if(fragment&&dest.endsWith('.md')){
       const content=fs.readFileSync(dest,'utf8')
       const anchors=[...content.matchAll(/^#{1,6}\s+(.+)$/gm)].map(m=>m[1].toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu,'').replace(/\s/g,'-'))
+      anchors.push(...[...content.matchAll(/\bid=["']([^"']+)["']/g)].map(m=>m[1]))
       assert.ok(anchors.includes(fragment),`失效锚点 ${file}: ${link}`)
     }
   }

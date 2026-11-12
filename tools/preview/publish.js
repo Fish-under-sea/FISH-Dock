@@ -33,7 +33,7 @@ const gitinfo = require('./gitinfo')
 
 const HERE = __dirname
 const REPO = path.join(HERE, '..', '..')
-const PET = path.join(REPO, 'src', 'pet')
+const PET = path.join(REPO, 'app', 'src', 'pet')
 const PREVIEW = ['page.html', 'boot.js', 'fake-tauri.js', 'fixtures.js', 'scenes.js', 'playground.js']
 const PAGES = ['index.html', 'desk.html']
 // The role each page plays in the playground (its frame).
@@ -43,7 +43,7 @@ const ROLE_OF = { 'index.html': 'island', 'desk.html': 'desk' }
 const FRAME_FILES = ['page.html', 'boot.js']
 const PAGE_FILES = ['playground.html', 'playground.js', 'fake-tauri.js', 'fixtures.js', 'scenes.js']
 // The folders the code it shows lives in (what a build's label looks at).
-const SOURCES = ['src/pet', 'src/shared', 'pets/claude-chan', 'tools/preview']
+const SOURCES = ['app/src/pet', 'app/src/shared', 'pets/claude-chan', 'tools/preview']
 
 // Her pages' scripts and styles, as their HTML loads them (src/pet relative).
 function pageFiles(page) {
@@ -69,7 +69,7 @@ function plan() {
     out.set(`pet/${page}`, { text: pageText(page) })
     for (const ref of pageFiles(page)) {
       const abs = path.resolve(PET, ref)
-      const rel = path.relative(path.join(REPO, 'src'), abs).split(path.sep).join('/')
+      const rel = path.relative(path.join(REPO, 'app', 'src'), abs).split(path.sep).join('/')
       out.set(rel, { file: abs })
     }
   }
@@ -143,7 +143,7 @@ function serve(port, folder) {
 const ROOTS = [
   ['preview/', HERE],
   ['pet/', PET],
-  ['shared/', path.join(REPO, 'src', 'shared')],
+  ['shared/', path.join(REPO, 'app', 'src', 'shared')],
   ['pets/', path.join(REPO, 'pets')],
   ['assets/', path.join(HERE, 'assets')],
 ]
@@ -162,8 +162,8 @@ function publishedOf(rel) {
   const map = [
     ['tools/preview/assets/', 'assets/'],
     ['tools/preview/', 'preview/'],
-    ['src/pet/', 'pet/'],
-    ['src/shared/', 'shared/'],
+    ['app/src/pet/', 'pet/'],
+    ['app/src/shared/', 'shared/'],
     ['pets/', 'pets/'],
   ]
   for (const [from, to] of map) if (rel.startsWith(from)) return to + rel.slice(from.length)
@@ -256,7 +256,7 @@ function dev(port) {
       for (const res of clients) res.write(data)
     }, 150)
   }
-  const WATCHED = ['src/pet', 'src/shared', 'pets/claude-chan', 'tools/preview']
+  const WATCHED = ['app/src/pet', 'app/src/shared', 'pets/claude-chan', 'tools/preview']
   for (const dir of WATCHED) {
     try {
       fs.watch(path.join(REPO, dir), { recursive: true }, (_, name) => {

@@ -6,8 +6,8 @@
 //   section-<tab-lowercased>-<theme>.png
 //
 // Usage:
-//   node tools/render-sections.mjs                 # the default set below
-//   node tools/render-sections.mjs "WORKSPACE=工作区" "DATA=数据边界"
+//   node tools/docs/render-sections.mjs                 # the default set below
+//   node tools/docs/render-sections.mjs "WORKSPACE=工作区" "DATA=数据边界"
 //     (each arg: TAB=TITLE; rendered for both light and dark)
 import fs from 'node:fs'
 import os from 'node:os'
@@ -17,15 +17,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 
 const DEFAULT_SECTIONS = [
-  { tab: 'ACKNOWLEDGEMENTS', title: '致谢' },
+  { tab: 'INTRO', title: '简介' },
+  { tab: 'FEATURES', title: '能做什么' },
   { tab: 'WORKSPACE', title: '工作区' },
+  { tab: 'CHANGELOG', title: '更新记录' },
+  { tab: 'INSTALL', title: '安装' },
   { tab: 'DATA', title: '数据边界' },
+  { tab: 'DEVELOP', title: '开发构建' },
+  { tab: 'CONTRIBUTORS', title: '贡献者' },
+  { tab: 'ACKNOWLEDGEMENTS', title: '致谢' },
 ]
 const sections = process.argv.slice(2).length
   ? process.argv.slice(2).map(arg => { const i = arg.indexOf('='); return { tab: arg.slice(0, i), title: arg.slice(i + 1) } })
   : DEFAULT_SECTIONS
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const assets = path.join(root, 'assets/readme')
 // 资源后缀用于破 GitHub 图床缓存：README_ASSET_SUFFIX=-v2 时输出 xxx-v2.png
 const suffix = process.env.README_ASSET_SUFFIX || ''
@@ -51,9 +57,13 @@ try {
     for (const theme of ['light', 'dark']) {
       const url = pathToFileURL(path.join(assets, 'section.html')).href + `?theme=${theme}&tab=${encodeURIComponent(tab)}&title=${encodeURIComponent(title)}`
       await call('Page.navigate', { url })
-      await until(() => evaluate(`document.readyState==='complete' && document.documentElement.dataset.theme==='${theme}'`))
+      await until(() => evaluate(`document.readyState==='complete' && document.body.classList.contains('${theme}')`))
       await evaluate('document.fonts.ready.then(()=>true)')
-      const clip = await evaluate(`(()=>{const r=document.getElementById('sec').getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),scale:1}})()`)
+      // 模板使用 body 的主题类与 .bar；截图包含条体下方 7px 投影。
+      assert.ok(await evaluate("document.fonts.check('24px Jersey')"), '像素字体缺失')
+      await evaluate("(()=>{const tag=document.getElementById('tag');let size=30;while(tag.scrollWidth>tag.clientWidth&&size>12)tag.style.fontSize=`${--size}px`})()")
+      assert.ok(await evaluate("document.getElementById('tag').scrollWidth<=document.getElementById('tag').clientWidth"), '标签文字溢出')
+      const clip = await evaluate(`(()=>{const r=document.body.getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),scale:1}})()`)
       const image = await call('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true })
       const file = `section-${tab.toLowerCase()}-${theme}${suffix}.png`
       const bytes = Buffer.from(image.data, 'base64')

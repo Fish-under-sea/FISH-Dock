@@ -1,4 +1,4 @@
-// T-B 的客户端协议夹具：/v1 的 proof 与 Bearer 顺序（app/tools/agent-api-client.mjs）。
+// T-B 的客户端协议夹具：/v1 的 proof 与 Bearer 顺序（tools/misc/agent-api-client.mjs）。
 //
 // 要证明的是：客户端先验 HMAC-SHA256(token, nonce) 的 proof，验不过就一个带 Bearer
 // 的请求都不发；token 不进 URL。服务端那一半（Host/Origin、游标、背压、释放）
@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { createHmac } from 'node:crypto'
 import { test } from 'node:test'
 
-import { connect, newNonce, proofOf, readToken } from '../tools/agent-api-client.mjs'
+import { connect, newNonce, proofOf, readToken } from '../../tools/misc/agent-api-client.mjs'
 
 const TOKEN = 'a'.repeat(63) + 'f' // 64 位 hex
 

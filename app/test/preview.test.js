@@ -7,13 +7,13 @@ const path = require('node:path')
 const zlib = require('node:zlib')
 const { execFileSync } = require('node:child_process')
 
-const F = require('../tools/preview/fixtures')
-const Scenes = require('../tools/preview/scenes')
-const gitinfo = require('../tools/preview/gitinfo')
-const publish = require('../tools/preview/publish')
-const compare = require('../tools/preview/compare')
+const F = require('../../tools/preview/fixtures')
+const Scenes = require('../../tools/preview/scenes')
+const gitinfo = require('../../tools/preview/gitinfo')
+const publish = require('../../tools/preview/publish')
+const compare = require('../../tools/preview/compare')
 
-const REPO = path.join(__dirname, '..')
+const REPO = path.join(__dirname, '..', '..')
 
 // The playground's one-click scenes, as agreed (2026-10-17; the hold and the
 // island at a corner, zhoupengjie/Wakuwaku#59 and #65, 2026-10-18), in order.
@@ -212,21 +212,21 @@ test('the live playground: a stylesheet swapped, a script its frames reloaded, i
   const pages = publish.framePages()
   assert.ok(pages.island.has('pet/island.js') && pages.island.has('shared/i18n.js') && pages.desk.has('pet/desk.js'))
   const at = rel => publish.liveChange(rel, pages)
-  assert.deepEqual(at('src/pet/style.css'), { css: { island: ['pet/style.css'] } })
-  assert.deepEqual(at('src/pet/desk.css'), { css: { desk: ['pet/desk.css'] } })
-  assert.deepEqual(at('src/pet/island.js'), { frames: ['island'] })
-  assert.deepEqual(at('src/pet/widgets.js'), { frames: ['island', 'desk'] })
-  assert.deepEqual(at('src/shared/i18n.js'), { frames: ['island', 'desk'] })
-  assert.deepEqual(at('src/pet/index.html'), { frames: ['island'] })
+  assert.deepEqual(at('app/src/pet/style.css'), { css: { island: ['pet/style.css'] } })
+  assert.deepEqual(at('app/src/pet/desk.css'), { css: { desk: ['pet/desk.css'] } })
+  assert.deepEqual(at('app/src/pet/island.js'), { frames: ['island'] })
+  assert.deepEqual(at('app/src/pet/widgets.js'), { frames: ['island', 'desk'] })
+  assert.deepEqual(at('app/src/shared/i18n.js'), { frames: ['island', 'desk'] })
+  assert.deepEqual(at('app/src/pet/index.html'), { frames: ['island'] })
   assert.deepEqual(at('tools/preview/boot.js'), { frames: ['island', 'desk'] })
   assert.deepEqual(at('pets/claude-chan/spritesheet.webp'), { frames: ['island', 'desk'] })
   for (const f of ['playground.html', 'playground.js', 'fake-tauri.js', 'fixtures.js', 'scenes.js']) assert.deepEqual(at(`tools/preview/${f}`), { page: true }, f)
   assert.deepEqual(at('tools/preview/assets/wall.jpg'), { page: true })
   // Not the playground's: nothing to do.
-  for (const f of ['src/pet/bar.js', 'tools/preview/render.ps1', 'tools/preview/compare.js', 'src-tauri/src/main.rs', 'docs/DEVELOPMENT.md']) assert.equal(at(f), null, f)
+  for (const f of ['app/src/pet/bar.js', 'tools/preview/render.ps1', 'tools/preview/compare.js', 'src-tauri/src/main.rs', 'docs/guides/DEVELOPMENT.md']) assert.equal(at(f), null, f)
   // A burst of saves, one message.
-  const msg = publish.mergeChanges([{ rel: 'src/pet/style.css', change: at('src/pet/style.css') }, { rel: 'src/pet/island.js', change: at('src/pet/island.js') }, { rel: 'x', change: null }])
-  assert.deepEqual(msg, { page: false, frames: ['island'], css: { island: ['pet/style.css'] }, files: ['src/pet/style.css', 'src/pet/island.js'] })
+  const msg = publish.mergeChanges([{ rel: 'app/src/pet/style.css', change: at('app/src/pet/style.css') }, { rel: 'app/src/pet/island.js', change: at('app/src/pet/island.js') }, { rel: 'x', change: null }])
+  assert.deepEqual(msg, { page: false, frames: ['island'], css: { island: ['pet/style.css'] }, files: ['app/src/pet/style.css', 'app/src/pet/island.js'] })
   assert.equal(publish.mergeChanges([{ rel: 'x', change: null }]), null)
 })
 
@@ -235,8 +235,8 @@ test('the live playground reads only from its folders', () => {
   assert.ok(publish.repoFile('preview/boot.js').endsWith(path.join('tools', 'preview', 'boot.js')))
   assert.equal(publish.repoFile('pet/../../package.json'), null)
   assert.equal(publish.repoFile('preview/../../../secret'), null)
-  assert.equal(publish.repoFile('src/pet/island.js'), null)
-  assert.equal(publish.publishedOf('src/pet/island.js'), 'pet/island.js')
+  assert.equal(publish.repoFile('app/src/pet/island.js'), null)
+  assert.equal(publish.publishedOf('app/src/pet/island.js'), 'pet/island.js')
   assert.equal(publish.publishedOf('tools/preview/assets/wall.jpg'), 'assets/wall.jpg')
 })
 
@@ -244,6 +244,22 @@ test('a build has every file its two pages load', () => {
   const plan = publish.plan()
   for (const role of ['island', 'desk']) for (const pub of publish.framePages()[role]) assert.ok(plan.has(pub), pub)
   for (const f of ['playground.html', 'preview/scenes.js', 'preview/fixtures.js', 'preview/playground.js', 'assets/wall.jpg', 'pets/claude-chan/spritesheet.webp']) assert.ok(plan.has(f), f)
+})
+
+test('历史 ref 的 app/pets 归一化，当前根目录布局保持不变', () => {
+  const fs = require('node:fs')
+  const os = require('node:os')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fish-preview-layout-'))
+  try {
+    const old = path.join(root, 'app', 'pets', 'claude-chan')
+    fs.mkdirSync(old, { recursive: true })
+    fs.writeFileSync(path.join(old, 'spritesheet.webp'), 'fixture')
+    compare.normalizeLayout(root)
+    assert.equal(fs.readFileSync(path.join(root, 'pets', 'claude-chan', 'spritesheet.webp'), 'utf8'), 'fixture')
+    assert.ok(!fs.existsSync(path.join(root, 'app', 'pets')))
+    compare.normalizeLayout(root)
+    assert.equal(fs.readFileSync(path.join(root, 'pets', 'claude-chan', 'spritesheet.webp'), 'utf8'), 'fixture')
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
 
 // --- compare.js: PNGs read, pictures compared -----------------------------------------------
