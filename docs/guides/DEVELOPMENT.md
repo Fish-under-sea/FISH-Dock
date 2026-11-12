@@ -100,33 +100,38 @@ relay/                    崩溃报告中转（Cloudflare Worker → GitHub issu
 examples/widgets/         岛上插件的示例脚本：waku、邮件……，以及她替你跑的那几个插件的脚本版（样例，她不运行）
 integrations/thunderbird/ Thunderbird 扩展：未读邮件发到岛上（build.ps1 打包成 .xpi）
 docs/design/prototypes/          设计原型：island-settings.html 是设置长在岛里的手感原型
-app/data/                 开发运行数据（不进仓库；正式数据根按配置解析）
+app/data/                 历史开发数据回退目录（不进仓库；当前启动使用统一数据根）
 pets/                     默认宠物立绘与配置（claude-chan 入库；下载宠物不入库）
 art/                      美术和调查资料，只在本地（只有 art/README.md 进仓库）
 ```
 
 ## 构建和运行
 
-```bash
-cd app/src-tauri
-cargo run                 # 调试版：有控制台窗口
-cargo build --release     # target/release/wakuwaku.exe：单个文件，约 5 MB，没有控制台
-cargo test                # Rust 单元测试
-cd .. && node --test "test/*.test.js"   # 页面的单元测试
+以下命令在仓库根运行：
+
+```powershell
+cargo run --manifest-path app/src-tauri/Cargo.toml -- --data-root '<新的绝对开发数据目录>'
+cargo check --locked --offline --features installed --manifest-path app/src-tauri/Cargo.toml
+cargo build --release --manifest-path app/src-tauri/Cargo.toml
+cargo test --locked --offline --manifest-path app/src-tauri/Cargo.toml
+node --test --test-isolation=none 'app/test/*.test.js' 'app/test/*.test.mjs' 'app/scripts/*.test.mjs' 'sdk/node/*.test.mjs'
 ```
 
-页面是打进 exe 的：改了 `src/` 要重新编译（cargo 会发现）。不需要 Node 和 Tauri CLI；`Cargo.toml` 默认开着 `custom-protocol`，所以 `cargo run` 也直接用打进去的页面，不找开发服务器。
+未设置 `CARGO_TARGET_DIR` 时，Windows release 二进制位于 `app/src-tauri/target/release/FISH-Dock.exe`。这是宿主程序，不是携带全部运行资源的独立安装包；正式 Setup 的资源准备与构建见 [安装版构建](installer-build.md)。程序体积随依赖与编译选项变化，不承诺固定大小。`--offline` 要求本机已经缓存锁文件中的依赖。
 
-**数据放在哪**（`data.rs` 的 `folder()`）：`WAKUWAKU_USER_DATA`（测试用）；从源码树里运行时是项目的 `data/`；否则是 exe 旁边的 `wakuwaku-data/`，启动时没有就新建一个。旧的 Electron 安装版的 `%APPDATA%\wakuwaku` 不再读取。数据目录里放一个 `debug.on` 文件，就会写 `debug.log`（两个页面的 console.log 也在里面）。
+页面打进 exe，修改 `app/src/` 后需要重新编译。`Cargo.toml` 默认开启 `custom-protocol`，开发运行不依赖前端开发服务器，也不要求 Node 或 Tauri CLI 编译页面；Node 仍用于测试、工具和插件运行时。涉及真实子进程或浏览器的测试遇到沙箱权限错误时，应保留断言并申请原命令单次授权，不能直接记作通过。
+
+**数据放在哪**：主启动流程先建立 `storage_context`，数据根按 `--data-root` > `FISH_DOCK_HOME` > `%USERPROFILE%/.fish-dock` 解析，宿主数据位于根下 `host/`。源码调试同样会建立此上下文，建议显式传入新的绝对开发目录，明确开发写入目标，不把默认用户数据根当作测试目录。启动引导仍可能从历史位置复制迁移资料，真实账号联调应使用隔离环境。`data.rs::folder()` 仅在上下文尚未建立时回退到 `WAKUWAKU_USER_DATA`、安装模式的数据目录或历史开发/便携目录；这些回退不覆盖已建立的统一数据根。迁移与备份范围见 [运维说明](operations.md)。
 
 | 环境变量 | 作用 |
 | --- | --- |
-| `WAKUWAKU_PORT` | 端口（默认 47213） |
-| `WAKUWAKU_USER_DATA` | 换一个数据目录 |
+| `FISH_DOCK_HOME` | 统一数据根；显式 `--data-root` 优先于此变量 |
+| `FISH_DOCK_PORT`（旧 `WAKUWAKU_PORT` 只读兼容） | 端口，默认 47213，新名优先 |
+| `WAKUWAKU_USER_DATA` | 保留旧名的测试/兼容数据目录覆盖，仅在存储上下文尚未建立时由 `data.rs::folder()` 使用 |
 | `CLAUDE_CONFIG_DIR` | Claude Code 的配置目录（测试里指向临时目录，不碰真实设置） |
 | `CODEX_HOME` | Codex 的配置目录（`hooks.json`、`pets/`），默认 `~/.codex` |
 | `FISH_DOCK_DEBUG=1`（旧 `WAKUWAKU_DEBUG` 只读兼容） | `/health` 带上两个窗口和设置，开放 `/debug/eval`、`/debug/walk`（统一经 `config::debug_enabled`） |
-| `WAKUWAKU_IDLE_HIDE_MS` | 空闲会话多久不再显示（毫秒，`0` 一直显示），代替设置 `idleHideMin` |
+| `FISH_DOCK_IDLE_HIDE_MS`（旧 `WAKUWAKU_IDLE_HIDE_MS` 只读兼容） | 空闲会话隐藏时间覆盖（毫秒）；未设置时按 `idleHideMin`，显式 `0` 关闭空闲隐藏 |
 
 ## 插件
 

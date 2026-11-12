@@ -51,7 +51,7 @@
 | `interval.ticker_ms` | `500` | `FISH_DOCK_TICKER_MS` | 轮询间隔 | 主 ticker 心跳间隔 |
 | `interval.fullscreen_ms` | `1500` | `FISH_DOCK_FULLSCREEN_MS` | 轮询间隔 | 全屏检测轮询间隔 |
 | `interval.quiet_after_ms` | `90000` | `FISH_DOCK_QUIET_AFTER_MS` | 轮询间隔 | 闲置多久进入 quiet（旧 WAKUWAKU_QUIET_AFTER_MS 兼容） |
-| `interval.idle_hide_ms` | `0` | `FISH_DOCK_IDLE_HIDE_MS` | 轮询间隔 | 空闲多久隐藏会话（0/未设=按 idleHideMin 设置；旧 WAKUWAKU_IDLE_HIDE_MS 兼容） |
+| `interval.idle_hide_ms` | `(未设=按设置)` | `FISH_DOCK_IDLE_HIDE_MS` | 轮询间隔 | 空闲多久隐藏会话（未设时按 idleHideMin；显式 0 关闭空闲隐藏；旧 WAKUWAKU_IDLE_HIDE_MS 兼容） |
 | `interval.lhm_every_ms` | `3000` | `FISH_DOCK_LHM_EVERY_MS` | 轮询间隔 | LHM 传感器轮询（活跃） |
 | `interval.lhm_every_quiet_ms` | `10000` | `FISH_DOCK_LHM_EVERY_QUIET_MS` | 轮询间隔 | LHM 传感器轮询（quiet） |
 | `interval.monitor_min_ms` | `1000` | `FISH_DOCK_MONITOR_MIN_MS` | 轮询间隔 | 硬件监视最短轮询间隔 |
@@ -75,7 +75,7 @@
 | 新键（推荐） | 旧名（兼容保留） | 说明 |
 |---|---|---|
 | `FISH_DOCK_QUIET_AFTER_MS` | `WAKUWAKU_QUIET_AFTER_MS` | 闲置多久进入 quiet（t5 内存预算相关） |
-| `FISH_DOCK_IDLE_HIDE_MS` | `WAKUWAKU_IDLE_HIDE_MS` | 空闲多久隐藏会话（0/未设=按 idleHideMin 设置） |
+| `FISH_DOCK_IDLE_HIDE_MS` | `WAKUWAKU_IDLE_HIDE_MS` | 空闲多久隐藏会话（未设时按 idleHideMin；显式 0 关闭空闲隐藏） |
 | `FISH_DOCK_BROWSER_ARGS` | `WAKUWAKU_BROWSER_ARGS` | WebView2 额外启动参数（字符串） |
 | `FISH_DOCK_PORT` | `WAKUWAKU_PORT` | 宿主端口（t6 已收口） |
 | `FISH_DOCK_RESOURCES` | `DSH_FISH_RESOURCES` | 安装资源目录（2.0.4 T-Q 收口：`config::resources_override` 是唯一解析点） |
