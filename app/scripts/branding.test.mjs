@@ -38,10 +38,15 @@ test('托盘、通知和 README 使用用户原图，不再引用自绘素材', 
   const notify = read('src-tauri/src/notify.rs')
   assert.ok(notify.includes('include_bytes!("../icons/fish-dock.png")'))
   assert.ok(notify.includes('dir.join("fish-dock-user-icon-v1.png")'))
-  for (const file of ['README.md', 'README.en.md']) {
-    assert.ok(read(file).includes('src="src-tauri/icons/fish-dock.png"'))
-    assert.ok(!read(file).includes('art/fish-dock-master.png'))
+  // app/ 只保留入口；产品 README 使用由模板渲染的用户原图横幅。
+  for (const [file, lang] of [['README.md', 'zh'], ['README.en.md', 'en']]) {
+    assert.ok(read(file).includes(`../${file}`), '源码入口指向仓库根文档')
+    const product = read(`../${file}`)
+    assert.match(product, new RegExp(`src="assets/readme/hero-${lang}-light[^" ]*\\.png"`))
+    assert.ok(!product.includes('art/fish-dock-master.png'))
   }
+  assert.match(read('../assets/readme/hero.html'), /id="portrait" src="DSH-FISH\.png"/)
+  assert.equal(createHash('sha256').update(fs.readFileSync(new URL('../assets/readme/DSH-FISH.png', root))).digest('hex'), 'cbef6d848787c339e8379d8f70155deae680b575881b8609373bfcb80d7f7650')
 })
 
 test('用户原始 ICO 与 PNG 保持不变，托盘直接复用 ICO 内的原图', () => {

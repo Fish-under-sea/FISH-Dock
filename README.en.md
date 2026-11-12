@@ -1,20 +1,20 @@
 <div align="center">
 <p>
-<a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark.png"><img src="assets/readme/key-zh-zh-light.png" width="74" alt="中文"></picture></a>
-<a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark.png"><img src="assets/readme/key-en-zh-light.png" width="108" alt="English"></picture></a>
-<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-en-dark.png"><img src="assets/readme/key-start-en-light.png" width="126" alt="Get started"></picture></a>
+<a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark-v223.png"><img src="assets/readme/key-zh-zh-light-v223.png" width="74" alt="中文"></picture></a>
+<a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark-v223.png"><img src="assets/readme/key-en-zh-light-v223.png" width="108" alt="English"></picture></a>
+<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-en-dark-v223.png"><img src="assets/readme/key-start-en-light-v223.png" width="126" alt="Get started"></picture></a>
 </p>
-<h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark-v221.png"><img src="assets/readme/hero-en-light-v221.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
+<h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark-v223.png"><img src="assets/readme/hero-en-light-v223.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark-v221.png"><img src="assets/readme/stat-version-en-light-v221.png" width="23%" alt="Current version v2.2.1"></picture></a>
-<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark.png"><img src="assets/readme/stat-desktop-en-light.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
-<a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark.png"><img src="assets/readme/stat-mail-en-light.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
-<a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v2.png"><img src="assets/readme/stat-channels-en-light-v2.png" width="23%" alt="Three independent official plugins"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark-v223.png"><img src="assets/readme/stat-version-en-light-v223.png" width="23%" alt="Current version v2.2.3"></picture></a>
+<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark-v223.png"><img src="assets/readme/stat-desktop-en-light-v223.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
+<a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark-v223.png"><img src="assets/readme/stat-mail-en-light-v223.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v223.png"><img src="assets/readme/stat-channels-en-light-v223.png" width="23%" alt="Three independent official plugins"></picture></a>
 </p>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark.png"><img src="assets/readme/key-download-en-light.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="docs/release-2.2.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark.png"><img src="assets/readme/key-release-en-light.png" width="112" alt="Changelog"></picture></a>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark.png"><img src="assets/readme/key-issues-en-light.png" width="120" alt="Report an issue"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark-v223.png"><img src="assets/readme/key-download-en-light-v223.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
+<a href="docs/releases/release-2.2.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark-v223.png"><img src="assets/readme/key-release-en-light-v223.png" width="112" alt="Changelog"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark-v223.png"><img src="assets/readme/key-issues-en-light-v223.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
 
@@ -22,7 +22,7 @@
 <tr>
 <td>
 <p><strong>2.2.3 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
-<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="docs/release-2.2.3.md">Release notes</a></p>
+<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="docs/releases/release-2.2.3.md">Release notes</a></p>
 </td>
 <td width="232" align="center" valign="middle">
 <picture>
@@ -45,7 +45,7 @@ What the host itself provides. Business content — mail, models, notifications,
 | About and notes | Brand image first and centred, clickable to the official site (override `url.official_site`); notes show only the latest version's highlights with the full text collapsed; sources are GitHub → Gitee → local cache (Gitee is skipped explicitly when unconfigured); updates finish entirely in-app. |
 | Global shortcuts | A recorder in Settings; an occupied combination is reported, and after 30 seconds without a usable one the recorder gives up instead of hanging. |
 | Appearance toolchain | Connects to your own Windhawk install (2.1.2 stopped bundling the engine and compiler): import mods, compile, switch and roll back on the Appearance page. |
-| Theme and legibility | White on dark, black on light; the contrast audit (`scripts/check-contrast.mjs`) reports zero violations. |
+| Theme and legibility | White on dark, black on light; the contrast audit (`app/scripts/check-contrast.mjs`) reports zero violations. |
 | Network and cache | Gallery and downloads use one egress (respecting proxy settings, falling back to direct); timeouts are tiered and configurable; the gallery has an offline LRU cache. Mail reconnects use exponential backoff, a circuit breaker and persisted state. |
 | Memory | Hidden means resting (a hidden page gets `IsVisible=false` and a Low memory target); `check_quiet` no longer lifts hidden pages back to normal; a parked plugin iframe retires after five minutes. The budget table has A/B/C tiers in `红线-禁止屎山十条.md` (open items tracked in issues #29 / #30). |
 
@@ -64,10 +64,10 @@ This section is only about entry points and operations; capability detail is abo
 
 Business code, plugin packages and the store catalog are maintained in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins); this repository owns the desktop host, SDK, installer, plugin management and Windhawk.
 
-- **2.2.1**: no longer crashes at launch while WebView2 is being updated, and clears a stale runtime folder variable left by older versions; plugin version changes no longer fail after a plugin cleans `tmp`; closing plugin windows from the tray notifies once. Setup only. [Full notes](docs/release-2.2.3.md).
-- **2.2.0**: plugins explicitly request native windows outside Dock and provide their own UI. No request means no second window. Removes the hardcoded staging UI and persistent dot; in-app upgrades use Setup. **This is the final release with both Setup and Update; later releases provide Setup only.** [Full notes](docs/release-2.2.0.md).
-- **2.1.9**: uses system Evergreen WebView2 and transactionally removes old bundled runtime files while preserving user data. [Full notes](docs/release-2.1.9.md).
-- **2.1.8**: restores the system proxy when Clash exits and adds host proxy recovery. [Full notes](docs/release-2.1.8.md).
+- **2.2.1**: no longer crashes at launch while WebView2 is being updated, and clears a stale runtime folder variable left by older versions; plugin version changes no longer fail after a plugin cleans `tmp`; closing plugin windows from the tray notifies once. Setup only. [Full notes](docs/releases/release-2.2.1.md).
+- **2.2.0**: plugins explicitly request native windows outside Dock and provide their own UI. No request means no second window. Removes the hardcoded staging UI and persistent dot; in-app upgrades use Setup. **This is the final release with both Setup and Update; later releases provide Setup only.** [Full notes](docs/releases/release-2.2.0.md).
+- **2.1.9**: uses system Evergreen WebView2 and transactionally removes old bundled runtime files while preserving user data. [Full notes](docs/releases/release-2.1.9.md).
+- **2.1.8**: restores the system proxy when Clash exits and adds host proxy recovery. [Full notes](docs/releases/release-2.1.8.md).
 
 See [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases) for earlier versions and complete changes.
 
@@ -91,15 +91,15 @@ The complete data root is resolved from `--data-root`, then `FISH_DOCK_HOME`, th
 
 ## Development
 
-The desktop host, SDK, installer and Windhawk integration belong in this repository. Plugin business code and distribution belong in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Service startup is on demand. Model requests still use the selected upstream provider and its own accounts and quotas. All directories, ports, URLs, timeouts and intervals live in one entry point, `app/src-tauri/src/config.rs` (49 keys / 9 categories, `FISH_DOCK_*` overridable, legacy `WAKUWAKU_*` readable); `scripts/check-hardcoded.mjs` and `scripts/check-contrast.mjs` are part of the test run.
+The desktop host, SDK, installer and Windhawk integration belong in this repository. Plugin business code and distribution belong in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Service startup is on demand. Model requests still use the selected upstream provider and its own accounts and quotas. All directories, ports, URLs, timeouts and intervals live in one entry point, `app/src-tauri/src/config.rs` (49 keys / 9 categories, `FISH_DOCK_*` overridable, legacy `WAKUWAKU_*` readable); `app/scripts/check-hardcoded.mjs` and `app/scripts/check-contrast.mjs` are part of the test run.
 
 ```powershell
 cargo run --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml
-node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js'
+node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js' 'app/test/*.test.mjs' 'app/scripts/*.test.mjs'
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
 
-Plugin code, packaging and the catalog live in the [official plugin repository](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Start with the [developer guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md). For native windows outside Dock, see the [Hook guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md), [host API notes](docs/plugin-windows-2.2.0.md) and [complete protocol example](sdk/examples/window-file-drop/README.md).
+Plugin code, packaging and the catalog live in the [official plugin repository](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Start with the [developer guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md). For native windows outside Dock, see the [Hook guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md), [host API notes](docs/guides/plugin-windows-2.2.0.md) and [complete protocol example](sdk/examples/window-file-drop/README.md).
 
 Build inputs are pinned in `app/scripts/runtime-sources.json`. Prepare a new resource directory with `prepare-installer.mjs`, then build with `build-installer.ps1` and NSIS. See the Chinese README for detailed storage and build instructions.
 
@@ -112,3 +112,5 @@ Build inputs are pinned in `app/scripts/runtime-sources.json`. Prepare a new res
 ## Acknowledgements
 
 Upstream copyright and the [MIT license](LICENSE) are retained (Wakuwaku, Copyright 2026 Pengjie Zhou); model capabilities are provided by the Magpie plugin. The Node.js license ships with the installed resources; WebView2 is provided by the system Evergreen runtime, and its Fixed Version runtime and license are no longer bundled as of 2.1.9; Windhawk is no longer redistributed as of 2.1.2, so its GPLv3 obligations follow the copy you install yourself. Source and redistribution bounds of the original brand assets are in [asset credits](assets/readme/SOURCES.md): pet sprites and the application icon keep their own asset rights and are not relicensed by the open-source code. People and repository ownership are listed under Contributors above.
+
+Maintenance: [documentation index](docs/README.md) · [repository tools](tools/README.md) · [Agent instructions](AGENTS.md).

@@ -1,30 +1,30 @@
 <div align="center">
 
 <p>
-  <a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark.png"><img src="assets/readme/key-zh-zh-light.png" alt="中文" height="40"></picture></a>
-  <a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark.png"><img src="assets/readme/key-en-zh-light.png" alt="English" height="40"></picture></a>
-  <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-zh-dark.png"><img src="assets/readme/key-start-zh-light.png" alt="入门指南" height="40"></picture></a>
+  <a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark-v223.png"><img src="assets/readme/key-zh-zh-light-v223.png" alt="中文" height="40"></picture></a>
+  <a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark-v223.png"><img src="assets/readme/key-en-zh-light-v223.png" alt="English" height="40"></picture></a>
+  <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-zh-dark-v223.png"><img src="assets/readme/key-start-zh-light-v223.png" alt="入门指南" height="40"></picture></a>
 </p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark-v221.png">
-  <img src="assets/readme/hero-zh-light-v221.png" alt="FISH Dock：桌面与模型工作台" width="1448">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark-v223.png">
+  <img src="assets/readme/hero-zh-light-v223.png" alt="FISH Dock：桌面与模型工作台" width="1448">
 </picture>
 
 <p>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark-v221.png"><img src="assets/readme/stat-version-zh-light-v221.png" alt="VERSION：当前版本 2.2.1" width="23%"></picture></a>
-  <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark.png"><img src="assets/readme/stat-desktop-zh-light.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
-  <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark.png"><img src="assets/readme/stat-mail-zh-light.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
-  <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v2.png"><img src="assets/readme/stat-channels-zh-light-v2.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.2.3"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark-v223.png"><img src="assets/readme/stat-version-zh-light-v223.png" alt="VERSION：当前版本 2.2.3" width="23%"></picture></a>
+  <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark-v223.png"><img src="assets/readme/stat-desktop-zh-light-v223.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
+  <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark-v223.png"><img src="assets/readme/stat-mail-zh-light-v223.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v223.png"><img src="assets/readme/stat-channels-zh-light-v223.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
 </p>
 
 <p><img src="https://img.shields.io/badge/Windows-10%2F11%20x64-8fd6a0?style=flat-square&logo=windows&logoColor=white&labelColor=5a544a" alt="Windows x64"> <img src="https://img.shields.io/badge/Rust-Tauri-8fd6a0?style=flat-square&logo=rust&logoColor=white&labelColor=5a544a" alt="Rust Tauri"> <img src="https://img.shields.io/badge/Node.js-24.14%2B-8fd6a0?style=flat-square&logo=nodedotjs&logoColor=white&labelColor=5a544a" alt="Node.js"> <img src="https://img.shields.io/badge/License-MIT-8fd6a0?style=flat-square&labelColor=5a544a" alt="MIT License"> <img src="https://img.shields.io/badge/Official%20Plugins-3-ffd84a?style=flat-square&labelColor=5a544a" alt="Three official plugins"></p>
 <p><strong>Everything is a Plugin · 一切皆插件</strong><br>一个安静的桌面宿主，把会话、模型和工具收进同一个工作台。</p>
 
 <p>
-  <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark.png"><img src="assets/readme/key-download-zh-light.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="docs/release-2.2.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark.png"><img src="assets/readme/key-release-zh-light.png" alt="更新记录" height="40"></picture></a>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark.png"><img src="assets/readme/key-issues-zh-light.png" alt="反馈 / Issues" height="40"></picture></a>
+  <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark-v223.png"><img src="assets/readme/key-download-zh-light-v223.png" alt="下载 / Releases" height="40"></picture></a>
+  <a href="docs/releases/release-2.2.3.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark-v223.png"><img src="assets/readme/key-release-zh-light-v223.png" alt="更新记录" height="40"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark-v223.png"><img src="assets/readme/key-issues-zh-light-v223.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
 </div>
@@ -57,7 +57,7 @@
 | 插件安装与更新 | 校验来源、平台与资源摘要；官方插件优先 npm（`@fish-under-sea/fish-dock-plugin-*`）→ npmmirror 镜像 → GitHub Release；安装/更新为带 journal 的事务（中断可续做、不可验证则回滚），更新后只保留当前版本。插件卡上统一三态自启动按钮：已开「关闭自启动」、已关「随 Dock 启动」、无自启动能力「无需自启动」（纯展示）；卡内唯一实心按钮是「更新」，卸载与「打开插件日志」收进「更多」。 |
 | 关于与公告 | 关于页品牌图首位居中、可点击进官网（地址在 `url.official_site` 可覆盖）；更新公告只显示最新版本与新特性要点，完整说明折叠；公告源 GitHub → Gitee → 本地缓存，未配置 Gitee 时明确跳过；内置更新全程在应用内完成。 |
 | 全局快捷键 | 设置页可录制组合键；被其他程序占用时给出提示，30 秒内未录到可用组合就放弃。 |
-| 主题与可读性 | 暗色白字、浅色黑字；对比度审计（`scripts/check-contrast.mjs`）违规 0。 |
+| 主题与可读性 | 暗色白字、浅色黑字；对比度审计（`app/scripts/check-contrast.mjs`）违规 0。 |
 | 网络与缓存 | 图库/下载走统一出口（尊重代理设置，失败回落直连）；超时分层可配；图库 LRU 缓存离线可用；邮件重连为指数退避 + 熔断 + 状态持久化。 |
 | 内存 | 隐藏即休（页面隐藏则 `IsVisible=false` 并把内存目标降到 Low）；`check_quiet` 不再把隐藏页抬回 normal；插件页 iframe park 后 5 分钟整页退场。预算表按 A/B/C 三档见 `红线-禁止屎山十条.md`（含未结清项，见 issue #29 / #30）。 |
 
@@ -76,14 +76,14 @@
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器与插件管理。
 
-- **2.2.1**：修复 WebView2 正在更新时启动崩溃，清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。仅发布 Setup。[完整说明](docs/release-2.2.3.md)。
-- **2.2.0**：插件通过 Hook 按需请求 Dock 外部原生窗口，自行绘制业务界面；无请求不创建第二窗口。移除硬编码暂存条与常驻小球，应用内更新改用 Setup。**本版最后一次同时发布 Setup 和 Update，之后仅发布 Setup。** [完整说明](docs/release-2.2.0.md)。
-- **2.1.9**：改用系统 Evergreen WebView2，安装事务清理旧随包运行时并保留用户资料。[完整说明](docs/release-2.1.9.md)。
-- **2.1.8**：修复 Clash 退出后的系统代理恢复，并补充宿主代理自愈。[完整说明](docs/release-2.1.8.md)。
+- **2.2.1**：修复 WebView2 正在更新时启动崩溃，清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。仅发布 Setup。[完整说明](docs/releases/release-2.2.1.md)。
+- **2.2.0**：插件通过 Hook 按需请求 Dock 外部原生窗口，自行绘制业务界面；无请求不创建第二窗口。移除硬编码暂存条与常驻小球，应用内更新改用 Setup。**本版最后一次同时发布 Setup 和 Update，之后仅发布 Setup。** [完整说明](docs/releases/release-2.2.0.md)。
+- **2.1.9**：改用系统 Evergreen WebView2，安装事务清理旧随包运行时并保留用户资料。[完整说明](docs/releases/release-2.1.9.md)。
+- **2.1.8**：修复 Clash 退出后的系统代理恢复，并补充宿主代理自愈。[完整说明](docs/releases/release-2.1.8.md)。
 
-- **2.2.2**：补齐外部原生窗口 Hook：主岛几何/状态读取与订阅、窗口宽度跟随胶囊、锚点对齐语义、窗口下限降到 32×32、拖入落点坐标、窗口焦点事件、`zOrder`。**主岛外观不变**，新增上报按需启用。仅发布 Setup。[完整说明](docs/release-2.2.3.md)。
+- **2.2.2**：补齐外部原生窗口 Hook：主岛几何/状态读取与订阅、窗口宽度跟随胶囊、锚点对齐语义、窗口下限降到 32×32、拖入落点坐标、窗口焦点事件、`zOrder`。**主岛外观不变**，新增上报按需启用。仅发布 Setup。[完整说明](docs/releases/release-2.2.3.md)。
 
-- **2.2.3**：外部窗口 Hook 补齐拖出（`beginDragOut`）、透明区穿透（`hitRects`）、内部页打开（`openPage`）与动画跟手；修掉旧插件清单退役字段导致整张注册表读不出来的升级故障。**主岛外观不变**。[完整说明](docs/release-2.2.3.md)。
+- **2.2.3**：外部窗口 Hook 补齐拖出（`beginDragOut`）、透明区穿透（`hitRects`）、内部页打开（`openPage`）与动画跟手；修掉旧插件清单退役字段导致整张注册表读不出来的升级故障。**主岛外观不变**。[完整说明](docs/releases/release-2.2.3.md)。
 
 更早版本及完整变更见 [发行记录](https://github.com/Fish-under-sea/FISH-Dock/releases)。
 
@@ -126,11 +126,11 @@
 
 ```powershell
 cargo run --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml
-node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js'
+node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js' 'app/test/*.test.mjs' 'app/scripts/*.test.mjs'
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
 
-插件业务源码、打包与商店目录维护在 [官方插件仓](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。开发插件先读 [开发者指南](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md)；外部原生窗口接入见 [Hook 文档](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md)、[宿主接口说明](docs/plugin-windows-2.2.0.md) 与 [完整协议示例](sdk/examples/window-file-drop/README.md)。SDK 与宿主接口由本仓维护，业务界面由插件提供。
+插件业务源码、打包与商店目录维护在 [官方插件仓](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。开发插件先读 [开发者指南](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md)；外部原生窗口接入见 [Hook 文档](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md)、[宿主接口说明](docs/guides/plugin-windows-2.2.0.md) 与 [完整协议示例](sdk/examples/window-file-drop/README.md)。SDK 与宿主接口由本仓维护，业务界面由插件提供。
 
 构建输入固定在 `app/scripts/runtime-sources.json`；资源目录由 `prepare-installer.mjs` 准备，再用 `build-installer.ps1` 与 NSIS 打包。
 
@@ -145,3 +145,5 @@ cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.to
 上游代码的版权与 [MIT 许可](LICENSE) 保留（Wakuwaku，Copyright 2026 Pengjie Zhou）；模型能力由 Magpie 插件提供。Node.js 的原文许可随运行资源交付；WebView2 由系统 Evergreen 提供，自 2.1.9 起不再随包分发固定版及其许可文件；Windhawk 自 2.1.2 起不再随包分发，其 GPLv3 义务随用户自己安装的那份走。原始品牌素材的来源与授权边界见 [素材记录](assets/readme/SOURCES.md)：宠物精灵图与应用图标遵循各自素材授权，不因代码开源而自动获得再分发许可。人员与仓库归属见上一节「贡献者」。
 
 <p align="center"><sub>FISH Dock · Desktop + Model Workspace · Windows x64</sub></p>
+
+维护入口：[文档索引](docs/README.md) · [仓库工具](tools/README.md) · [Agent 约定](AGENTS.md)。
