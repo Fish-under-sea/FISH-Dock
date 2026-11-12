@@ -13,4 +13,4 @@
 
 GitHub 登录使用公开 OAuth Client ID 和设备授权流程；宿主加密保存令牌，不向插件传递。公开 Client ID 属于应用标识，不是客户端密钥。自建应用可通过 `FISH_DOCK_GITHUB_CLIENT_ID` 配置。模型渠道的授权配置在对应业务插件仓维护。
 
-[构建方法](README.md#development) · [2.0.3 更新记录](docs/release-2.0.3.md)。
+[构建方法](README.md#development) · [2.0.3 更新记录](docs/releases/release-2.0.3.md)。

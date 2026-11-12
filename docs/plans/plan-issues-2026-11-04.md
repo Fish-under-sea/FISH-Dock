@@ -256,7 +256,7 @@
 
 | 层 | 文件:行 | 做什么 |
 | --- | --- | --- |
-| 主仓 | `app/README.en.md:9`（声明不预装业务服务）、`docs/plugin-startup-diagnosis-2026-11-02.md:300/345/346/400/480/600`（诊断文档） | **主仓没有任何预装登记实现**；grep `preinstall` 全树只命中文档与 `storage_context.rs:126` 的测试名 |
+| 主仓 | `app/README.en.md:9`（声明不预装业务服务）、`docs/guides/plugin-startup-diagnosis-2026-11-02.md:300/345/346/400/480/600`（诊断文档） | **主仓没有任何预装登记实现**；grep `preinstall` 全树只命中文档与 `storage_context.rs:126` 的测试名 |
 | 插件仓调用点 | `plugins/magpie/runtime.mjs:12`（import）、`:133-136` | `seedPreinstalled(...)` → `ensurePreinstallState(...)`，异常吞掉（仅 AbortError 抛出） |
 | 插件仓核心 | `plugins/magpie/preinstall.mjs:107` `markerName='.fish-dock-preinstalled.json'`、`:168-206` `seedPreinstalled` | **`:170-175` 见 marker 即 `return {skipped:true}`**，不再调 `addPreinstalled`；`:176-188` 读 `plugins.json` → `addPreinstalled` 补缺 → 写；`:190-197` 写 marker（`wx` + EEXIST 并发保护）；`:199-204` 写状态文件 |
 | 插件仓幂等能力 | `preinstall.mjs:76-105` `addPreinstalled` | 「只补缺席的包，已有同名包条目保留原样」——**本身幂等且正是修复所需** |
@@ -325,7 +325,7 @@
 | GPU 列 | `mem-report.mjs:155` `gpuPrivateGrowthMb` | 存在（#30 要的差值由此出） |
 | 隐藏即休 | `app/src-tauri/src/power.rs:16/245-254` `resting()`；`bars.rs:467`、`island.rs:1009/1079`、`main.rs:856`、`pet.rs:294` | 2.0.0 已含 |
 | iframe 退场 | `app/src/pet/extension-page.js:17` `PARK_DISCARD_MS=5*60*1000`、`:37` 注入参数、`:128/141` park 与计时 | 2.0.0 已含 |
-| **预算原文** | issue 引用的 `红线-禁止屎山十条.md` | **仓库内 glob 无结果**；可用口径散见 `docs/audit-dock-2.0.4.md`、`docs/PERFORMANCE.md`、issue 里的表格 |
+| **预算原文** | issue 引用的 `红线-禁止屎山十条.md` | **仓库内 glob 无结果**；可用口径散见 `docs/plans/audit-dock-2.0.4.md`、`docs/guides/PERFORMANCE.md`、issue 里的表格 |
 | 本机形态 | `installed-plugins.json` 3 插件；catalog 2.2.0 | 满足「装好 + 有插件」 |
 
 ### 5.3 计划（执行清单，不改产品代码）
@@ -411,7 +411,7 @@
 
 ## 9. PLAN 阶段声明
 
-- 本文只写到 `docs/plan-issues-2026-11-04.md` 一份新文档 + 工作区 `AGENTS.md` 的 §七提交约定与 §八 Gitee 双仓路径；**未修改任何实现代码、未改 catalog、未提交 git、未发布任何版本**。
+- 本文只写到 `docs/plans/plan-issues-2026-11-04.md` 一份新文档 + 工作区 `AGENTS.md` 的 §七提交约定与 §八 Gitee 双仓路径；**未修改任何实现代码、未改 catalog、未提交 git、未发布任何版本**。
 - 所有「方案」均为待批准计划；其中 #70 明确要求先做 S0 真机复核再决定是否改码，#29 有「预算原文缺失」前置阻塞，#68 的 S1-A 需要插件仓配合。
 - §10 是 2026-11-04 后补的附加条目（Gitee 双仓 + 国内镜像下载历史欠账），同属本 PLAN，未批准前同样不动实现代码。
 - 按工作区 `AGENTS.md` §七：本文件与 `AGENTS.md` 的改动**随下一次代码提交一起带上**，不单独落 commit，提交信息注明包含 `AGENTS.md`。
@@ -450,7 +450,7 @@
 
 | 能力 | 代码 | 默认值 |
 | --- | --- | --- |
-| 配置键 `url.raw_mirror` / `url.gh_proxy` / `url.gitee_repo` / `url.pet_mirror` | `config.rs:96-101`（四个环境变量）、`:255`（Key 表）、`:408`（getter）、`docs/config-keys.md:25` | 全空 = 不加候选；`GITEE_REPO` 空即不启用（`config.rs:710-713` 有断言） |
+| 配置键 `url.raw_mirror` / `url.gh_proxy` / `url.gitee_repo` / `url.pet_mirror` | `config.rs:96-101`（四个环境变量）、`:255`（Key 表）、`:408`（getter）、`docs/guides/config-keys.md:25` | 全空 = 不加候选；`GITEE_REPO` 空即不启用（`config.rs:710-713` 有断言） |
 | 镜像候选 `picks(url)` | `sources.rs:142-173`：jsDelivr raw（**开箱即用的结构化改写**，`:146-148`）、raw 前缀镜像、npm 镜像、Release 加速前缀、宠物镜像 | jsDelivr 无条件；其余「配了才启用」 |
 | 一次下载的顺序 `candidates(url)` | `sources.rs:175-194`：原地址 + 镜像，按 `mirror.prefer`（`auto`/`domestic`/`overseas`）排 | `auto` = 原地址优先、镜像兜底 |
 | 共用 deadline / 失败回退 | `sources.rs:430/456/476`、`plugin_store.rs:102-107`（`download` 走 `sources::fetch_bytes_with`） | 一个请求总 deadline 跨所有候选，不逐候选重置 |
@@ -459,11 +459,11 @@
 
 **历史欠账原文**（这批要求的出处）：
 
-- `docs/plan-dock-2.0.4.md:300-311` §7.2 映射表：`api.github.com/.../releases/latest → Gitee API（需 url.gitee_repo）配了才启用`、`github.com/.../releases/download/… → {url.gh_proxy} 默认空`、`codex-pets.net → {url.pet_mirror} 默认空`、**「Windhawk / LHM 没有已确认的免费国内镜像」**、`:309` 明确「不得伪造镜像」；
-- `docs/plan-dock-2.0.4.md:324-329` §7.3.2：`raw CDN 仅是候选，不保证国内可达`；**`:329`「无 Gitee、pet mirror 或 Release 加速配置时，尚未满足『每类资源默认国内外双源』；先调研现有免费渠道的真实覆盖、字节一致与可用性，再列实测来源矩阵。未找到时明确标记缺口，不能把默认空前缀算作已完成，也不要求用户部署服务」**；
-- `docs/release-2.0.4.md:93`：**「免费国内镜像缺口：pet、Release、Windhawk、LHM 均无已确认的免费国内镜像；Gitee 通道需自行配置」**；
-- `docs/plan-dock-2.0.4.md:490`：`gitee-release.ps1` / `app/relay/*` 里指向上游 `zhoupengjie/Wakuwaku` 的活动操作要退役或参数化，**默认禁止向上游仓库发布/开 issue**；
-- `docs/plan-dock-2.0.4.md:313-322` §7.3/7.3.1：各网络出口清单（`fetch.rs:139`、`plugin_store.rs:101-102`、`updates.rs:1399`、`windhawk_collection.rs:52`、`lhm_setup.rs:937/950`、`sensors.rs:977-1009,1049`）与「宠物预览不经 Rust 择源层」的坑。
+- `docs/plans/plan-dock-2.0.4.md:300-311` §7.2 映射表：`api.github.com/.../releases/latest → Gitee API（需 url.gitee_repo）配了才启用`、`github.com/.../releases/download/… → {url.gh_proxy} 默认空`、`codex-pets.net → {url.pet_mirror} 默认空`、**「Windhawk / LHM 没有已确认的免费国内镜像」**、`:309` 明确「不得伪造镜像」；
+- `docs/plans/plan-dock-2.0.4.md:324-329` §7.3.2：`raw CDN 仅是候选，不保证国内可达`；**`:329`「无 Gitee、pet mirror 或 Release 加速配置时，尚未满足『每类资源默认国内外双源』；先调研现有免费渠道的真实覆盖、字节一致与可用性，再列实测来源矩阵。未找到时明确标记缺口，不能把默认空前缀算作已完成，也不要求用户部署服务」**；
+- `docs/releases/release-2.0.4.md:93`：**「免费国内镜像缺口：pet、Release、Windhawk、LHM 均无已确认的免费国内镜像；Gitee 通道需自行配置」**；
+- `docs/plans/plan-dock-2.0.4.md:490`：`gitee-release.ps1` / `app/relay/*` 里指向上游 `zhoupengjie/Wakuwaku` 的活动操作要退役或参数化，**默认禁止向上游仓库发布/开 issue**；
+- `docs/plans/plan-dock-2.0.4.md:313-322` §7.3/7.3.1：各网络出口清单（`fetch.rs:139`、`plugin_store.rs:101-102`、`updates.rs:1399`、`windhawk_collection.rs:52`、`lhm_setup.rs:937/950`、`sensors.rs:977-1009,1049`）与「宠物预览不经 Rust 择源层」的坑。
 
 ### 10.3 根因判定
 
@@ -478,7 +478,7 @@
 **S1 免费渠道实测矩阵（先做，不改产品默认值）**
 - 逐项测：Gitee 主仓的 tag + `releases/download/<tag>/<exe>.sha256` 与 exe 实际地址（参照 `updates.rs:303-313` 的拼法与 `fake-release.js:121-135` 的 302 行为）、jsDelivr raw（`cdn.jsdelivr.net/gh/...`）、npmmirror（已有）、gh-proxy 前缀、`FISH_DOCK_PET_MIRROR` 候选、Windhawk / LHM 原地址。
 - 每项记录：**URL 形状、是否匿名可达、与 GitHub Release 的 `sha256` 字节是否一致、要不要令牌、实测速率、区域顺序位置、失败回退行为**；不一致或无免费渠道的写「缺口」，**不编数字、不伪造镜像**。
-- 产出 `docs/domestic-mirror-matrix-2026-11-04.md`（或并入本节附表），作为 `plan-dock-2.0.4.md §7.3.2` 那条欠账的收口证据。
+- 产出 `docs/guides/domestic-mirror-matrix-2026-11-04.md`（或并入本节附表），作为 `plan-dock-2.0.4.md §7.3.2` 那条欠账的收口证据。
 
 **S2 主仓 Gitee 资源接入（配了才启用）**
 - `updates.rs:461-475` 的 `endpoints()` 在 `config::gitee_repo()` 有值时加入 `https://gitee.com/Fish-under-sea/FISH-Dock`；沿用现有 `gitee_found`（tag + `.sha256`）与 `merge`（`:580-601` 同版摘要冲突不装、一侧超时标降级）；`updateFrom=gitee` 从此真有效（`plan-dock-2.0.4.md:336` 的待办）。
@@ -495,7 +495,7 @@
 - **默认空配置不变、不要求用户部署服务**；`mirror.prefer` 行为不变（无候选时 `domestic` 自然回落原地址）。
 
 **S5 文档与提交**
-- `AGENTS.md` §八已写好双仓路径、配置键表、欠账出处与「不写进 catalog/三源」的硬约束；`docs/config-keys.md` 补一行「Gitee 双仓路径与默认值口径」。
+- `AGENTS.md` §八已写好双仓路径、配置键表、欠账出处与「不写进 catalog/三源」的硬约束；`docs/guides/config-keys.md` 补一行「Gitee 双仓路径与默认值口径」。
 - 按 `AGENTS.md` §七：`AGENTS.md` 与本计划文档**随下一次代码提交一起带上**，提交信息注明包含 `AGENTS.md`；plan 阶段不单独落 commit。
 
 ### 10.5 验收映射
@@ -503,7 +503,7 @@
 | 检查 | 命令 / 证据 |
 | --- | --- |
 | 双仓路径真实 | `GET https://gitee.com/api/v5/repos/<owner>/<repo>` → 200 且 `full_name` 与 `AGENTS.md` §八一致 |
-| 来源矩阵 | `docs/domestic-mirror-matrix-2026-11-04.md`：每类资源一行（候选/超时/摘要/失败回退/字节一致结论），缺口如实标注 |
+| 来源矩阵 | `docs/guides/domestic-mirror-matrix-2026-11-04.md`：每类资源一行（候选/超时/摘要/失败回退/字节一致结论），缺口如实标注 |
 | Gitee 更新通道 | `cargo test updates`：`gitee_repo` 配置后 `endpoints()` 含 Gitee；`updateFrom=gitee` 生效；同版摘要冲突返回 `mismatch` 不装；未配置时设置页显示「未配置」 |
 | 择源不变形 | `cargo test sources`：`auto/domestic/overseas` 顺序、原地址永远在候选里、镜像失败回落、一个 deadline 跨候选（`sources.rs:642` 既有断言） |
 | 插件链不受污染 | `catalog/stable.json` 三字段仍指向 GitHub Release；`plugin_store` 三源仍是 npm 官方 / npmmirror / GitHub；单测断言 Gitee 路径未出现在三源 URL 里 |

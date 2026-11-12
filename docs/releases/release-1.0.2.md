@@ -44,4 +44,4 @@
 
 全量历史回归中保留的环境限制和忽略项不计为本轮通过。Windows 实际全屏切换、真实邮箱、服务商账号授权和跨日到账仍需实机验证；商汤续期不保证触发每个账号当天发放。Meoo 仍按上方灰度状态说明处理。
 
-[完整说明与源码构建](../README.md) · [Issue #2](https://github.com/Fish-under-sea/FISH-Dock/issues/2)
+[完整说明与源码构建](../../README.md) · [Issue #2](https://github.com/Fish-under-sea/FISH-Dock/issues/2)

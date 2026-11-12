@@ -1,8 +1,8 @@
 # 国内镜像实测来源矩阵（2026-11-04）
 
-> 本文件收口两条历史欠账：`docs/plan-dock-2.0.4.md:329` §7.3.2 的「先调研现有免费渠道的真实覆盖、字节一致与可用性，再列实测来源矩阵；未找到时明确标记缺口，不能把默认空前缀算作已完成，也不要求用户部署服务」，以及 `docs/release-2.0.4.md:93` 的「免费国内镜像缺口：pet、Release、Windhawk、LHM 均无已确认的免费国内镜像」。
+> 本文件收口两条历史欠账：`docs/plans/plan-dock-2.0.4.md:329` §7.3.2 的「先调研现有免费渠道的真实覆盖、字节一致与可用性，再列实测来源矩阵；未找到时明确标记缺口，不能把默认空前缀算作已完成，也不要求用户部署服务」，以及 `docs/releases/release-2.0.4.md:93` 的「免费国内镜像缺口：pet、Release、Windhawk、LHM 均无已确认的免费国内镜像」。
 >
-> 它是附加条目 A 的 **S1** 产物（`docs/plan-issues-2026-11-04.md` §10.4），S2 / S4 的代码落点见 §7。与工作区 `AGENTS.md` §八互为索引：那边写常驻路径与配置键，这边写实测证据。
+> 它是附加条目 A 的 **S1** 产物（`docs/plans/plan-issues-2026-11-04.md` §10.4），S2 / S4 的代码落点见 §7。与工作区 `AGENTS.md` §八互为索引：那边写常驻路径与配置键，这边写实测证据。
 >
 > **一句话结论**：raw 文件与插件包（npm 双源）已有**实测字节一致**的免费国内渠道；GitHub Release 资产（Dock 更新 exe、Windhawk、LHM）**没有官方国内镜像**，只有第三方公开前缀加速可用（实测字节一致，但属第三方服务，默认不内置）；pet 图库在本机**DNS 污染级不可达且无任何已确认镜像**；**Gitee 双仓目前一个附件都没有**，配了也拿不到字节。
 
@@ -266,7 +266,7 @@ DNS 层：`raw.githubusercontent.com` 解析到 `185.199.108–111.133` 与 `260
 | S4 · 缺口注释 | `app/src-tauri/src/sources.rs` 模块头文档 | 写明 pet / Windhawk / LHM 无已确认免费镜像、Gitee 侧只有 tags 没有附件、不伪造镜像、不改 CSP / 下载域名白名单，并指回本文件 |
 | S4 · 白名单**收窄**（顺带修掉的真实缺陷） | `app/src-tauri/src/updates.rs`：`allowed()` 拆出 `in_repo()` | 原先是纯前缀比较，而 `config::gitee_repo()` 会去掉尾部 `/`，于是配了 `…/FISH-Dock` 之后 `…/FISH-DOCK-Plugins`（插件仓，同名前缀）也被判成「在放行范围内」——用户配一个仓，白名单却覆盖了两个仓。改成「前缀 + 边界字符（`/`、`?`、`#`）」：只**收窄**不放宽，仓库地址到此为止（无边界）仍不放行，`GITHUB_REPO` 自带尾部 `/` 的既有放行结果逐条不变（既有 `allowed` 用例全绿） |
 | S4 · 白名单不放宽（断言） | `app/src-tauri/src/updates.rs` 单测 `the_gitee_candidate_stays_inside_the_same_allowance` | 断言 `allowed()` 对 Gitee 候选与对原地址同一口径（前缀就是用户自己配的 `gitee_repo`）；没配时任何 `gitee.com` 地址都进不来；插件仓（另一个 repo）既不进候选也不进白名单 |
-| S5 · 配置键文档 | `docs/config-keys.md` 的 `url.gitee_repo` 行 | 补上「同时驱动 `sources::picks` 的 Gitee 附件候选（只映射同名项目）」与本文件的指引 |
+| S5 · 配置键文档 | `docs/guides/config-keys.md` 的 `url.gitee_repo` 行 | 补上「同时驱动 `sources::picks` 的 Gitee 附件候选（只映射同名项目）」与本文件的指引 |
 
 **新增单测**（`cargo test -- sources` / `-- updates`）：
 

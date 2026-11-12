@@ -4,6 +4,8 @@ Wakuwaku 是一个 Tauri 2 程序：页面是 `src/` 里的 HTML / JS / CSS，�
 
 ## 目录
 
+下列源码树以 `app/` 为根；后文运行 `cargo` 的示例也以 `app/` 为工作目录。文档、集成、宠物、示例与预览工具均已迁到仓库根，完整导航见 [文档索引](../README.md)。
+
 ```
 src/                      页面，Tauri 直接把整个文件夹打进 exe（tauri.conf.json 的 frontendDist）
   pet/
@@ -83,25 +85,30 @@ src-tauri/
   icons/                  exe、窗口、托盘和通知的图标（npm 不需要：scripts/make-icons.js 用 ImageMagick 画）
   capabilities/           页面能用的 Tauri 权限：两个窗口都要列进去
   vendor/tiny_http/       打过补丁的 tiny_http 0.12.0：连接出错时丢掉这个连接，不 panic（见 README.md）
+```
+
+以下路径从仓库根计算：
+
+```text
 integrations/claude-code/ Claude Code 插件 wakuwaku（只有 HTTP hooks）
 integrations/opencode/    OpenCode 2 的插件 wakuwaku.js（打进 exe，安装时写上端口放进 OpenCode 的插件文件夹）
 integrations/omp/         omp 的扩展 wakuwaku.ts（connection.rs 填上端口、程序路径后写进 omp 的 agent 文件夹）
 .claude-plugin/           插件市场入口 marketplace.json（位置是 Claude Code 规定的）
-scripts/make-icons.js     画图标（node + ImageMagick），输出提交在 src-tauri/icons
-test/                     页面的单元测试（node --test，不需要 npm install）；fake-imap.js、fake-smtp.js 是试邮件用的假 IMAP、SMTP 服务器；fake-relay.js 是假的崩溃报告中转；fake-lhm.js 是假的 LibreHardwareMonitor 网页服务器
+app/scripts/make-icons.js  画图标（node + ImageMagick），输出提交在 src-tauri/icons
+app/test/                 页面的单元测试（node --test，不需要 npm install）；fake-imap.js、fake-smtp.js 是试邮件用的假 IMAP、SMTP 服务器；fake-relay.js 是假的崩溃报告中转；fake-lhm.js 是假的 LibreHardwareMonitor 网页服务器
 relay/                    崩溃报告中转（Cloudflare Worker → GitHub issue；阿里云函数计算 → Gitee issue），部署步骤在 relay/README.md
 examples/widgets/         岛上插件的示例脚本：waku、邮件……，以及她替你跑的那几个插件的脚本版（样例，她不运行）
 integrations/thunderbird/ Thunderbird 扩展：未读邮件发到岛上（build.ps1 打包成 .xpi）
-docs/prototypes/          设计原型：island-settings.html 是设置长在岛里的手感原型
-data/                     从源码运行时她的设置、宠物和日志（不进仓库）
-pets/                     从源码运行时也会读这里的宠物（不进仓库）
+docs/design/prototypes/          设计原型：island-settings.html 是设置长在岛里的手感原型
+app/data/                 开发运行数据（不进仓库；正式数据根按配置解析）
+pets/                     默认宠物立绘与配置（claude-chan 入库；下载宠物不入库）
 art/                      美术和调查资料，只在本地（只有 art/README.md 进仓库）
 ```
 
 ## 构建和运行
 
 ```bash
-cd src-tauri
+cd app/src-tauri
 cargo run                 # 调试版：有控制台窗口
 cargo build --release     # target/release/wakuwaku.exe：单个文件，约 5 MB，没有控制台
 cargo test                # Rust 单元测试
@@ -272,7 +279,7 @@ omp 的计划审批也走这里（`tool_name: "ExitPlanMode"`，面板上标着 
 
 ## 岛上的插件（第一层：只收数据）
 
-插件就是岛上的一行字：图标、标题、数值、颜色。脚本往 `/widget` 发 JSON（字段见 [examples/widgets](../app/examples/widgets/README.md)），`widgets.rs` 校验后放进 `Shared.widgets`，宠物只显示文字，不运行任何东西。同一个 `id` 再发一次就是更新；`ttl` 秒没再收到就去掉（每 3 秒清一次），脚本停了它就自己消失。脚本发来的最多 32 个。
+插件就是岛上的一行字：图标、标题、数值、颜色。脚本往 `/widget` 发 JSON（字段见 [examples/widgets](../../examples/widgets/README.md)），`widgets.rs` 校验后放进 `Shared.widgets`，宠物只显示文字，不运行任何东西。同一个 `id` 再发一次就是更新；`ttl` 秒没再收到就去掉（每 3 秒清一次），脚本停了它就自己消失。脚本发来的最多 32 个。
 
 **大小和明细**（2026-10-16 的小工具设计，第一期：任务栏和胶囊；桌面和工作台是后两期）：每个插件至少有小档（图标和数值）。`detail` 是对象 `{ sizes, series, rows, extra }` 时说它有哪几档（`s` `m` `l`）、给大的样子更多可放：`series` 一条曲线或一排柱子（`points` 最多 120 个，留最后的；`unit`、`hi`、`lo`），`rows` 一个列表（最多 12 行；名字类字段 `from code name when price change value unit kind icon` 各 16 个字，主题类 `subject text` 各 60 个字，`at` 毫秒，`points` 这一行自己的小曲线），`extra` 一句补充（24 个字）。字符串 `detail`（以前的写法，天气的温度范围）就是 `extra`。`widgets.rs` 的 `detail_of` 检查、截断（超长的末尾加「…」）、丢掉别的字段，视图里每个 widget 的 `detail` 是这样一个对象或 `null`；页面用 `widgets.js` 的 `detailOf`、`sizesOf`（没写 `sizes` 的脚本是小和中，中是数值在上、名字在下；内置的按 `BUILT_SIZES`；只写 `["s"]` 的，比如倒计时，任务栏上也只有小档）。内置的明细：监控（`monitor_detail`：最近 60 秒的 CPU 是 `series`，`rows` 按 `kind`：`cpu`（核心数、平均频率）、`memory`（已用 / 总量）、`gpu`（最忙的那块，有温度的独显优先）、`disk`（活动时间最高的那块盘）、`net`（下行、上行，下行最近 60 秒的 `points`）、`uptime`（秒，按分钟取整）；显卡、硬盘和 CPU 频率只在鼠标在她的家上时才读（`Watching::looking`：`island::is_over`，鼠标进来时 `hover` 叫醒监控线程马上读一次；`hw::Hw::turn_also` 多读这几个，既不上岛也不在设置里打勾），平时监控照旧只读勾选的；内存用 `GlobalMemoryStatusEx`（已用 = 总量 − 可用）；来源是 LHM 时没有显卡、硬盘这两行，卡片上写「暂无数据」）、今天（`Today.hours`：每个本地小时开始了几轮，`begun` 记进当前小时，存在 `today.json`，换天清零；`series` 是 24 个数）、每个邮箱的未读（`mail/sync.rs` 的 `tell` 取最新的 6 封未读：`{ from, subject, at }`，`mail.rs` 的 `show` 放进 `rows`）。她替你跑的天气（同一次请求加上逐小时和三天：24 小时温度是 `series`，每两小时一个 `kind: "hour"` 的行（`icon` 按 WMO 代码：`sun` `moon` `partly` `cloud` `fog` `rain` `snow` `storm`），明后天是 `kind: "day"`）、股票（`range=1d&interval=5m`，当天的价格最多 120 个点是 `series`，`hi`、`lo` 是当天最高最低，一行 `{ code, name, price, change, value: 成交量 }`）、番茄钟（`series` 一个点：剩下的秒数，`hi` 是这一段的总秒数，画成圆环；`extra` 是接下来做什么）、倒计时（只有 `s`；`extra` 是日期，一行 `kind: "days"` 是剩下的天数）都这样发（`plugins/` 里，和 examples/widgets 里同名的示例脚本发的一样；脚本用 `ConvertTo-Json -Depth 6`（默认的深度 2 会把嵌套的对象变成字符串））。
 
@@ -552,7 +559,7 @@ mail/proxy.rs      代理：跟随系统 / 手动（HTTP CONNECT、SOCKS5，自�
 - **设置迁移**（`data.rs` 的 `adopt_end_cue`）：原来的开关 `openOnEnd`（默认开）读配置时去掉；原来关掉的变成 `endCue: "none"`，其他人用新默认 `ring`。`settings.rs` 只收 `open`、`ring`、`none`。页面也认没迁移的老配置（`Flow.endCue`）。
 - **全屏怎么到页面**：`Shared::is_fullscreen` 以前只在 `hideInFullscreen` 开着或任务栏模式时看，现在一直看（`look_fullscreen` 的 `watching`，`covering` 很便宜，岛模式本来每 1.5 秒也在看最大化的窗口）：灵动岛关掉「全屏时隐藏」、浮在全屏游戏上时也不转。页面从 `pet:update` 的 `fullScreen` 拿到，变化时 `look_fullscreen` 另发 `pet:full-screen { on }` 给岛的窗口（`bridge.js` 的 `onFullScreen`）。
 - **画法**：光环是岛旁边（`#island-row` 里）一个单独的 `#flow`，因为岛自己 `overflow: hidden`；用 CSS 锚点定位（`#island` 的 `anchor-name: --island`）贴在岛外面，胶囊变大变小（标题变长）跟着走；不支持锚点的（老的 WebKit）由 `placeFlow` 按岛当时的位置设一次。纯黑条带（`home() === 'taskbar' && !isCapsule()`，没有胶囊）时是绕头像的直径 36 的圆（`round`）。外框用 mask 镂空成 2px 的环（content-box 减掉整个框），里面一块边长 `150cqmax` 的正方形画 conic-gradient，只转它；两层（`b`），换颜色时上面那层 0.3 秒淡入新颜色（`blendTo`），淡完下面那层换上、上面那层回到透明。深色时下面再垫一份同样的、模糊 6px、不透明 45%（`glow`）；浅色和减少动画时没有。动画用 Web Animations，只动 transform（旋转）和 opacity；`will-change` 只在 `#flow.on` 时有，放完 `display: none`，什么都不留着跑。`#flow` 是自己的元素，`update()` 重画岛（每秒的计时、插件每两秒的读数、`onWidgets`）都不碰它，不会重来或闪；时间由 `Flow.frames` 按开始的时刻算（负的 delay），所以接着放、重新排时都从当下的角度和亮度接上。
-- **转法**（`Flow.play`，2026-10-18 用户改定，原来是 1080°、2.55 秒、平滑）：720° 在 2 秒里转完，曲线 `cubic-bezier(.3,0,.7,1)`，一步一步地画：每秒 15 步（`Flow.stepsOf`：从开始转那一刻算的 1/15 秒网格，最后一步落在转完的角度），`island.js` 的 `stepRing` 每一步只设一次 `transform`，下一步一个定时器，两步之间什么都不动（一直动的动画按帧算钱，见 docs/PERFORMANCE.md）；亮度照旧平滑（只动 opacity），0–0.28 秒淡入；没有停留时 1.69–2.25 秒淡出，小点在淡出开始时从 0 放大到 1（0.25 秒，带一点回弹）。转的时候又来一个：优先级（出错 > 改好 > 做完 > 打招呼 > 插件）不比正在放的低就换成它的颜色（`blend`），两圈照原样转完，不多转（原来会接着转到新颜色至少 1.5 圈、最多 4.5 圈）；低的只换小点的颜色（`hold`）。放完 8 秒内又来：不转，小点换颜色跳一下（`hop`：1 → 1.35 → 1，0.3 秒）；8 秒后照常。岛因为被看而中途收掉光环（`Flow.stop`）后，下一个照常放。减少动画（`prefers-reduced-motion`）：不转，光环静止亮 1.4 秒（0.2 秒淡入淡出），没有发光层，小点直接出现、不跳，连着来只换颜色（`swap`）。
+- **转法**（`Flow.play`，2026-10-18 用户改定，原来是 1080°、2.55 秒、平滑）：720° 在 2 秒里转完，曲线 `cubic-bezier(.3,0,.7,1)`，一步一步地画：每秒 15 步（`Flow.stepsOf`：从开始转那一刻算的 1/15 秒网格，最后一步落在转完的角度），`island.js` 的 `stepRing` 每一步只设一次 `transform`，下一步一个定时器，两步之间什么都不动（一直动的动画按帧算钱，见 docs/guides/PERFORMANCE.md）；亮度照旧平滑（只动 opacity），0–0.28 秒淡入；没有停留时 1.69–2.25 秒淡出，小点在淡出开始时从 0 放大到 1（0.25 秒，带一点回弹）。转的时候又来一个：优先级（出错 > 改好 > 做完 > 打招呼 > 插件）不比正在放的低就换成它的颜色（`blend`），两圈照原样转完，不多转（原来会接着转到新颜色至少 1.5 圈、最多 4.5 圈）；低的只换小点的颜色（`hold`）。放完 8 秒内又来：不转，小点换颜色跳一下（`hop`：1 → 1.35 → 1，0.3 秒）；8 秒后照常。岛因为被看而中途收掉光环（`Flow.stop`）后，下一个照常放。减少动画（`prefers-reduced-motion`）：不转，光环静止亮 1.4 秒（0.2 秒淡入淡出），没有发光层，小点直接出现、不跳，连着来只换颜色（`swap`）。
 - **停留**（`Flow.play` 的 `hold`，zhoupengjie/Wakuwaku#65；以前不管「停留多久」选什么都是 2.8 秒）：转两圈，转完不淡出，光环静止亮着，直到从事件那一刻算起「停留多久」的时间到（`stillAt` 转完，`fadeAt` 开始淡出），再 0.56 秒淡出、小点出来；看到为止是 `Infinity`，一直亮到岛展开（`stopRing`）。静止的这段什么都不跑（`holdRing`）：所有动画取消，亮度和渐变的角度直接写成样式（`Flow.frames` 的 `rest`），发光层也一样，`#flow.held` 去掉 `will-change`；到时间 `fadeRing` 再起一个 0.56 秒的淡出。减少动画：一开始就静止亮着，亮满整个停留时间（不再是 1.4 秒），0.2 秒淡出。静止或淡出时又来一个（优先级不低）：用新颜色从停住的角度再转两圈（`base` 记着从哪转起，转的时候再来只换颜色），停留从这个事件重新算；低的只换小点的颜色，停留不变；光环完全消失后 8 秒内再来照旧只跳小点。那个会话又开始干活（`movedOn` → `Flow.release`）：马上淡出变成小点（还在转就转完再淡出）。
 - **颜色**（`Flow.palette`）：每种事件一组，首尾同色接缝不露，深色一套、浅色一套（`modeNow()` 是 light 时：任务栏看 Windows 的模式，顶部看 `winLight`）；插件用它自己的颜色和混 45% 白交替，浅色时先加深 15%，没有颜色的用强调色。小点：做完、改好、出错用岛的心情色（`hue()`：岛的字是深色时是 `COLOR_LIGHT`），打招呼和新版本用 Windows 强调色（`hintAccent`），插件用它的颜色（`ink`）；几个都没看过时是最新那个的颜色；样子和「还没连接」的点一样（9px，头像右上角；有底色时描 2px 底色，没有底色时描 1.5px 半透明），两个不会同时出现（没连接就没有事件，`drawNews` 也在 `isHinting` 时不显示）。
 - **看过**：岛因为任何原因展开（悬停、确认面板、设置、`peek`）就算看过，`update()` 里小点清掉、正在放的光环马上收掉。岛本来会显示的东西不丢（设计会话）：做完的回复本来就在展开的岛里（会话还在做完的状态时）；打招呼的话、插件的卡片、新版本那一行存在 `pending`，下次展开时变成那次的 `nudge`（`takePending`，显示 `NUDGE_MS` / `NUDGE_READ_MS`，鼠标移开就结束，和以前自己展开后被看过一样；点它照样打开它要打开的东西，比如更新页），最新的那个算数；留多久跟「停留多久」（`hold`：8、30、120 秒、自定义的 3–600 秒或看到为止，`Flow.keepFor`），新版本、崩溃报告一直留到看过。
@@ -637,7 +644,7 @@ zhoupengjie/Wakuwaku#44：exe 改名后 Run 还指着旧文件，开机什么也
 
 ## 设置（长在岛里）
 
-没有单独的主窗口。设计和手感见 `docs/prototypes/island-settings.html`。
+没有单独的主窗口。设计和手感见 `docs/design/prototypes/island-settings.html`。
 
 - **默认宠物**（Claude小姐，`pets/claude-chan/`，仓库里跟踪，`.gitignore` 只放过它）：`fetch.rs` 用 `include_bytes!` / `include_str!` 把 `spritesheet.webp` 和 `pet.json` 打进 exe，首次运行一只宠物都没有时 `seed_default_pet` 直接写到 `wakuwaku-data/pets/claude-chan/`（和从宠物库下载的一样走 `put_pet`：先把 pet.json 和图写进 `pets/.claude-chan.new/`，再一次改名放到位；扫描跳过点开头的文件夹；写完调 `data::forget_pets` 让缓存作废。以前先图后 pet.json 直接写在原地：扫描恰好落在两步之间时只认到图，名字成了 id、作者为空，而 `pets()` 的缓存只看 pets 文件夹本身的修改时间——往子文件夹里补 pet.json 不改它，并且它按时钟节拍（约 15 ms）走，同一节拍里的两次改动看不出来——于是整次运行都错，2026-10-13 测试会话的新用户运行里碰到过），不再从 codex-pets.net 下载（国内访问慢）；写不进去才退回下载，再不行打开「宠物」页。exe 因此从约 7.4 MB 变成约 10.8 MB（2026-10-13：7,450,112 → 10,756,096 字节）。pet.json 里的出处说明原样保留（原始形象作者 B 站 UP 主 ZipZipPipe，非官方二创），README 的致谢里也写了。宠物库照样能下载别的宠物。
 - **新用户的默认外观**（2026-10-13 起，用户自己的样子）：任务栏透明（`taskbarMaterial: clear`，`taskbarClearWhen` 仍是 mica），深色模式下她的胶囊是简洁的（`settings.js` 的 `ILOOK_DEFAULT.dark.bare` 为 true；`island.js` 的 `drawIslandLook` 在没设过时也按深色简洁、浅色不简洁来）；深色的颜色（#2c2c2c、不透明 100、不模糊、细边线）、浅色的默认和各个预设都没动。老用户不受影响：读配置时（`data.rs` 的 `keep_old_look`），2026-10-13 之前写的 config（没有 `lookDefaults`）只做一次：没选过材质的写成 mica，深色的胶囊外观没明确设过（没有或是 null）的写成原来的灰色非简洁，再记 `lookDefaults: 2`；之后用户再改成什么都照他的。

@@ -6,6 +6,6 @@
 
 本轮公开构建还合并保留了 1.0.1 的 CodeArts 专用签名传输、隔离出口、严格模型测试、持久测试结果与探测顺序，避免用本地旧分支覆盖既有修复。公开源码和安装器均移除了 Google OAuth 默认客户端参数，保留环境变量配置入口。
 
-详细更新、验证范围和数据保留方式统一见 [1.0.2 更新记录](release-1.0.2.md)。下载安装器和校验文件请到 [v1.0.2 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2)。本次没有覆盖当前安装或改写真实账号数据，实机验收仍由用户在原环境执行。
+详细更新、验证范围和数据保留方式统一见 [1.0.2 更新记录](../releases/release-1.0.2.md)。下载安装器和校验文件请到 [v1.0.2 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v1.0.2)。本次没有覆盖当前安装或改写真实账号数据，实机验收仍由用户在原环境执行。
 
 进度与后续问题继续记录在 [Issue #2](https://github.com/Fish-under-sea/FISH-Dock/issues/2)。

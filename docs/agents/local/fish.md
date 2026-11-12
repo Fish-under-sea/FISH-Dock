@@ -22,7 +22,7 @@
 | 7-Zip | `C:\Program Files\7-Zip\7z.exe` | 工具栏位那份不存在，别用 |
 | 双包构建脚本 | `D:\Fish-code\DSH\可复用脚本与经验\FISH Dock\build-dual-package.ps1` | 默认 `-Dock` / `-Resources` 已指向 1109 工作区 |
 | 下载脚本 | 同上目录的 `fetch-file.mjs`、`fetch-asset-resume.mjs` | 本机 schannel 坏，走 Node TLS |
-| README 渲染 | 本仓 `tools/render-readme.mjs` | 无头浏览器需 `danger-full-access` |
+| README 渲染 | 本仓 `tools/docs/render-readme.mjs` | 实际遇到沙箱拒绝后申请单次授权 |
 
 ## 三、环境变量
 

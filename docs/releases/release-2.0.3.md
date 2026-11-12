@@ -8,8 +8,8 @@
   逐项判定后纳入四项修复，另修正两处与版本位有关的既有缺陷（来源清单里一条自 2.0.1 起就写错的选择项、
   `plugin.json` 漏掉的版本位）。上游该版共 11 个提交（8 个非合并 + 3 个合并）、16 个文件、`+211/−67`；
   其中两项本仓早在 2.0.1 之前就自己做过且更严格，不重复移植。
-- **插件启动链路**（任务书 [`plan-dock-2.0.3.md`](plan-dock-2.0.3.md)，诊断
-  [`plugin-startup-diagnosis-2026-11-02.md`](plugin-startup-diagnosis-2026-11-02.md)）：任务书十项里落了九项
+- **插件启动链路**（任务书 [`plan-dock-2.0.3.md`](../plans/plan-dock-2.0.3.md)，诊断
+  [`plugin-startup-diagnosis-2026-11-02.md`](../guides/plugin-startup-diagnosis-2026-11-02.md)）：任务书十项里落了九项
   ——T01、T03、T04、T05、T06、T07、T08、T09 与维护线程的互斥收口（t19）；T02 留 2.1.0（见「已知限制」）。
   起点是两条用户可见的病症：「启用自启动后首次启动插件拉起异常」与「设置页连开十次起十个 `node.exe`」——
   第一条不是「慢」，是**误杀**（见下）。
@@ -80,7 +80,7 @@
   `config::pet_site()`、错误分 `network` / `http` / `notFound` 三档、另有离线读缓存兜底。
 - **补的是说明**：设置页「网络代理」的中英文案（`s.net.systemNow` / `s.net.manualNote`）原来列了
   软件更新、崩溃报告、插件联网、LibreHardwareMonitor，唯独漏了宠物图库；`proxy.rs` 与
-  `docs/DEVELOPMENT.md` 同样补上。
+  `docs/guides/DEVELOPMENT.md` 同样补上。
 - **补的是测试**：上游那条「图库真的照网络代理走」的断言本仓没有，补为
   `fetch.rs` 的 `the_gallery_goes_the_way_the_network_proxy_says`（起一个本地代理，钉住它收到的是
   `CONNECT codex-pets.net:443 HTTP/1.1`）。属特性回归（characterization），不是本轮修复的证明。

@@ -38,7 +38,7 @@ node sdk/examples/window-file-drop/harness.mjs
 ## 装进真正的 Dock（可选）
 
 这是示例，不提供 `.fish-plugin` 发行包。要在真机上试：把 `plugin.json` 的
-`files` 摘要重算（改过任何文件都要重算）、按 `docs/plugin-windows-2.2.0.md`
+`files` 摘要重算（改过任何文件都要重算）、按 `docs/guides/plugin-windows-2.2.0.md`
 的说明打成插件包，再从「第三方插件」页安装。宿主会校验包摘要、能力与页面登记，
 任何一项不符都会在开窗前就拒绝。
 

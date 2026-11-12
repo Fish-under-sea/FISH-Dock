@@ -30,7 +30,7 @@
   // Its turning is drawn in steps, a new angle 15 times a second (each a
   // frame; nothing animated between them), as the user chose over every
   // frame: a frame of her window costs the same whatever it shows, and her
-  // screen may show 280 of them a second (docs/PERFORMANCE.md). Its light
+  // screen may show 280 of them a second (docs/guides/PERFORMANCE.md). Its light
   // comes up and goes down smoothly (opacity alone, on the compositor).
   const SPIN_FPS = 15
   const STEP_MS = 1000 / SPIN_FPS

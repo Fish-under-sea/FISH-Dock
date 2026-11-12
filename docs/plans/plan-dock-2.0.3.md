@@ -2,7 +2,7 @@
 
 > 结论先行：2.0.3 是**只装宿主侧修复**的补丁版，范围严格锁在「插件自启冷启失败」「更新后首启全量校验」两条链，外加插件页面入口的锁问题；**不含**任何插件页面视觉与签到数据改动。后者在插件仓 `2.1.3` 里走（`fish.magpie` + `fish.clash`）。
 >
-> 依据：《插件自启与冷启四项症状诊断报告》`docs/plugin-startup-diagnosis-2026-11-02.md`；主仓 issue [#55](https://github.com/Fish-under-sea/FISH-Dock/issues/55)、[#56](https://github.com/Fish-under-sea/FISH-Dock/issues/56)。
+> 依据：《插件自启与冷启四项症状诊断报告》`docs/guides/plugin-startup-diagnosis-2026-11-02.md`；主仓 issue [#55](https://github.com/Fish-under-sea/FISH-Dock/issues/55)、[#56](https://github.com/Fish-under-sea/FISH-Dock/issues/56)。
 > 编制：2026-11-02。基线：Dock 2.0.1（`a6ea519` 之后）／2.0.2（`1997de0` 版本位）。目标：**Dock 2.0.3**，插件 **`fish.magpie 2.1.3` + `fish.clash 2.1.3`**（`fish.feishu` 保持 2.1.0 不动）。
 
 ## 1. 范围与边界
@@ -95,10 +95,10 @@
 
 | 物件 | 位置 | 作用 |
 | --- | --- | --- |
-| 完整诊断报告 | [`plugin-startup-diagnosis-2026-11-02.md`](plugin-startup-diagnosis-2026-11-02.md) | 四项症状的根因、实测数据、探测脚本、证据索引 |
+| 完整诊断报告 | [`plugin-startup-diagnosis-2026-11-02.md`](../guides/plugin-startup-diagnosis-2026-11-02.md) | 四项症状的根因、实测数据、探测脚本、证据索引 |
 | 宿主侧工单 | [#55](https://github.com/Fish-under-sea/FISH-Dock/issues/55)、[#56](https://github.com/Fish-under-sea/FISH-Dock/issues/56) | 现象 + 根因 + 修复 + 验收 |
 | 插件侧工单 | 插件仓 #15（签到数据）、#16（预装可见性）、#17（Clash 视觉与下拉） | 同名口径 |
-| 本文 | `docs/plan-dock-2.0.3.md` | 把宿主侧任务从诊断里分离成可执行清单与门禁 |
+| 本文 | `docs/plans/plan-dock-2.0.3.md` | 把宿主侧任务从诊断里分离成可执行清单与门禁 |
 
 > 本文只写 Dock 宿主侧。插件视觉（含节点下拉重做、浅色主题色板）在插件仓 #17，按 `fish.clash 2.1.3` 交付，不与 2.0.3 混在同一个包里改。
 

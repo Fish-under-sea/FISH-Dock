@@ -29,7 +29,7 @@
 | — | `ab0eb65a` | 版本位与文档 |
 
 另有两个纯版本位文件（`Cargo.toml` / `Cargo.lock` / `tauri.conf.json` /
-`integrations/claude-code/.claude-plugin/plugin.json`），以及 `docs/GUIDE*.md`、`docs/DEVELOPMENT.md` 的说明。
+`integrations/claude-code/.claude-plugin/plugin.json`），以及 `docs/GUIDE*.md`、`docs/guides/DEVELOPMENT.md` 的说明。
 
 ## 二、逐项判定
 
@@ -82,7 +82,7 @@ if self.seen > 0 && self.at[(self.seen + TUG_TIMES - 1) % TUG_TIMES] == tick {
 | 上游做法 | `fetch.rs` 原本自建 `ureq::Agent`，改为逐个 `proxy::web_ways(url)` 试、第一个应答算数 |
 | 本仓现状 | `fetch.rs:139` 的 `get()` 早就走 `proxy::web_ways`，而且更严格：按 `proxy::pet_timeout()` 的预算、`http_status_as_error(false)`、`max_redirects(0)`、站点地址走 `config::pet_site()`、错误分 `network` / `http` / `notFound`、`gallery()` 另有离线读缓存兜底 |
 | 判定 | **代码不移植**（移植等于降级）。但本仓**缺两样**：① 设置页「网络代理」的中英文案没把「宠物图库」列进去；② 没有「图库真的问代理」的断言 |
-| 本轮做法 | 文案（`s.net.systemNow` / `s.net.manualNote`）、`proxy.rs` 头注释、`docs/DEVELOPMENT.md` 补全；新增 `fetch.rs` 的 `the_gallery_goes_the_way_the_network_proxy_says`，钉住代理收到的是 `CONNECT codex-pets.net:443 HTTP/1.1` |
+| 本轮做法 | 文案（`s.net.systemNow` / `s.net.manualNote`）、`proxy.rs` 头注释、`docs/guides/DEVELOPMENT.md` 补全；新增 `fetch.rs` 的 `the_gallery_goes_the_way_the_network_proxy_says`，钉住代理收到的是 `CONNECT codex-pets.net:443 HTTP/1.1` |
 
 ### #100 控制台句柄还原 —— 合入（24 行）
 
@@ -142,12 +142,12 @@ if self.seen > 0 && self.at[(self.seen + TUG_TIMES - 1) % TUG_TIMES] == tick {
 4. `app/src/pet/island.js` —— `slotWatch`（`ResizeObserver` + 守卫）。
 5. `app/src-tauri/src/jump.rs` —— `GetStdHandle` / `SetStdHandle` 声明、`STD_HANDLES`、`console_window` 寄回。
 6. `app/src-tauri/src/fetch.rs` —— `the_gallery_goes_the_way_the_network_proxy_says`。
-7. 文案与文档 —— `i18n.js` 两条、`proxy.rs` 头注释、`docs/DEVELOPMENT.md` 三处。
+7. 文案与文档 —— `i18n.js` 两条、`proxy.rs` 头注释、`docs/guides/DEVELOPMENT.md` 三处。
 8. 版本位 —— `Cargo.toml` / `Cargo.lock` / `tauri.conf.json` / `integrations/claude-code/.claude-plugin/plugin.json`
    （第四处 2.0.2 漏了，见下）→ `2.0.3`。
 9. `UPSTREAM.json` —— `version` → `2.0.3`、`selectedUpstreamThrough` → `ab0eb65a`、`selectedChanges` 补四项、
    **删掉一条一直写错的**（`5a0fee56` 被列为「已选」，但本仓没有可附着的审批代码）。
-10. `docs/release-2.0.3.md`。
+10. `docs/releases/release-2.0.3.md`。
 
 ## 五之二、顺带查出的两条既有缺陷（非上游带来）
 
