@@ -9,6 +9,6 @@
 
 ## 重新渲染
 
-在仓库根目录执行 `node tools/render-readme.mjs`。需要 Microsoft Edge；可通过 `EDGE_BINARY` 指定安装路径。脚本只在隔离浏览器中加载本地 HTML、PNG 和字体，检查图片、字体加载和标题边界，再生成 PNG 与 `metadata.json`；不调用生成式图片服务，不发送用户素材。
+在仓库根目录执行 `node tools/docs/render-readme.mjs`。需要 Microsoft Edge；可通过 `EDGE_BINARY` 指定安装路径。脚本只在隔离浏览器中加载本地 HTML、PNG 和字体，检查图片、字体加载和标题边界，再生成 PNG 与 `metadata.json`；不调用生成式图片服务，不发送用户素材。
 
 GitHub README 不执行自定义 CSS，深浅主题使用 `<picture>` 选择本地 PNG。所有正文、安装步骤、风险说明和上游版权仍保留为可检索的 Markdown。
