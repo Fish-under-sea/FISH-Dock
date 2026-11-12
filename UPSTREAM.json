@@ -7,7 +7,7 @@
       "repository": "https://github.com/zhoupengjie/Wakuwaku",
       "baseCommit": "f1441cbbcf6801d18c27a1d241fd4e5475086e3b",
       "selectedUpstreamThrough": "ab0eb65a",
-      "license": "app/LICENSE",
+      "license": "LICENSE",
       "selectedChanges": [
         "Settings WebView DPI/hit testing and clipping",
         "Explorer startup/restart taskbar handoff",
