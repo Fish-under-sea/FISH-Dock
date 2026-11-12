@@ -29,7 +29,11 @@
 | `app/scripts/` | 构建、安装、发布、渲染、校验脚本（`installer.mjs`、`prepare-installer.mjs`、`gitee-release.ps1`、`build-*.ps1`、各 `*.test.mjs`） |
 | `docs/` | 开发说明、计划、发行说明、规格、审计（见第二节） |
 | `sdk/` | 对外 SDK（`browser/`、`node/`、`examples/`） |
-| `tools/` | 仓库级渲染与校验脚本（`render-readme.mjs`、`check-readme.mjs`、`render-sections.mjs`） |
+| `tools/docs/` | README 渲染与引用校验（`render-readme.mjs`、`check-readme.mjs`、`render-sections.mjs`） |
+| `tools/preview/`、`tools/misc/` | 真实前端预览与截图；API 客户端与专项截图辅助工具 |
+| `integrations/`、`examples/` | Agent / 邮件集成与示例脚本，Rust 编译期嵌入路径从这里取 |
+| `pets/`、`art/`、`wallpapers/` | 默认宠物、素材说明与壁纸；素材许可独立于代码 |
+| `relay/` | 独立的崩溃报告中转代码，不在源码构建目录内 |
 | `.github/` | issue 模板与 `CONTRIBUTING.md`（提交规则唯一出处） |
 
 官方插件本体与商店目录不在本仓，在 `Fish-under-sea/FISH-DOCK-Plugins`。
@@ -38,12 +42,12 @@
 
 | 你要做的事 | 先读 |
 | --- | --- |
-| 理解宿主架构、hook、更新、崩溃、岛 | `docs/DEVELOPMENT.md`（内容最全，按小节查） |
-| 动安装器 / 出包 | `docs/installer-build.md`、`app/scripts/installer.mjs`、`app/scripts/installer.test.mjs` |
-| 动配置键或环境变量 | `docs/config-keys.md` |
-| 发版 | `docs/release-<ver>.md`（模板照抄上一版） |
-| 查历史决策与欠账 | `docs/plan-*.md`、`docs/audit-*.md` |
-| 国内镜像口径 | `docs/domestic-mirror-matrix-2026-11-04.md` |
+| 理解宿主架构、hook、更新、崩溃、岛 | `docs/guides/DEVELOPMENT.md`（内容最全，按小节查） |
+| 动安装器 / 出包 | `docs/guides/installer-build.md`、`app/scripts/installer.mjs`、`app/scripts/installer.test.mjs` |
+| 动配置键或环境变量 | `docs/guides/config-keys.md` |
+| 发版 | `docs/releases/release-<ver>.md`（模板照抄上一版） |
+| 查历史决策与欠账 | `docs/plans/plan-*.md`、`docs/plans/audit-*.md` |
+| 国内镜像口径 | `docs/guides/domestic-mirror-matrix-2026-11-04.md` |
 | 提 issue / PR | `.github/CONTRIBUTING.md` |
 | 本机环境 | `docs/agents/local/<用户名>.md` |
 
@@ -58,33 +62,18 @@
 
 ## 四、出包与发布
 
-1. **准备资源**：`prepare-installer.mjs` 的 `prepareResources` 会下载并核对官方 Node / WebView2 / Windhawk。复用既有资源可在**同卷**做硬链接暂存（秒级、不复制 GB），但**绝不就地修改硬链接文件**——那会改到源文件。
-2. **构建**：
-
-   ```powershell
-   pwsh "<可复用脚本目录>/build-dual-package.ps1" -Dock <本仓路径> -Resources <暂存上层目录> -Version <ver> -Baseline <本仓路径>/app/scripts/baselines/install-manifest-2.1.0.json -SkipManifest
-   ```
-
-   - `-SkipManifest` 必加，否则 `rebuild-manifest` 会把 product 退回旧值。
-   - **`-Baseline` 固定用 2.1.0 那份，不随版本滚动**：2.1.0/2.1.1 的 `resources/licenses/runtime-sources.json` 与 2.1.2 之后不同，只拿上一版做基线时它既不进载荷、现场校验又对不上，老用户点应用内更新会报「基础资源缺失」并回滚（2.1.6 的实测故障，2.1.7 修）。
-   - 脚本自己设 `CARGO_NET_OFFLINE=true`；`makensis` 偶发 `deflate() failed (-4)` 属瞬时错误，清半成品重跑一次即可，不要当产品缺陷。
-   - 双包构建脚本不在本仓，位置写在你自己的 `docs/agents/local/<用户名>.md` 里。
-3. **验包**：用 7-Zip 跑 `7z t`（可执行文件路径见本机覆盖），再核对 `<exe>.sha256` 与实际字节。
-4. **包内实物必须看**：装出来的 `resources/manifest.json`、`licenses/NOTICE.txt` 这类**生成型文件**，每次出包都要从包里抽出来核对一次（历史上就因 NOTICE 带了退役组件引用返工过）。
-5. **发布**：
-
-   ```powershell
-   gh release create v<ver> --repo Fish-under-sea/FISH-Dock --title <标题> --notes-file docs/release-<ver>.md --target main <Setup> <Setup.sha256> <Update> <Update.sha256> SHA256SUMS.txt
-   ```
-
-   - Update 包以 **2.1.0** 为基线，2.1.0 及以上都能直接升（2.0.x 跨越了改名与 Windhawk 下线，仍用 Setup）；发布说明里写清覆盖范围。
-   - **2.2.0 是最后一个双包版**：2.2.1 起只发 Setup、不再发 Update，更新器探针只认 `FISH-Dock-Update-<ver>.exe.sha256`，所以这些版本不会走应用内更新通道。这是有意为之的口径，继续沿用时在发布说明里说明。
+- 当前仅发布 Setup；2.2.0 是最后的 Setup + Update 双包版本。历史双包脚本不能当作当前默认入口。
+- 资源由 `app/scripts/prepare-installer.mjs` 从已下载并锁定摘要的 Node 包准备；不再携带 Windhawk 或固定版 WebView2，Setup 检测系统 Evergreen。清单必须用 `writeManifest` 生成。
+- 从仓库根运行 `pwsh app/scripts/build-installer.ps1 -Resources <含 manifest.json 的资源目录>`；实际工具参数见脚本与 `docs/guides/installer-build.md`。复用资源时不得就地修改硬链接。
+- 出包后用 7-Zip 验证完整性，抽取清单与 NOTICE 核对，并校验 `FISH-Dock-Setup-<ver>.exe.sha256`。
+- 更新器自 2.2.0 起只认 Setup 载荷及其摘要，不再用 Update 作为候选；不要沿用「Setup-only 不能应用内升级」的过期说法。
+- 推送、发布与部署必须单独得到用户确认；本地构建或提交不代表授权发布。
 
 ## 五、版本位与文档同步
 
 - 版本唯一权威：`app/src-tauri/tauri.conf.json` 与 `app/src-tauri/Cargo.toml`（必须同版）。
-- README 的版本卡与头图由 `tools/render-readme.mjs` 渲染（从 `tauri.conf.json` 读取），**禁止手改 PNG**；改完用 `read_image` 确认两个版本号都对。
-- 发版要同步：`README.md`、`README.en.md` 的当前版本 / Release 链接 / 包名，并新增 `docs/release-<ver>.md`；历史变更条目保持原样。
+- README 的版本卡与头图由 `tools/docs/render-readme.mjs` 渲染（从 `tauri.conf.json` 读取），**禁止手改 PNG**；改完用 `read_image` 确认两个版本号都对。
+- 发版要同步：`README.md`、`README.en.md` 的当前版本 / Release 链接 / 包名，并新增 `docs/releases/release-<ver>.md`；历史变更条目保持原样。
 
 ## 六、环境坑（跨机器通用的部分）
 
@@ -94,11 +83,11 @@
 | `git push` 要凭据时 credential helper 起不来 | 沙箱禁命名管道（`sh.exe ... signal pipe, Win32 error 5`） | 用 `gh auth token` 拼**临时 URL** 推送，用完即弃；**不写进 remote/config**，推完 `git fetch` 对齐 |
 | 以为开了代理、其实没有 | `HTTP(S)_PROXY` 会在代理内核停掉后残留 | 先 `Get-NetTCPConnection -State Listen` 看端口是否在听，再决定用或清 |
 | `gh` 报 `fatal: not a git repository` | `gh` 要在仓库目录执行 | 一律显式 `--repo <owner>/<repo>` |
-| Chromium/Edge 无头起不来（`mojo … 拒绝访问 (0x5)`） | 沙箱禁命名管道 | `tools/render-readme.mjs`、截图类脚本用 `danger-full-access` 跑一次 |
-| `node --test` 报 `spawn EPERM` | 沙箱禁管道 stdio | 用 `node --test --test-isolation=none "<glob>"`；真子进程用例恒失败记环境不记缺陷 |
+| Chromium/Edge 无头起不来（`mojo … 拒绝访问 (0x5)`） | 沙箱禁命名管道 | `tools/docs/render-readme.mjs`、截图类脚本在实际被拒后申请原命令单次授权 |
+| `node --test` 报 `spawn EPERM` | 沙箱禁管道 stdio | 用 `node --test --test-isolation=none "<glob>"`；真实子进程被拒时保留断言并申请该命令单次授权，未经验证不能记通过 |
 | HTTPS 报 `schannel: AcquireCredentialsHandle failed` | 本机 schannel 客户端凭证不可用，与代理、目标站无关 | 下载走 Node TLS（脚本位置见本机覆盖），大文件用断点续传那份 |
 
-`node --test` 里若断言涉及子进程，优先把断言改成可直接执行的形式，不要靠 `--test-threads` 硬凑。
+测试必须保留真实协议与子进程覆盖，不为适配沙箱删断言；只把能确认的权限错误归类为环境阻塞。
 
 ## 七、Gitee 通道与国内镜像
 
@@ -128,3 +117,5 @@
 - **禁用 `git clean -fdx`**，删东西按白名单逐项删。
 - 改本文件或 `docs/agents/` 下的内容，随**改动它的那次功能提交**一起带上，不为文档单独开一个空转提交。
 - `AGENTS.local.md` 这种只在本机生效、不入库的写法已废弃；本机事实一律写进 `docs/agents/local/<用户名>.md` 并入库。
+
+- 不提交 handoff、会话交接、临时验收与构建报告。短期材料放忽略的 `.work/`；长期知识归入指南、规格或回归测试。
