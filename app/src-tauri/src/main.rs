@@ -42,6 +42,8 @@
 
 mod agent_hub;
 mod appbar;
+// DEC-7：外部程序审批 POST /ask（仅 loopback、默认关闭、每请求确认、超时拒绝、审计）。
+mod askapi;
 mod asks;
 mod audio;
 mod backplate;
