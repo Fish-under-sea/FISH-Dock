@@ -1943,6 +1943,7 @@ fn main() {
             plugin_window::plugin_window_ready,
             plugin_window::plugin_window_call,
             plugin_window::plugin_window_close,
+            plugin_window::plugin_goo_done,
             settings::settings_set,
             settings::settings_open,
             settings::settings_closed,

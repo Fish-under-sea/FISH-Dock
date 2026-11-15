@@ -760,6 +760,11 @@ static TOP_LIGHT: AtomicU8 = AtomicU8::new(2);
 static PRESS_OUTSIDE: AtomicBool = AtomicBool::new(false);
 // 按下点在岛窗口区域内、无法判断是否为“外面拖进来”时的计时起点（ms）。
 static HOLD_SINCE: AtomicU64 = AtomicU64::new(0);
+// 2.3.4（#88 H4）：上一次胶囊点击的时间（ms），用于区分单击/双击。
+static PILL_CLICK_AT: AtomicU64 = AtomicU64::new(0);
+// 2.3.4（#88 H3）：上一次看到的「左键按下」状态。指针线程每轮看一次光标，用它检出
+// 「从松到按」的那一刻，作为全局的外部按下信号分给插件窗口（窗外点击）。
+static PREV_DOWN: AtomicBool = AtomicBool::new(false);
 
 pub fn look_over_max(sh: &Arc<Shared>) {
     let looks = sh.setting("islandTopLook");
@@ -1320,6 +1325,16 @@ pub fn keep_on_screen(sh: &Shared) {
 pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
     // She is being dragged past: the home is not being hovered.
     let passive = crate::pet::is_dragged(sh);
+    // 2.3.4（#88 H3）：全局左键上升沿 → 通知订阅了 windows 的插件「窗外按下」。
+    // 与主岛自身的按下处理无关，纯广播一个时刻；插件自行判断这个点是否在自己的窗口外。
+    {
+        let down = crate::pet::any_down().unwrap_or(false);
+        if down && !PREV_DOWN.swap(true, Ordering::SeqCst) {
+            crate::plugin_hit::outside_press(cursor);
+        } else if !down {
+            PREV_DOWN.store(false, Ordering::SeqCst);
+        }
+    }
     let (ignore, pointer, wait, called, came) = {
         let mut isl = sh.island.lock().unwrap();
         if !isl.ready {
@@ -1351,6 +1366,22 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
                 if on != was {
                     isl.pointer_on = on;
                     crate::plugin_dock::notify_pointer(on);
+                }
+                // 2.3.4（#88 H4）：指针停在胶囊上时连续推 move（带坐标与形态）。
+                if on {
+                    let view = if isl.view.is_empty() { "compact" } else { isl.view };
+                    crate::plugin_dock::notify_pointer_move(cursor.0, cursor.1, view, isl.stow.stowed, isl.over_full);
+                    // 胶囊上的「按下」上升沿 = 一次点击（双击由双击间隔判定）。
+                    if crate::pet::any_down().unwrap_or(false) {
+                        let last = PILL_CLICK_AT.load(Ordering::SeqCst);
+                        let nowms = crate::now_ms() as u64;
+                        if nowms.saturating_sub(last) > 250 {
+                            PILL_CLICK_AT.store(nowms, Ordering::SeqCst);
+                            let late = nowms.saturating_sub(last);
+                            let button = if late <= 500 && last != 0 { "double" } else { "left" };
+                            crate::plugin_dock::notify_click(button, cursor.0, cursor.1);
+                        }
+                    }
                 }
             }
             let psf = page_sf;

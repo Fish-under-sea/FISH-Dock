@@ -1357,7 +1357,10 @@
     body.classList.toggle('isl-stowed', on)
     // Main told whether it is up, and the closed island's size, where a
     // window under it is looked for (none on the taskbar).
-    const { width, height } = home() === 'island' && !screenTop ? sizeOf('compact') : { width: 0, height: 0 }
+    // 2.3.4（#88 P6）：island home 时**恒定**上报 sizeOf('compact')，与是否贴顶无关。
+    // 旧条件 `&& !screenTop` 在贴顶时上报 (0,0) → 宿主 closed_rect=None，导致文件拖不到
+    // 主岛、anchorBase:'capsule' 的窗口回落整窗。
+    const { width, height } = home() === 'island' ? sizeOf('compact') : { width: 0, height: 0 }
     const sent = JSON.stringify([on, width, height])
     if (sent !== stowSent) {
       stowSent = sent
