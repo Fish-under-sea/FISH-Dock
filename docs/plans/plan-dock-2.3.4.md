@@ -17,7 +17,7 @@
 | #88 | 6 处宿主补丁 + Hook 层 10 项 | 全部实现（I88-*）；H9 见 DEC-1；H-D1 文档对齐 |
 | #89 | Windows 11 任务视图图标 | 实现（I89-1，移植 pri.rs，Win10 回退字形） |
 | 上游 §3.2 | #115 / 卡住还任务栏 / 托盘 / 首点 / Esc / 抓栈 | 全部实现（UP-3.2-*） |
-| 上游 §3.3 | 顶栏+dock、嵌入任务栏、任意显示器、日历、HTML 邮件、外部审批、CI | 实现（DEC-2/3/4/5/6/7/9）；整页 TS（DEC-8）移出本轮 |
+| 上游 §3.3 | 顶栏+dock、嵌入任务栏、任意显示器、日历、HTML 邮件、外部审批、CI、整页 TS | 实现（DEC-1…9 全部裁定为 A 实现）；整页 TS（DEC-8）由集成后独立 TS 任务（t14）+ 独立核验（t15）承接，仍属 2.3.4 |
 | 上游 §3.4 | 等价实现 | 提供本仓代码+测试证据（UP-3.4-*） |
 
 ## 二、三分支与集成
@@ -32,7 +32,7 @@
 
 `requirements.json` 56 条每项都映射到最终代码与测试：
 - 集成分支 `git diff 0626a19..HEAD` 覆盖全部 feature 项；
-- design 项（DEC-2…9）在 C 支实现为 `topbar.rs`/`embed.rs`/`home.rs`/`calendar.rs`/`askapi.rs`/`mail/sanitize.rs`/`.github/workflows/ci.yml` 并各有测试；DEC-8 标注移出；
+- design 项（DEC-1…9，全部裁定方案 A）在分支实现为 `plugin_window.rs` 覆盖窗（DEC-1，B 支）/`topbar.rs`/`embed.rs`/`home.rs`/`calendar.rs`/`askapi.rs`/`mail/sanitize.rs`/`.github/workflows/ci.yml`（DEC-2…7、9）并各有测试；DEC-8 整页 TS 由集成后独立 TS 任务（t14）+ 独立核验（t15）承接，仍属 2.3.4，不在本条标记移出；
 - equivalence 项（UP-3.4-*、DEBUGEVAL、DOCKFLICKER）在 `evidence/verify-c/upstream-exclusions-c.md` 有本仓代码+测试证据；
 - 真机项在 `evidence/` 逐项标「未测（环境）」与条件，不冒充。
 
@@ -50,7 +50,10 @@
 - 只出 Setup：版本位 2.3.4（tauri.conf.json = Cargo.toml = Cargo.lock = plugin.json），README 用 `render-readme.mjs` 重渲，新增 `docs/releases/release-2.3.4.md`，`prepare-installer.mjs` 的 `writeManifest` 生成清单，`build-installer.ps1` 出包，7z + sha256 校验。
 - 推送、打 tag、GitHub/Gitee 发布必须用户明确确认后由 captain 统一执行。本地构建与提交不等于授权发布。
 
-## 六、用户决策（默认按实现推进，用户仍可就下列回退）
+## 六、产品级决策（DEC-1…9 全部裁定为方案 A · 实现）
 
-- DEC-1（#88 H9 跨窗口 goo 融合动画）：B 支以「明确不可实现 + 窗内简化动画」处置并文档化；用户若要求覆盖层/共享合成层/内核回放，另立任务。
-- DEC-2…7、DEC-9 已在 C 支实现为真实可跑；DEC-8（整页 TS）移出本轮。
+> 依据 `.work/2.3.4/decisions-captain.md`：9 项 DEC 不是「不做」，全部判定为 A（实现），并已按下列约束落地。用户仍可就单项回退。
+
+- DEC-1（#88 H9 跨窗口 goo 融合动画）：**方案 A**——宿主在拖放落点创建顶层透明覆盖窗（`WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW`，不抢焦点/不进任务栏），用 SVG/CSS 滤镜回放「液滴→颈→球」吸收与抖动后把落点交给目标插件窗口并销毁覆盖窗；B 支已实现、t6 验证（DPI/多屏、快速连拖串行、插件窗销毁/主岛隐藏取消、失败不阻断 drop）。禁止以「跨窗口无法实现」降级为窗内动画，窗内简化仅作失败回退。
+- DEC-2 顶栏+dock、DEC-3 嵌入任务栏、DEC-4 任意显示器、DEC-5 日历/正在播放、DEC-6 HTML 邮件（安全默认）、DEC-7 外部审批 `POST /ask`（loopback+默认关+审计）、DEC-9 CI：已在 C 支实现为真实可跑并各有测试。
+- DEC-8（整页 TypeScript 化）：**仍在 2.3.4 内**，由集成后独立 TS 任务（t14，在集成分支 SHA 上迁移）+ 独立核验（t15）承接，不写为移出/延期。
