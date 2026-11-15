@@ -107,6 +107,33 @@
     window.pet.dismiss(shownId)
     if (session) window.pet.jump(session)
   }
+  // Esc puts the prompt away (upstream bf6f0adb): the same as its "to the
+  // terminal" button, not answering it. Only while it is up and armed, so a key
+  // already on its way as the prompt opens cannot put it away unseen. Handed
+  // back here, it does not come again when the settings are closed and opened:
+  // it is the terminal's now (asks.rs hand_back).
+  const cancelAsked = () => {
+    if (panel.hidden || !shownId) return false
+    if (panel.querySelector('button:not([disabled])') === null) return false
+    dismiss()
+    return true
+  }
+  // On the page that holds the panel (her home's). Capture, so the settings'
+  // own Esc (closing them) does not also fire for a prompt over them.
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener(
+      'keydown',
+      e => {
+        if (e.key !== 'Escape' || e.isComposing) return
+        if (!holdsPanel()) return
+        if (cancelAsked()) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+      },
+      true,
+    )
+  }
 
   function header(title, ask) {
     return el(

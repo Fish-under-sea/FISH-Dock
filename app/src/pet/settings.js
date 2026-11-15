@@ -59,8 +59,8 @@
   const PART_OF = { identity: 'widgets', backup: 'now', pets: 'look', place: 'look', quiet: 'now', shortcuts: 'now', sessions: 'agents', alerts: 'agents', hold: 'agents', idle: 'agents', notify: 'agents', prompts: 'agents', others: 'agents', files: 'agents', welcome: 'agents', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
-  const HOMES = ['island', 'taskbar']
-  const HOME_KEY = { island: 's.displayIsland', taskbar: 's.displayTaskbar' }
+  const HOMES = ['island', 'taskbar', 'topbar']
+  const HOME_KEY = { island: 's.displayIsland', taskbar: 's.displayTaskbar', topbar: 's.displayTopbar' }
   // How long what she tells stays (停留多久): the quick choices, until seen,
   // and Custom, whole seconds typed in a box beside them (flow.js holdSecs,
   // zhoupengjie/Wakuwaku#59).
@@ -920,11 +920,13 @@
   function pageLook() {
     const s = snap.settings
     return `${sec(T('home.display'))}<div class="modes">
-        <div class="mode${s.display === 'taskbar' ? '' : ' on'}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span>${esc(T('s.displayIsland'))}</div></div>
+        <div class="mode${s.display !== 'taskbar' && s.display !== 'topbar' ? ' on' : ''}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span>${esc(T('s.displayIsland'))}</div></div>
         <div class="mode${s.display === 'taskbar' ? ' on' : ''}" data-mode="taskbar"><div class="pv"><s></s></div><div class="l"><span class="rd"></span>${esc(T('s.displayTaskbar'))}</div></div>
+        <div class="mode${s.display === 'topbar' ? ' on' : ''}" data-mode="topbar"><div class="pv"><t></t></div><div class="l"><span class="rd"></span>${esc(T('s.displayTopbar'))}</div></div>
       </div>
+      ${s.display === 'topbar' ? `<div class="grp"><div class="note">${esc(T('s.topbarNote'))}</div></div>` : ''}
       ${sec(T('s.builtin'))}
-      ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div></div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
+      ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div>${row(esc(T('s.embedTaskbar')), esc(T('s.embedTaskbarNote')), sw('embedTaskbar', s.embedTaskbar))}</div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
       ${part('place', '')}<div class="grp">${islandPosRow()}${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
       ${pageWindows()}
       ${pageTabOrder()}
@@ -3659,6 +3661,16 @@
   function close(why = 'asked') {
     if (!isOpen) return
     console.log('settings close:', why)
+    // 关闭设置时，落在面板上的确认提问一并作废（上游 bf6f0adb）：不这样，重开设置
+    // 时上一次没答完的提问又冒出来。本仓没有上游的 approveFor，设置页自己的确认状态
+    // 是 confirmActive（正显示的）与 confirmQueue（排队的）；交给 settings-asked.js
+    // 一个作废入口，Esc/取消/点背景/✕ 与关闭设置走同一条路（不做两套）。提问「交还
+    // 终端」的权限询问走 panel.js（settings-esc 测试），不在这里。
+    try {
+      window.SettingsAsked?.closeCleared({ finishActive: () => { if (!confirmActive) return false; finishConfirm(false); return true }, queue: confirmQueue })
+    } catch (error) {
+      console.log('[settings asked]', error)
+    }
     // 录到一半面板关了（点外面、Esc 到这里、✕）：组合键先还回去（setRecording
     // 里叫停 shortcutsPause），不然按键没人接。
     setRecording(null)
@@ -3666,8 +3678,6 @@
     void extensionPanel.closeAuth?.()
     // #69 S3：插件进度浮层自己拿的滚动锁由它自己还（这里不数它攒了几次）。
     extensionPanel.releaseScroll?.()
-    if (confirmActive) finishConfirm(false)
-    while (confirmQueue.length) confirmQueue.shift().resolve(false)
     void window.pet.settings.set({ settingsLastTab: tab }).catch(error => console.log('[settings memory]', error))
     isOpen = false
     ++openRevision

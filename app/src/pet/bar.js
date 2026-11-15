@@ -25,6 +25,7 @@
   // asked at once here before any look has come).
   const tview = document.querySelector('.tview')
   let taskViewOn = true
+  let taskViewIcons = null
   const wins = document.getElementById('wins')
   const clock = document.querySelector('.clock')
   let state = { windows: [], look: {}, edge: 'bottom', align: 'center', material: 'clear', lang: 'zh' }
@@ -238,11 +239,33 @@
     taskViewOn = on !== false
     tview.hidden = !taskViewOn
     tview.title = t(state.lang, 'taskbar.taskView')
+    // Windows 11's own双色 SVG out of its private resource (issue #89, upstream
+    // c1bead2c), picked by this strip's brightness; the U+E7C4 glyph (bar.html)
+    // stays otherwise — Windows 10, or the resource not read. Windows' own
+    // Taskview_Light.svg is the dark glyph (for a light bar), Taskview_Dark.svg
+    // the light one, so a light bar takes `light` — as tview.js has it.
+    const url = window.TView ? window.TView.dataUrl(taskViewIcons, isLight()) : null
+    if (url) {
+      tview.classList.add('svg')
+      tview.textContent = ''
+      tview.style.setProperty('--tview-svg', url)
+    } else {
+      tview.classList.remove('svg')
+      tview.textContent = '\u{e7c4}'
+      tview.style.removeProperty('--tview-svg')
+    }
   }
   invoke('taskbar_task_view')
     .then(on => {
       if (state.look?.taskView !== undefined) return
       taskViewOn = on !== false
+      drawTaskView()
+    })
+    .catch(() => {})
+  // The two SVGs, once: Windows 11's own; null on Windows 10 (the glyph).
+  invoke('taskbar_task_view_icons')
+    .then(icons => {
+      taskViewIcons = window.TView ? window.TView.usable(icons) : null
       drawTaskView()
     })
     .catch(() => {})

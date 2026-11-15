@@ -1,0 +1,71 @@
+# FISH Dock · CI（2.3.4，上游 v0.4.3 b32e9352 的等价实现）
+#
+# Windows runner 上跑：Rust 单测、Node 页面/SDK 测试、README 引用与版本一致性检查。
+# 任一失败即阻断（本 job 失败即红），不做「继续但不报告」。不放任何令牌或发布凭据：
+# 发布（打 tag、GitHub Release、Gitee 同步）仍由人明确授权后在本地/受控流程里做，
+# 本工作流只验证，不发布。
+#
+# 缓存：只缓存 Cargo registry 与 git 依赖（~\.cargo），不缓存 target/ 与资源包——
+# 不把构建产物或资源包提交/缓存进仓库。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的新推送取消旧跑：省时间，也避免旧结论盖新结论。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust 单测
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo registry（不含 target/）
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: cargo test（与本地 verify 同一条命令）
+        # 已核实的既有环境性失败（lhm_setup 的 DACL 用例在无交互会话/SSH 下必然失败）
+        # 在 CI 的交互桌面 runner 上应通过；若因 runner 差异失败，见 run 日志逐项归类，
+        # 不在此静默跳过任何断言。
+        run: cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
+
+  node:
+    name: Node 页面与 SDK 测试
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: node --test（与本地 verify 同一条命令）
+        # 沙箱禁管道 stdio 时用 --test-isolation=none；CI 的 runner 无此限制，但仍沿用
+        # 同一条命令以保持一致。浏览器类用例在 runner 有 Chromium 时跑；缺则如实记跳过。
+        run: node --test --test-isolation=none "app/test/*.test.js" "app/test/*.test.mjs" "app/scripts/*.test.mjs" "sdk/node/*.test.mjs"
+
+  docs:
+    name: README 引用与版本一致性
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: tools/docs/check-readme.mjs
+        # 检查 README 的引用、锚点、版本卡与 tauri.conf.json 一致（渲染由 render-readme.mjs）。
+        run: node tools/docs/check-readme.mjs

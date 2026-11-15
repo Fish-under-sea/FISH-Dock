@@ -1494,6 +1494,20 @@ body.home-taskbar {
   font-size: 16px;
 }
 
+/* The task view button drawn as Windows 11's own双色 SVG (issue #89): the
+   svg source is a CSS var the page sets (island.js / bar.js drawTaskView); the
+   glyph is hidden meanwhile. Size and stretching follow the button. */
+#bar-rest .tview.svg .fi {
+  display: none;
+}
+
+#bar-rest .tview.svg {
+  background-image: var(--tview-svg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px 16px;
+}
+
 /* Windows' quick settings: the network and the volume, one button. */
 #bar-rest .tquick {
   flex: none;

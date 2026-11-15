@@ -447,6 +447,62 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
                 reply(req, 200, json!({ "ok": true, "arrived": arrived }));
             });
         }
+        // A thread of hers held still for a while, as a hang is: her guard
+        // shows Windows' taskbar after ten seconds of it (shell.rs HangBack,
+        // upstream cdb0270b). Answered before it begins. Debug only.
+        ("POST", "/debug/hang") if is_debug => {
+            let Some(body) = read_json(&mut req) else { return reply(req, 400, json!({ "error": "bad json" })) };
+            let secs = body["secs"].as_u64().unwrap_or(15).clamp(1, 120);
+            let thread = body["thread"].as_str().unwrap_or("main").to_string();
+            sh.log(&format!("debug: her {thread} thread held still for {secs} s"));
+            let held = match thread.as_str() {
+                "taskbar" => crate::taskbar::hold_still(secs),
+                "main" => sh.app.run_on_main_thread(move || std::thread::sleep(std::time::Duration::from_secs(secs))).is_ok(),
+                _ => false,
+            };
+            reply(req, if held { 200 } else { 400 }, json!({ "ok": held, "thread": thread, "secs": secs }))
+        }
+        // DEC-7：外部程序经本机 loopback 请求一次人工审批（上游 v0.4.3 #149 的等价实现）。
+        // 默认关闭（FISH_DOCK_ASK=1 或设置 askApi=true 才开）；复用 /v1 的 Host/Origin/
+        // Bearer 校验；每请求弹一次原生确认，超时按拒绝；拒绝与超时可区分；记审计日志。
+        ("POST", "/ask") => {
+            let setting = sh.setting("askApi").as_bool();
+            if !crate::askapi::enabled_from(std::env::var("FISH_DOCK_ASK").ok().as_deref(), setting) {
+                return reply(req, 404, json!({ "error": "ask api not enabled" }));
+            }
+            let port = sh.port;
+            let api = sh.agent_api.clone();
+            if let Err((code, why)) = crate::agent_hub::loopback_authorized(&api, &req, port) {
+                sh.log(&format!("ask: refused ({why})"));
+                return reply(req, code, json!({ "error": why }));
+            }
+            let Some(body) = read_json(&mut req) else { return reply(req, 400, json!({ "error": "bad json" })) };
+            let ask = match crate::askapi::parse(&body) {
+                Ok(a) => a,
+                Err(why) => return reply(req, 400, json!({ "error": why })),
+            };
+            // 每请求弹一次原生确认（asks 队列，与 hook 审批同一条路）。请求本身在等待期间
+            // 由工作线程持有，答完（或超时）回写；同一 request_id 不重复弹由前端去重。
+            let event = crate::askapi::event_for(&ask);
+            let wait = ask.wait_ms;
+            let audit = ask.clone();
+            let data_dir = sh.dir.clone();
+            let respond: Responder = Box::new(move |out: Option<Value>| {
+                let decision = crate::askapi::classify(out.as_ref());
+                // 审计：谁、为何、结论（不记 token）。
+                crate::crash::guard_said(&data_dir, &crate::askapi::audit_line(&audit, decision));
+                let status = if decision == crate::askapi::Decision::Allow { 200 } else { 403 };
+                reply(req, status, json!({ "decision": decision.as_str() }));
+            });
+            match sh.asks.lock().unwrap().add(event, respond, now_ms(), wait) {
+                Ok(id) => {
+                    sh.log(&format!("ask {id}: {} waits on the person (\"{}\")", ask.caller, ask.purpose));
+                    sh.push_asks();
+                }
+                // 队列满：当作拒绝（明确、可区分），不静默悬挂。
+                Err(respond) => respond(Some(json!({ "action": "deny" }))),
+            }
+        }
         _ => reply(req, 404, json!({ "error": "not found" })),
     }
 }

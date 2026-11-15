@@ -70,3 +70,6 @@ integrations/thunderbird/*.xpi
 .work/
 **/handoff/
 **/*handoff*.md
+
+# C 支本地独立 CARGO_TARGET_DIR（不入库）
+.work-cargo-target/

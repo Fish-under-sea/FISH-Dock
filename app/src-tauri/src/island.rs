@@ -319,6 +319,11 @@ pub fn display(sh: &Shared) -> Option<(i32, i32, i32, i32)> {
     area(sh).map(|a| a.mon)
 }
 
+// DEC-2/4：「家」所在的显示器与缩放（顶栏/dock 窗口按它摆放）。
+pub fn home_display(sh: &Shared) -> Option<((i32, i32, i32, i32), f64)> {
+    area(sh).map(|a| (a.mon, a.sf))
+}
+
 // Where the window goes, by home. Returns the physical rect if it moved.
 fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
     let home = sh.home();
@@ -739,6 +744,8 @@ fn create(sh: &Arc<Shared>) {
                     crate::tasks::no_transitions(hwnd.0 as isize);
                 }
                 sh.own_window(&win);
+                // DEC-3：岛窗口建好后，若开着嵌入任务栏就尝试嵌入（默认关，失败回落）。
+                crate::embed::refresh(&sh, sh.island.lock().unwrap().hwnd);
                 // Its renderer gone: told, and the page loaded again (crash.rs).
                 crate::crash::watch(&sh, &win);
             }
@@ -1294,6 +1301,17 @@ pub fn handoff_out(sh: &Shared) {
 // put back where it was put if Windows moved it: the taskbar's window, which
 // reaches over its own strip, was pushed up into the work area by the strip's
 // height (2026-10-10, as a game went full screen and back).
+// DEC-4：显示变更后「家」的显示器变了（home.rs 判定）：把岛/顶栏移动到解出的显示器
+// （homeMonitor）。这里只做重定位，不再各自听显示变化（main.rs 的 ticker 统一驱动）。
+pub fn on_home_display_moved(sh: &Arc<Shared>, home_monitor: Option<(i32, i32, i32, i32)>) {
+    // 保存新显示器到 dockScreen 让 area() 的「按设定屏」路径生效，再重摆。
+    if let Some(mon) = home_monitor {
+        sh.change(json!({ "dockScreen": [mon.0, mon.1, mon.2, mon.3] }));
+    }
+    place(sh);
+    lay_again(sh, "home display moved");
+}
+
 pub fn keep_on_screen(sh: &Shared) {
     // A display come or gone: her taskbar on the others too (bars.rs).
     crate::bars::sync(&crate::shared(&sh.app));

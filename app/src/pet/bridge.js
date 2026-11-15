@@ -149,6 +149,11 @@
       // Personalization → Taskbar): her own cell after Start goes with it
       // (issue #48); shown when Windows cannot say.
       taskView: () => invoke('taskbar_task_view').catch(() => true),
+      // Windows 11's own Task view icons (#89, upstream c1bead2c): { light,
+      // dark } as SVG source strings, read from Windows' private resource
+      // once; null on Windows 10 or where it cannot be read, so the page keeps
+      // the U+E7C4 glyph. Asked once, kept by the page.
+      taskViewIcons: () => invoke('taskbar_task_view_icons').catch(() => null),
       // The input methods to pick from ([{ id, lang, langName, name, icon, own,
       // current }], inputs.rs), and one of them switched to for the window in front.
       inputs: () => invoke('taskbar_inputs').catch(() => []),

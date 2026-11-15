@@ -42,6 +42,8 @@
 
 mod agent_hub;
 mod appbar;
+// DEC-7：外部程序审批 POST /ask（仅 loopback、默认关闭、每请求确认、超时拒绝、审计）。
+mod askapi;
 mod asks;
 mod audio;
 mod backplate;
@@ -102,6 +104,10 @@ mod plugin_thirdparty;
 mod plugin_api;
 mod plugin_dependencies;
 mod github_access;
+// DEC-3：嵌入 Windows 任务栏的开关/回落/重挂决策核心（安全默认，失败回落独立窗口）。
+mod embed;
+// DEC-2/3/4：统一的「家」（island/taskbar/topbar）与显示器抽象，唯一入口，禁止各家自立。
+mod home;
 mod tab_order;
 mod plugin_page;
 mod plugin_window;
@@ -116,6 +122,8 @@ mod inputs;
 mod island;
 mod jump;
 mod browser;
+// DEC-5：宿主内建日历与「正在播放」的纯逻辑核心（日历不联网、媒体无则不显示）。
+mod calendar;
 mod legacy_ofm;
 mod lhm;
 mod lhm_setup;
@@ -130,6 +138,8 @@ mod paper;
 mod pet;
 mod pins;
 mod plugins;
+// #89：Windows 11 自己的任务视图图标（读系统私有 .pri 的两张 SVG；只依赖 std）。
+mod pri;
 mod pointer;
 mod power;
 mod proxy;
@@ -150,6 +160,8 @@ mod taskbar;
 mod tasks;
 mod theme;
 mod tokens;
+// DEC-2：顶栏 + dock（第三种家）的布局几何。
+mod topbar;
 mod tray;
 mod updates;
 mod wallpaper;
@@ -388,12 +400,16 @@ impl Shared {
         self.by_fullscreen.load(Ordering::SeqCst)
     }
 
-    // Her home: 'island' or 'taskbar' (island.rs).
+    // Her home: 'island', 'taskbar' or 'topbar' (home.rs, DEC-2). One place for
+    // all three so no home handles the taskbar or a display change on its own.
     pub fn home(&self) -> &'static str {
-        match self.setting("display").as_str() {
-            Some("taskbar") => "taskbar",
-            _ => "island",
-        }
+        home::Home::parse(self.setting("display").as_str()).as_setting()
+    }
+
+    // The display her home sits on (home.rs, DEC-4): the saved monitor if it is
+    // still connected, else the primary. None only when there is no display.
+    pub fn home_choice(&self) -> home::HomeChoice {
+        home::HomeChoice::from_settings(self.setting("display").as_str(), home::parse_monitor(&self.setting("homeMonitor")))
     }
 
     // Whether she keeps start at login to where she is (connection.rs):
@@ -774,6 +790,11 @@ impl Shared {
         }
         // Her taskbar on the other displays: its material, its buttons' alignment, her language (bars.rs).
         bars::refresh(self);
+        // DEC-2：家的三种形态切换即时生效——topbar 创建/销毁顶栏与 dock 窗口，island/taskbar
+        // 保持原样（sync 里按 home 判定）。
+        topbar::sync(self);
+        // DEC-3：嵌入任务栏开关/家切换即时生效（默认关；失败回落独立窗口）。
+        embed::refresh(self, island::hwnd(self));
         // The desktop's widgets: made or gone as the layout says, told the rest (desk.rs).
         desk::sync(self);
         if touches_top {
@@ -1661,9 +1682,17 @@ fn main() {
     if let Some((pid, file)) = shell::guard_args(&args) {
         let data = file.parent().map(PathBuf::from).unwrap_or_default();
         let after = data.clone();
-        // Meanwhile, every two seconds: whether she answers (crash.rs Hang).
+        // Meanwhile, every two seconds: whether she answers (crash.rs Hang),
+        // and — her main thread or her taskbar's not answering ten seconds
+        // while her taskbar holds the strip — Windows' own shown again
+        // (shell.rs HangBack, upstream cdb0270b).
         let mut hang = crash::Hang::default();
-        shell::guard(pid, file, || hang.look(&data, pid), || drop(icons::hold(&data)), move |code, started| crash::after_exit(&after, pid, code, started));
+        let mut back = shell::HangBack::default();
+        let watch = || {
+            let hung = hang.look(&data, pid);
+            back.look(file, pid, hung, |line| crash::guard_said(&data, line));
+        };
+        shell::guard(pid, file, watch, || drop(icons::hold(&data)), move |code, started| crash::after_exit(&after, pid, code, started));
         // Her desktop's icons as they were, should she have left them moved (icons.rs).
         icons::given_back(&data);
         return;
@@ -2010,6 +2039,9 @@ fn main() {
             taskbar::taskbar_clock_tip,
             taskbar::taskbar_end_task,
             taskbar::taskbar_task_view,
+        taskbar::taskbar_task_view_icons,
+        topbar::topbar_focus,
+        topbar::topbar_ready,
             taskbar::taskbar_inputs,
             taskbar::taskbar_input,
             taskbar::taskbar_battery_font,
@@ -2368,16 +2400,35 @@ fn main() {
                     if n % 4 == 0 {
                         let screens = screen::read(&ticker.app);
                         // Displays come or go, or change: the desktop's widgets' windows
-                        // with them (only while there are any).
-                        let changed = {
+                        // with them (only while there are any). DEC-2/4: the ONE display
+                        // change path — her home (island/taskbar/topbar) resolves against
+                        // the new displays here (home.rs), never each home on its own.
+                        let (before_mons, after_mons, primary_mon, changed) = {
                             let mut previous = ticker.screens.lock().unwrap();
+                            let before: Vec<_> = previous.areas.iter().map(|a| a.mon).collect();
                             let changed = previous.areas != screens.areas || previous.primary != screens.primary;
+                            let after: Vec<_> = screens.areas.iter().map(|a| a.mon).collect();
+                            let primary = screens.primary.map(|p| p.mon);
                             *previous = screens;
-                            changed
+                            (before, after, primary, changed)
                         };
                         if changed {
                             plugin_window::screens_changed();
                             if desk::any() { desk::sync(&ticker); }
+                            // Her home's display: saved screen kept, gone → primary
+                            // (DEC-4). A move relocates the island / topbar / dock;
+                            // bars rebuild on any set change; all executed here once.
+                            let acts = crate::home::on_displays_changed(&before_mons, &after_mons, primary_mon, &ticker.home_choice());
+                            if acts.home_moved {
+                                crate::island::on_home_display_moved(&ticker, acts.home_monitor);
+                            }
+                            if acts.refresh_bars {
+                                bars::refresh(&ticker);
+                            }
+                            // DEC-2：顶栏/dock 按新显示器/缩放重摆（家是 topbar 时）。
+                            crate::topbar::sync(&ticker);
+                            // DEC-3：显示/任务栏变动后重挂嵌入（含 Explorer 重启，按状态机）。
+                            crate::embed::reattach(&ticker, island::hwnd(&ticker));
                         }
                         pet::keep_on_screen(&ticker);
                         island::keep_on_screen(&ticker);

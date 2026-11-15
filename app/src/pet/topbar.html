@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: http://asset.localhost asset:; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>FISH Dock top bar</title>
+    <link rel="stylesheet" href="topbar.css" />
+  </head>
+  <body data-mode="topbar">
+    <!-- DEC-2：顶栏 / dock 页面。mode=topbar 是顶上一条细条（左时间、中缩略项、右状态入口），
+         mode=dock 是底部图标条。窗口由 topbar.rs 创建并按 topbar_rect/dock_rect 摆放。 -->
+    <div id="mica"></div>
+    <div id="bar">
+      <div id="lead" hidden>
+        <span class="clock"></span>
+      </div>
+      <div id="items"></div>
+      <div id="end" hidden>
+        <button class="st" data-open="quick" title="quick settings">&#xE713;</button>
+      </div>
+    </div>
+    <script src="../shared/i18n.js"></script>
+    <script src="topbar.js"></script>
+  </body>
+</html>
