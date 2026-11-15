@@ -295,10 +295,28 @@ test('#88 H9：存在 goo 吸收覆盖页（Canvas 回放液滴→颈→球）',
 })
 
 // 2.3.4（#88 H10）：桥暴露 onReserve，主岛页面消费预留高度（占位不是只登记不生效）。
-test('#88 H10：bridge 暴露 onReserve，island.js 消费占位预留高度', () => {
+test('#88 H10：桥暴露 onReserve，island.js 消费占位预留高度', () => {
   const bridge = read('src', 'pet', 'bridge.js')
   assert.ok(bridge.includes("onReserve: on('island:reserve')"), 'bridge 暴露 onReserve')
   const island = read('src', 'pet', 'island.js')
   assert.ok(island.includes('window.pet.onReserve'), 'island.js 订阅 onReserve')
   assert.ok(island.includes('--isl-reserve-extra'), 'island.js 用预留高度作用到布局')
+})
+
+// 2.3.4（#88 H10）：预留高度要真正抬高展开高度（行为，不是字符串）。把 island.js 的纯函数
+// `expandedReserveHeight` 抽出在 vm 里跑，断言 extra>0 时才加高、<=0/NaN 时原样——若只是
+// 「设了个没人用的 CSS 变量」，这条会红（之前那种静态 includes 测试做不到）。
+test('#88 H10：expandedReserveHeight 真的把占位高度加到展开高度上', () => {
+  const src = read('src', 'pet', 'island.js')
+  const m = src.match(/function expandedReserveHeight\([^)]*\)\s*\{[\s\S]*?\n  \}/)
+  assert.ok(m, 'island.js 里应能找到 expandedReserveHeight 的纯函数定义')
+  const sandbox = {}
+  vm.runInNewContext(`${m[0]}; this.expandedReserveHeight = expandedReserveHeight`, sandbox)
+  const f = sandbox.expandedReserveHeight
+  assert.equal(f(100, 0), 100, '没有占位时高度不变（2.2.3 逐像素一致）')
+  assert.equal(f(100, 128), 228, '一个 120 高浮窗 + 8 缝 → 展开高 +128')
+  assert.equal(f(84, -5), 84, '负预留不加（防御坏输入）')
+  assert.equal(f(84, NaN), 84, 'NaN 预留不加')
+  // 真接线：sizeOf('expanded') 必须经过这个函数，而不是硬加。
+  assert.ok(/sizeOf|expandedReserveHeight\(/.test(src) && src.includes('expandedReserveHeight(Math.max('), "sizeOf('expanded') 用 expandedReserveHeight 计算高度")
 })

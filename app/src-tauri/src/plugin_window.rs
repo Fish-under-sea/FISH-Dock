@@ -1010,7 +1010,18 @@ fn geometry_of(win: &WebviewWindow) -> Option<(i32, i32, i32, i32)> {
     }
 }
 
-/// H7：记下一个窗口最近一次的外框（`rect` 与 `last_rect` 同步）。
+/// 2.3.4（#88 H2）：`rec` 按当前锚点/胶囊应落在的外框（补间目标，供记 last_rect/命中）。
+fn intend_rect(app: &AppHandle, rec: &Rec) -> Option<(i32, i32, i32, i32)> {
+    let win = app.get_webview_window(&rec.label)?;
+    let sf = win.scale_factor().ok().unwrap_or(1.0).max(0.5);
+    let screens = crate::screen::read(app);
+    let dock = app.get_webview_window("island").and_then(|w| match (w.outer_position(), w.outer_size()) {
+        (Ok(pos), Ok(size)) => Some((pos.x, pos.y, size.width as i32, size.height as i32)),
+        _ => None,
+    });
+    let capsule = crate::island::snapshot(&crate::shared(app)).capsule;
+    Some(placement_h7(rec, &screens, dock, capsule, sf, rec.last_rect))
+}
 fn record_rect(handle: &str, rect: Option<(i32, i32, i32, i32)>) {
     let Some(rect) = rect else { return };
     if let Some(rec) = book().windows.get_mut(handle) {
@@ -1341,17 +1352,19 @@ fn update(context: &Context, plugin: &str, generation: u64, params: &Value) -> R
         let win = app.get_webview_window(&current.label).ok_or("插件窗口尚未创建")?;
         win.set_title(&current.title).map_err(|_| "插件窗口标题设置失败")?;
         if current.duration_ms > 0 {
-            // H2：目标算一次，再从当前外框补间过去。
-            animate_place(&win, &current)?;
+            // H2：补间到目标（帧循环在工作线程，不阻塞主线程）；先记目标外框，供上次位置/命中用。
+            let target = intend_rect(&app, &current);
+            animate_place(&win, app.clone(), &current)?;
+            if let Some(target) = target { record_rect(&current.handle, Some(target)); }
         } else {
             place(&win, &current)?;
+            record_rect(&current.handle, geometry_of(&win));
         }
-        // H7：记录这次摆放的外框。
-        record_rect(&current.handle, geometry_of(&win));
         // 2.2.3（B4）：命中区域或命中方式可能刚改过，按当前值重新登记/撤销。
         if current.hit_test == HitTest::Opaque {
             crate::plugin_hit::watch(&current.label, current.hit_rects.clone());
-            crate::plugin_hit::place(&current.label, geometry_of(&win), win.scale_factor().unwrap_or(1.0));
+            let hit_rect = book().windows.get(&current.handle).and_then(|r| r.rect).or_else(|| geometry_of(&win));
+            crate::plugin_hit::place(&current.label, hit_rect, win.scale_factor().unwrap_or(1.0));
         } else {
             crate::plugin_hit::forget(&current.label);
         }
@@ -1388,51 +1401,89 @@ fn reopen(context: &Context, plugin: &str, generation: u64, params: &Value) -> R
             book.windows.get(&for_main.handle).filter(|rec| book.fresh(&rec.plugin, rec.generation)).cloned()
         }.ok_or("窗口已关闭或会话已撤销")?;
         let win = app.get_webview_window(&current.label).ok_or("插件窗口尚未创建")?;
-        if current.duration_ms > 0 { animate_place(&win, &current)?; } else { place(&win, &current)?; }
-        record_rect(&current.handle, geometry_of(&win));
+        if current.duration_ms > 0 {
+            let target = intend_rect(&app, &current);
+            animate_place(&win, app.clone(), &current)?;
+            if let Some(target) = target { record_rect(&current.handle, Some(target)); }
+        } else {
+            place(&win, &current)?;
+            record_rect(&current.handle, geometry_of(&win));
+        }
         if current.hit_test == HitTest::Opaque {
             crate::plugin_hit::watch(&current.label, current.hit_rects.clone());
-            crate::plugin_hit::place(&current.label, geometry_of(&win), win.scale_factor().unwrap_or(1.0));
+            let hit_rect = book().windows.get(&current.handle).and_then(|r| r.rect).or_else(|| geometry_of(&win));
+            crate::plugin_hit::place(&current.label, hit_rect, win.scale_factor().unwrap_or(1.0));
         }
         Ok(())
     })??;
     Ok(view(&snapshot))
 }
 
-/// 2.3.4（#88 H2）：把窗口从当前外框补间到 `rec` 算出的目标外框，终帧回到 place 收口。
-fn animate_place(win: &WebviewWindow, rec: &Rec) -> Result<(), String> {
-    let app = win.app_handle();
-    let sf = win.scale_factor().unwrap_or(1.0).max(0.5);
-    let screens = crate::screen::read(app);
-    let island = app.get_webview_window("island");
-    let dock = island.as_ref().and_then(|win| match (win.outer_position(), win.outer_size()) {
+/// 2.3.4（#88 H2）：一帧补间的几何。`t∈(0,1]` 为归一化时间，返回 (x, y, w, h)。
+/// 抽成纯函数，便于单测覆盖端点/单调/取消语义，也便于主线程只做「套用一帧」。
+fn tween_frame(start: (i32, i32, i32, i32), target: (i32, i32, i32, i32), t: f64, easing: Easing) -> (i32, i32, u32, u32) {
+    let (sx, sy, sw, sh) = (start.0, start.1, start.2.max(1), start.3.max(1));
+    let (tx, ty, tw, th) = (target.0, target.1, target.2.max(1), target.3.max(1));
+    let e = ease_at(easing, t.clamp(0.0, 1.0));
+    let x = (sx as f64 + (tx - sx) as f64 * e).round() as i32;
+    let y = (sy as f64 + (ty - sy) as f64 * e).round() as i32;
+    let w = (sw as f64 + (tw - sw) as f64 * e).round() as u32;
+    let h = (sh as f64 + (th - sh) as f64 * e).round() as u32;
+    (x, y, w.max(1), h.max(1))
+}
+
+/// 2.3.4（#88 H2）：一帧的间隔与总帧数（16 ms/帧，与 60 Hz 对齐）。
+/// 用**向上取整**，保证末帧 `t≥1`（经 `anim_frame_t` 夹到 1.0），终帧精确落在目标几何——
+/// 否则 duration 不是 16 的整数倍时，末帧只到 t<1，窗口停在目标之前（旧实现靠额外 place() 兜底）。
+const ANIM_STEP_MS: u64 = 16;
+fn anim_steps(duration_ms: u64) -> u64 {
+    duration_ms.max(1).div_ceil(ANIM_STEP_MS).max(1)
+}
+fn anim_frame_t(step: u64, duration_ms: u64) -> f64 {
+    (step as f64 * ANIM_STEP_MS as f64 / duration_ms.max(1) as f64).min(1.0)
+}
+
+/// 2.3.4（#88 H2）：把当前窗口从眼前几何补间到目标几何。
+///
+/// **不在主线程上 sleep**：本函数在调用方线程（插件后端线程）里跑帧循环，每帧只把
+/// 「套用一帧（set_size/set_position）」这一小步**排进主线程**（`run_on_main_thread`
+/// 非阻塞投递），把 sleep 留在工作线程。这样主线程消息泵不被阻塞——否则 `duration_ms`
+/// 内整个界面（主岛、任务栏、所有窗口）都会僵住，与 P1「不在主线程做重活」相违。
+fn animate_place(_win: &WebviewWindow, app: AppHandle, rec: &Rec) -> Result<(), String> {
+    let sf = app.get_webview_window(&rec.label).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0).max(0.5);
+    let screens = crate::screen::read(&app);
+    let dock = app.get_webview_window("island").and_then(|win| match (win.outer_position(), win.outer_size()) {
         (Ok(pos), Ok(size)) => Some((pos.x, pos.y, size.width as i32, size.height as i32)),
         _ => None,
     });
-    let capsule = crate::island::snapshot(&crate::shared(app)).capsule;
-    let start = match (win.outer_position(), win.outer_size()) {
-        (Ok(pos), Ok(size)) => (pos.x, pos.y, size.width as i32, size.height as i32),
-        _ => { place(win, rec)?; return Ok(()); }
+    let capsule = crate::island::snapshot(&crate::shared(&app)).capsule;
+    let start = {
+        let Some(win) = app.get_webview_window(&rec.label) else { return Ok(()); };
+        match (win.outer_position(), win.outer_size()) {
+            (Ok(pos), Ok(size)) => (pos.x, pos.y, size.width as i32, size.height as i32),
+            _ => return Ok(()), // 拿不到起始几何：由调用方 place() 兜底
+        }
     };
-    let (tx0, ty0, tw, th) = placement_h7(rec, &screens, dock, capsule, sf, rec.last_rect);
-    let (sx, sy, sw, sh) = start;
-    let (sw, sh) = (sw.max(1), sh.max(1));
-    let (tw, th) = (tw.max(1), th.max(1));
+    let target = placement_h7(rec, &screens, dock, capsule, sf, rec.last_rect);
     let total = rec.duration_ms.max(1);
-    let step_ms = 16u64;
-    let steps = (total / step_ms).max(1);
-    for step in 1..=steps {
-        let t = (step as f64 * step_ms as f64 / total as f64).min(1.0);
-        let e = ease_at(rec.easing, t);
-        let w = (sw as f64 + (tw - sw) as f64 * e).round() as u32;
-        let h = (sh as f64 + (th - sh) as f64 * e).round() as u32;
-        let x = (sx as f64 + (tx0 - sx) as f64 * e).round() as i32;
-        let y = (sy as f64 + (ty0 - sy) as f64 * e).round() as i32;
-        let _ = win.set_size(tauri::PhysicalSize::new(w.max(1), h.max(1)));
-        let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
-        std::thread::sleep(Duration::from_millis(step_ms));
-    }
-    place(win, rec)?;
+    let steps = anim_steps(total);
+    let easing = rec.easing;
+    let label = rec.label.clone();
+    // 帧循环在工作线程跑；每帧把 set_size/set_position 非阻塞排进主线程。sleep 不在主线程。
+    std::thread::spawn(move || {
+        for step in 1..=steps {
+            let (x, y, w, h) = tween_frame(start, target, anim_frame_t(step, total), easing);
+            let app_for_frame = app.clone();
+            let label_for_frame = label.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(win) = app_for_frame.get_webview_window(&label_for_frame) {
+                    let _ = win.set_size(tauri::PhysicalSize::new(w, h));
+                    let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+                }
+            });
+            std::thread::sleep(Duration::from_millis(ANIM_STEP_MS));
+        }
+    });
     Ok(())
 }
 
@@ -1737,7 +1788,7 @@ pub fn deliver_window_at(handle: &str, paths: &[String], point: Option<(i32, i32
     let (plugin, label, handle, generation, rect) = target;
     // 2.3.4（#88 H9）：在真实落点回放吸收动画（失败只记日志，不阻断交付）。
     if let Some(point) = point {
-        let scale = app_handle().ok().map(|_| 1.0).unwrap_or(1.0);
+        let scale = app_handle().map(|app| goo_scale_for(&crate::screen::read(&app), point)).unwrap_or(1.0);
         let to = rect.map(|(x, y, w, h)| (x + w / 2, y + h / 2)).unwrap_or(point);
         play_absorb(point, to, scale);
     }
@@ -1781,8 +1832,9 @@ pub fn deliver_dock_at(subscription: &str, paths: &[String], point: Option<(i32,
     let capsule = app_handle().ok().map(|app| crate::island::snapshot(&crate::shared(app)).capsule).flatten();
     // 2.3.4（#88 H9）：在主 Dock 落点回放吸收动画（目标 = 胶囊中心）。
     if let Some(point) = point {
+        let scale = app_handle().map(|app| goo_scale_for(&crate::screen::read(&app), point)).unwrap_or(1.0);
         let to = capsule.map(|(x, y, w, h)| (x + w / 2, y + h / 2)).unwrap_or(point);
-        play_absorb(point, to, 1.0);
+        play_absorb(point, to, scale);
     }
     let payload = json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"dock","paths":paths,
         "position":drop_position(point, capsule)});
@@ -1814,6 +1866,8 @@ fn revoke_generation(plugin: &str, generation: Option<u64>, reason: &str) {
         terminal_event(&rec, reason, output.as_ref());
         destroy_record(rec, reason);
     }
+    // 2.3.4（#88 H9，DEC-1）：插件窗口销毁（停用/卸载/换版/崩溃）时取消在途吸收动画。
+    cancel_goo();
 }
 
 // 撤销后仅向撤销瞬间捕获的旧会话通知；不查新会话，永不把旧事件送给替代实例。
@@ -1865,6 +1919,17 @@ pub fn count() -> usize {
 static GOO_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// 覆盖窗口兜底销毁时长（动画约 700ms；2s 后强制销毁，页面异常也不常驻）。
 const GOO_TTL: Duration = Duration::from_secs(2);
+
+/// 2.3.4（#88 H9）：吸收覆盖窗按落点所在显示器的 DPI 缩放（DEC-1 要求「DPI/多屏换算」）。
+/// 落点（物理像素）落在哪块屏就用它的 `sf`；拿不到时回落 1.0，绝不给 0 或 NaN。
+fn goo_scale_for(screens: &crate::screen::Screens, point: (i32, i32)) -> f64 {
+    screens
+        .near(point.0, point.1)
+        .map(|area| area.sf)
+        .filter(|sf| sf.is_finite() && *sf > 0.0)
+        .unwrap_or(1.0)
+        .max(0.5)
+}
 
 /// 在一个真实拖放落点回放「液滴→颈→球」吸收动画。
 ///
@@ -1937,6 +2002,18 @@ pub fn goo_done() {
     GOO_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// 2.3.4（#88 H9，DEC-1）：取消在途吸收动画并销毁覆盖窗。
+/// 插件窗口销毁、主岛全局隐藏（收起滑出/全屏避让）时调用——DEC-1 要求这两种情形取消动画，
+/// 不留下悬空的顶层覆盖窗（TTL 兜底之外再显式收一次）。幂等。
+fn cancel_goo() {
+    if !GOO_ACTIVE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    if let Ok(app) = app_handle() {
+        if let Some(win) = app.get_webview_window("plugin-goo") { let _ = win.destroy(); }
+    }
+}
+
 /// 把覆盖窗设成鼠标穿透的顶层工具窗（不抢焦点、不进任务栏）。
 #[cfg(windows)]
 fn make_goo_overlay(win: &WebviewWindow) {
@@ -1966,6 +2043,8 @@ fn make_goo_overlay(_win: &WebviewWindow) {}
 /// 本来还开着的窗口（用户自己关掉的不复活）。主岛普通收起（缩成胶囊）不算全局隐藏，
 /// 那时窗口照常留着——screen 窗口更不跟随主岛的展开/收起。
 pub fn set_dock_hidden(hidden: bool) {
+    // 2.3.4（#88 H9，DEC-1）：主岛全局隐藏（收起滑出/全屏避让）时取消在途吸收动画。
+    if hidden { cancel_goo(); }
     let changes: Vec<(String, String)> = {
         let mut book = book();
         book.dock_hidden = hidden;
@@ -2669,6 +2748,36 @@ mod tests {
         let fresh = placement_h7(&rec, &screens, Some((0,0,1920,132)), None, 1.0, None);
         let fallback = placement(&rec, &screens, Some((0,0,1920,132)), None, 1.0);
         assert_eq!(fresh, fallback, "没有上次位置时回落到既有算法");
+    }
+
+    // H9（DEC-1）：吸收覆盖窗按落点所在显示器的 DPI 缩放，多屏各按各的 sf（不再硬编码 1.0）。
+    #[test]
+    fn goo_scale_follows_the_monitor_under_the_drop_point() {
+        use crate::screen::{Area, Screens};
+        let primary = Area { x:0, y:0, w:1920, h:1040, sf:1.0, mon:(0,0,1920,1080) };
+        let hdpi = Area { x:1920, y:0, w:1600, h:900, sf:1.5, mon:(1920,0,3840,960) };
+        let screens = Screens { areas:vec![primary, hdpi], primary:Some(primary) };
+        assert_eq!(goo_scale_for(&screens, (500, 40)), 1.0, "100% 屏落点用 1.0");
+        assert_eq!(goo_scale_for(&screens, (2600, 40)), 1.5, "150% 屏落点用 1.5，不是硬编码 1.0");
+        // 空屏表也绝不返回 0/NaN：回落 1.0。
+        let empty = Screens { areas:vec![], primary:None };
+        assert_eq!(goo_scale_for(&empty, (10, 10)), 1.0, "拿不到显示器时回落 1.0");
+    }
+
+    // H2：补间帧序列——首帧靠近起点、末帧精确到目标、步骤数随 duration 缩放。
+    #[test]
+    fn tween_frames_start_near_start_and_end_at_target() {
+        let start = (100, 100, 36, 36);
+        let target = (400, 200, 531, 72);
+        // 末帧（t=1）精确落到目标。
+        let last = tween_frame(start, target, anim_frame_t(anim_steps(220), 220), Easing::Linear);
+        assert_eq!(last, (400, 200, 531, 72), "末帧等于目标几何");
+        // 第一帧（t 小）更靠近起点而非目标。
+        let first = tween_frame(start, target, anim_frame_t(1, 220), Easing::Linear);
+        assert!(first.0 < 400 && first.0 > 100, "首帧在起点与目标之间");
+        // 步骤数：220ms / 16ms ≈ 13 步（至少 1），duration 越大步数越多。
+        assert!(anim_steps(220) > anim_steps(16));
+        assert_eq!(anim_steps(0), 1, "duration:0 至少一帧，不退化为 0");
     }
 
     // H-D1：对外契约下限为 32×32（与文档 §3 修订、§8.1 一致）。这条钉住实现的常量，

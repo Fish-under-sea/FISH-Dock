@@ -313,8 +313,16 @@
   let reserveExtra = 0
   let reserveSpan = null
   let reserveRects = []
-  // 把占位预留作用到布局：给岛底额外留出 extra 的高度（仅当有占位 >0 时）。
-  // 不改任何既有布局宽度/形态；只把展开时的高度增加预留，避免插件长条压住主岛内容。
+  let reserveApplied = 0
+  // 2.3.4（#88 H10）：展开高度的纯函数——base 是既有高度，extra 是浮窗预留（GAP+barHeight+8）。
+  // 抽成独立函数便于单测直接验证「占位真的抬高展开高度」，而不是只看字符串。extra<=0 时原样返回。
+  function expandedReserveHeight(base, extra) {
+    const e = Number(extra)
+    return Number.isFinite(e) && e > 0 ? base + e : base
+  }
+  // 把占位预留作用到布局：展开时的高度按 reserveExtra 让出（见 sizeOf('expanded')），
+  // 并触发一次重排让新高度生效。不改任何既有布局宽度/形态；extra 恒为 0 时不改变任何东西
+  // （与 2.2.3 逐像素一致）。
   function applyReserve() {
     if (!isOn()) return
     if (reserveExtra > 0) {
@@ -323,6 +331,11 @@
     } else {
       island.style.removeProperty('--isl-reserve-extra')
       body.classList.remove('isl-reserve')
+    }
+    // 高度真的变了才重排（避免每次同值 reserve 事件都整轮重画）。
+    if (reserveExtra !== reserveApplied) {
+      reserveApplied = reserveExtra
+      if (typeof update === 'function') update()
     }
   }
   let lastSentView = ''
@@ -1483,9 +1496,11 @@
     }
     if (name === 'expanded') {
       // As tall as what it says, never shorter than her.
+      // 2.3.4（#88 H10）：插件浮窗登记了占位时，展开高度再让出 reserveExtra（GAP+barHeight+8），
+      // 避免浮窗长条压住主岛内容。没有占位时 reserveExtra 恒为 0，高度与 2.2.3 逐像素一致。
       return withHer
-        ? { width: Math.min(OPEN_MAX_W, Math.max(320, expanded.offsetWidth)), height: Math.max(OPEN_H, expanded.offsetHeight) }
-        : { width: Math.min(OPEN_BARE_MAX_W, Math.max(300, expanded.offsetWidth)), height: Math.max(84, expanded.offsetHeight) }
+        ? { width: Math.min(OPEN_MAX_W, Math.max(320, expanded.offsetWidth)), height: expandedReserveHeight(Math.max(OPEN_H, expanded.offsetHeight), reserveExtra) }
+        : { width: Math.min(OPEN_BARE_MAX_W, Math.max(300, expanded.offsetWidth)), height: expandedReserveHeight(Math.max(84, expanded.offsetHeight), reserveExtra) }
     }
     if (isSide()) return sideCapsule(isHinting() || !!time())
     return { width: compactWidth, height: home() === 'taskbar' ? taskCompactH() : screenTop ? screenTop.height : 36 }

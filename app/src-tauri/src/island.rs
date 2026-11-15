@@ -1321,6 +1321,33 @@ pub fn keep_on_screen(sh: &Shared) {
     }
 }
 
+// 2.3.4（#88 H10）：主岛在物理像素下的拖放/点击命中矩形集合 = 胶囊 + 页面自报的 solid
+// + 插件浮窗登记的占位（等价旧产物 `solids()`）。`solid` 是页面逻辑像素（相对岛窗口），
+// 用 `pos`(岛物理原点) 与 `psf`(页面缩放) 换算；`reservations` 已是屏幕物理像素，直接并入。
+// 纯函数：输入相同则输出相同，便于单测。
+fn dock_hit_rects(
+    pill: Option<(i32, i32, i32, i32)>,
+    solid: &[[f64; 4]],
+    psf: f64,
+    pos: (i32, i32),
+    reservations: &[(f64, f64, f64, f64)],
+) -> Vec<(i32, i32, i32, i32)> {
+    let mut rects: Vec<(i32, i32, i32, i32)> = Vec::new();
+    if let Some(r) = pill { rects.push(r); }
+    for s in solid.iter() {
+        let x = pos.0 + (s[0] * psf) as i32;
+        let y = pos.1 + (s[1] * psf) as i32;
+        let w = (s[2] * psf) as i32;
+        let h = (s[3] * psf) as i32;
+        if w > 2 && h > 2 { rects.push((x, y, w, h)); }
+    }
+    for (rx, ry, rw, rh) in reservations.iter().copied() {
+        let rect = (rx.round() as i32, ry.round() as i32, rw.round() as i32, rh.round() as i32);
+        if rect.2 > 2 && rect.3 > 2 { rects.push(rect); }
+    }
+    rects
+}
+
 // One look at the mouse. Returns ms until the next look.
 pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
     // She is being dragged past: the home is not being hovered.
@@ -1387,17 +1414,7 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
             let psf = page_sf;
             let pad = (12.0 * sf) as i32;
             // 检测区只在“胶囊”和“子子灵动岛”周围一圈，不再覆盖大片桌面。
-            let mut rects: Vec<(i32, i32, i32, i32)> = Vec::new();
-            if let Some(r) = pill { rects.push(r); }
-            // 2.2.0 §7：原先在 pet 小圆窗口旁边挂一个 36 px 的「子岛小球」命中区，只有
-            // 宿主暂存子岛会用到；子岛删除后这里也不再往落点表里塞这个虚构区域。
-            for s in solid.iter() {
-                let x = pos.0 + (s[0] * psf) as i32;
-                let y = pos.1 + (s[1] * psf) as i32;
-                let w = (s[2] * psf) as i32;
-                let h = (s[3] * psf) as i32;
-                if w > 2 && h > 2 { rects.push((x, y, w, h)); }
-            }
+            let rects = dock_hit_rects(pill, &solid, psf, pos, &crate::plugin_dock::reservations());
             let mut hit: Option<(i32, i32, i32, i32)> = None;
             for r in rects.iter() {
                 if crate::pointer::within(cursor, (r.0, r.1), (r.2, r.3), pad) {
@@ -2138,5 +2155,32 @@ mod strip_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod hit_tests {
+    use super::dock_hit_rects;
+
+    // 2.3.4（#88 H10）：主岛命中集合 = 胶囊 + 页面 solid（经缩放/平移）+ 插件浮窗占位。
+    #[test]
+    fn reservations_and_solid_join_the_dock_hit_set() {
+        // 胶囊在物理像素下 (100,8,300,36)。
+        let pill = Some((100, 8, 300, 36));
+        // 页面 solid：逻辑像素 (10, 40, 20, 20)，页面缩放 1.5、岛原点 (100, 0)
+        // → 物理 (100+15, 0+60, 30, 30)。
+        let solid: Vec<[f64; 4]> = vec![[10.0, 40.0, 20.0, 20.0]];
+        // 插件浮窗占位（已是物理像素）：(694, 52, 531, 72) —— 就是 #88 B2 里那条长条。
+        let reservations: Vec<(f64, f64, f64, f64)> = vec![(694.0, 52.0, 531.0, 72.0)];
+
+        let rects = dock_hit_rects(pill, &solid, 1.5, (100, 0), &reservations);
+        assert!(rects.contains(&(100, 8, 300, 36)), "胶囊在命中集合里");
+        assert!(rects.contains(&(115, 60, 30, 30)), "页面上报的 solid 经缩放/平移到物理坐标");
+        assert!(rects.contains(&(694, 52, 531, 72)), "插件浮窗占位并入主岛命中集合（#88 H10）");
+
+        // 没有占位时，命中集合不含浮窗矩形——与 2.2.3 一致。
+        let none = dock_hit_rects(pill, &solid, 1.5, (100, 0), &[]);
+        assert!(!none.contains(&(694, 52, 531, 72)), "无占位时不含浮窗矩形");
+        assert_eq!(none.len(), 2, "只有胶囊 + solid 两块");
     }
 }
