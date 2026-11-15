@@ -19,6 +19,10 @@
 - 只给了 label/value 的脚本小工具（examples/widgets/*.ps1）：只有小档；中档自动用「数值在上、名字在下」两行；没有大档。
 - 内置的（天气、系统监控、自选股、邮件、Claude 今天、番茄钟、倒计时）按第 4 节给齐。
 
+### 1.1 怎么送进来（`POST /widget`）
+
+脚本用 `Invoke-RestMethod` / `curl` 把上面这个对象 POST 到本地端口的 `/widget`，回 `{ ok: true }` 或 400 `{ error }`（字段校验，最多 32 条）。**2.3.4 起网页来源一律 403**：带 `http:`/`https:`/`file:`/`null` 的 `Origin`，或 `Host` 不是本机的请求，在正文被读之前就被拒；不带 `Origin` 的本机脚本（PowerShell、`curl`、Node）与 Thunderbird 扩展（`moz-extension://`）照常工作。设置页「插件示例」里可直接复制的 `Invoke-RestMethod … /widget` 也不带 `Origin`，修复后仍能直接用。完整规则见 [开发说明的「HTTP 接口」](../guides/DEVELOPMENT.md#http-接口)。
+
 ## 2. 外观语言（深色 / 浅色）
 
 - **材质**：一块玻璃。
