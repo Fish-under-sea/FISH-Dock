@@ -68,6 +68,10 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     async update(handle, options = {}) {
       return hostFor('windows', 'host.windows.update', { ...options, handle: handleOf(handle, '窗口') });
     },
+    // 2.3.4（#88 H6）：单窗口多形态 / keepAlive 回原位，保留句柄与订阅。
+    async reopen(handle, options = {}) {
+      return hostFor('windows', 'host.windows.reopen', { ...options, handle: handleOf(handle, '窗口') });
+    },
     async close(handle) {
       const result = await hostFor('windows', 'host.windows.close', { handle: handleOf(handle, '窗口') });
       return !!result?.closed;
@@ -120,6 +124,15 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     async openPage(pageId) {
       if (typeof pageId !== 'string' || !pageId) throw new Error('openPage 需要一个页面 ID');
       return hostFor('dock', 'host.dock.openPage', { page: pageId });
+    },
+    // 2.3.4（#88 H10）：登记一块浮窗占位 {x,y,w,h}（页面逻辑像素），主岛据此避让。
+    async reserve(rect, handle) {
+      if (!rect || typeof rect !== 'object') throw new Error('reserve 需要一个 {x,y,w,h} 矩形');
+      return hostFor('dock', 'host.dock.reserve', { rect, handle });
+    },
+    // 释放占位：给 handle 按句柄释放，缺省释放本插件全部占位。
+    async release(handle) {
+      return hostFor('dock', 'host.dock.release', { handle });
     },
   });
   const context = Object.freeze({
@@ -178,13 +191,20 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
       // 与 plugin.event 分开：窗口事件属于 windows / file-drop 能力，不要求 events。
       if (row.method === 'plugin.windowEvent') {
         const payload = row.params ?? {};
-        const need = payload.event === 'fileDrop' ? 'file-drop' : 'windows';
+        // 2.3.4（#88 B3）：dock 事件需要 dock 能力（此前被误判成 windows）；
+        // 且必须遍历 listeners.dock——旧代码从不遍历，后端 dock.onEvent 永远收不到。
+        const need = payload.event === 'fileDrop' ? 'file-drop' : payload.event === 'dock' ? 'dock' : 'windows';
         if (!hello.capabilities.includes(need)) return error('CAPABILITY_REQUIRED',`插件未声明 ${need} 能力`);
         for (const listener of [...listeners.windows]) {
           try { await listener(payload); } catch { /* 监听器自己的错不该断会话 */ }
         }
         if (payload.event === 'fileDrop') {
           for (const listener of [...listeners.fileDrop]) {
+            try { await listener(payload); } catch { /* 同上 */ }
+          }
+        }
+        if (payload.event === 'dock') {
+          for (const listener of [...listeners.dock]) {
             try { await listener(payload); } catch { /* 同上 */ }
           }
         }
