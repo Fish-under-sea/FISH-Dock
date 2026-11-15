@@ -104,6 +104,8 @@ mod plugin_thirdparty;
 mod plugin_api;
 mod plugin_dependencies;
 mod github_access;
+// DEC-3：嵌入 Windows 任务栏的开关/回落/重挂决策核心（安全默认，失败回落独立窗口）。
+mod embed;
 // DEC-2/3/4：统一的「家」（island/taskbar/topbar）与显示器抽象，唯一入口，禁止各家自立。
 mod home;
 mod tab_order;
