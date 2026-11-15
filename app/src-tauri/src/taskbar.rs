@@ -3564,7 +3564,7 @@ fn resize(src: &[u8], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{end_task_set, resize, seconds_set, task_view_set};
+    use super::{end_task_set, icons_json, resize, seconds_set, task_view_set};
 
     // 2.0.4 T-G：Windows' "Show seconds in system clock" (0/1/缺省) is off unless 1.
     #[test]
@@ -3591,6 +3591,25 @@ mod tests {
         assert!(task_view_set(Some(1)));
         assert!(task_view_set(Some(2)));
         assert!(!task_view_set(Some(0)));
+    }
+
+    // #89：任务视图两张 SVG 交给页面的形状是**字符串**，不是字节数组。Vec<u8> 走
+    // serde_json 会变成一串数字（[60,115,…]），页面的 encodeURIComponent(svg) 会把
+    // 它拼成 "60%2C115%2C…" 的假 data URL，图标永远画不出来。这里钉住线上形状。
+    #[test]
+    fn task_view_icons_are_strings_on_the_wire() {
+        let icons = crate::pri::TaskViewIcons {
+            light: br#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M1,7H17"/></svg>"#.to_vec(),
+            dark: br#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M7,1H23"/></svg>"#.to_vec(),
+        };
+        let value = icons_json(Some(icons));
+        let light = value.get("light").and_then(|v| v.as_str()).expect("light 是字符串");
+        let dark = value.get("dark").and_then(|v| v.as_str()).expect("dark 是字符串");
+        assert!(light.starts_with("<svg"), "light 是 SVG 源：{light}");
+        assert!(dark.ends_with("</svg>"), "dark 是 SVG 源：{dark}");
+        assert!(value.get("light").and_then(|v| v.as_array()).is_none(), "不是数字数组");
+        // 读不到（Windows 10 / 资源缺失）一律 null，页面回退 U+E7C4 字形。
+        assert_eq!(icons_json(None), serde_json::Value::Null);
     }
 
     #[test]
@@ -3679,16 +3698,30 @@ pub async fn taskbar_task_view() -> bool {
     task_view_on()
 }
 
-// Windows 11's own Task view icons (#89, upstream c1bead2c): the light and
-// dark SVG Windows draws in its own taskbar, read once from its private
-// resource (pri.rs, OnceLock here). { light, dark }, or null on Windows 10
-// and where the resource cannot be read, so the page keeps the U+E7C4 glyph.
-#[tauri::command]
-pub async fn taskbar_task_view_icons() -> serde_json::Value {
-    match task_view_icons() {
-        Some(icons) => serde_json::json!({ "light": icons.light, "dark": icons.dark }),
+// The two SVGs as the page takes them (#89): **UTF-8 strings**, not byte
+// arrays. A `Vec<u8>` in serde_json is a list of numbers, and the page's
+// `encodeURIComponent(svg)` would turn [60, 115, …] into "60%2C115%2C…" — a
+// data URL that is not the SVG at all, so the icon never draws. Kept a pure
+// function so the shape is pinned by a test.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn icons_json(icons: Option<crate::pri::TaskViewIcons>) -> serde_json::Value {
+    match icons {
+        Some(icons) => serde_json::json!({
+            "light": String::from_utf8_lossy(&icons.light),
+            "dark": String::from_utf8_lossy(&icons.dark),
+        }),
         None => serde_json::Value::Null,
     }
+}
+
+// Windows 11's own Task view icons (#89, upstream c1bead2c): the light and
+// dark SVG Windows draws in its own taskbar, read once from its private
+// resource (pri.rs, OnceLock here). { light, dark } as SVG source strings, or
+// null on Windows 10 and where the resource cannot be read, so the page keeps
+// the U+E7C4 glyph.
+#[tauri::command]
+pub async fn taskbar_task_view_icons() -> serde_json::Value {
+    icons_json(task_view_icons())
 }
 
 // The input methods to pick from (the mark's right press), each with its

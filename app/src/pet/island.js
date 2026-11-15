@@ -1602,13 +1602,15 @@
   let taskViewIcons = null
   const drawTaskView = () => {
     taskViewButton.hidden = !taskViewOn
-    // Pick the SVG by the strip's brightness (taskbar light = dark icons on a
-    // light bar). Without an SVG (Windows 10, missing resource) the glyph stays.
-    const svg = taskViewIcons ? (isLight() ? taskViewIcons.dark : taskViewIcons.light) : null
-    if (svg) {
+    // Pick the SVG by the strip's brightness: Windows' own Taskview_Light.svg is
+    // the *dark* glyph (for a light bar) and Taskview_Dark.svg the light one (for
+    // a dark bar), so a light bar takes `light` — as tview.js has it, with the
+    // shape guard and the U+E7C4 fallback (Windows 10, resource missing).
+    const url = window.TView ? window.TView.dataUrl(taskViewIcons, isLight()) : null
+    if (url) {
       taskViewButton.classList.add('svg')
       taskViewGlyph.hidden = true
-      taskViewButton.style.setProperty('--tview-svg', `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`)
+      taskViewButton.style.setProperty('--tview-svg', url)
     } else {
       taskViewButton.classList.remove('svg')
       taskViewGlyph.hidden = false
@@ -1624,7 +1626,7 @@
   })
   // The two SVGs, once: Windows 11's own; null on Windows 10 (the glyph).
   window.pet.taskbar.taskViewIcons().then(icons => {
-    taskViewIcons = icons && icons.light && icons.dark ? icons : null
+    taskViewIcons = window.TView ? window.TView.usable(icons) : null
     drawTaskView()
   })
 

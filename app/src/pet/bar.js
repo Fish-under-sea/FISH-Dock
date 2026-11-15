@@ -241,12 +241,14 @@
     tview.title = t(state.lang, 'taskbar.taskView')
     // Windows 11's own双色 SVG out of its private resource (issue #89, upstream
     // c1bead2c), picked by this strip's brightness; the U+E7C4 glyph (bar.html)
-    // stays otherwise — Windows 10, or the resource not read.
-    const svg = taskViewIcons ? (isLight() ? taskViewIcons.dark : taskViewIcons.light) : null
-    if (svg) {
+    // stays otherwise — Windows 10, or the resource not read. Windows' own
+    // Taskview_Light.svg is the dark glyph (for a light bar), Taskview_Dark.svg
+    // the light one, so a light bar takes `light` — as tview.js has it.
+    const url = window.TView ? window.TView.dataUrl(taskViewIcons, isLight()) : null
+    if (url) {
       tview.classList.add('svg')
       tview.textContent = ''
-      tview.style.setProperty('--tview-svg', `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`)
+      tview.style.setProperty('--tview-svg', url)
     } else {
       tview.classList.remove('svg')
       tview.textContent = '\u{e7c4}'
@@ -263,7 +265,7 @@
   // The two SVGs, once: Windows 11's own; null on Windows 10 (the glyph).
   invoke('taskbar_task_view_icons')
     .then(icons => {
-      taskViewIcons = icons && icons.light && icons.dark ? icons : null
+      taskViewIcons = window.TView ? window.TView.usable(icons) : null
       drawTaskView()
     })
     .catch(() => {})
