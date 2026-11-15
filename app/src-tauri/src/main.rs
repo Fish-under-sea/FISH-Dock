@@ -106,6 +106,7 @@ mod tab_order;
 mod plugin_page;
 mod plugin_window;
 mod plugin_dock;
+mod plugin_dialog;
 mod plugin_hit;
 mod plugin_drag;
 mod windhawk_source;
