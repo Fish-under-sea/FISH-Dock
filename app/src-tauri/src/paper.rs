@@ -581,12 +581,22 @@ mod imp {
     // A picture, or a folder, picked in Windows' own file dialog over this
     // window; None when it was closed instead.
     pub fn pick(folder: bool, title: &str, pictures: &str, owner: isize) -> Option<String> {
+        // 行为不变：取消与 COM 失败对外都仍是 None。区分二者用 pick_reason。
+        pick_reason(folder, title, pictures, owner).unwrap_or(None)
+    }
+
+    // 同 pick，但把「对话框 COM 对象创建失败」从「用户取消」里分出来：
+    // - Ok(Some(path))：选中；
+    // - Ok(None)：用户取消（或没有选择）；
+    // - Err(())：COM 对象创建失败（不等于取消）。
+    // 供 plugin_dialog 用它把 COM 失败映射成 DIALOG_OPERATION_FAILED（规格 §4.2、DLG-2）。
+    pub fn pick_reason(folder: bool, title: &str, pictures: &str, owner: isize) -> Result<Option<String>, ()> {
         // SAFETY: COM objects of our own, released; the strings alive for the
         // calls; the dialog's own loop runs while it is open.
         with_com(|| unsafe {
             let mut dialog: *mut Obj = std::ptr::null_mut();
             if CoCreateInstance(&CLSID_FILE_OPEN_DIALOG, std::ptr::null_mut(), CLSCTX_ALL, &IID_FILE_OPEN_DIALOG, &mut dialog as *mut *mut Obj as *mut *mut c_void) < 0 || dialog.is_null() {
-                return None;
+                return Err(());
             }
             let mut options = 0u32;
             let get: extern "system" fn(*mut Obj, *mut u32) -> i32 = method(dialog, DIALOG_GET_OPTIONS);
@@ -613,7 +623,7 @@ mod imp {
                 }
             }
             release(dialog);
-            picked
+            Ok(picked)
         })
     }
 }
@@ -653,9 +663,14 @@ mod imp {
     pub fn pick(_folder: bool, _title: &str, _pictures: &str, _owner: isize) -> Option<String> {
         None
     }
+
+    // 非 Windows：没有原生对话框，签名与 Windows 版一致（plugin_dialog 用它）。
+    pub fn pick_reason(_folder: bool, _title: &str, _pictures: &str, _owner: isize) -> Result<Option<String>, ()> {
+        Ok(None)
+    }
 }
 
-pub use imp::{next, notes, now, pick, previous, remember, set_folder, set_picture, set_position, set_turns, undo};
+pub use imp::{next, notes, now, pick, pick_reason, previous, remember, set_folder, set_picture, set_position, set_turns, undo};
 
 #[cfg(test)]
 mod tests {

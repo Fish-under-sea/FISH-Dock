@@ -59,12 +59,20 @@ pub fn validate_title(title: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 平台无关的映射：把「选中 / 取消 / COM 失败」三态从 paper 的 Result 翻成宿主错误码。
+/// 纯函数，便于单测——修的是「production pick_folder 永不返回 Err，COM 失败被当取消」的缺口。
+fn map_pick(result: Result<Option<String>, ()>) -> Result<Option<String>, String> {
+    result.map_err(|()| "DIALOG_OPERATION_FAILED".to_string())
+}
+
 /// 平台相关：真正弹框。成功返回 Some(路径)，取消返回 None，COM 失败返回 Err。
-/// Windows 走 paper::pick(true, title, "", owner)（已 STA/IFileOpenDialog/FOS_PICKFOLDERS）；
+/// Windows 走 paper::pick_reason(true, title, "", owner)（已 STA/IFileOpenDialog/FOS_PICKFOLDERS）；
+/// 用 pick_reason 而非 pick，才能把「COM 对象创建失败」从「用户取消」里分出来
+/// （DLG-2 要求 COM 失败回 DIALOG_OPERATION_FAILED，不是 {dir:null}）。
 /// 非 Windows 直接 DIALOG_UNSUPPORTED（不复用 paper 的空实现去冒充「取消」）。
 #[cfg(windows)]
 fn pick_folder(title: &str, owner: isize) -> Result<Option<String>, String> {
-    Ok(crate::paper::pick(true, title, "", owner))
+    map_pick(crate::paper::pick_reason(true, title, "", owner))
 }
 
 #[cfg(not(windows))]
@@ -242,5 +250,24 @@ mod tests {
         let bad = failure("title 不能为空");
         assert_eq!(bad["code"], "DIALOG_OPERATION_FAILED");
         assert!(bad["message"].as_str().unwrap().contains("title"));
+    }
+
+    // 验证用的回归：DLG-2 要求 COM 对象创建失败映射为 DIALOG_OPERATION_FAILED，
+    // 不能当成取消返回 {dir:null}。修复前 pick_folder 直接用 paper::pick（永不返回 Err），
+    // COM 失败会被静默当成取消；现在经 map_pick 把 Err(()) 翻成 DIALOG_OPERATION_FAILED。
+    #[test]
+    fn com_failure_is_operation_failed_not_a_cancel() {
+        // paper 三态 → map_pick 的映射：选中、取消、COM 失败各归其位。
+        assert_eq!(map_pick(Ok(Some("C:\\Backups".into()))).unwrap(), Some("C:\\Backups".into()));
+        assert_eq!(map_pick(Ok(None)).unwrap(), None, "取消仍是 None，不报错");
+        assert_eq!(map_pick(Err(())), Err("DIALOG_OPERATION_FAILED".to_string()), "COM 失败不是取消");
+        // 端到端：pick_folder 的失败（Err）经 choose_with 组帧后是 DIALOG_OPERATION_FAILED，
+        // 而取消是 {dir:null}——两者不可混同。
+        let id = json!(1);
+        let via_com_fail = choose_with(&id, "p", "t", 0, &|_t, _o| map_pick(Err(())));
+        assert_eq!(via_com_fail["error"]["code"], "DIALOG_OPERATION_FAILED");
+        let via_cancel = choose_with(&id, "p", "t", 0, &|_t, _o| map_pick(Ok(None)));
+        assert_eq!(via_cancel["result"]["dir"], Value::Null);
+        assert!(via_cancel.get("error").is_none());
     }
 }

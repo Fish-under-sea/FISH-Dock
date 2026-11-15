@@ -693,6 +693,49 @@ mod tests {
         assert_eq!(answer.matches("HTTP/1.1 200").count(), 1, "第二个请求 200: {answer}");
     }
 
+    // 2.3.4 SEC-1 独立复验（验证会话 ds-verify-a）：用原始 TCP 管道对真实 tiny_http
+    // Server 逐条重放攻击与放行，断言**线上字节**（状态行 + JSON 正文），不只看纯函数。
+    // 覆盖：恶 Origin 403、恶 Host 403、Origin+本机 Host 仍 403、无 Origin 的本机 curl 放行 200、
+    // /v1/* 带恶 Origin 不归 turned_away（由 agent_hub 判，这里断言不被本层拒）、
+    // 以及 403 正文逐字为 {"error":"not for web pages"}。
+    #[test]
+    fn independent_raw_tcp_replays_attacks_and_allows_native_clients() {
+        use std::io::{Read, Write};
+        use std::time::Duration;
+        fn send(port: u16, raw: &'static [u8]) -> String {
+            let mut conn = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            conn.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            conn.write_all(raw).unwrap();
+            let mut answer = String::new();
+            conn.read_to_string(&mut answer).unwrap();
+            answer
+        }
+        let server = Server::http(("127.0.0.1", 0)).unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let cases: [(&'static [u8], &str); 5] = [
+            (b"POST /quit HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://evil.example\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", "403"),
+            (b"GET /health HTTP/1.1\r\nHost: evil.example:47213\r\nConnection: close\r\n\r\n", "403"),
+            (b"POST /state HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: null\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}", "403"),
+            (b"POST /widget HTTP/1.1\r\nHost: 127.0.0.1:47213\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}", "200"),
+            (b"GET /v1/info HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://evil.example\r\nConnection: close\r\n\r\n", "200"),
+        ];
+        for (raw, want) in cases {
+            let handle = std::thread::spawn(move || send(port, raw));
+            // 服务端按 serve() 的同一判定 + 回包逻辑处理（真实 socket、真实字节）。
+            let req = server.recv_timeout(Duration::from_secs(5)).unwrap().expect("应有请求");
+            if turned_away(&req).is_some() {
+                reply(req, 403, json!({ "error": "not for web pages" }));
+            } else {
+                reply(req, 200, json!({ "ok": true }));
+            }
+            let answer = handle.join().unwrap();
+            assert!(answer.starts_with(&format!("HTTP/1.1 {want}")), "期望 {want}，实际：{answer}");
+            if want == "403" {
+                assert!(answer.contains("not for web pages"), "403 正文逐字：{answer}");
+            }
+        }
+    }
+
     #[test]
     fn what_tiny_http_tells_is_logged_once() {
         let mut said = Vec::new();
