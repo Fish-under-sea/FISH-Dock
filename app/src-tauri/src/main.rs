@@ -104,6 +104,8 @@ mod plugin_thirdparty;
 mod plugin_api;
 mod plugin_dependencies;
 mod github_access;
+// DEC-2/3/4：统一的「家」（island/taskbar/topbar）与显示器抽象，唯一入口，禁止各家自立。
+mod home;
 mod tab_order;
 mod plugin_page;
 mod plugin_window;
@@ -393,12 +395,16 @@ impl Shared {
         self.by_fullscreen.load(Ordering::SeqCst)
     }
 
-    // Her home: 'island' or 'taskbar' (island.rs).
+    // Her home: 'island', 'taskbar' or 'topbar' (home.rs, DEC-2). One place for
+    // all three so no home handles the taskbar or a display change on its own.
     pub fn home(&self) -> &'static str {
-        match self.setting("display").as_str() {
-            Some("taskbar") => "taskbar",
-            _ => "island",
-        }
+        home::Home::parse(self.setting("display").as_str()).as_setting()
+    }
+
+    // The display her home sits on (home.rs, DEC-4): the saved monitor if it is
+    // still connected, else the primary. None only when there is no display.
+    pub fn home_choice(&self) -> home::HomeChoice {
+        home::HomeChoice::from_settings(self.setting("display").as_str(), home::parse_monitor(&self.setting("homeMonitor")))
     }
 
     // Whether she keeps start at login to where she is (connection.rs):
@@ -2381,16 +2387,31 @@ fn main() {
                     if n % 4 == 0 {
                         let screens = screen::read(&ticker.app);
                         // Displays come or go, or change: the desktop's widgets' windows
-                        // with them (only while there are any).
-                        let changed = {
+                        // with them (only while there are any). DEC-2/4: the ONE display
+                        // change path — her home (island/taskbar/topbar) resolves against
+                        // the new displays here (home.rs), never each home on its own.
+                        let (before_mons, after_mons, primary_mon, changed) = {
                             let mut previous = ticker.screens.lock().unwrap();
+                            let before: Vec<_> = previous.areas.iter().map(|a| a.mon).collect();
                             let changed = previous.areas != screens.areas || previous.primary != screens.primary;
+                            let after: Vec<_> = screens.areas.iter().map(|a| a.mon).collect();
+                            let primary = screens.primary.map(|p| p.mon);
                             *previous = screens;
-                            changed
+                            (before, after, primary, changed)
                         };
                         if changed {
                             plugin_window::screens_changed();
                             if desk::any() { desk::sync(&ticker); }
+                            // Her home's display: saved screen kept, gone → primary
+                            // (DEC-4). A move relocates the island / topbar / dock;
+                            // bars rebuild on any set change; all executed here once.
+                            let acts = crate::home::on_displays_changed(&before_mons, &after_mons, primary_mon, &ticker.home_choice());
+                            if acts.home_moved {
+                                crate::island::on_home_display_moved(&ticker, acts.home_monitor);
+                            }
+                            if acts.refresh_bars {
+                                bars::refresh(&ticker);
+                            }
                         }
                         pet::keep_on_screen(&ticker);
                         island::keep_on_screen(&ticker);

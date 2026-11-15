@@ -1289,6 +1289,17 @@ pub fn handoff_out(sh: &Shared) {
 // put back where it was put if Windows moved it: the taskbar's window, which
 // reaches over its own strip, was pushed up into the work area by the strip's
 // height (2026-10-10, as a game went full screen and back).
+// DEC-4：显示变更后「家」的显示器变了（home.rs 判定）：把岛/顶栏移动到解出的显示器
+// （homeMonitor）。这里只做重定位，不再各自听显示变化（main.rs 的 ticker 统一驱动）。
+pub fn on_home_display_moved(sh: &Arc<Shared>, home_monitor: Option<(i32, i32, i32, i32)>) {
+    // 保存新显示器到 dockScreen 让 area() 的「按设定屏」路径生效，再重摆。
+    if let Some(mon) = home_monitor {
+        sh.change(json!({ "dockScreen": [mon.0, mon.1, mon.2, mon.3] }));
+    }
+    place(sh);
+    lay_again(sh, "home display moved");
+}
+
 pub fn keep_on_screen(sh: &Shared) {
     // A display come or gone: her taskbar on the others too (bars.rs).
     crate::bars::sync(&crate::shared(&sh.app));
