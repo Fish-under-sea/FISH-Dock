@@ -51,6 +51,9 @@ mod discover;
 mod imap;
 pub mod letters;
 pub mod proxy;
+// DEC-6：HTML 邮件净化（安全默认：去脚本/iframe/内联事件/危险 scheme，远程图片默认阻止，
+// 链接登记真实域名，验证码只展示/复制）。纯逻辑模块，页面后续接渲染与放行。
+pub mod sanitize;
 pub mod send;
 mod smtp;
 mod store;
