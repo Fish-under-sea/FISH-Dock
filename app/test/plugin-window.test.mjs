@@ -241,3 +241,55 @@ test('主岛拖放检测不再用虚构的 500×36 矩形', () => {
   const production = source.split('#[cfg(test)]')[0]
   assert.ok(!production.includes('(500.0, 36.0)'), 'closed_rect 不再用默认虚构尺寸兜底')
 })
+
+// 2.3.4（#88 P6）：贴顶时 island home 仍恒定上报 compact 尺寸（旧条件 `&& !screenTop`
+// 会报 (0,0) → 宿主 closed_rect=None → 文件拖不到主岛、capsule 窗口回落整窗）。
+test('#88 P6：setStow 在 island home 恒定上报 sizeOf(compact)，与是否贴顶无关', () => {
+  const island = read('src', 'pet', 'island.js')
+  const body = island.slice(island.indexOf('function setStow()'), island.indexOf('function setStow()') + 800)
+  assert.ok(!body.includes("home() === 'island' && !screenTop"), 'setStow 不再带 !screenTop 分支（P6）')
+  assert.ok(body.includes("home() === 'island' ? sizeOf('compact')"), 'island home 恒报 compact 尺寸')
+})
+
+// 2.3.4（#88 B3）：容器页 window.js 用 ...payload 全量转发 dock 事件的 type/action/rect，
+// 不再只挑固定字段（旧代码把 dock 内容全丢了）。投递类型与 extension-page.js 一致。
+test('#88 B3：window.js 用 ...payload 全量转发，保留 dock 的 type/action/rect', () => {
+  const window = read('src', 'window', 'window.js')
+  assert.ok(window.includes("type: 'fish:window-event', ticket, ...payload"), 'window.js 必须 ...payload 全量转发')
+  assert.ok(!window.includes("event: payload.event, handle: payload.handle, reason: payload.reason"), '不再手工挑字段')
+  // 与 extension-page.js 同形：都是 fish:window-event + ...payload。
+  const page = read('src', 'pet', 'extension-page.js')
+  assert.ok(page.includes("type:'fish:window-event'") || page.includes("type: 'fish:window-event'"))
+})
+
+// 2.3.4（#88 H6/H10）：浏览器 SDK 暴露 reopen（保留句柄/订阅）与 dock.reserve/release。
+test('#88 H6/H10：browser SDK 暴露 windows.reopen 与 dock.reserve/release 并真发协议', async () => {
+  const f = sdk()
+  assert.equal(typeof f.api.windows.reopen, 'function')
+  assert.equal(typeof f.api.dock.reserve, 'function')
+  assert.equal(typeof f.api.dock.release, 'function')
+  const reopening = f.api.windows.reopen('h-1', { width: 420, height: 72, duration: 200 })
+  await until(() => f.calls().length === 1, 'reopen 发出')
+  const reopen = f.calls()[0]
+  assert.equal(reopen.method, 'dock.windows.reopen')
+  assert.deepEqual(plain(reopen.params), { width: 420, height: 72, duration: 200, handle: 'h-1' })
+  f.answer(reopen.id, { handle: 'h-1', ready: true })
+  await reopening
+  // reserve：需要先订阅（不过 SDK 只负责转发，能力由宿主校验）。
+  const reserving = f.api.dock.reserve({ x: 8, y: 132, w: 420, h: 120 }, 'reserve-x')
+  await until(() => f.calls().length >= 2, 'reserve 发出')
+  const reserve = f.calls().find(row => row.method === 'dock.dock.reserve')
+  assert.ok(reserve, 'reserve 发出 dock.dock.reserve')
+  assert.deepEqual(plain(reserve.params.rect), { x: 8, y: 132, w: 420, h: 120 })
+  f.answer(reserve.id, { reserved: true })
+  await reserving
+})
+
+// 2.3.4（#88 H9/DEC-1）：吸收覆盖窗页面存在，且用 Canvas/SVG 回放「液滴→颈→球」。
+test('#88 H9：存在 goo 吸收覆盖页（Canvas 回放液滴→颈→球）', () => {
+  const goo = read('src', 'window', 'goo.html')
+  assert.ok(goo.includes('canvas') || goo.includes('svg'), '覆盖页用 Canvas/SVG 画 goo')
+  assert.ok(goo.includes('requestAnimationFrame'), '逐帧回放')
+  // 起点来自真实落点坐标（fx/fy），目标来自子岛中心（tx/ty）：不是写死动画。
+  assert.ok(goo.includes("q.get('fx')") || goo.includes("num('fx'"), '读取真实落点坐标')
+})
