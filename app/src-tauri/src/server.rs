@@ -397,6 +397,21 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
                 reply(req, 200, json!({ "ok": true, "arrived": arrived }));
             });
         }
+        // A thread of hers held still for a while, as a hang is: her guard
+        // shows Windows' taskbar after ten seconds of it (shell.rs HangBack,
+        // upstream cdb0270b). Answered before it begins. Debug only.
+        ("POST", "/debug/hang") if is_debug => {
+            let Some(body) = read_json(&mut req) else { return reply(req, 400, json!({ "error": "bad json" })) };
+            let secs = body["secs"].as_u64().unwrap_or(15).clamp(1, 120);
+            let thread = body["thread"].as_str().unwrap_or("main").to_string();
+            sh.log(&format!("debug: her {thread} thread held still for {secs} s"));
+            let held = match thread.as_str() {
+                "taskbar" => crate::taskbar::hold_still(secs),
+                "main" => sh.app.run_on_main_thread(move || std::thread::sleep(std::time::Duration::from_secs(secs))).is_ok(),
+                _ => false,
+            };
+            reply(req, if held { 200 } else { 400 }, json!({ "ok": held, "thread": thread, "secs": secs }))
+        }
         _ => reply(req, 404, json!({ "error": "not found" })),
     }
 }

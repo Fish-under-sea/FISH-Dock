@@ -1593,16 +1593,38 @@
   // look has come), so hers is never forced where Windows hid it.
   const taskViewButton = el('span', 'tview')
   taskViewButton.dataset.bar = 'tasks'
-  taskViewButton.append(el('span', 'fi', '\u{e7c4}'))
+  // The fallback glyph first (Windows 10 and any path with no SVG); Windows 11's
+  // own双色 SVG, read once out of its private resource, replaces it (issue #89,
+  // upstream c1bead2c). Light on a light strip, dark on a dark one.
+  const taskViewGlyph = el('span', 'fi', '\u{e7c4}')
+  taskViewButton.append(taskViewGlyph)
   let taskViewOn = true
+  let taskViewIcons = null
   const drawTaskView = () => {
     taskViewButton.hidden = !taskViewOn
+    // Pick the SVG by the strip's brightness (taskbar light = dark icons on a
+    // light bar). Without an SVG (Windows 10, missing resource) the glyph stays.
+    const svg = taskViewIcons ? (isLight() ? taskViewIcons.dark : taskViewIcons.light) : null
+    if (svg) {
+      taskViewButton.classList.add('svg')
+      taskViewGlyph.hidden = true
+      taskViewButton.style.setProperty('--tview-svg', `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`)
+    } else {
+      taskViewButton.classList.remove('svg')
+      taskViewGlyph.hidden = false
+      taskViewButton.style.removeProperty('--tview-svg')
+    }
   }
   // Asked before the strip's look arrives, so the cell is there from the
   // first draw or not at all; the look keeps it as Windows' setting changes
   // (WM_SETTINGCHANGE, taskbar.rs send_look).
   window.pet.taskbar.taskView().then(on => {
     taskViewOn = on !== false
+    drawTaskView()
+  })
+  // The two SVGs, once: Windows 11's own; null on Windows 10 (the glyph).
+  window.pet.taskbar.taskViewIcons().then(icons => {
+    taskViewIcons = icons && icons.light && icons.dark ? icons : null
     drawTaskView()
   })
 
@@ -5108,6 +5130,13 @@
   // always did; any other press closes it, rather than opening the settings
   // and leaving it to its time.
   function pressNudge() {
+    // What was kept for the next look, shown as the person opened the island:
+    // not open by itself, so a press does what any other does (the settings;
+    // upstream 2d5ba793). End the nudge and fall through to plain press.
+    if (pressOn(nudge) === 'press') {
+      endNudge()
+      return window.pet.openSettings()
+    }
     const open = nudge?.widget?.open
     endNudge()
     // A word that points somewhere (an agent answered about a letter): there.
@@ -5438,18 +5467,29 @@
 
   // Opened (by a hover, mostly) with something kept: it is what the island
   // shows, for as long as it would have by itself; gone if its time is up.
+  // Kept (upstream 2d5ba793, #45's neighbouring fix): what was kept for the
+  // next look was shown as the person opened the island (a hover, the peek),
+  // not open by itself — a press on it then does what any other does (the
+  // settings), which is the first click after a start opening them.
   function takePending() {
     if (!pending || isNudging()) return
     const p = pending
     pending = null
     if (Date.now() > p.until) return
-    nudge = { until: Date.now() + p.ms, clip: p.clip, text: p.text, widget: p.widget }
+    nudge = { until: Date.now() + p.ms, clip: p.clip, text: p.text, widget: p.widget, kept: true }
     clearTimeout(nudgeTimer)
     nudgeTimer = setTimeout(() => {
       nudge = null
       update()
     }, p.ms)
   }
+
+  // What a press on the island does while something is open in it that way
+  // (nudging), not on a session's or a widget's row (upstream 2d5ba793,
+  // island-state.ts pressOn): what its words point to opens ('there'); one that
+  // opened by itself closes ('close', #45); what was kept and shown as the
+  // person opened the island presses as any other ('press', the settings).
+  const pressOn = n => window.Nudge.pressOn(n)
 
   // Now and then a blink, as a class for a moment (no running animation).
   function blink() {
@@ -5614,6 +5654,12 @@
       // pointer, is this press too: not one to open the settings.
       if (view === 'ask') return
       if (!isNudging()) return window.pet.openSettings()
+      // What was kept for the next look (a hello after a start) presses as any
+      // other; one open by itself closes (upstream 2d5ba793).
+      if (pressOn(nudge) === 'press') {
+        endNudge()
+        return window.pet.openSettings()
+      }
       pulledAt = Date.now()
       return pressNudge()
     }
@@ -5992,7 +6038,15 @@
         if (isNudging()) dismiss()
         return jumpTo(id)
       }
-      if (isNudging() && !e.target.closest('[data-widget]')) return pressNudge()
+      if (isNudging() && !e.target.closest('[data-widget]')) {
+        // What was kept (a hello after a start) presses as any other: the
+        // settings. One open by itself closes (upstream 2d5ba793, pressOn).
+        if (pressOn(nudge) === 'press') {
+          endNudge()
+        } else {
+          return pressNudge()
+        }
+      }
       // Not connected: "don't remind me" puts the hint away; any other
       // press but on a session's or a widget's row opens the settings'
       // welcome (a session listed still goes to its window: the hooks

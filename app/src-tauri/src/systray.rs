@@ -723,9 +723,25 @@ mod imp {
             return None;
         };
         let rects = RECTS.lock().unwrap();
-        let (_, (l, t, r, b)) = rects.iter().find(|(k, _)| *k == icon.key)?;
-        let (x, y) = if q.message == 2 { (*r, *b) } else { (*l, *t) };
+        let (_, rect) = rects.iter().find(|(k, _)| *k == icon.key)?;
+        let (x, y) = rect_half(*rect, q.message);
         Some(((x as u16 as u32) | ((y as u16 as u32) << 16)) as i32 as isize)
+    }
+
+    // The half of an icon's rect each question asks for (upstream 7b81fe1f,
+    // #141): message 1 its left and top; message 2 its WIDTH and HEIGHT, which
+    // shell32 adds to the first answer for the right and bottom. Answered with
+    // the right and bottom, a program asking (WeChat, QQ: where to put their
+    // window by their icon) was told a rect that ended as far again past the
+    // icon, off the screen (an icon at 2206,1384 to 2241,1434 said to end at
+    // 4447,2818). Kept a pure function so it can be tested with and without a
+    // second display to the left.
+    fn rect_half((l, t, r, b): (i32, i32, i32, i32), message: u32) -> (i32, i32) {
+        if message == 2 {
+            (r - l, b - t)
+        } else {
+            (l, t)
+        }
     }
 
     pub fn set_rects(rects: Vec<(u64, (i32, i32, i32, i32))>) {
@@ -1329,6 +1345,20 @@ mod imp {
             assert_eq!(std::mem::size_of::<TrayData>(), 964);
             assert_eq!(std::mem::size_of::<TrayData>(), super::super::PATH_AT);
             assert_eq!(std::mem::size_of::<RectQuestion>(), 40);
+        }
+
+        #[test]
+        fn where_an_icon_is_answered_as_shell32_reads_it() {
+            // An icon at 2380,1395 to 2412,1427 (32×32): message 1 its left and
+            // top, message 2 its width and height (shell32 adds them to the
+            // first answer for the right and bottom).
+            let rect = (2380, 1395, 2412, 1427);
+            assert_eq!(super::rect_half(rect, 1), (2380, 1395));
+            assert_eq!(super::rect_half(rect, 2), (32, 32));
+            // On a screen left of the main one: the left below 0, the size as
+            // ever (副屏负坐标不改变宽高）。
+            assert_eq!(super::rect_half((-1880, 1040, -1856, 1064), 1), (-1880, 1040));
+            assert_eq!(super::rect_half((-1880, 1040, -1856, 1064), 2), (24, 24));
         }
 
         fn nid(hwnd: u32, id: u32, flags: u32, tip: &str) -> IconData {

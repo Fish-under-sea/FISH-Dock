@@ -129,6 +129,8 @@ mod paper;
 mod pet;
 mod pins;
 mod plugins;
+// #89：Windows 11 自己的任务视图图标（读系统私有 .pri 的两张 SVG；只依赖 std）。
+mod pri;
 mod pointer;
 mod power;
 mod proxy;
@@ -1660,9 +1662,17 @@ fn main() {
     if let Some((pid, file)) = shell::guard_args(&args) {
         let data = file.parent().map(PathBuf::from).unwrap_or_default();
         let after = data.clone();
-        // Meanwhile, every two seconds: whether she answers (crash.rs Hang).
+        // Meanwhile, every two seconds: whether she answers (crash.rs Hang),
+        // and — her main thread or her taskbar's not answering ten seconds
+        // while her taskbar holds the strip — Windows' own shown again
+        // (shell.rs HangBack, upstream cdb0270b).
         let mut hang = crash::Hang::default();
-        shell::guard(pid, file, || hang.look(&data, pid), || drop(icons::hold(&data)), move |code, started| crash::after_exit(&after, pid, code, started));
+        let mut back = shell::HangBack::default();
+        let watch = || {
+            let hung = hang.look(&data, pid);
+            back.look(file, pid, hung, |line| crash::guard_said(&data, line));
+        };
+        shell::guard(pid, file, watch, || drop(icons::hold(&data)), move |code, started| crash::after_exit(&after, pid, code, started));
         // Her desktop's icons as they were, should she have left them moved (icons.rs).
         icons::given_back(&data);
         return;
@@ -2008,6 +2018,7 @@ fn main() {
             taskbar::taskbar_clock_tip,
             taskbar::taskbar_end_task,
             taskbar::taskbar_task_view,
+        taskbar::taskbar_task_view_icons,
             taskbar::taskbar_inputs,
             taskbar::taskbar_input,
             taskbar::taskbar_battery_font,

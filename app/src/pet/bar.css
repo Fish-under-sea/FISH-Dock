@@ -209,6 +209,15 @@ body {
   display: none;
 }
 
+/* Windows 11's own双色 SVG (issue #89, upstream c1bead2c): the svg source is
+   a CSS var the page sets (bar.js drawTaskView), the glyph text emptied. */
+.tview.svg {
+  background-image: var(--tview-svg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px 16px;
+}
+
 .start .s0 {
   stop-color: #77f3ff;
 }

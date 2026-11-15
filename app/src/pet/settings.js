@@ -3659,6 +3659,14 @@
   function close(why = 'asked') {
     if (!isOpen) return
     console.log('settings close:', why)
+    // 关闭设置时，落在面板上的提问一并清掉（上游 bf6f0adb）：不这样，重开设置
+    // 时新权限的询问又冒出来。清的是同几处状态（settings-asked.js）；提问按 Esc
+    // 交还终端走的是 panel.js（settings-esc 测试）。
+    try {
+      window.SettingsAsked?.closeCleared(snap?.uiState || {})
+    } catch (error) {
+      console.log('[settings asked]', error)
+    }
     // 录到一半面板关了（点外面、Esc 到这里、✕）：组合键先还回去（setRecording
     // 里叫停 shortcutsPause），不然按键没人接。
     setRecording(null)
