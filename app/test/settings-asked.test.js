@@ -1,37 +1,44 @@
-// 关闭设置时清掉落在面板上的提问（上游 bf6f0adb）：Esc 的取消与「取消」按钮走
-// 同一条 cancelAsked；关设置时清 approveFor 等，免得重开又冒出来。
+// 关闭设置时作废落在面板上的确认提问（上游 bf6f0adb）：settings.js 的 close() 把
+// 设置页自己的 confirmActive / confirmQueue 交给 settings-asked.closeCleared 作废，
+// 与取消/Esc/点背景走同一条路。这里钉纯逻辑：作废正在显示的、排队的都按否收掉、
+// 一个失败的 resolve 不挡住其余、没有就返回 0。
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { mayCancel, cancelAsked, closeCleared } = require('../src/pet/settings-asked')
+const { closeCleared } = require('../src/pet/settings-asked')
 
-test('取消与 Esc 走同一个 cancelAsked：清掉所有落在面板上的提问', () => {
-  const state = { gone: { id: 'x' }, mkAsk: { id: 'y' }, approveFor: { id: 'z' }, flow: { step: 'ask' } }
-  assert.equal(cancelAsked(state), true)
-  assert.equal(state.gone, null)
-  assert.equal(state.mkAsk, null)
-  assert.equal(state.approveFor, null)
-  assert.equal(state.flow.step, 'idle')
+test('作废正在显示的与排队的确认提问', () => {
+  const seen = []
+  const state = {
+    finishActive: () => {
+      seen.push('finish')
+      return true
+    },
+    queue: [{ resolve: v => seen.push(['a', v]) }, { resolve: v => seen.push(['b', v]) }],
+  }
+  assert.equal(closeCleared(state), 3, '1 个正显示的 + 2 个排队的')
+  assert.deepEqual(seen, ['finish', ['a', false], ['b', false]])
+  assert.equal(state.queue.length, 0, '队列清空')
 })
 
-test('卸载或安装进行中不清理（不打断在干活的那一个）', () => {
-  assert.equal(mayCancel({ gone: { busy: true } }), false)
-  assert.equal(mayCancel({ flow: { step: 'installing' } }), false)
-  const busy = { approveFor: { id: 'z' }, gone: { busy: true }, flow: { step: 'installing' } }
-  assert.equal(cancelAsked(busy), false)
-  assert.notEqual(busy.approveFor, null, '在干活时不动 approveFor')
+test('没有正在显示的，只收排队的', () => {
+  const seen = []
+  const state = { finishActive: () => false, queue: [{ resolve: v => seen.push(v) }] }
+  assert.equal(closeCleared(state), 1)
+  assert.deepEqual(seen, [false])
 })
 
-test('关闭设置时清掉 approveFor，重开不再残留', () => {
-  const state = { approveFor: { id: 'z' }, mkAsk: { id: 'y' }, gone: null, flow: { step: 'ask' } }
-  closeCleared(state)
-  assert.equal(state.approveFor, null)
-  assert.equal(state.mkAsk, null)
-  assert.equal(state.flow.step, 'idle')
+test('一个 resolve 抛错不挡住其余', () => {
+  const seen = []
+  const state = {
+    finishActive: () => false,
+    queue: [{ resolve: () => { throw new Error('x') } }, { resolve: v => seen.push(v) }],
+  }
+  assert.equal(closeCleared(state), 2, '两条都算作废')
+  assert.deepEqual(seen, [false], '后一条仍被收掉')
 })
 
-test('关闭设置不清正在安装的步骤', () => {
-  const state = { flow: { step: 'installing' }, approveFor: null }
-  closeCleared(state)
-  assert.equal(state.flow.step, 'installing')
+test('空状态返回 0', () => {
+  assert.equal(closeCleared(null), 0)
+  assert.equal(closeCleared({ finishActive: () => false, queue: [] }), 0)
 })

@@ -3661,11 +3661,13 @@
   function close(why = 'asked') {
     if (!isOpen) return
     console.log('settings close:', why)
-    // 关闭设置时，落在面板上的提问一并清掉（上游 bf6f0adb）：不这样，重开设置
-    // 时新权限的询问又冒出来。清的是同几处状态（settings-asked.js）；提问按 Esc
-    // 交还终端走的是 panel.js（settings-esc 测试）。
+    // 关闭设置时，落在面板上的确认提问一并作废（上游 bf6f0adb）：不这样，重开设置
+    // 时上一次没答完的提问又冒出来。本仓没有上游的 approveFor，设置页自己的确认状态
+    // 是 confirmActive（正显示的）与 confirmQueue（排队的）；交给 settings-asked.js
+    // 一个作废入口，Esc/取消/点背景/✕ 与关闭设置走同一条路（不做两套）。提问「交还
+    // 终端」的权限询问走 panel.js（settings-esc 测试），不在这里。
     try {
-      window.SettingsAsked?.closeCleared(snap?.uiState || {})
+      window.SettingsAsked?.closeCleared({ finishActive: () => { if (!confirmActive) return false; finishConfirm(false); return true }, queue: confirmQueue })
     } catch (error) {
       console.log('[settings asked]', error)
     }
@@ -3676,8 +3678,6 @@
     void extensionPanel.closeAuth?.()
     // #69 S3：插件进度浮层自己拿的滚动锁由它自己还（这里不数它攒了几次）。
     extensionPanel.releaseScroll?.()
-    if (confirmActive) finishConfirm(false)
-    while (confirmQueue.length) confirmQueue.shift().resolve(false)
     void window.pet.settings.set({ settingsLastTab: tab }).catch(error => console.log('[settings memory]', error))
     isOpen = false
     ++openRevision
