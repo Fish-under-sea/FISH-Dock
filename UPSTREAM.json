@@ -40,7 +40,7 @@
         "Upstream v0.4.2 built-in calendar / now-playing plugin: official plugins live in the plugin repository; product-level decision pending (DEC-5)",
         "Upstream v0.4.3 mail HTML rendering / remote images / links / codes on the island (upstream #114/#150): new feature with a security surface; decision pending (DEC-6)",
         "Upstream v0.4.3 external approval protocol POST /ask (upstream #149): new external protocol + permission model; decision pending (DEC-7)",
-        "Upstream v0.4.3 whole-page TypeScript rewrite / file splitting / thread cleanup: engineering project with its own regression plan; decision pending (DEC-8)",
+        "Upstream v0.4.3 whole-page TypeScript rewrite / file splitting / thread cleanup: NOT done in 2.3.4 (pages stay JS); deferred to 2.4.0, tracked by an issue (DEC-8)",
         "Upstream v0.4.3 GitHub Actions CI (b32e9352): this repository's test/release chain differs; decision pending (DEC-9)"
       ]
     },
