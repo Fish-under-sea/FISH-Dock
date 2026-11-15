@@ -334,3 +334,53 @@ test('页面桥不提供 FishDock.dialogs（页面侧不开放选文件夹）', 
   assert.ok(!/dialogs\s*[:,]/.test(source.replace(/不提供[^\n]*/g,'')),'bridge.js 不该导出 dialogs 成员');
   assert.ok(!/chooseFolder/.test(source),'bridge.js 不该出现 chooseFolder');
 });
+
+test('窗口事件：dock 事件按 dock 能力分发给 dock 监听器（#88 B3）', async () => {
+  const dockSeen=[],windowsSeen=[];
+  const f=fixture({commands:{wire:async(_,ctx)=>{
+    ctx.dock.onEvent(row=>dockSeen.push(row)).catch(()=>{});
+    ctx.windows.onEvent(row=>windowsSeen.push(row));
+    return 'wired';
+  }}});
+  try{
+    await handshake(f,['storage','windows','dock']);
+    f.send({id:3,method:'wire'});
+    // dock.onEvent 内部会先发 host.dock.subscribe；回执它，命令才返回。
+    const sub=await f.next();assert.equal(sub.method,'host.dock.subscribe');f.send({id:sub.id,result:{subscribed:true}});
+    assert.equal((await f.next()).result,'wired');
+    // dock 几何事件：必须走 dock 能力、进 dock 监听器（旧代码误判为 windows 且从不遍历 dock）。
+    f.send({id:9,method:'plugin.windowEvent',params:{event:'dock',type:'geometry',rect:{window:null,capsule:null}}});
+    assert.deepEqual((await f.next()).result,{handled:true});
+    assert.equal(dockSeen.length,1,'dock 监听器收到 dock 事件');
+    assert.equal(dockSeen[0].type,'geometry');
+    assert.equal(windowsSeen.length,1,'dock 事件也进 windows 监听器（兼容既有约定）');
+  } finally {f.plugin.close();}
+});
+test('窗口事件：只有 windows 能力时 dock 事件被拒（#88 B3）', async () => {
+  const f=fixture({commands:{wire:async(_,ctx)=>{ctx.dock.onEvent(()=>{}).catch(()=>{});return 'wired'}}});
+  try{
+    await handshake(f,['storage','windows']); // 缺 dock
+    f.send({id:3,method:'wire'});assert.equal((await f.next()).result,'wired');
+    f.send({id:9,method:'plugin.windowEvent',params:{event:'dock',type:'pointer',action:'enter'}});
+    assert.equal((await f.next()).error.code,'CAPABILITY_REQUIRED','dock 事件需要 dock 能力，不能借用 windows');
+  } finally {f.plugin.close();}
+});
+test('windows.reopen / dock.reserve / dock.release 走对应宿主方法（#88 H6/H10）', async () => {
+  const f=fixture({commands:{wire:async(_,ctx)=>{
+    const reopened=await ctx.windows.reopen('h-1',{width:420,height:72,duration:200});
+    const res=await ctx.dock.reserve({x:8,y:132,w:420,h:120},'reserve-x');
+    const rel=await ctx.dock.release('reserve-x');
+    return {reopened,res,rel};
+  }}});
+  try{
+    await handshake(f,['storage','windows','dock']);
+    f.send({id:3,method:'wire'});
+    // 宿主回执三条：reopen / reserve / release。
+    const methods=[];
+    for(let i=0;i<3;i++){const req=await f.next();methods.push(req.method);f.send({id:req.id,result:{ok:true,reserved:true}});}
+    const out=await f.next();
+    assert.deepEqual(methods,['host.windows.reopen','host.dock.reserve','host.dock.release']);
+    assert.equal(out.result.reopened.ok,true);
+    assert.equal(out.result.res.reserved,true);
+  } finally {f.plugin.close();}
+});

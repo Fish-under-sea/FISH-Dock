@@ -37,6 +37,58 @@ use tauri::AppHandle;
 pub static DRAG_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
 static STARTED: AtomicBool = AtomicBool::new(false);
 
+/// 2.3.4（#88 P5）：真实拖拽松手后 WM_DROPFILES 才投递，此时 island::poll 已把
+/// DRAG_RECT/ACTIVE 清空 → 落点丢失（`no live drop target`）。命中拖拽时记一份
+/// 「1.5 秒内 && 指针仍在 rect 内」的快照，松手时若 ACTIVE 已清则用它兜底。
+#[derive(Clone, Copy)]
+pub struct Snapshot {
+    target: SnapshotTarget,
+    rect: (i32, i32, i32, i32),
+    at: std::time::Instant,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum SnapshotTarget {
+    Dock,
+    Window,
+}
+
+impl SnapshotTarget {
+    fn from_target(target: &Target) -> Self {
+        match target {
+            Target::Dock(_) => Self::Dock,
+            Target::Window(_) => Self::Window,
+        }
+    }
+}
+
+/// 快照快照有效期（与 issue #88 P5 一致：1.5 秒）。
+const SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_millis(1500);
+static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
+
+/// 记录一次命中拖拽的快照（在进入某个 drop zone 且按键按住时调用）。
+pub fn note_snapshot(target: &Target, rect: (i32, i32, i32, i32)) {
+    let mut snap = SNAPSHOT.lock().unwrap_or_else(|p| p.into_inner());
+    *snap = Some(Snapshot { target: SnapshotTarget::from_target(target), rect, at: std::time::Instant::now() });
+}
+
+/// 清掉快照（离开落点/松手后调用）。
+pub fn clear_snapshot() {
+    *SNAPSHOT.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
+/// 松手兜底：在 1.5 秒内、指针仍在该 rect 内时返回当时的目标类型；否则 None。
+pub fn snapshot_hit(point: (i32, i32)) -> Option<(SnapshotTarget, (i32, i32, i32, i32))> {
+    let snap = *SNAPSHOT.lock().unwrap_or_else(|p| p.into_inner());
+    let snap = snap?;
+    if snap.at.elapsed() > SNAPSHOT_TTL {
+        return None;
+    }
+    let (x, y, w, h) = snap.rect;
+    let inside = point.0 >= x && point.1 >= y && point.0 < x + w && point.1 < y + h;
+    inside.then_some((snap.target, snap.rect))
+}
+
 pub fn note_drag(rect: Option<(i32, i32, i32, i32)>) {
     *DRAG_RECT.lock().unwrap_or_else(|poison| poison.into_inner()) = rect;
 }
@@ -187,7 +239,12 @@ mod imp {
         fn DispatchMessageW(msg: *const Msg) -> isize;
         fn GetAsyncKeyState(vk: i32) -> i16;
         fn GetCursorPos(point: *mut Point) -> i32;
+        // 2.3.4（#88 B2）：读窗口扩展样式，识别鼠标穿透/分层的主岛全屏窗。
+        fn GetWindowLongW(hwnd: Hwnd, index: i32) -> i32;
     }
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_TRANSPARENT: u32 = 0x0000_0020;
+    const WS_EX_LAYERED: u32 = 0x0008_0000;
 
     pub(super) fn spawn(app: AppHandle) {
         let _ = APP.set(app);
@@ -231,10 +288,17 @@ mod imp {
         let mut hwnd = GetTopWindow(std::ptr::null_mut());
         for _ in 0..4096 {
             if hwnd.is_null() { break; }
-            if hwnd!=receiver && IsWindowVisible(hwnd)!=0 && IsIconic(hwnd)==0 {
+            // 2.3.4（#88 B2）：主岛是 1920 宽的**全屏透明窗**（WS_EX_LAYERED +
+            // WS_EX_TRANSPARENT），Z 序高于插件窗口且矩形包含落点，但它的胶囊 zone 不含该点，
+            // 旧逻辑会在这里把它当候选后返回 None，插件窗口的 WM_DROPFILES 永远送不到。
+            // 修法：显式跳过「鼠标穿透 / 分层」且不是任何 drop owner 的窗口，让下层真正的
+            // 插件窗口成为候选。
+            let owner = owners.iter().find(|(candidate,_)| *candidate==hwnd).map(|(_,target)|target.clone());
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let click_through = ex_style & (WS_EX_TRANSPARENT | WS_EX_LAYERED) != 0;
+            if hwnd!=receiver && IsWindowVisible(hwnd)!=0 && IsIconic(hwnd)==0 && !(click_through && owner.is_none()) {
                 let mut rect = Rect { left:0,top:0,right:0,bottom:0 };
                 if GetWindowRect(hwnd,&mut rect)!=0 {
-                    let owner=owners.iter().find(|(candidate,_)|*candidate==hwnd).map(|(_,target)|target.clone());
                     stack.push((owner,(rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top)));
                 }
             }
@@ -319,7 +383,9 @@ mod imp {
                     }
                     hovering(Some(target.clone()), over.clone());
                     over = Some(target.clone());
-                    *ACTIVE.lock().unwrap_or_else(|p|p.into_inner()) = Some(target);
+                    *ACTIVE.lock().unwrap_or_else(|p|p.into_inner()) = Some(target.clone());
+                    // P5：命中拖拽时记快照，松手后落点被清空也能兜底。
+                    super::note_snapshot(&target, (x, y, w, hgt));
                 }
                 None => {
                     // 离开落点或松开左键：命中区立刻撤掉（在途拖入随之作废）。
@@ -331,6 +397,8 @@ mod imp {
                         hovering(None, over.clone());
                         over = None;
                         *ACTIVE.lock().unwrap_or_else(|p|p.into_inner()) = None;
+                        // 注意：这里**不清**快照——松手瞬间本循环会把 over 清掉，但
+                        // WM_DROPFILES 紧接着才到；由 wndproc 消费快照，超时自然失效。
                     }
                 }
             }
@@ -373,6 +441,14 @@ mod imp {
             let point = if GetCursorPos(&mut cursor) != 0 { Some((cursor.x, cursor.y)) } else { None };
             let active = ACTIVE.lock().unwrap_or_else(|p|p.into_inner()).take();
             let target = point.and_then(|point| native_target(point, &live_zones(), hwnd)).filter(|target| Some(target) == active.as_ref());
+            // 2.3.4（#88 P5）：正常路径拿不到（ACTIVE 已在松手时被清空）时，用 1.5s 快照 +
+            // 指针仍在 rect 内兜底，按快照类型在当前 live zones 里找回同一个订阅句柄。
+            let target = target.or_else(|| {
+                let point = point?;
+                let (_kind, rect) = super::snapshot_hit(point)?;
+                live_zones().into_iter().find(|(_, zone)| *zone == rect).map(|(target, _)| target)
+            });
+            super::clear_snapshot();
             match target {
                 Some(Target::Dock(handle)) => {
                     if let Err(error) = crate::plugin_window::deliver_dock_at(&handle, &paths, point) {
@@ -437,5 +513,32 @@ mod tests {
         assert_eq!(target_at((109, 49), &zones), Some(Target::Dock("dock-sub".into())));
         assert_eq!(target_at((110, 49), &zones), None);
         assert_eq!(target_at((109, 50), &zones), None);
+    }
+
+    // 2.3.4（#88 P5）：松手兜底——1.5s 内且指针仍在 rect 内才算命中；过期或出界即失效。
+    #[test]
+    fn snapshot_hit_is_within_ttl_and_rect() {
+        super::clear_snapshot();
+        super::note_snapshot(&Target::Window("w".into()), (100, 100, 50, 50));
+        // 指针仍在 rect 内：命中（返回类型与 rect）。
+        let hit = super::snapshot_hit((120, 120));
+        assert!(hit.is_some(), "1.5s 内、指针在 rect 内应命中快照");
+        assert_eq!(hit.unwrap().1, (100, 100, 50, 50));
+        // 指针出了 rect：不命中。
+        assert!(super::snapshot_hit((10, 10)).is_none(), "指针离开 rect 就不该用快照兜底");
+        super::clear_snapshot();
+        assert!(super::snapshot_hit((120, 120)).is_none(), "清掉后不再命中");
+    }
+
+    // 2.3.4（#88 B2）：鼠标穿透/分层且非 drop owner 的窗口（主岛全屏透明窗）不参与遮挡判定。
+    // 这里用纯逻辑复核 stack 语义：一个 None(穿透) 矩形若压在插件窗口上，不应把插件窗口挡掉。
+    #[test]
+    fn click_through_host_overlay_does_not_shadow_the_plugin_window() {
+        let rect = (0, 0, 1920, 132);
+        let plugin = (694, 52, 531, 72);
+        let zones = zones(None, &[("a".into(), plugin)]);
+        // 修复后：主岛穿透窗不进 stack；插件窗口成为候选 → 命中。
+        let stack = vec![(Some(Target::Window("a".into())), plugin)];
+        assert_eq!(target_in_stack((900, 88), &zones, &stack), Some(Target::Window("a".into())));
     }
 }

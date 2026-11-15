@@ -68,6 +68,20 @@ pub fn watching() -> bool {
     !rules().is_empty()
 }
 
+/// 2.3.4（#88 H3）：全局左键按下时调用（island::poll 检上升沿）。给每个登记了命中规则
+/// 的窗口所有者发一条 `outsidePress` dock 事件——带屏幕物理坐标，插件据此判断这次按下
+/// 是否落在自己窗口之外，从而实现可靠的「点窗外收起」，不必退化成 blur 近似。
+pub fn outside_press(point: (i32, i32)) {
+    // 只读规则表算一遍「哪些标签在窗口内」；真投递在锁外，避免持锁跨模块。
+    let labels: Vec<String> = {
+        let table = rules();
+        table.keys().cloned().collect()
+    };
+    for label in labels {
+        crate::plugin_window::outside_press_for_label(&label, point);
+    }
+}
+
 /// 判定光标是否落在某条规则的可点区域内。逻辑像素乘缩放换成物理，再加窗口原点。
 fn hits(rule: &Rule, (x, y): (i32, i32)) -> bool {
     let Some((ox, oy, w, h)) = rule.rect else { return true };

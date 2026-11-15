@@ -14,7 +14,7 @@
 //! 等页面就绪用 Condvar 的 `wait_timeout`（等待时释放 BOOK），创建/关闭都由别的
 //! 线程推进，不会出现「持锁等自己」。
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
@@ -172,6 +172,54 @@ pub enum Anchor {
     DockBottom,
     Screen,
 }
+
+/// 2.3.4（#88 H2）：`windows.update` 的几何补间曲线。
+/// `Linear` 匀速；`EaseOutCubic` 先快后慢；`Spring` 弹簧（过冲后收敛）。
+/// 缺省 `EaseOutCubic`，只在 `duration > 0` 时插值；`duration == 0` 保持 2.2.3 瞬时摆放。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Easing {
+    Linear,
+    EaseOutCubic,
+    Spring,
+}
+
+impl Easing {
+    fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "linear" => Self::Linear,
+            "ease-out-cubic" | "ease-out" => Self::EaseOutCubic,
+            "spring" => Self::Spring,
+            _ => return None,
+        })
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::EaseOutCubic => "ease-out-cubic",
+            Self::Spring => "spring",
+        }
+    }
+}
+
+/// 2.3.4（#88 H2）：归一化时间 `t ∈ [0,1]` → 进度 `p`。端点严格 t=0→0、t=1→1。
+fn ease_at(easing: Easing, t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    if t <= 0.0 { return 0.0; }
+    if t >= 1.0 { return 1.0; }
+    match easing {
+        Easing::Linear => t,
+        Easing::EaseOutCubic => 1.0 - (1.0 - t).powi(3),
+        Easing::Spring => 1.0 - (-6.0 * t).exp() * (12.0 * t).cos(),
+    }
+}
+
+/// 2.3.4（#88 H2）：`from → to` 在归一化时间 `t` 处的插值。
+fn tween(from: f64, to: f64, t: f64, easing: Easing) -> f64 {
+    from + (to - from) * ease_at(easing, t)
+}
+
+/// 2.3.4（#88 H2）：duration 合法上界（毫秒）。
+const DURATION_MAX_MS: u64 = 2000;
 
 /// 2.2.2：窗口宽度。`Dock` 表示跟随可见胶囊当前宽度（C4）。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -435,6 +483,12 @@ struct Rec {
     rect: Option<(i32, i32, i32, i32)>,
     /// 本窗口的文件拖入订阅句柄：没有订阅就不捕获、不交付（句柄原样回给插件）。
     drop: Option<String>,
+    /// 2.3.4（#88 H2）：位置尺寸变化的补间时长（毫秒）。0 = 瞬时（2.2.3 行为）。
+    duration_ms: u64,
+    /// 2.3.4（#88 H2）：补间曲线，仅在 `duration_ms > 0` 时生效。
+    easing: Easing,
+    /// 2.3.4（#88 H7）：上次成功摆放的外框，用于胶囊短暂未知时保持上次位置。
+    last_rect: Option<(i32, i32, i32, i32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -671,6 +725,8 @@ pub fn backend(context: &Context, plugin: &str, generation: u64, method: &str, p
     match method {
         "host.windows.open" => open(context, plugin, &row.digest.clone(), generation, params),
         "host.windows.update" => update(context, plugin, generation, params),
+        // 2.3.4（#88 H6）：单窗口多形态 / keepAlive 回原位，保留句柄与订阅。
+        "host.windows.reopen" => reopen(context, plugin, generation, params),
         "host.windows.close" => close_owned(plugin, generation, params, "plugin"),
         "host.windows.list" => list(context, plugin, generation),
         "host.fileDrop.subscribe" => subscribe(context, plugin, generation, params),
@@ -704,6 +760,7 @@ fn open(context: &Context, plugin: &str, digest: &str, generation: u64, params: 
         anchor: options.anchor, align: options.align, anchor_base: options.anchor_base, offset_x: options.offset_x, offset_y: options.offset_y,
         width: options.width, height: options.height, transparent: options.transparent, z_order: options.z_order, hit_test: options.hit_test, hit_rects: options.hit_rects.clone(),
         state: State::Pending, shown: false, hidden_by_dock: false, rect: None, drop: None,
+        duration_ms: 0, easing: Easing::EaseOutCubic, last_rect: None,
     })?;
     let (handle, label) = (reserved.handle, reserved.label);
     if reuse {
@@ -776,30 +833,54 @@ fn build(handle: &str) -> Result<(), String> {
     let app = app_handle()?.clone();
     on_main(move || -> Result<(), String> {
         if !book().windows.contains_key(&snapshot.handle) { return Err("窗口创建已取消".into()); }
-        let win = WebviewWindowBuilder::new(&app, &snapshot.label, WebviewUrl::App("window/window.html".into()))
-            .title(&snapshot.title)
-            .inner_size(snapshot.width.resolve(capsule_width_logical(&app)), snapshot.height)
-            // 透明浮窗允许插件自己画形状与按钮；此时没有原生标题栏，只剩宿主 Escape 与托盘出口。
-            .decorations(!snapshot.transparent)
-            .transparent(snapshot.transparent)
-            .resizable(true)
-            .maximizable(false)
-            .minimizable(true)
-            // 默认不占任务栏，也不抢当前焦点（显示走 SWP_NOACTIVATE）。
-            .skip_taskbar(true)
-            .focused(false)
-            // 2.2.2（E6）：above-dock 要压在主岛之上，主岛本身是 always_on_top。
-            .always_on_top(snapshot.z_order == ZOrder::AboveDock)
-            .visible(false)
-            .build()
-            .map_err(|error| format!("插件窗口创建失败：{error}"))?;
+        let shared = crate::shared(&app);
+        // 2.3.4（#88 P1）：WebView2 不能在主线程同步 build（与消息泵冲突报
+        // `0x8007139F`，插件外部窗口一个都开不出来）。改在独立线程创建，主线程用
+        // mpsc 超时等待；并补 `.additional_browser_args` / `.data_directory`
+        // 复用全局 WebView 配置。
+        let browser_args = crate::browser_args(&shared).to_string();
+        let data_dir = crate::webview_dir(&shared);
+        let capacity = snapshot.width.resolve(capsule_width_logical(&app));
+        let height = snapshot.height;
+        let label = snapshot.label.clone();
+        let title = snapshot.title.clone();
+        let (tell, told) = std::sync::mpsc::channel::<Result<WebviewWindow, String>>();
+        let app_for_build = app.clone();
+        std::thread::spawn(move || {
+            let built = WebviewWindowBuilder::new(&app_for_build, &label, WebviewUrl::App("window/window.html".into()))
+                .title(&title)
+                .inner_size(capacity, height)
+                .decorations(!snapshot.transparent)
+                .transparent(snapshot.transparent)
+                .resizable(true)
+                .maximizable(false)
+                .minimizable(true)
+                .skip_taskbar(true)
+                .focused(false)
+                .always_on_top(snapshot.z_order == ZOrder::AboveDock)
+                .additional_browser_args(&browser_args)
+                .data_directory(data_dir)
+                .visible(false)
+                .build()
+                .map_err(|error| format!("插件窗口创建失败：{error}"));
+            let _ = tell.send(built);
+        });
+        let win = match told.recv_timeout(MAIN_WAIT) {
+            Ok(Ok(win)) => win,
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Err("插件窗口创建在主线程超时".to_string()),
+        };
         let watched = win.clone();
         win.on_window_event(move |event| window_event(&watched, event));
         if !book().windows.contains_key(&snapshot.handle) {
             let _ = win.destroy();
             return Err("窗口创建已取消".into());
         }
+        // 2.3.4（#88 P2）：透明窗剥掉原生标题栏/边框；非透明窗保持系统标题栏。
+        if snapshot.transparent { strip_chrome(&win); }
         if let Err(error) = place(&win, &snapshot) { let _ = win.destroy(); return Err(error); }
+        // H7：记下首帧外框，供后续胶囊短暂未知时保持位置。
+        record_rect(&snapshot.handle, geometry_of(&win));
         // 2.2.3（B4）：只有 hitTest:'opaque' 的窗口才登记命中规则。
         // 其余窗口连登记都不做，plugin_hit 的规则表为空 → 主循环不会调 poll，
         // 与 2.2.2 的指针节奏一模一样。
@@ -835,7 +916,8 @@ fn place(win: &WebviewWindow, rec: &Rec) -> Result<(), String> {
     });
     let capsule = crate::shared(app);
     let capsule = crate::island::snapshot(&capsule).capsule;
-    let (x, y, width, height) = placement(rec, &screens, dock, capsule, sf);
+    // H7：anchorBase=capsule 且胶囊暂时未知时保持上次位置，绝不回落整窗。
+    let (x, y, width, height) = placement_h7(rec, &screens, dock, capsule, sf, rec.last_rect);
     win.set_size(tauri::PhysicalSize::new(width as u32, height as u32)).map_err(|_| "插件窗口尺寸设置失败")?;
     win.set_position(tauri::PhysicalPosition::new(x, y)).map_err(|_| "插件窗口位置设置失败")?;
     // set_size 指客户区；原生标题栏和边框也必须留在工作区。
@@ -886,12 +968,11 @@ fn placement(rec: &Rec, screens: &crate::screen::Screens, dock: Option<(i32, i32
             };
             match reference {
                 Some((rx, ry, rw, rh)) => {
-                    // 锚点：dock-left 取基准的左缘中点，dock-bottom 取基准的左下角。
-                    // 这两个点与 2.2.1 的默认 align（right-center / left-top）配合，
-                    // 算出来的位置与旧版完全一致。
+                    // 锚点：dock-left 取基准的左缘中点，dock-bottom 取其底边中点
+                    // （2.3.4/P4：与 dock-left 对称，修正旧版取左下角导致长条贴屏幕最左）。
                     let point = match rec.anchor {
                         Anchor::DockLeft => (rx, ry + rh / 2),
-                        _ => (rx, ry + rh),
+                        _ => (rx + rw / 2, ry + rh),
                     };
                     let point = (point.0 + (rec.offset_x * sf).round() as i32, point.1 + (rec.offset_y * sf).round() as i32);
                     rec.align.offset(point, (width, height))
@@ -911,10 +992,41 @@ fn placement(rec: &Rec, screens: &crate::screen::Screens, dock: Option<(i32, i32
     (x, y, width, height)
 }
 
+/// 2.3.4（#88 H7）：`placement` 之上加「胶囊未知时保持上次位置」。
+/// 只有 anchorBase=capsule 且这次拿不到胶囊、但有上次摆放结果时才保持；其余走既有 `placement`。
+fn placement_h7(rec: &Rec, screens: &crate::screen::Screens, dock: Option<(i32, i32, i32, i32)>, capsule: Option<(i32, i32, i32, i32)>, fallback_sf: f64, last_rect: Option<(i32, i32, i32, i32)>) -> (i32, i32, i32, i32) {
+    if rec.anchor_base == AnchorBase::Capsule && capsule.is_none() {
+        if let Some((lx, ly, lw, lh)) = last_rect {
+            return (lx, ly, lw, lh);
+        }
+    }
+    placement(rec, screens, dock, capsule, fallback_sf)
+}
+
 fn geometry_of(win: &WebviewWindow) -> Option<(i32, i32, i32, i32)> {
     match (win.outer_position(), win.outer_size()) {
         (Ok(position), Ok(size)) => Some((position.x, position.y, size.width as i32, size.height as i32)),
         _ => None,
+    }
+}
+
+/// 2.3.4（#88 H2）：`rec` 按当前锚点/胶囊应落在的外框（补间目标，供记 last_rect/命中）。
+fn intend_rect(app: &AppHandle, rec: &Rec) -> Option<(i32, i32, i32, i32)> {
+    let win = app.get_webview_window(&rec.label)?;
+    let sf = win.scale_factor().ok().unwrap_or(1.0).max(0.5);
+    let screens = crate::screen::read(app);
+    let dock = app.get_webview_window("island").and_then(|w| match (w.outer_position(), w.outer_size()) {
+        (Ok(pos), Ok(size)) => Some((pos.x, pos.y, size.width as i32, size.height as i32)),
+        _ => None,
+    });
+    let capsule = crate::island::snapshot(&crate::shared(app)).capsule;
+    Some(placement_h7(rec, &screens, dock, capsule, sf, rec.last_rect))
+}
+fn record_rect(handle: &str, rect: Option<(i32, i32, i32, i32)>) {
+    let Some(rect) = rect else { return };
+    if let Some(rec) = book().windows.get_mut(handle) {
+        rec.rect = Some(rect);
+        rec.last_rect = Some(rect);
     }
 }
 
@@ -949,6 +1061,18 @@ fn focus_changed(win: &WebviewWindow, focused: bool) {
     let payload = json!({"event": if focused {"focus"} else {"blur"}, "handle": handle});
     emit(&plugin, generation, Some(label), payload.clone());
     let _ = notify_backend(&plugin, generation, payload);
+}
+
+/// 2.3.4（#88 H3）：给一个窗口的所有者发 `outsidePress`（若这次按下落在该窗口之外）。
+pub(crate) fn outside_press_for_label(label: &str, point: (i32, i32)) {
+    let rec = { let book = book(); book.by_label(label).cloned() };
+    let Some(rec) = rec else { return };
+    if !generation_fresh(&rec.plugin, rec.generation) { return; }
+    let inside = rec.rect.is_some_and(|(x, y, w, h)| point.0 >= x && point.1 >= y && point.0 < x + w && point.1 < y + h);
+    if inside { return; }
+    let payload = json!({"event":"dock","type":"outside","x":point.0,"y":point.1,"handle":rec.handle});
+    emit(&rec.plugin, rec.generation, Some(&rec.label), payload.clone());
+    let _ = notify_backend(&rec.plugin, rec.generation, payload);
 }
 
 fn geometry_changed(win: &WebviewWindow) {
@@ -1119,7 +1243,7 @@ fn apply_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
 fn validate_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
         let object = params.as_object().ok_or("插件窗口更新参数应为对象")?;
         for name in object.keys() {
-            if !["handle", "width", "height", "anchor", "offsetX", "offsetY", "title", "maxWidth", "align", "anchorBase", "zOrder", "hitTest", "hitRects"].contains(&name.as_str()) {
+            if !["handle", "width", "height", "anchor", "offsetX", "offsetY", "title", "maxWidth", "align", "anchorBase", "zOrder", "hitTest", "hitRects", "duration", "easing", "resize"].contains(&name.as_str()) {
                 return Err("插件窗口更新参数含未知字段".into());
             }
         }
@@ -1186,6 +1310,18 @@ fn validate_update(rec: &mut Rec, params: &Value) -> Result<(), String> {
             let text = title.as_str().map(str::trim).filter(|t| !t.is_empty() && t.chars().count() <= TITLE_MAX && !t.chars().any(char::is_control)).ok_or("插件窗口标题无效")?;
             rec.title = text.to_string();
         }
+        // 2.3.4（#88 H2）：duration/easing。duration=0 回到瞬时；easing 缺省 ease-out-cubic。
+        if let Some(duration) = object.get("duration") {
+            let value = duration.as_u64().filter(|v| *v <= DURATION_MAX_MS).ok_or("插件窗口 duration 应为 0–2000 的整数毫秒")?;
+            rec.duration_ms = value;
+        }
+        if let Some(easing) = object.get("easing") {
+            rec.easing = easing.as_str().and_then(Easing::parse).ok_or("插件窗口 easing 只支持 linear、ease-out-cubic、spring")?;
+        }
+        // H6：resize 只为兼容显式布尔；实际重摆由 reopen 完成（这里校验类型即可）。
+        if let Some(resize) = object.get("resize") {
+            if !matches!(resize, Value::Bool(_)) { return Err("插件窗口 resize 应为布尔值".into()); }
+        }
     Ok(())
 }
 
@@ -1215,11 +1351,20 @@ fn update(context: &Context, plugin: &str, generation: u64, params: &Value) -> R
         }.ok_or("窗口已关闭或会话已撤销")?;
         let win = app.get_webview_window(&current.label).ok_or("插件窗口尚未创建")?;
         win.set_title(&current.title).map_err(|_| "插件窗口标题设置失败")?;
-        place(&win, &current)?;
+        if current.duration_ms > 0 {
+            // H2：补间到目标（帧循环在工作线程，不阻塞主线程）；先记目标外框，供上次位置/命中用。
+            let target = intend_rect(&app, &current);
+            animate_place(&win, app.clone(), &current)?;
+            if let Some(target) = target { record_rect(&current.handle, Some(target)); }
+        } else {
+            place(&win, &current)?;
+            record_rect(&current.handle, geometry_of(&win));
+        }
         // 2.2.3（B4）：命中区域或命中方式可能刚改过，按当前值重新登记/撤销。
         if current.hit_test == HitTest::Opaque {
             crate::plugin_hit::watch(&current.label, current.hit_rects.clone());
-            crate::plugin_hit::place(&current.label, geometry_of(&win), win.scale_factor().unwrap_or(1.0));
+            let hit_rect = book().windows.get(&current.handle).and_then(|r| r.rect).or_else(|| geometry_of(&win));
+            crate::plugin_hit::place(&current.label, hit_rect, win.scale_factor().unwrap_or(1.0));
         } else {
             crate::plugin_hit::forget(&current.label);
         }
@@ -1227,6 +1372,119 @@ fn update(context: &Context, plugin: &str, generation: u64, params: &Value) -> R
     })??;
     let _ = context;
     Ok(view(&snapshot))
+}
+
+/// 2.3.4（#88 H6）：单窗口多形态 / keepAlive 的「回原位」。句柄、票据、页面、drop
+/// 订阅、代次全部保留，只按当前记录重摆（可选带 duration/easing 补间），并允许顺带改形状。
+fn reopen(context: &Context, plugin: &str, generation: u64, params: &Value) -> Result<Value, String> {
+    let handle = handle_of(params)?.to_string();
+    let snapshot = {
+        let mut book = book();
+        if !book.fresh(plugin, generation) { return Err("插件会话已撤销".into()); }
+        let current = book.sessions.get(plugin).copied();
+        let rec = book.windows.get_mut(&handle).ok_or("插件窗口不存在或已关闭")?;
+        if rec.plugin != plugin { return Err("这个插件窗口不属于当前插件".into()); }
+        if current != Some(generation) || rec.generation != generation {
+            return Err("插件实例代次已变化，本次重开已丢弃".into());
+        }
+        let mut candidate = rec.clone();
+        validate_update(&mut candidate, params)?;
+        *rec = candidate.clone();
+        candidate
+    };
+    let _ = context;
+    let app = app_handle()?.clone();
+    let for_main = snapshot.clone();
+    on_main(move || -> Result<(), String> {
+        let current = {
+            let book = book();
+            book.windows.get(&for_main.handle).filter(|rec| book.fresh(&rec.plugin, rec.generation)).cloned()
+        }.ok_or("窗口已关闭或会话已撤销")?;
+        let win = app.get_webview_window(&current.label).ok_or("插件窗口尚未创建")?;
+        if current.duration_ms > 0 {
+            let target = intend_rect(&app, &current);
+            animate_place(&win, app.clone(), &current)?;
+            if let Some(target) = target { record_rect(&current.handle, Some(target)); }
+        } else {
+            place(&win, &current)?;
+            record_rect(&current.handle, geometry_of(&win));
+        }
+        if current.hit_test == HitTest::Opaque {
+            crate::plugin_hit::watch(&current.label, current.hit_rects.clone());
+            let hit_rect = book().windows.get(&current.handle).and_then(|r| r.rect).or_else(|| geometry_of(&win));
+            crate::plugin_hit::place(&current.label, hit_rect, win.scale_factor().unwrap_or(1.0));
+        }
+        Ok(())
+    })??;
+    Ok(view(&snapshot))
+}
+
+/// 2.3.4（#88 H2）：一帧补间的几何。`t∈(0,1]` 为归一化时间，返回 (x, y, w, h)。
+/// 抽成纯函数，便于单测覆盖端点/单调/取消语义，也便于主线程只做「套用一帧」。
+fn tween_frame(start: (i32, i32, i32, i32), target: (i32, i32, i32, i32), t: f64, easing: Easing) -> (i32, i32, u32, u32) {
+    let (sx, sy, sw, sh) = (start.0, start.1, start.2.max(1), start.3.max(1));
+    let (tx, ty, tw, th) = (target.0, target.1, target.2.max(1), target.3.max(1));
+    let e = ease_at(easing, t.clamp(0.0, 1.0));
+    let x = (sx as f64 + (tx - sx) as f64 * e).round() as i32;
+    let y = (sy as f64 + (ty - sy) as f64 * e).round() as i32;
+    let w = (sw as f64 + (tw - sw) as f64 * e).round() as u32;
+    let h = (sh as f64 + (th - sh) as f64 * e).round() as u32;
+    (x, y, w.max(1), h.max(1))
+}
+
+/// 2.3.4（#88 H2）：一帧的间隔与总帧数（16 ms/帧，与 60 Hz 对齐）。
+/// 用**向上取整**，保证末帧 `t≥1`（经 `anim_frame_t` 夹到 1.0），终帧精确落在目标几何——
+/// 否则 duration 不是 16 的整数倍时，末帧只到 t<1，窗口停在目标之前（旧实现靠额外 place() 兜底）。
+const ANIM_STEP_MS: u64 = 16;
+fn anim_steps(duration_ms: u64) -> u64 {
+    duration_ms.max(1).div_ceil(ANIM_STEP_MS).max(1)
+}
+fn anim_frame_t(step: u64, duration_ms: u64) -> f64 {
+    (step as f64 * ANIM_STEP_MS as f64 / duration_ms.max(1) as f64).min(1.0)
+}
+
+/// 2.3.4（#88 H2）：把当前窗口从眼前几何补间到目标几何。
+///
+/// **不在主线程上 sleep**：本函数在调用方线程（插件后端线程）里跑帧循环，每帧只把
+/// 「套用一帧（set_size/set_position）」这一小步**排进主线程**（`run_on_main_thread`
+/// 非阻塞投递），把 sleep 留在工作线程。这样主线程消息泵不被阻塞——否则 `duration_ms`
+/// 内整个界面（主岛、任务栏、所有窗口）都会僵住，与 P1「不在主线程做重活」相违。
+fn animate_place(_win: &WebviewWindow, app: AppHandle, rec: &Rec) -> Result<(), String> {
+    let sf = app.get_webview_window(&rec.label).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0).max(0.5);
+    let screens = crate::screen::read(&app);
+    let dock = app.get_webview_window("island").and_then(|win| match (win.outer_position(), win.outer_size()) {
+        (Ok(pos), Ok(size)) => Some((pos.x, pos.y, size.width as i32, size.height as i32)),
+        _ => None,
+    });
+    let capsule = crate::island::snapshot(&crate::shared(&app)).capsule;
+    let start = {
+        let Some(win) = app.get_webview_window(&rec.label) else { return Ok(()); };
+        match (win.outer_position(), win.outer_size()) {
+            (Ok(pos), Ok(size)) => (pos.x, pos.y, size.width as i32, size.height as i32),
+            _ => return Ok(()), // 拿不到起始几何：由调用方 place() 兜底
+        }
+    };
+    let target = placement_h7(rec, &screens, dock, capsule, sf, rec.last_rect);
+    let total = rec.duration_ms.max(1);
+    let steps = anim_steps(total);
+    let easing = rec.easing;
+    let label = rec.label.clone();
+    // 帧循环在工作线程跑；每帧把 set_size/set_position 非阻塞排进主线程。sleep 不在主线程。
+    std::thread::spawn(move || {
+        for step in 1..=steps {
+            let (x, y, w, h) = tween_frame(start, target, anim_frame_t(step, total), easing);
+            let app_for_frame = app.clone();
+            let label_for_frame = label.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(win) = app_for_frame.get_webview_window(&label_for_frame) {
+                    let _ = win.set_size(tauri::PhysicalSize::new(w, h));
+                    let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+                }
+            });
+            std::thread::sleep(Duration::from_millis(ANIM_STEP_MS));
+        }
+    });
+    Ok(())
 }
 
 /// 2.2.3（B3）：把本窗口里的文件交给系统的 OLE 拖放，用户松手即落在资源管理器。
@@ -1285,6 +1543,8 @@ fn view(rec: &Rec) -> Value {
         "hitTest":rec.hit_test.name(),
         "hitRects":rec.hit_rects,
         "transparent":rec.transparent,
+        "duration":rec.duration_ms,
+        "easing":rec.easing.name(),
         "ready":rec.state == State::Ready,
         "visible":rec.shown && !rec.hidden_by_dock,
     })
@@ -1526,6 +1786,12 @@ pub fn deliver_window_at(handle: &str, paths: &[String], point: Option<(i32, i32
         (rec.plugin.clone(), rec.label.clone(), rec.handle.clone(), rec.generation, rec.rect)
     };
     let (plugin, label, handle, generation, rect) = target;
+    // 2.3.4（#88 H9）：在真实落点回放吸收动画（失败只记日志，不阻断交付）。
+    if let Some(point) = point {
+        let scale = app_handle().map(|app| goo_scale_for(&crate::screen::read(&app), point)).unwrap_or(1.0);
+        let to = rect.map(|(x, y, w, h)| (x + w / 2, y + h / 2)).unwrap_or(point);
+        play_absorb(point, to, scale);
+    }
     log(&format!("file drop -> {} path(s) for {plugin} window {}", paths.len(), short(&handle)));
     let payload = json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"window","paths":paths,
         "position":drop_position(point, rect)});
@@ -1564,6 +1830,12 @@ pub fn deliver_dock_at(subscription: &str, paths: &[String], point: Option<(i32,
     log(&format!("file drop -> {} path(s) for {plugin} dock", paths.len()));
     // 主 Dock 订阅没有对应窗口，`client` 以胶囊矩形为参照。
     let capsule = app_handle().ok().map(|app| crate::island::snapshot(&crate::shared(app)).capsule).flatten();
+    // 2.3.4（#88 H9）：在主 Dock 落点回放吸收动画（目标 = 胶囊中心）。
+    if let Some(point) = point {
+        let scale = app_handle().map(|app| goo_scale_for(&crate::screen::read(&app), point)).unwrap_or(1.0);
+        let to = capsule.map(|(x, y, w, h)| (x + w / 2, y + h / 2)).unwrap_or(point);
+        play_absorb(point, to, scale);
+    }
     let payload = json!({"event":"fileDrop","phase":"drop","handle":handle,"scope":"dock","paths":paths,
         "position":drop_position(point, capsule)});
     emit(&plugin, generation, None, payload.clone());
@@ -1594,6 +1866,8 @@ fn revoke_generation(plugin: &str, generation: Option<u64>, reason: &str) {
         terminal_event(&rec, reason, output.as_ref());
         destroy_record(rec, reason);
     }
+    // 2.3.4（#88 H9，DEC-1）：插件窗口销毁（停用/卸载/换版/崩溃）时取消在途吸收动画。
+    cancel_goo();
 }
 
 // 撤销后仅向撤销瞬间捕获的旧会话通知；不查新会话，永不把旧事件送给替代实例。
@@ -1637,10 +1911,140 @@ pub fn count() -> usize {
     book().windows.len()
 }
 
+// ---------------------------------------------------------------------------------------
+// 2.3.4（#88 H9，DEC-1 方案 A）：跨窗口「文件融入」吸收动画的顶层透明覆盖窗口
+// ---------------------------------------------------------------------------------------
+
+/// 当前是否有活着的吸收覆盖窗口（同一时刻至多一个；连续拖放串行，不叠窗）。
+static GOO_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// 覆盖窗口兜底销毁时长（动画约 700ms；2s 后强制销毁，页面异常也不常驻）。
+const GOO_TTL: Duration = Duration::from_secs(2);
+
+/// 2.3.4（#88 H9）：吸收覆盖窗按落点所在显示器的 DPI 缩放（DEC-1 要求「DPI/多屏换算」）。
+/// 落点（物理像素）落在哪块屏就用它的 `sf`；拿不到时回落 1.0，绝不给 0 或 NaN。
+fn goo_scale_for(screens: &crate::screen::Screens, point: (i32, i32)) -> f64 {
+    screens
+        .near(point.0, point.1)
+        .map(|area| area.sf)
+        .filter(|sf| sf.is_finite() && *sf > 0.0)
+        .unwrap_or(1.0)
+        .max(0.5)
+}
+
+/// 在一个真实拖放落点回放「液滴→颈→球」吸收动画。
+///
+/// `from` 是落点（屏幕物理像素），`to` 是目标中心（同坐标系），`scale` 是目标屏 DPI。
+/// 宿主创建一个**顶层透明覆盖窗口**（WS_EX_LAYERED | WS_EX_TRANSPARENT |
+/// WS_EX_TOOLWINDOW：不抢焦点、不进任务栏、鼠标穿透），窗内用 Canvas 回放吸收；
+/// 动画结束或 TTL 到点即销毁。**动画失败绝不阻断实际 drop**——所有错误只记日志后返回。
+pub fn play_absorb(from: (i32, i32), to: (i32, i32), scale: f64) {
+    let app = match app_handle() { Ok(app) => app.clone(), Err(_) => return };
+    // 只能有一个覆盖窗；已有就先销毁，避免重叠。
+    if GOO_ACTIVE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        if let Some(win) = app.get_webview_window("plugin-goo") { let _ = win.destroy(); }
+    }
+    let min_x = from.0.min(to.0) - 160;
+    let min_y = from.1.min(to.1) - 160;
+    let max_x = from.0.max(to.0) + 160;
+    let max_y = from.1.max(to.1) + 160;
+    let (ox, oy) = (min_x, min_y);
+    let (w, h) = ((max_x - min_x).max(1), (max_y - min_y).max(1));
+    let (fx, fy) = (from.0 - ox, from.1 - oy);
+    let (tx, ty) = (to.0 - ox, to.1 - oy);
+    let url = format!("window/goo.html?fx={fx}&fy={fy}&tx={tx}&ty={ty}&scale={}", scale.max(0.5));
+    let app_for_build = app.clone();
+    // 建窗放独立线程：不在主线程同步 build，也不阻塞 drop 交付。
+    let built = std::thread::spawn(move || {
+        let shared = crate::shared(&app_for_build);
+        WebviewWindowBuilder::new(&app_for_build, "plugin-goo", WebviewUrl::App(url.into()))
+            .title("")
+            .inner_size(w as f64, h as f64)
+            .position(ox as f64, oy as f64)
+            .decorations(false)
+            .transparent(true)
+            .resizable(false)
+            .skip_taskbar(true)
+            .focused(false)
+            .always_on_top(true)
+            .additional_browser_args(crate::browser_args(&shared))
+            .data_directory(crate::webview_dir(&shared))
+            .visible(true)
+            .build()
+            .map_err(|error| format!("吸收覆盖窗创建失败：{error}"))
+    });
+    match built.join() {
+        Ok(Ok(win)) => { make_goo_overlay(&win); }
+        Ok(Err(error)) => {
+            log(&format!("goo overlay: {error}; drop continues without animation"));
+            GOO_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+            return;
+        }
+        Err(_) => {
+            log("goo overlay: build thread panicked; drop continues without animation");
+            GOO_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+            return;
+        }
+    }
+    // TTL 兜底：到点销毁（页面自己调 plugin_goo_done 时也会销毁）。
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(GOO_TTL);
+        if let Some(win) = app2.get_webview_window("plugin-goo") { let _ = win.destroy(); }
+        GOO_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// 页面动画结束回调：销毁覆盖窗口。
+pub fn goo_done() {
+    if let Ok(app) = app_handle() {
+        if let Some(win) = app.get_webview_window("plugin-goo") { let _ = win.destroy(); }
+    }
+    GOO_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// 2.3.4（#88 H9，DEC-1）：取消在途吸收动画并销毁覆盖窗。
+/// 插件窗口销毁、主岛全局隐藏（收起滑出/全屏避让）时调用——DEC-1 要求这两种情形取消动画，
+/// 不留下悬空的顶层覆盖窗（TTL 兜底之外再显式收一次）。幂等。
+fn cancel_goo() {
+    if !GOO_ACTIVE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    if let Ok(app) = app_handle() {
+        if let Some(win) = app.get_webview_window("plugin-goo") { let _ = win.destroy(); }
+    }
+}
+
+/// 把覆盖窗设成鼠标穿透的顶层工具窗（不抢焦点、不进任务栏）。
+#[cfg(windows)]
+fn make_goo_overlay(win: &WebviewWindow) {
+    type Hwnd = *mut std::ffi::c_void;
+    extern "system" {
+        fn GetWindowLongW(hwnd: Hwnd, index: i32) -> i32;
+        fn SetWindowLongW(hwnd: Hwnd, index: i32, value: i32) -> i32;
+        fn SetWindowPos(hwnd: Hwnd, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+    }
+    const GWL_EXSTYLE: i32 = -20;
+    if let Ok(hwnd) = win.hwnd() {
+        let hwnd = hwnd.0 as Hwnd;
+        unsafe {
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            // LAYERED | TRANSPARENT | TOOLWINDOW | NOACTIVATE
+            SetWindowLongW(hwnd, GWL_EXSTYLE, ex | 0x0008_0000 | 0x0000_0020 | 0x0000_0080 | 0x0800_0000);
+            // HWND_TOPMOST, SWP_NOSIZE|NOMOVE|NOACTIVATE|SHOWWINDOW
+            SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn make_goo_overlay(_win: &WebviewWindow) {}
+
 /// Dock 全局隐藏 / 全屏避让：插件窗口随之隐藏并停止接受拖入；恢复时只恢复那一批
 /// 本来还开着的窗口（用户自己关掉的不复活）。主岛普通收起（缩成胶囊）不算全局隐藏，
 /// 那时窗口照常留着——screen 窗口更不跟随主岛的展开/收起。
 pub fn set_dock_hidden(hidden: bool) {
+    // 2.3.4（#88 H9，DEC-1）：主岛全局隐藏（收起滑出/全屏避让）时取消在途吸收动画。
+    if hidden { cancel_goo(); }
     let changes: Vec<(String, String)> = {
         let mut book = book();
         book.dock_hidden = hidden;
@@ -1719,7 +2123,9 @@ fn rearrange(include_screen: bool) {
                 book.windows.get(&requested.handle).filter(|rec| (include_screen || rec.anchor != Anchor::Screen) && book.fresh(&rec.plugin, rec.generation)).cloned()
             };
             if let Some(rec) = current {
-                if let Some(win) = app.get_webview_window(&rec.label) { let _ = place(&win, &rec); }
+                if let Some(win) = app.get_webview_window(&rec.label) {
+                    if place(&win, &rec).is_ok() { record_rect(&rec.handle, geometry_of(&win)); }
+                }
             }
         }
     });
@@ -1772,6 +2178,37 @@ fn show_without_activating(win: &WebviewWindow) {
     let _ = win.show();
 }
 
+/// 2.3.4（#88 P2）：透明窗剥掉原生标题栏与边框（`.decorations(false)` 对透明 WebView2
+/// 窗不彻底，会留一条原生标题栏/边框）。清 `WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|
+/// WS_MINIMIZEBOX|WS_MAXIMIZEBOX` 后 `SetWindowPos(SWP_FRAMECHANGED)` 让系统重算非客户区。
+#[cfg(windows)]
+fn strip_chrome(win: &WebviewWindow) {
+    type Hwnd = *mut std::ffi::c_void;
+    extern "system" {
+        fn GetWindowLongW(hwnd: Hwnd, index: i32) -> i32;
+        fn SetWindowLongW(hwnd: Hwnd, index: i32, value: i32) -> i32;
+        fn SetWindowPos(hwnd: Hwnd, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+    }
+    const GWL_STYLE: i32 = -16;
+    const WS_CAPTION: i32 = 0x00c0_0000;
+    const WS_THICKFRAME: i32 = 0x0004_0000;
+    const WS_SYSMENU: i32 = 0x0008_0000;
+    const WS_MINIMIZEBOX: i32 = 0x0002_0000;
+    const WS_MAXIMIZEBOX: i32 = 0x0001_0000;
+    if let Ok(hwnd) = win.hwnd() {
+        let hwnd = hwnd.0 as Hwnd;
+        unsafe {
+            let style = GetWindowLongW(hwnd, GWL_STYLE);
+            let naked = style & !(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+            SetWindowLongW(hwnd, GWL_STYLE, naked);
+            SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn strip_chrome(_win: &WebviewWindow) {}
+
 // ---------------------------------------------------------------------------------------
 // Tauri 命令（容器页面用）
 // ---------------------------------------------------------------------------------------
@@ -1805,6 +2242,13 @@ pub async fn plugin_window_call(webview: tauri::Webview, method: String, params:
 pub fn plugin_window_close(webview: tauri::Webview) -> Result<Value, String> {
     close_label_as_user(webview.label())?;
     Ok(json!({"closed":true}))
+}
+
+/// 2.3.4（#88 H9）：吸收覆盖窗页面动画结束，请宿主销毁覆盖窗。
+#[tauri::command]
+pub fn plugin_goo_done() -> Value {
+    goo_done();
+    json!({"done": true})
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1861,6 +2305,7 @@ mod tests {
                 page: "main".into(), title: "t".into(), label: format!("plugin-win-{index}"), ticket: String::new(), url: String::new(),
                 anchor: Anchor::DockBottom, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal, hit_test: HitTest::Window, hit_rects: Vec::new(),
                 state: State::Ready, shown: true, hidden_by_dock: false, rect: None, drop: None,
+                duration_ms: 0, easing: Easing::EaseOutCubic, last_rect: None,
             });
         }
         assert_eq!(book.per_plugin("acme.weather"), PER_PLUGIN);
@@ -1878,6 +2323,7 @@ mod tests {
             page: "main".into(), title: "t".into(), label: format!("plugin-win-{handle}"), ticket: "t".into(), url: "u".into(),
             anchor: Anchor::DockBottom, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal, hit_test: HitTest::Window, hit_rects: Vec::new(),
             state, shown, hidden_by_dock: false, rect: Some((10, 10, 100, 100)), drop: if drop { Some(format!("drop-{handle}")) } else { None },
+            duration_ms: 0, easing: Easing::EaseOutCubic, last_rect: None,
         };
         book.windows.insert("a".into(), record("a", true, State::Ready, true));
         book.windows.insert("b".into(), record("b", false, State::Ready, true));
@@ -1897,6 +2343,7 @@ mod tests {
             page: "main".into(), title: "面板".into(), label: String::new(), ticket: String::new(), url: String::new(),
             anchor: Anchor::DockLeft, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 0.0, offset_y: 0.0, width: Width::Fixed(420.0), height: 320.0, transparent: false, z_order: ZOrder::Normal, hit_test: HitTest::Window, hit_rects: Vec::new(),
             state: State::Pending, shown: false, hidden_by_dock: false, rect: None, drop: None,
+            duration_ms: 0, easing: Easing::EaseOutCubic, last_rect: None,
         }
     }
 
@@ -2094,6 +2541,7 @@ mod tests {
             page: "main".into(), title: "面板".into(), label: "plugin-win-9".into(), ticket: "secret-ticket".into(), url: "http://plugin/page".into(),
             anchor: Anchor::DockLeft, align: Align::RightCenter, anchor_base: AnchorBase::Window, offset_x: 8.0, offset_y: 0.0, width: Width::Fixed(500.0), height: 240.0, transparent: true, z_order: ZOrder::Normal, hit_test: HitTest::Window, hit_rects: Vec::new(),
             state: State::Ready, shown: true, hidden_by_dock: false, rect: None, drop: None,
+            duration_ms: 0, easing: Easing::EaseOutCubic, last_rect: None,
         };
         let view = view(&rec);
         assert_eq!(view["handle"], "h");
@@ -2210,5 +2658,136 @@ mod tests {
         let (fallback_x, fallback_y, _, _) = placement(&rec, &screens, window, None, 1.0);
         assert_eq!(fallback_x, 0, "没有胶囊时按窗口左缘算，再被工作区夹回左缘");
         assert_eq!(fallback_y, 48, "垂直按窗口 132 高中点 66 再减半高 18");
+    }
+
+    // P4：dock-bottom 以基准底边中点为锚点（与 dock-left 用左边中点对称）。
+    #[test]
+    fn dock_bottom_anchors_at_the_bottom_center_not_the_left_corner() {
+        use crate::screen::{Area, Screens};
+        let primary = Area { x:0, y:0, w:1920, h:1040, sf:1.0, mon:(0,0,1920,1080) };
+        let screens = Screens { areas:vec![primary], primary:Some(primary) };
+        let mut rec = pending_record("acme.notes", "bar");
+        rec.anchor = Anchor::DockBottom;
+        rec.align = Align::TopCenter;
+        rec.width = Width::Fixed(420.0); rec.height = 72.0;
+        rec.anchor_base = AnchorBase::Capsule;
+        let window = Some((0, 0, 1920, 132));
+        let capsule = Some((810, 8, 300, 36));
+        let (x, y, _, _) = placement(&rec, &screens, window, capsule, 1.0);
+        assert_eq!(x, 960 - 210, "TopCenter 以底边中点为锚：960-210=750");
+        assert_eq!(y, 44, "窗口顶贴胶囊底边");
+        // 缺省 align 由 Options::parse 决定：dock-bottom → left-top（P4 下锚点=底边中点）。
+        let parsed = Options::parse(&json!({"key":"bar","page":"main","anchor":"dock-bottom","width":420,"height":72,"anchorBase":"capsule"})).unwrap();
+        assert_eq!(parsed.align, Align::LeftTop, "dock-bottom 缺省仍 left-top");
+        let mut default = pending_record("acme.notes", "bar");
+        default.anchor = parsed.anchor; default.align = parsed.align; default.anchor_base = parsed.anchor_base;
+        default.width = parsed.width; default.height = parsed.height;
+        let (dx, _, _, _) = placement(&default, &screens, window, capsule, 1.0);
+        assert_eq!(dx, 960, "dock-bottom 缺省 left-top 下，锚点从「左下角」改为「底边中点」（P4）");
+    }
+
+    // H2：动画补间——两条曲线端点精确、中点合理。
+    #[test]
+    fn tween_hits_both_ends_and_is_monotonic() {
+        assert!((ease_at(Easing::Linear, 0.0) - 0.0).abs() < 1e-9);
+        assert!((ease_at(Easing::Linear, 1.0) - 1.0).abs() < 1e-9);
+        assert!((ease_at(Easing::Linear, 0.5) - 0.5).abs() < 1e-9);
+        assert!(ease_at(Easing::EaseOutCubic, 0.0).abs() < 1e-9);
+        assert!((ease_at(Easing::EaseOutCubic, 1.0) - 1.0).abs() < 1e-9);
+        assert!(ease_at(Easing::EaseOutCubic, 0.5) > 0.5);
+        assert!(ease_at(Easing::Spring, 0.0).abs() < 1e-9);
+        assert!((ease_at(Easing::Spring, 1.0) - 1.0).abs() < 1e-6, "弹簧末端收敛到 1");
+        assert!(ease_at(Easing::Spring, 0.9) > 0.99, "接近末尾已基本到位");
+        assert_eq!(tween(100.0, 200.0, 1.0, Easing::Linear), 200.0);
+        assert_eq!(tween(100.0, 200.0, 0.0, Easing::Linear), 100.0);
+    }
+
+    // H2：update 接受 duration/easing；缺省 duration=0 保持瞬时。
+    #[test]
+    fn update_accepts_duration_and_easing_and_defaults_to_instant() {
+        let mut rec = pending_record("acme.notes", "bar");
+        assert_eq!(rec.duration_ms, 0, "缺省瞬时");
+        assert_eq!(rec.easing, Easing::EaseOutCubic, "缺省曲线");
+        validate_update(&mut rec, &json!({"duration": 220, "easing": "spring"})).unwrap();
+        assert_eq!(rec.duration_ms, 220);
+        assert_eq!(rec.easing, Easing::Spring);
+        assert!(validate_update(&mut rec, &json!({"easing": "bounce"})).is_err());
+        assert!(validate_update(&mut rec, &json!({"duration": 99999})).is_err());
+        validate_update(&mut rec, &json!({"duration": 0})).unwrap();
+        assert_eq!(rec.duration_ms, 0, "duration:0 回到瞬时");
+    }
+
+    // H6：reopen 语义——保留句柄与订阅，不重置状态。
+    #[test]
+    fn reopen_keeps_the_same_handle_and_drop_subscription() {
+        let mut registry = Book { windows: BTreeMap::new(), dock: None, next: 0, sessions: BTreeMap::new(), outputs: BTreeMap::new(), dock_hidden: false };
+        registry.sessions.insert("acme.notes".into(), 1);
+        let mut rec = pending_record("acme.notes", "ball");
+        rec.state = State::Ready; rec.shown = true; rec.rect = Some((0,0,36,36));
+        let (rec, _) = registry.reserve(rec).unwrap();
+        let handle = rec.handle.clone();
+        registry.windows.get_mut(&handle).unwrap().drop = Some("drop-x".into());
+        let after = registry.windows.get(&handle).unwrap();
+        assert_eq!(after.handle, handle);
+        assert_eq!(after.drop.as_deref(), Some("drop-x"), "reopen 不得丢订阅");
+        assert_eq!(after.state, State::Ready, "reopen 不重置状态");
+    }
+
+    // H7：胶囊未知时 anchorBase=capsule 保持上次位置，不回落整窗。
+    #[test]
+    fn capsule_unknown_keeps_last_position_instead_of_the_whole_window() {
+        use crate::screen::{Area, Screens};
+        let primary = Area { x:0, y:0, w:1920, h:1040, sf:1.0, mon:(0,0,1920,1080) };
+        let screens = Screens { areas:vec![primary], primary:Some(primary) };
+        let mut rec = pending_record("acme.notes", "ball");
+        rec.anchor = Anchor::DockLeft; rec.align = Align::RightCenter; rec.anchor_base = AnchorBase::Capsule;
+        rec.width = Width::Fixed(36.0); rec.height = 36.0;
+        let with = placement(&rec, &screens, Some((0,0,1920,132)), Some((810, 8, 300, 36)), 1.0);
+        let kept = placement_h7(&rec, &screens, Some((0,0,1920,132)), None, 1.0, Some(with));
+        assert_eq!(kept, with, "胶囊未知时保持上次位置");
+        let fresh = placement_h7(&rec, &screens, Some((0,0,1920,132)), None, 1.0, None);
+        let fallback = placement(&rec, &screens, Some((0,0,1920,132)), None, 1.0);
+        assert_eq!(fresh, fallback, "没有上次位置时回落到既有算法");
+    }
+
+    // H9（DEC-1）：吸收覆盖窗按落点所在显示器的 DPI 缩放，多屏各按各的 sf（不再硬编码 1.0）。
+    #[test]
+    fn goo_scale_follows_the_monitor_under_the_drop_point() {
+        use crate::screen::{Area, Screens};
+        let primary = Area { x:0, y:0, w:1920, h:1040, sf:1.0, mon:(0,0,1920,1080) };
+        let hdpi = Area { x:1920, y:0, w:1600, h:900, sf:1.5, mon:(1920,0,3840,960) };
+        let screens = Screens { areas:vec![primary, hdpi], primary:Some(primary) };
+        assert_eq!(goo_scale_for(&screens, (500, 40)), 1.0, "100% 屏落点用 1.0");
+        assert_eq!(goo_scale_for(&screens, (2600, 40)), 1.5, "150% 屏落点用 1.5，不是硬编码 1.0");
+        // 空屏表也绝不返回 0/NaN：回落 1.0。
+        let empty = Screens { areas:vec![], primary:None };
+        assert_eq!(goo_scale_for(&empty, (10, 10)), 1.0, "拿不到显示器时回落 1.0");
+    }
+
+    // H2：补间帧序列——首帧靠近起点、末帧精确到目标、步骤数随 duration 缩放。
+    #[test]
+    fn tween_frames_start_near_start_and_end_at_target() {
+        let start = (100, 100, 36, 36);
+        let target = (400, 200, 531, 72);
+        // 末帧（t=1）精确落到目标。
+        let last = tween_frame(start, target, anim_frame_t(anim_steps(220), 220), Easing::Linear);
+        assert_eq!(last, (400, 200, 531, 72), "末帧等于目标几何");
+        // 第一帧（t 小）更靠近起点而非目标。
+        let first = tween_frame(start, target, anim_frame_t(1, 220), Easing::Linear);
+        assert!(first.0 < 400 && first.0 > 100, "首帧在起点与目标之间");
+        // 步骤数：220ms / 16ms ≈ 13 步（至少 1），duration 越大步数越多。
+        assert!(anim_steps(220) > anim_steps(16));
+        assert_eq!(anim_steps(0), 1, "duration:0 至少一帧，不退化为 0");
+    }
+
+    // H-D1：对外契约下限为 32×32（与文档 §3 修订、§8.1 一致）。这条钉住实现的常量，
+    // 将来若有人把下限又调回 160×80，这里立刻红。
+    #[test]
+    fn minimum_size_contract_is_32_logical_pixels() {
+        assert_eq!(WIDTH_MIN, 32.0, "H-D1：宽度下限对外契约为 32 逻辑像素");
+        assert_eq!(HEIGHT_MIN, 32.0, "H-D1：高度下限对外契约为 32 逻辑像素");
+        // 32×32 合法、31×31 拒绝：契约边界一致。
+        assert!(Options::parse(&json!({"key":"ball","page":"main","width":32.0,"height":32.0})).is_ok());
+        assert!(Options::parse(&json!({"key":"ball","page":"main","width":31.0,"height":32.0})).is_err());
     }
 }

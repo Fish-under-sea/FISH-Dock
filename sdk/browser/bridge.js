@@ -65,6 +65,10 @@
     async update(handle, options = {}) {
       return send('dock.windows.update', { ...options, handle: handleOf(handle, '窗口') })
     },
+    // 2.3.4（#88 H6）：单窗口多形态 / keepAlive 回原位，保留句柄与订阅。
+    async reopen(handle, options = {}) {
+      return send('dock.windows.reopen', { ...options, handle: handleOf(handle, '窗口') })
+    },
     async close(handle) {
       const result = await send('dock.windows.close', { handle: handleOf(handle, '窗口') })
       return !!(result && result.closed)
@@ -112,6 +116,16 @@
     async openPage(pageId) {
       if (typeof pageId !== 'string' || !pageId) throw new Error('openPage 需要一个页面 ID')
       return send('dock.dock.openPage', { page: pageId })
+    },
+    // 2.3.4（#88 H10）：登记一块浮窗占位 {x,y,w,h}（页面逻辑像素），主岛据此避让；
+    // 并可把自身矩形纳入主岛命中/拖放面。handle 可选（缺省按本次会话生成）。
+    async reserve(rect, handle) {
+      if (!rect || typeof rect !== 'object') throw new Error('reserve 需要一个 {x,y,w,h} 矩形')
+      return send('dock.dock.reserve', { rect, handle })
+    },
+    // 释放占位：给 handle 按句柄释放，缺省释放本插件全部占位。
+    async release(handle) {
+      return send('dock.dock.release', { handle })
     },
   })
   // 宿主保留 Escape 出口：透明浮窗没有原生关闭按钮时，页面里按 Escape 也要能真正关掉。

@@ -23,6 +23,99 @@ static SUBSCRIBERS: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
 /// 上一次推出去（或读到时）的快照，用来去重：只在真的变了才发事件。
 static LAST: Mutex<Option<crate::island::DockSnapshot>> = Mutex::new(None);
 
+/// 2.3.4（#88 H10）：插件浮窗向主岛登记的占位矩形（物理像素 x, y, w, h），键是订阅句柄。
+/// 主岛据此把展开高度让出 `h + 8`，并把矩形并进命中/拖放面。按订阅句柄归零，撤销即清。
+static RESERVED: Mutex<BTreeMap<String, (f64, f64, f64, f64)>> = Mutex::new(BTreeMap::new());
+/// 占位上限：与 `island::set_editing` 的 solids 同一约束（最多 8 块）。
+const MAX_RESERVE: usize = 8;
+/// 主岛在预留的浮窗高度下额外留的缝（与旧产物 `GAP + barHeight + 8` 的 +8 对齐）。
+const RESERVE_GAP: f64 = 8.0;
+
+fn reserved() -> MutexGuard<'static, BTreeMap<String, (f64, f64, f64, f64)>> {
+    RESERVED.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// 主岛占位在纵向上要让出的逻辑像素：取最高的那个占位（并排的长条不叠加），
+/// 再加一道 `RESERVE_GAP`。没有占位时为 0（主岛保持既有展开高度）。
+pub fn reserved_extra(list: &[(f64, f64, f64, f64)]) -> f64 {
+    let tallest = list.iter().map(|r| r.3).fold(0.0f64, f64::max);
+    if tallest > 0.0 { tallest + RESERVE_GAP } else { 0.0 }
+}
+
+/// 主岛占位横向并集 (left, right)：把每个占位矩形的 x..x+w 合成一段连续区间。
+pub fn reserved_span(list: &[(f64, f64, f64, f64)]) -> (f64, f64) {
+    if list.is_empty() {
+        return (0.0, 0.0);
+    }
+    let left = list.iter().map(|r| r.0).fold(f64::INFINITY, f64::min);
+    let right = list.iter().map(|r| r.0 + r.2).fold(f64::NEG_INFINITY, f64::max);
+    (left, right)
+}
+
+/// 校验一条占位矩形：{x,y,w,h} 都是有限数，w/h 为正。
+pub fn validate_reserve(value: &Value) -> Result<(f64, f64, f64, f64), String> {
+    let num = |key: &str| value.get(key).and_then(Value::as_f64).filter(|v| v.is_finite());
+    let x = num("x").ok_or("占位 x 必须是有限数")?;
+    let y = num("y").ok_or("占位 y 必须是有限数")?;
+    let w = num("w").ok_or("占位 w 必须是有限数")?;
+    let h = num("h").ok_or("占位 h 必须是有限数")?;
+    if w <= 0.0 || h <= 0.0 {
+        return Err("占位宽高必须为正".into());
+    }
+    Ok((x, y, w, h))
+}
+
+/// 校验一批占位矩形（最多 MAX_RESERVE 个）。
+pub fn validate_reserve_list(list: &[Value]) -> Result<Vec<(f64, f64, f64, f64)>, String> {
+    if list.len() > MAX_RESERVE {
+        return Err(format!("占位最多 {MAX_RESERVE} 块"));
+    }
+    list.iter().map(validate_reserve).collect()
+}
+
+/// 主岛当前占位（物理像素）。没有任何登记时为空，主岛一行代码都不用执行。
+pub fn reservations() -> Vec<(f64, f64, f64, f64)> {
+    reserved().values().copied().collect()
+}
+
+/// 占位登记/更新：句柄由拖入/给窗订阅提供，一把锁里替换，天然串行。
+pub fn reserve(handle: &str, rect: (f64, f64, f64, f64)) -> Result<Value, String> {
+    let mut table = reserved();
+    if !table.contains_key(handle) && table.len() >= MAX_RESERVE {
+        return Err(format!("占位最多 {MAX_RESERVE} 块"));
+    }
+    table.insert(handle.to_string(), rect);
+    drop(table);
+    notify_reserve();
+    Ok(json!({"reserved": true}))
+}
+
+/// 释放一个占位（对应订阅句柄）。幂等：不存在也返回成功。
+pub fn release(handle: &str) -> Result<Value, String> {
+    reserved().remove(handle);
+    notify_reserve();
+    Ok(json!({"reserved": false}))
+}
+
+/// H10：把当前占位算出的预留高度推给主岛页面，页面据此把展开高度让出 `h+8`
+/// 并可把占位矩形并进命中面。没有任何订阅者时跳过（零开销）。
+fn notify_reserve() {
+    if watchers() == 0 {
+        return;
+    }
+    let Ok(app) = crate::plugin_window::app_handle() else { return };
+    use tauri::Emitter as _;
+    let list = reservations();
+    let extra = reserved_extra(&list);
+    let (left, right) = reserved_span(&list);
+    let _ = app.emit_to("island", "island:reserve", json!({
+        "extra": extra,
+        "left": left,
+        "right": right,
+        "rects": list,
+    }));
+}
+
 fn subscribers() -> MutexGuard<'static, BTreeMap<String, u64>> {
     SUBSCRIBERS.lock().unwrap_or_else(|poison| poison.into_inner())
 }
@@ -97,20 +190,44 @@ fn broadcast(payload: &Value) -> usize {
     delivered
 }
 
+/// H4：形态（view / stowed / over-full / hidden）变化作为独立 dock `state` 事件。
+/// `before` 是上一次推送的快照：四态都没变时返回 None（不产生事件）。
+pub fn state_event(snapshot: &crate::island::DockSnapshot, before: Option<&crate::island::DockSnapshot>) -> Option<Value> {
+    let same = before.is_some_and(|b| {
+        b.view == snapshot.view && b.stowed == snapshot.stowed && b.fullscreen == snapshot.fullscreen && b.hidden == snapshot.hidden
+    });
+    if same {
+        return None;
+    }
+    Some(json!({
+        "event": "dock",
+        "type": "state",
+        "view": snapshot.view,
+        "stowed": snapshot.stowed,
+        "overFull": snapshot.fullscreen,
+        "hidden": snapshot.hidden,
+    }))
+}
+
 /// 主岛几何或状态变了。`island.rs` 在胶囊尺寸、视图形态、stow、全屏避让变化后调用。
 ///
 /// 先去重：与上次相同就直接返回，不产生任何重排或 IPC。这条是滑动动画期间
 /// 不刷爆队列的关键——页面每帧都报，但只有真正的变化才继续往下走。
 pub fn notify_changed() {
     let Some(snapshot) = snapshot() else { return };
-    {
+    let before = {
         let mut last = last();
         if last.as_ref() == Some(&snapshot) {
             return;
         }
+        let before = last.clone();
         *last = Some(snapshot.clone());
-    }
+        before
+    };
     broadcast(&json!({"event":"dock","type":"geometry","rect":rect_value(&snapshot)}));
+    if let Some(event) = state_event(&snapshot, before.as_ref()) {
+        broadcast(&event);
+    }
 }
 
 /// 指针进入/离开主岛胶囊。由 `island.rs` 的轮询在跨过边界时调用。
@@ -119,6 +236,42 @@ pub fn notify_pointer(on: bool) {
         "event": "dock",
         "type": "pointer",
         "action": if on { "enter" } else { "leave" },
+    }));
+}
+
+/// 2.3.4（#88 H4）：指针在胶囊上的连续移动（带屏幕物理坐标），供插件做「按主岛位置
+/// 贴边跟随」和 hover 细节。`x,y` 是物理像素；`view/stowed/over-full` 一并带上，
+/// 免插件为一个坐标再问一次快照。
+pub fn notify_pointer_move(x: i32, y: i32, view: &str, stowed: bool, over_full: bool) {
+    if watchers() == 0 {
+        return;
+    }
+    broadcast(&json!({
+        "event": "dock",
+        "type": "pointer",
+        "action": "move",
+        "x": x,
+        "y": y,
+        "view": view,
+        "stowed": stowed,
+        "overFull": over_full,
+    }));
+}
+
+/// 2.3.4（#88 H4）：主岛胶囊上的点击（单击/双击）。`button` 是 'left'/'right'/'double'。
+/// island.rs 在胶囊命中区里检出一次可信按下时调用（不依赖页面 DOM 事件——外部窗口里
+/// 的插件页收不到主岛的 DOM 事件）。
+pub fn notify_click(button: &str, x: i32, y: i32) {
+    if watchers() == 0 {
+        return;
+    }
+    broadcast(&json!({
+        "event": "dock",
+        "type": "pointer",
+        "action": "click",
+        "button": button,
+        "x": x,
+        "y": y,
     }));
 }
 
@@ -148,6 +301,9 @@ pub fn unsubscribe(plugin: &str) -> Result<Value, String> {
         table.remove(plugin);
         table.len()
     };
+    // H10：退订即撤销该插件的全部占位，主岛避让随之回落。
+    let prefix = format!("reserve-{plugin}");
+    reserved().retain(|handle, _| !handle.starts_with(&prefix));
     if after == 0 {
         *last() = None;
         tell_island(false);
@@ -162,6 +318,8 @@ pub fn forget(plugin: &str) {
         table.remove(plugin);
         table.len()
     };
+    let prefix = format!("reserve-{plugin}");
+    reserved().retain(|handle, _| !handle.starts_with(&prefix));
     if after == 0 {
         *last() = None;
         tell_island(false);
@@ -221,8 +379,37 @@ fn dispatch(plugin: &str, generation: u64, method: &str, params: &Value) -> Resu
         "dock.dock.subscribe" | "host.dock.subscribe" => subscribe(plugin, generation),
         "dock.dock.unsubscribe" | "host.dock.unsubscribe" => unsubscribe(plugin),
         "dock.dock.openPage" | "host.dock.openPage" => open_page(plugin, params),
+        // 2.3.4（#88 H10）：浮窗占位注册/释放，纳入主岛布局避让与命中面。
+        "dock.dock.reserve" | "host.dock.reserve" => reserve_op(plugin, generation, params),
+        "dock.dock.release" | "host.dock.release" => release_op(plugin, params),
         _ => Err("主岛方法无效".into()),
     }
+}
+
+/// H10：登记一块占位。`rect` 为页面逻辑像素 {x,y,w,h}（页面 → 物理由插件侧或页面侧
+/// 换算前先按现有约定：宿主统一按物理像素口径——调用方给的是主岛页面的逻辑像素，
+/// 这里按主岛 page_sf 折算）。句柄用调用方提供的订阅令牌，缺省由本次代次生成。
+fn reserve_op(plugin: &str, generation: u64, params: &Value) -> Result<Value, String> {
+    if watchers() == 0 || !subscribers().contains_key(plugin) {
+        return Err("请先订阅主岛事件再登记占位".into());
+    }
+    let rect = validate_reserve(params.get("rect").unwrap_or(params))?;
+    let sf = crate::plugin_window::app_handle().ok().map(|app| crate::island::snapshot(&crate::shared(app)).scale).filter(|s| *s > 0.0).unwrap_or(1.0);
+    let (x, y, w, h) = (rect.0 * sf, rect.1 * sf, rect.2 * sf, rect.3 * sf);
+    let handle = params.get("handle").and_then(Value::as_str).filter(|h| !h.is_empty()).map(str::to_owned)
+        .unwrap_or_else(|| format!("reserve-{plugin}-{generation}"));
+    reserve(&handle, (x, y, w, h))
+}
+
+fn release_op(plugin: &str, params: &Value) -> Result<Value, String> {
+    // 显式给句柄按句柄释放；否则把该插件的所有占位（句柄前缀 reserve-<plugin>-）一起清。
+    if let Some(handle) = params.get("handle").and_then(Value::as_str).filter(|h| !h.is_empty()) {
+        return release(handle);
+    }
+    let prefix = format!("reserve-{plugin}");
+    let mut table = reserved();
+    table.retain(|handle, _| !handle.starts_with(&prefix));
+    Ok(json!({"reserved": false}))
 }
 
 /// 2.2.3（D2）：在本插件的设置面板里打开它的内部页。
@@ -340,6 +527,74 @@ mod tests {
         assert!(live_subscribers().is_empty());
         // 没有订阅者时广播是空操作，不会 panic、也不会触碰任何通道。
         assert_eq!(broadcast(&json!({"event":"dock","type":"pointer","action":"enter"})), 0);
+    }
+
+    // -------------------------------------------------------------------------------
+    // 2.3.4（#88）H4 / H7 / H10：状态事件、实时几何、占位避让
+    // -------------------------------------------------------------------------------
+
+    // H4：形态变化（view/stowed/fullscreen/hidden）作为独立 dock 'state' 事件推送。
+    #[test]
+    fn state_change_emits_a_state_event_with_the_changed_fields() {
+        let mut snapshot = snapshot_of(Some((0, 0, 1920, 132)), Some((810, 8, 300, 36)), "compact");
+        let payload = state_event(&snapshot, None).expect("首次必然推送");
+        assert_eq!(payload["event"], "dock");
+        assert_eq!(payload["type"], "state");
+        assert_eq!(payload["view"], "compact");
+        assert_eq!(payload["stowed"], false);
+        assert_eq!(payload["overFull"], false);
+        assert_eq!(payload["hidden"], false);
+        // 只有真的变化才推送：与上次相同 → None，不产生事件。
+        assert!(state_event(&snapshot, Some(&snapshot)).is_none(), "同态不推");
+        snapshot.stowed = true;
+        let changed = state_event(&snapshot, Some(&snapshot_of(Some((0, 0, 1920, 132)), Some((810, 8, 300, 36)), "compact"))).unwrap();
+        assert_eq!(changed["stowed"], true, "收起状态变了要推");
+    }
+
+    // H10：占位注册表——主岛按占位矩形把展开高度让出来（GAP + barHeight + 8），
+    // 且插件的浮窗矩形可以纳入主岛的命中/拖放面。这里是纯逻辑判据。
+    #[test]
+    fn reservations_raise_the_dock_room_and_extend_hit_rects() {
+        // 基线：没有占位时预留高度为 0、命中面只有主岛自己的区域。
+        assert_eq!(reserved_extra(&[]), 0.0);
+        // 一个 120 逻辑像素高的浮窗：预留 120 + 8（GAP 由调用方并入 h）。
+        let one = vec![(8.0, 132.0, 420.0, 120.0)];
+        assert_eq!(reserved_extra(&one), 128.0, "占位高度 + 8");
+        // 多个占位取最高的那个（并排的长条不叠加），且只算主岛下方的。
+        let many = vec![(8.0, 132.0, 420.0, 120.0), (8.0, 132.0, 300.0, 80.0)];
+        assert_eq!(reserved_extra(&many), 128.0, "取最高，不叠加");
+        // 横向并集的宽度覆盖每个占位矩形的 x..x+w。
+        let span = reserved_span(&many);
+        assert_eq!(span, (8.0, 428.0), "横向并集 8..(8+420)");
+    }
+
+    // H10：占位矩形必须是有限数、宽高为正，且上限 8 个（与 editing solids 同一约束），
+    // 坏的直接拒，不让一条 NaN 进来把整个避让算塌。
+    #[test]
+    fn reservations_reject_bad_numbers_and_too_many() {
+        assert!(validate_reserve(&json!({"x":8,"y":132,"w":420,"h":120})).is_ok());
+        for bad in [
+            json!({"x":8,"y":132,"w":0,"h":120}),
+            json!({"x":8,"y":132,"w":420,"h":-1}),
+            json!({"x":8,"y":132,"w":"420","h":120}),
+            json!({}),
+        ] {
+            assert!(validate_reserve(&bad).is_err(), "坏占位必须拒: {bad}");
+        }
+        let mut list: Vec<Value> = (0..9).map(|i| json!({"x":i,"y":132,"w":40,"h":40})).collect();
+        assert!(validate_reserve_list(&list).is_err(), "超过 8 个占位拒绝");
+        list.truncate(8);
+        assert!(validate_reserve_list(&list).is_ok());
+    }
+
+    // H7：胶囊未知时不回落整窗——外部窗口的 anchorBase 摆放要能识别「无胶囊」并请求
+    // 「保持上次位置」。这里只钉住「无胶囊」这条判据（摆放策略在 plugin_window 里测）。
+    #[test]
+    fn capsule_unknown_is_reported_as_none_not_the_whole_window() {
+        let snapshot = snapshot_of(Some((0, 0, 1920, 132)), None, "compact");
+        assert!(snapshot.capsule.is_none(), "没有上报胶囊时 capsule 必须是 None");
+        // rect_value 对外也必须是 null，而不是把整窗宽当成胶囊。
+        assert!(rect_value(&snapshot)["capsule"].is_null());
     }
 
     // 已停用的插件留在表里也不该被推送：live_subscribers 按当前代次过滤。

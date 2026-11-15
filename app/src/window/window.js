@@ -78,13 +78,15 @@
     toPage({ type: 'fish:result', ticket, id: row.id, ...answer })
   })
 
-  // 宿主事件（ready/closed/anchorChanged/fileDrop）交给插件页的 FishDock.windows.onEvent。
+  // 宿主事件（ready/closed/anchorChanged/fileDrop/dock）交给插件页。2.3.4（#88 B3）：
+  // 用 `...payload` 全量转发，保留 dock 的 type/action/rect/x/y 等字段（旧代码只挑固定
+  // 几个字段，把 dock 事件内容全丢了）；投递类型与 extension-page.js 一致。
   try {
     if (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen) {
       window.__TAURI__.event.listen('plugin:window-event', event => {
         const payload = event && event.payload
         if (!payload || !ticket || payload.generation !== generation) return
-        toPage({ type: 'fish:window-event', ticket, event: payload.event, handle: payload.handle, reason: payload.reason, phase: payload.phase, scope: payload.scope, paths: payload.paths, x: payload.x, y: payload.y, width: payload.width, height: payload.height })
+        toPage({ type: 'fish:window-event', ticket, ...payload })
       })
     }
   } catch {

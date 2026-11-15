@@ -309,6 +309,35 @@
   // 下面的上报一行都不执行——不装插件、装了不启用、或启用没订阅的用户
   // 走的是与 2.2.1 完全相同的路径。
   let watchDock = false
+  // 2.3.4（#88 H10）：插件浮窗占位——预留高度、横向并集与矩形表（物理像素）。
+  let reserveExtra = 0
+  let reserveSpan = null
+  let reserveRects = []
+  let reserveApplied = 0
+  // 2.3.4（#88 H10）：展开高度的纯函数——base 是既有高度，extra 是浮窗预留（GAP+barHeight+8）。
+  // 抽成独立函数便于单测直接验证「占位真的抬高展开高度」，而不是只看字符串。extra<=0 时原样返回。
+  function expandedReserveHeight(base, extra) {
+    const e = Number(extra)
+    return Number.isFinite(e) && e > 0 ? base + e : base
+  }
+  // 把占位预留作用到布局：展开时的高度按 reserveExtra 让出（见 sizeOf('expanded')），
+  // 并触发一次重排让新高度生效。不改任何既有布局宽度/形态；extra 恒为 0 时不改变任何东西
+  // （与 2.2.3 逐像素一致）。
+  function applyReserve() {
+    if (!isOn()) return
+    if (reserveExtra > 0) {
+      island.style.setProperty('--isl-reserve-extra', `${reserveExtra}px`)
+      body.classList.add('isl-reserve')
+    } else {
+      island.style.removeProperty('--isl-reserve-extra')
+      body.classList.remove('isl-reserve')
+    }
+    // 高度真的变了才重排（避免每次同值 reserve 事件都整轮重画）。
+    if (reserveExtra !== reserveApplied) {
+      reserveApplied = reserveExtra
+      if (typeof update === 'function') update()
+    }
+  }
   let lastSentView = ''
   // 2.2.3（E4）：滑出动画逐帧上报的时长。transition 是 220ms，多留尾巴。
   const CAPSULE_TRACK_MS = 320
@@ -1357,7 +1386,10 @@
     body.classList.toggle('isl-stowed', on)
     // Main told whether it is up, and the closed island's size, where a
     // window under it is looked for (none on the taskbar).
-    const { width, height } = home() === 'island' && !screenTop ? sizeOf('compact') : { width: 0, height: 0 }
+    // 2.3.4（#88 P6）：island home 时**恒定**上报 sizeOf('compact')，与是否贴顶无关。
+    // 旧条件 `&& !screenTop` 在贴顶时上报 (0,0) → 宿主 closed_rect=None，导致文件拖不到
+    // 主岛、anchorBase:'capsule' 的窗口回落整窗。
+    const { width, height } = home() === 'island' ? sizeOf('compact') : { width: 0, height: 0 }
     const sent = JSON.stringify([on, width, height])
     if (sent !== stowSent) {
       stowSent = sent
@@ -1418,6 +1450,15 @@
       window.pet.view(view)
     }
   })
+  // 2.3.4（#88 H10）：插件浮窗占位回推。宿主给出预留高度 extra 与横向并集；页面把它
+  // 记下来，供展开布局预留空间（避免长条压住主岛内容），并把占位矩形并入命中面。
+  // 没有插件登记占位时 extra 恒为 0，这里不改变任何既有布局。
+  window.pet.onReserve(({ extra, left, right, rects } = {}) => {
+    reserveExtra = Number(extra) > 0 ? Number(extra) : 0
+    reserveSpan = Number.isFinite(left) && Number.isFinite(right) && right > left ? [left, right] : null
+    reserveRects = Array.isArray(rects) ? rects : []
+    if (typeof applyReserve === 'function') applyReserve()
+  })
 
   function setSize({ width, height }) {
     island.style.width = `${width}px`
@@ -1455,9 +1496,11 @@
     }
     if (name === 'expanded') {
       // As tall as what it says, never shorter than her.
+      // 2.3.4（#88 H10）：插件浮窗登记了占位时，展开高度再让出 reserveExtra（GAP+barHeight+8），
+      // 避免浮窗长条压住主岛内容。没有占位时 reserveExtra 恒为 0，高度与 2.2.3 逐像素一致。
       return withHer
-        ? { width: Math.min(OPEN_MAX_W, Math.max(320, expanded.offsetWidth)), height: Math.max(OPEN_H, expanded.offsetHeight) }
-        : { width: Math.min(OPEN_BARE_MAX_W, Math.max(300, expanded.offsetWidth)), height: Math.max(84, expanded.offsetHeight) }
+        ? { width: Math.min(OPEN_MAX_W, Math.max(320, expanded.offsetWidth)), height: expandedReserveHeight(Math.max(OPEN_H, expanded.offsetHeight), reserveExtra) }
+        : { width: Math.min(OPEN_BARE_MAX_W, Math.max(300, expanded.offsetWidth)), height: expandedReserveHeight(Math.max(84, expanded.offsetHeight), reserveExtra) }
     }
     if (isSide()) return sideCapsule(isHinting() || !!time())
     return { width: compactWidth, height: home() === 'taskbar' ? taskCompactH() : screenTop ? screenTop.height : 36 }
