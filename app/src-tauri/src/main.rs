@@ -157,6 +157,8 @@ mod taskbar;
 mod tasks;
 mod theme;
 mod tokens;
+// DEC-2：顶栏 + dock（第三种家）的布局几何。
+mod topbar;
 mod tray;
 mod updates;
 mod wallpaper;

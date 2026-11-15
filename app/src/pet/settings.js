@@ -59,8 +59,8 @@
   const PART_OF = { identity: 'widgets', backup: 'now', pets: 'look', place: 'look', quiet: 'now', shortcuts: 'now', sessions: 'agents', alerts: 'agents', hold: 'agents', idle: 'agents', notify: 'agents', prompts: 'agents', others: 'agents', files: 'agents', welcome: 'agents', connect: 'agents', update: 'now', net: 'now', crash: 'now' }
   const HEAD_KEY = { working: 's.headWorking', waiting: 's.headWaiting', done: 's.headDone', review: 's.headReview', error: 's.headError' }
   const SIZES = [['small', 0.4], ['medium', 0.55], ['large', 0.75]]
-  const HOMES = ['island', 'taskbar']
-  const HOME_KEY = { island: 's.displayIsland', taskbar: 's.displayTaskbar' }
+  const HOMES = ['island', 'taskbar', 'topbar']
+  const HOME_KEY = { island: 's.displayIsland', taskbar: 's.displayTaskbar', topbar: 's.displayTopbar' }
   // How long what she tells stays (停留多久): the quick choices, until seen,
   // and Custom, whole seconds typed in a box beside them (flow.js holdSecs,
   // zhoupengjie/Wakuwaku#59).
@@ -920,9 +920,11 @@
   function pageLook() {
     const s = snap.settings
     return `${sec(T('home.display'))}<div class="modes">
-        <div class="mode${s.display === 'taskbar' ? '' : ' on'}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span>${esc(T('s.displayIsland'))}</div></div>
+        <div class="mode${s.display !== 'taskbar' && s.display !== 'topbar' ? ' on' : ''}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span>${esc(T('s.displayIsland'))}</div></div>
         <div class="mode${s.display === 'taskbar' ? ' on' : ''}" data-mode="taskbar"><div class="pv"><s></s></div><div class="l"><span class="rd"></span>${esc(T('s.displayTaskbar'))}</div></div>
+        <div class="mode${s.display === 'topbar' ? ' on' : ''}" data-mode="topbar"><div class="pv"><t></t></div><div class="l"><span class="rd"></span>${esc(T('s.displayTopbar'))}</div></div>
       </div>
+      ${s.display === 'topbar' ? `<div class="grp"><div class="note">${esc(T('s.topbarNote'))}</div></div>` : ''}
       ${sec(T('s.builtin'))}
       ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div></div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
       ${part('place', '')}<div class="grp">${islandPosRow()}${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
