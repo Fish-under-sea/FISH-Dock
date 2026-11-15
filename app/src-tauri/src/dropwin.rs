@@ -48,7 +48,7 @@ pub struct Snapshot {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum SnapshotTarget {
+pub enum SnapshotTarget {
     Dock,
     Window,
 }

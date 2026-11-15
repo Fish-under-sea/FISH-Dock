@@ -85,21 +85,35 @@ pub fn reserve(handle: &str, rect: (f64, f64, f64, f64)) -> Result<Value, String
         return Err(format!("占位最多 {MAX_RESERVE} 块"));
     }
     table.insert(handle.to_string(), rect);
+    drop(table);
+    notify_reserve();
     Ok(json!({"reserved": true}))
 }
 
 /// 释放一个占位（对应订阅句柄）。幂等：不存在也返回成功。
 pub fn release(handle: &str) -> Result<Value, String> {
     reserved().remove(handle);
+    notify_reserve();
     Ok(json!({"reserved": false}))
 }
 
-/// 撤销一个插件的全部占位（停用/卸载时调用；占位键是订阅句柄，按插件的订阅表清）。
-pub fn release_all(handles: &[String]) {
-    let mut table = reserved();
-    for handle in handles {
-        table.remove(handle);
+/// H10：把当前占位算出的预留高度推给主岛页面，页面据此把展开高度让出 `h+8`
+/// 并可把占位矩形并进命中面。没有任何订阅者时跳过（零开销）。
+fn notify_reserve() {
+    if watchers() == 0 {
+        return;
     }
+    let Ok(app) = crate::plugin_window::app_handle() else { return };
+    use tauri::Emitter as _;
+    let list = reservations();
+    let extra = reserved_extra(&list);
+    let (left, right) = reserved_span(&list);
+    let _ = app.emit_to("island", "island:reserve", json!({
+        "extra": extra,
+        "left": left,
+        "right": right,
+        "rects": list,
+    }));
 }
 
 fn subscribers() -> MutexGuard<'static, BTreeMap<String, u64>> {
