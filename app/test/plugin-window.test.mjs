@@ -293,3 +293,12 @@ test('#88 H9：存在 goo 吸收覆盖页（Canvas 回放液滴→颈→球）',
   // 起点来自真实落点坐标（fx/fy），目标来自子岛中心（tx/ty）：不是写死动画。
   assert.ok(goo.includes("q.get('fx')") || goo.includes("num('fx'"), '读取真实落点坐标')
 })
+
+// 2.3.4（#88 H10）：桥暴露 onReserve，主岛页面消费预留高度（占位不是只登记不生效）。
+test('#88 H10：bridge 暴露 onReserve，island.js 消费占位预留高度', () => {
+  const bridge = read('src', 'pet', 'bridge.js')
+  assert.ok(bridge.includes("onReserve: on('island:reserve')"), 'bridge 暴露 onReserve')
+  const island = read('src', 'pet', 'island.js')
+  assert.ok(island.includes('window.pet.onReserve'), 'island.js 订阅 onReserve')
+  assert.ok(island.includes('--isl-reserve-extra'), 'island.js 用预留高度作用到布局')
+})

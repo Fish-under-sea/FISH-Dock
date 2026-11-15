@@ -114,6 +114,9 @@
     // 2.2.3（E4）：滑出动画期间逐帧上报胶囊外框（页面视口坐标）；null 表示交还宿主。
     capsuleRect: rect => send('island_capsule_rect', { rect: rect || null }),
     onWatchDock: on('island:watch-dock'),
+    // 2.3.4（#88 H10）：插件浮窗占位变化，宿主回推预留高度 extra 与横向并集
+    // (left,right) 及矩形表；页面据此让出 expand 高度并把占位纳入命中面。
+    onReserve: on('island:reserve'),
     // Something opened up from her taskbar's strip: its window over any
     // other that has come over it (island.rs raise, zhoupengjie/Wakuwaku#55).
     raise: () => send('island_raise'),

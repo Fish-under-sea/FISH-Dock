@@ -309,6 +309,22 @@
   // 下面的上报一行都不执行——不装插件、装了不启用、或启用没订阅的用户
   // 走的是与 2.2.1 完全相同的路径。
   let watchDock = false
+  // 2.3.4（#88 H10）：插件浮窗占位——预留高度、横向并集与矩形表（物理像素）。
+  let reserveExtra = 0
+  let reserveSpan = null
+  let reserveRects = []
+  // 把占位预留作用到布局：给岛底额外留出 extra 的高度（仅当有占位 >0 时）。
+  // 不改任何既有布局宽度/形态；只把展开时的高度增加预留，避免插件长条压住主岛内容。
+  function applyReserve() {
+    if (!isOn()) return
+    if (reserveExtra > 0) {
+      island.style.setProperty('--isl-reserve-extra', `${reserveExtra}px`)
+      body.classList.add('isl-reserve')
+    } else {
+      island.style.removeProperty('--isl-reserve-extra')
+      body.classList.remove('isl-reserve')
+    }
+  }
   let lastSentView = ''
   // 2.2.3（E4）：滑出动画逐帧上报的时长。transition 是 220ms，多留尾巴。
   const CAPSULE_TRACK_MS = 320
@@ -1420,6 +1436,15 @@
       lastSentView = view
       window.pet.view(view)
     }
+  })
+  // 2.3.4（#88 H10）：插件浮窗占位回推。宿主给出预留高度 extra 与横向并集；页面把它
+  // 记下来，供展开布局预留空间（避免长条压住主岛内容），并把占位矩形并入命中面。
+  // 没有插件登记占位时 extra 恒为 0，这里不改变任何既有布局。
+  window.pet.onReserve(({ extra, left, right, rects } = {}) => {
+    reserveExtra = Number(extra) > 0 ? Number(extra) : 0
+    reserveSpan = Number.isFinite(left) && Number.isFinite(right) && right > left ? [left, right] : null
+    reserveRects = Array.isArray(rects) ? rects : []
+    if (typeof applyReserve === 'function') applyReserve()
   })
 
   function setSize({ width, height }) {
