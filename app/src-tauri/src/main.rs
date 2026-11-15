@@ -792,6 +792,8 @@ impl Shared {
         // DEC-2：家的三种形态切换即时生效——topbar 创建/销毁顶栏与 dock 窗口，island/taskbar
         // 保持原样（sync 里按 home 判定）。
         topbar::sync(self);
+        // DEC-3：嵌入任务栏开关/家切换即时生效（默认关；失败回落独立窗口）。
+        embed::refresh(self, island::hwnd(self));
         // The desktop's widgets: made or gone as the layout says, told the rest (desk.rs).
         desk::sync(self);
         if touches_top {
@@ -2423,6 +2425,8 @@ fn main() {
                             }
                             // DEC-2：顶栏/dock 按新显示器/缩放重摆（家是 topbar 时）。
                             crate::topbar::sync(&ticker);
+                            // DEC-3：显示/任务栏变动后重挂嵌入（含 Explorer 重启，按状态机）。
+                            crate::embed::reattach(&ticker, island::hwnd(&ticker));
                         }
                         pet::keep_on_screen(&ticker);
                         island::keep_on_screen(&ticker);

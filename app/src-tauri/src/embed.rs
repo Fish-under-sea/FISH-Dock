@@ -146,3 +146,151 @@ mod tests {
         assert!(!e.hide_standalone());
     }
 }
+
+// ---------------------------------------------------------------------------------
+// 平台绑定（DEC-3）：真正把岛窗口 SetParent 到 Shell_TrayWnd 下并显示/解嵌。用与 shell.rs
+// 同一套 raw FFI（仓库既有风格，不加 crate feature）。SetParent 到文档化 API；补 WS_CHILD、
+// 去 WS_POPUP；坐标相对父窗口；解嵌反向恢复。失败/找不到任务栏返回 Attempt 结果，交
+// Embedder 状态机决定回落。
+
+/// 全局的一次性 Embedder（进程级）：给了开关与家，由 main.rs 的显示/家切换路径驱动。
+static EMBEDDER: std::sync::Mutex<Option<Embedder>> = std::sync::Mutex::new(None);
+
+/// 用当前设置重算 policy（embedTaskbar 开关 + 家是否接管任务栏），并用它驱动一次尝试。
+/// 返回当前状态。由 main.rs 在 home 切换/启动/任务栏重建时调。
+pub fn refresh(sh: &crate::Shared, island_hwnd: isize) -> EmbedState {
+    let embed = sh.setting("embedTaskbar").as_bool().unwrap_or(false);
+    let home_takes = crate::home::Home::parse(sh.setting("display").as_str()).takes_taskbar();
+    let policy = EmbedPolicy::from_settings(embed, home_takes);
+    let mut guard = EMBEDDER.lock().unwrap_or_else(|e| e.into_inner());
+    let e = guard.get_or_insert_with(|| Embedder::new(policy));
+    e.policy = policy;
+    if !policy.enabled {
+        // 关掉：解嵌（若曾嵌入），落到独立窗口。
+        #[cfg(windows)]
+        win::unembed(island_hwnd);
+        e.state = EmbedState::Off;
+        e.attempts = 0;
+        return e.state.clone();
+    }
+    // 已回落：不再重试。
+    if e.state == EmbedState::Fallback {
+        return e.state.clone();
+    }
+    // 尝试嵌入。
+    let attempt = {
+        #[cfg(windows)]
+        {
+            win::try_embed(island_hwnd)
+        }
+        #[cfg(not(windows))]
+        {
+            Attempt::NoTaskbar
+        }
+    };
+    let state = e.on_attempt(attempt);
+    sh.log(&format!("embed: attempt {:?} -> {:?} (tries {})", attempt, state, e.attempts));
+    state
+}
+
+/// Explorer 重启（TaskbarCreated）后要重挂时调：按状态机重试（超时/上限在 Embedder 里）。
+pub fn reattach(sh: &crate::Shared, island_hwnd: isize) -> EmbedState {
+    let mut guard = EMBEDDER.lock().unwrap_or_else(|e| e.into_inner());
+    match guard.as_ref() {
+        Some(e) if e.should_reattach() => {}
+        _ => return guard.as_ref().map(|e| e.state.clone()).unwrap_or(EmbedState::Off),
+    }
+    drop(guard);
+    refresh(sh, island_hwnd)
+}
+
+/// 当前嵌入状态（供页面/日志）。
+pub fn state() -> EmbedState {
+    EMBEDDER.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|e| e.state.clone()).unwrap_or(EmbedState::Off)
+}
+
+/// 嵌入成功才该藏独立窗口（岛自己的独立窗口显示）；否则独立窗口照常。
+pub fn hides_standalone() -> bool {
+    EMBEDDER.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|e| e.hide_standalone()).unwrap_or(false)
+}
+
+#[cfg(windows)]
+mod win {
+    use super::Attempt;
+    use std::ffi::c_void;
+
+    type Hwnd = *mut c_void;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetParent(child: Hwnd, parent: Hwnd) -> Hwnd;
+        fn GetParent(hwnd: Hwnd) -> Hwnd;
+        fn GetWindowLongPtrW(hwnd: Hwnd, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: Hwnd, index: i32, value: isize) -> isize;
+        fn SetWindowPos(hwnd: Hwnd, after: isize, x: i32, y: i32, w: i32, h: i32, flags: u32) -> i32;
+        fn IsWindow(hwnd: Hwnd) -> i32;
+    }
+
+    const GWL_STYLE: i32 = -16;
+    const WS_CHILD: isize = 0x4000_0000;
+    const WS_POPUP: isize = 0x8000_0000u32 as i32 as isize;
+    const HWND_TOP: isize = 0;
+    const SWP_NOSIZE: u32 = 0x1;
+    const SWP_NOMOVE: u32 = 0x2;
+    const SWP_NOACTIVATE: u32 = 0x10;
+    const SWP_FRAMECHANGED: u32 = 0x20;
+
+    // 尝试把岛窗口嵌到主任务栏下。找不到任务栏 / 无效窗口 → NoTaskbar；SetParent 后父不是
+    // 任务栏 → Failed（已回滚）。
+    pub(super) fn try_embed(island: isize) -> Attempt {
+        if island == 0 {
+            return Attempt::Failed;
+        }
+        let tray = crate::shell::explorer_tray();
+        if tray == 0 {
+            return Attempt::NoTaskbar;
+        }
+        // SAFETY: 都是我们自己进程的窗口句柄与任务栏窗口；SetParent 是文档化 API。
+        unsafe {
+            if IsWindow(island as Hwnd) == 0 || IsWindow(tray as Hwnd) == 0 {
+                return Attempt::NoTaskbar;
+            }
+            // 补 WS_CHILD、去 WS_POPUP。
+            let style = GetWindowLongPtrW(island as Hwnd, GWL_STYLE);
+            let child = (style & !WS_POPUP) | WS_CHILD;
+            SetWindowLongPtrW(island as Hwnd, GWL_STYLE, child);
+            let prev = SetParent(island as Hwnd, tray as Hwnd);
+            let now = GetParent(island as Hwnd);
+            if now != tray as Hwnd {
+                // 回滚：恢复 popup、脱离父。
+                let back = (style & !WS_CHILD) | WS_POPUP;
+                SetWindowLongPtrW(island as Hwnd, GWL_STYLE, back);
+                let _ = SetParent(island as Hwnd, prev);
+                return Attempt::Failed;
+            }
+            // 子窗口：坐标相对任务栏，置顶显示。
+            SetWindowPos(island as Hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            Attempt::Ok
+        }
+    }
+
+    // 解嵌：脱离任务栏父，恢复顶层 popup 样式。幂等。
+    pub(super) fn unembed(island: isize) {
+        if island == 0 {
+            return;
+        }
+        // SAFETY: 自己的窗口；SetParent(null) 是文档化的解绑。
+        unsafe {
+            if IsWindow(island as Hwnd) == 0 {
+                return;
+            }
+            if !GetParent(island as Hwnd).is_null() {
+                let style = GetWindowLongPtrW(island as Hwnd, GWL_STYLE);
+                let back = (style & !WS_CHILD) | WS_POPUP;
+                SetWindowLongPtrW(island as Hwnd, GWL_STYLE, back);
+                let _ = SetParent(island as Hwnd, std::ptr::null_mut());
+                SetWindowPos(island as Hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            }
+        }
+    }
+}

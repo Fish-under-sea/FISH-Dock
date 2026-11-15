@@ -744,6 +744,8 @@ fn create(sh: &Arc<Shared>) {
                     crate::tasks::no_transitions(hwnd.0 as isize);
                 }
                 sh.own_window(&win);
+                // DEC-3：岛窗口建好后，若开着嵌入任务栏就尝试嵌入（默认关，失败回落）。
+                crate::embed::refresh(&sh, sh.island.lock().unwrap().hwnd);
                 // Its renderer gone: told, and the page loaded again (crash.rs).
                 crate::crash::watch(&sh, &win);
             }
