@@ -96,3 +96,191 @@ mod tests {
         assert!(!in_dock(MON, 1.0, 3, 0, 0), "左上不命中 dock");
     }
 }
+
+// ---------------------------------------------------------------------------------
+// 真正的顶栏 / dock 窗口（DEC-2）：home=topbar 时在「家」的显示器上创建并显示两个窗口：
+//   label "topbar"：顶上细条（topbar_rect）；label "dock"：底部图标条（dock_rect）。
+// island / taskbar 两种家：这两个窗口销毁，一行不改既有行为。显示变更 / DPI 变化按新几何
+// 重摆（main.rs ticker 的 home::on_displays_changed 之后调 sync）。窗口用与 island 同一套
+// builder（透明 / 无边框 / 置顶 / 不进任务栏 / 不抢焦点）。
+use std::sync::Mutex;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
+use crate::Shared;
+
+struct Managed {
+    label: &'static str,
+    hwnd: isize,
+}
+
+static MANAGED: Mutex<Vec<Managed>> = Mutex::new(Vec::new());
+
+fn has(label: &str) -> bool {
+    MANAGED.lock().unwrap().iter().any(|m| m.label == label)
+}
+
+fn record(label: &'static str, hwnd: isize) {
+    let mut m = MANAGED.lock().unwrap();
+    if let Some(e) = m.iter_mut().find(|e| e.label == label) {
+        e.hwnd = hwnd;
+    } else {
+        m.push(Managed { label, hwnd });
+    }
+}
+
+/// 该不该显示顶栏 / dock：只有 home 是 topbar。
+pub fn wanted(sh: &Shared) -> bool {
+    sh.home() == "topbar"
+}
+
+/// 显示变更 / 家切换 / 启动后调：按当前的「家」创建或销毁顶栏与 dock 窗口，并按当前显示器
+/// 与缩放重摆。幂等。
+pub fn sync(sh: &Arc<Shared>) {
+    if !wanted(sh) {
+        close_one(sh, "topbar");
+        close_one(sh, "dock");
+        return;
+    }
+    let Some((mon, sf)) = crate::island::home_display(sh) else { return };
+    let top = topbar_rect(mon, sf);
+    let icons = dock_icon_count(sh);
+    let dock = dock_rect(mon, sf, icons);
+    ensure(sh, "topbar", "pet/topbar.html?mode=topbar", top, sf);
+    ensure(sh, "dock", "pet/topbar.html?mode=dock", dock, sf);
+    push_state(sh);
+}
+
+fn dock_icon_count(sh: &Shared) -> usize {
+    let w = crate::taskbar::windows_now();
+    flatten_windows(&w).len().max(1)
+}
+
+/// 把一个 app 分组列表摊平成单个窗口列表（每个窗口 {id,title,png,min}）。
+fn flatten_windows(list: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    if let Some(groups) = list.as_array() {
+        for g in groups {
+            if let Some(ws) = g.get("windows").and_then(|w| w.as_array()) {
+                for w in ws {
+                    out.push(w.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 顶栏 / dock 要展示的窗口（运行中的窗口）。
+fn items_for(sh: &Shared) -> serde_json::Value {
+    let w = crate::taskbar::windows_now();
+    let mut items = Vec::new();
+    for win in flatten_windows(&w) {
+        let hwnd = win.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+        if hwnd == 0 {
+            continue;
+        }
+        items.push(serde_json::json!({
+            "hwnd": hwnd,
+            "title": win.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+            "minimized": win.get("min").and_then(|v| v.as_bool()).unwrap_or(false),
+            "icon": win.get("png").and_then(|v| v.as_str()).unwrap_or(""),
+        }));
+    }
+    serde_json::json!(items)
+}
+
+/// 给顶栏/dock 两个窗口推当前状态（窗口列表 + 时钟）。时钟留空由页面按 i18n 格式化。
+pub fn push_state(sh: &Arc<Shared>) {
+    let state = serde_json::json!({
+        "windows": items_for(sh),
+        "clock": "",
+    });
+    for label in ["topbar", "dock"] {
+        let _ = sh.app.emit_to(label, "topbar:state", state.clone());
+    }
+}
+
+/// 创建一个窗口（不存在时），按 rect 摆放；存在则只重摆。
+fn ensure(sh: &Arc<Shared>, label: &'static str, url: &str, rect: (i32, i32, i32, i32), sf: f64) {
+    if let Some(win) = sh.app.get_webview_window(label) {
+        lay(&win, rect);
+        let _ = win.show();
+        return;
+    }
+    if has(label) {
+        return; // 正在创建
+    }
+    record(label, 0);
+    let sh = sh.clone();
+    let url = url.to_string();
+    std::thread::spawn(move || {
+        use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+        let built = WebviewWindowBuilder::new(&sh.app, label, WebviewUrl::App(url.into()))
+            .title("FISH Dock top bar")
+            .inner_size(rect.2 as f64 / sf, rect.3 as f64 / sf)
+            .additional_browser_args(crate::browser_args(&sh))
+            .data_directory(crate::webview_dir(&sh))
+            .transparent(true)
+            .decorations(false)
+            .resizable(false)
+            .maximizable(false)
+            .minimizable(false)
+            .skip_taskbar(true)
+            .shadow(false)
+            .always_on_top(true)
+            .visible_on_all_workspaces(true)
+            .focusable(false)
+            .focused(false)
+            .visible(false)
+            .build();
+        match built {
+            Ok(win) => {
+                lay(&win, rect);
+                #[cfg(windows)]
+                if let Ok(hwnd) = win.hwnd() {
+                    record(label, hwnd.0 as isize);
+                    crate::tasks::no_transitions(hwnd.0 as isize);
+                }
+                sh.own_window(&win);
+                crate::power::webview_rest(&win, false);
+                let _ = win.show();
+                sh.log(&format!("topbar: {label} made at {rect:?}"));
+                push_state(&sh);
+            }
+            Err(err) => sh.log(&format!("topbar: {label} not made: {err}")),
+        }
+    });
+}
+
+fn lay(win: &tauri::WebviewWindow, rect: (i32, i32, i32, i32)) {
+    use tauri::{PhysicalPosition, PhysicalSize};
+    let _ = win.set_position(PhysicalPosition::new(rect.0, rect.1));
+    let _ = win.set_size(PhysicalSize::new(rect.2.max(1) as u32, rect.3.max(1) as u32));
+    let _ = win.set_position(PhysicalPosition::new(rect.0, rect.1));
+}
+
+fn close_one(sh: &Shared, label: &'static str) {
+    if let Some(win) = sh.app.get_webview_window(label) {
+        let _ = win.destroy();
+    }
+    MANAGED.lock().unwrap().retain(|m| m.label != label);
+}
+
+// --- 命令（给顶栏/dock 页面调用）---------------------------------------------
+
+// 点击顶栏缩略项 / dock 图标：把该窗口带到前台（Restore 先还原最小化）。复用 taskbar 的
+// bring-to-front（SetForegroundWindow），这是 DEC-2 的点击决策落地。
+#[tauri::command]
+pub async fn topbar_focus(hwnd: i64, restore: bool) -> bool {
+    let _ = restore;
+    crate::taskbar::taskbar_window(hwnd, "front".to_string())
+}
+
+// 页面刚起来：推一次当前状态（窗口列表）。
+#[tauri::command]
+pub fn topbar_ready(app: tauri::AppHandle) {
+    let sh = crate::shared(&app);
+    push_state(&sh);
+}
+
+

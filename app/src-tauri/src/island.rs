@@ -319,6 +319,11 @@ pub fn display(sh: &Shared) -> Option<(i32, i32, i32, i32)> {
     area(sh).map(|a| a.mon)
 }
 
+// DEC-2/4：「家」所在的显示器与缩放（顶栏/dock 窗口按它摆放）。
+pub fn home_display(sh: &Shared) -> Option<((i32, i32, i32, i32), f64)> {
+    area(sh).map(|a| (a.mon, a.sf))
+}
+
 // Where the window goes, by home. Returns the physical rect if it moved.
 fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
     let home = sh.home();

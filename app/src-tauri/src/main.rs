@@ -789,6 +789,9 @@ impl Shared {
         }
         // Her taskbar on the other displays: its material, its buttons' alignment, her language (bars.rs).
         bars::refresh(self);
+        // DEC-2：家的三种形态切换即时生效——topbar 创建/销毁顶栏与 dock 窗口，island/taskbar
+        // 保持原样（sync 里按 home 判定）。
+        topbar::sync(self);
         // The desktop's widgets: made or gone as the layout says, told the rest (desk.rs).
         desk::sync(self);
         if touches_top {
@@ -2033,6 +2036,8 @@ fn main() {
             taskbar::taskbar_end_task,
             taskbar::taskbar_task_view,
         taskbar::taskbar_task_view_icons,
+        topbar::topbar_focus,
+        topbar::topbar_ready,
             taskbar::taskbar_inputs,
             taskbar::taskbar_input,
             taskbar::taskbar_battery_font,
@@ -2416,6 +2421,8 @@ fn main() {
                             if acts.refresh_bars {
                                 bars::refresh(&ticker);
                             }
+                            // DEC-2：顶栏/dock 按新显示器/缩放重摆（家是 topbar 时）。
+                            crate::topbar::sync(&ticker);
                         }
                         pet::keep_on_screen(&ticker);
                         island::keep_on_screen(&ticker);
