@@ -117,6 +117,8 @@ mod inputs;
 mod island;
 mod jump;
 mod browser;
+// DEC-5：宿主内建日历与「正在播放」的纯逻辑核心（日历不联网、媒体无则不显示）。
+mod calendar;
 mod legacy_ofm;
 mod lhm;
 mod lhm_setup;
