@@ -27,9 +27,11 @@ Tauri/WebView2 顶层窗口（独立 HWND），插件提供里面的 HTML/CSS/JS
 | --- | --- |
 | `windows` | 允许创建/控制本插件的外部窗口 |
 | `file-drop` | 允许订阅文件拖入并接收路径 |
+| `dialogs` | （2.3.4）允许**后端**弹宿主的原生文件夹选择框 `context.dialogs.chooseFolder`；页面侧不提供 |
 
-两种能力都独立于 `storage`，少一个就在入口被拒绝（SDK 本地拒绝 + 宿主再拒绝）。
+三种能力都独立于 `storage`，少一个就在入口被拒绝（SDK 本地拒绝 + 宿主再拒绝）。
 窗口的 `page` 必须是清单 `pages[].id`；资源必须在本插件 `files` 里并通过摘要检查。
+`dialogs` 只有后端能调，页面（`FishDock`）没有同名方法；声明它要求宿主 ≥ 2.3.4，旧宿主会拒装。
 
 ## 3. 浏览器 SDK
 
@@ -101,9 +103,30 @@ export default createPlugin({
 | `context.windows.list()` | `host.windows.list` |
 | `context.fileDrop.subscribe(options)` | `host.fileDrop.subscribe` |
 | `context.fileDrop.unsubscribe(handle)` | `host.fileDrop.unsubscribe` |
+| `context.dialogs.chooseFolder(options)` | `host.dialogs.chooseFolder`（2.3.4） |
 
 宿主把窗口事件作为**单向通知**发 `plugin.windowEvent`（不要求 `events` 能力，
 按 `windows` / `file-drop` 分派）。
+
+### 4.1 选文件夹（`context.dialogs.chooseFolder`，2.3.4）
+
+后端在 `activate`/命令里弹宿主的原生文件夹框，拿回用户选中的绝对路径：
+
+```js
+const { dir } = await context.dialogs.chooseFolder({ title: '选择备份文件夹' })
+if (dir) await context.storage.write('config', 'backup-dir.json', JSON.stringify({ dir }))
+// 用户取消：dir === null，不抛错
+```
+
+| 项 | 值 |
+| --- | --- |
+| 参数 | `{ title?: string, parent?: 'main' }`；未知字段、`title` 非字符串 / 空串 / 超过 80 字 / 含控制字符、`parent` 不是 `'main'`，本地拒绝、不发请求 |
+| 返回 | `Promise<{ dir: string \| null }>`；取消是 `dir: null`，不是错误 |
+| 路径 | 原样返回 Windows 文件系统路径；不折叠 `~`、不规范化大小写或分隔符 |
+| 超时 | **不设 SDK 超时**（选文件夹常超过 5 秒）；会话关闭时才 reject |
+| 错误 | 能力缺失（`DIALOG_CAPABILITY_REQUIRED`）、`DIALOG_BUSY`（已有一个框开着）、`DIALOG_OPERATION_FAILED`、`DIALOG_UNSUPPORTED`（非 Windows） |
+
+一次只允许一个对话框，第二个并发调用得到 `DIALOG_BUSY`；日志只记 `shown/chosen/cancelled`，不记路径。页面侧（`FishDock`）没有这个方法。
 
 完整可运行例子：`sdk/examples/window-file-drop/`
 （`node sdk/examples/window-file-drop/harness.mjs` 在不需要 Dock 的情况下跑完整协议）。

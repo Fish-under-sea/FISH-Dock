@@ -245,6 +245,22 @@ hook 事件在 `events.rs`（Codex 的在 `events_codex.rs`，omp 的在 `events
 | `POST /debug/eval` | `{ page: "pet" \| "island", code }`：在页面里运行一段表达式，返回结果（可以是 Promise） |
 | `POST /debug/walk` | `{ dx, ms }`：立刻走一段 |
 
+### 网页来源一律 403（2.3.4）
+
+端口只绑 `127.0.0.1`，挡不住本机浏览器里的页面对上面这些接口发「简单跨源请求」。所以除了 `/v1` 与 `/v1/*`（它们由 `agent_hub.rs` 自己校验 Host/Origin，`/v1/sessions` 与 `/v1/events` 另要 Bearer），`server.rs` 在 `handle()` 之前、**读正文之前**就判来源：
+
+| 请求 | 判定 |
+| --- | --- |
+| `Origin` 是 `http:`、`https:`、`file:` 开头，或等于 `null`（不区分大小写，容忍前后空白） | 403 `{"error":"not for web pages"}` |
+| `Host` 存在，且去掉可选端口（只认纯数字端口）后不是 `127.0.0.1` / `localhost` / `[::1]` | 403（同上） |
+| 没有 `Origin`，且没有 `Host` 或 `Host` 是本机 | 照常处理 |
+| `Origin` 是 `moz-extension://`、`chrome-extension://` 等扩展来源 | 照常处理 |
+| `/v1` 或 `/v1/*` | 跳过，交给 `agent_hub`（自带校验） |
+
+被拒的请求写进日志，格式 `http: <方法> <路径> from <来源>, turned away (a web page's)`，每种只写一次（复用 `first_time`，上限 8 种）。正文没读完的请求也不影响同一条连接上的下一个请求。
+
+**不带 `Origin` 的本地客户端照常工作**：Claude Code 的 axios HTTP hook、Codex/Antigravity/ZCode/Reasonix/DSH 经本程序 `ureq` 或命令转发的、Node 的 `fetch` / `http`、`curl`、PowerShell 的 `Invoke-RestMethod`、Thunderbird 扩展的 `moz-extension://`、她自己的 `ureq` 转发 `/v1`。设置页「插件示例」里的 `Invoke-RestMethod … /widget` 也不带 `Origin`，可直接复制使用。网页、`file://` 页面则一律 403。
+
 ## 在宠物上确认
 
 交互模式下，终端确认框弹出的同时 PermissionRequest hook 在后台运行，先到先得。`server.rs` 把这个请求交给 `asks.rs` 挂起（`Responder` 里拿着 tiny_http 的请求），回答、超时、终端已答时才回复。后台子 agent 和 `claude -p` 会先等 hook 回复再决定，所以面板的等待时间（30 秒到 5 分钟）就是它们最多被拖住的时间。她不可见时（勿扰、隐藏、全屏），确认直接回 `{}`。

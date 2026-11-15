@@ -107,7 +107,7 @@ impl Manifest {
         if !["node", "native"].contains(&self.backend.runtime.as_str()) || self.backend.args.len() > 32 || self.backend.args.iter().any(|s| s.len() > 1024 || s.contains('\0')) { return Err("插件后端启动声明无效".into()); }
         // 2.2.0：`windows`（外部原生窗口）与 `file-drop`（接收文件拖入路径）都是独立
         // 能力，不与 `storage` 捆绑；没声明的插件既开不了窗也收不到路径。
-        if self.capabilities.len() > 16 || self.capabilities.iter().any(|c| !["storage", "events", "network", "services", "system-proxy", "windows", "file-drop", "dock"].contains(&c.as_str())) { return Err("插件声明了当前宿主不支持的能力".into()); }
+        if self.capabilities.len() > 16 || self.capabilities.iter().any(|c| !["storage", "events", "network", "services", "system-proxy", "windows", "file-drop", "dock", "dialogs"].contains(&c.as_str())) { return Err("插件声明了当前宿主不支持的能力".into()); }
         let mut seen = HashSet::new();
         if self.capabilities.iter().any(|s| !seen.insert(s)) { return Err("插件能力重复".into()); }
         let mut names = HashSet::new();
@@ -181,5 +181,18 @@ mod tests {
             "capabilites": ["storage"]
         });
         assert!(serde_json::from_value::<Manifest>(json).is_err(), "拼错的字段名必须报错");
+    }
+
+    // 2.3.4 DLG-1：新增 `dialogs` 能力，与 storage 等平级、不捆绑；拼错仍拒绝。
+    #[test] fn dialogs_capability_is_allowed_and_misspellings_are_not() {
+        let root = std::env::temp_dir().join(format!("fish-manifest-dialogs-{}", crate::now_ms()));
+        let mut manifest = fixture(); manifest.capabilities = vec!["storage".into(), "dialogs".into()];
+        assert!(manifest.validate(&root, Source::ThirdParty, "windows-x86_64").is_ok(), "storage+dialogs 应通过");
+        manifest.capabilities = vec!["dialogues".into()];
+        let error = manifest.validate(&root, Source::ThirdParty, "windows-x86_64").unwrap_err();
+        assert!(error.contains("当前宿主不支持的能力"), "{error}");
+        // 能力总数上限仍是 16。
+        manifest.capabilities = (0..17).map(|n| if n == 0 { "dialogs".to_string() } else { "storage".to_string() }).collect();
+        assert!(manifest.validate(&root, Source::ThirdParty, "windows-x86_64").is_err(), "超过 16 个能力应拒绝");
     }
 }

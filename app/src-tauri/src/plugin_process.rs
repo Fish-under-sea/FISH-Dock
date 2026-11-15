@@ -127,17 +127,29 @@ impl Process {
             let capabilities=row.manifest.capabilities.clone();
             let id=row.manifest.id.clone();
             let context=manager.context.clone();
+            let input_for_dialog=input.clone();
             std::thread::spawn(move||{
                 for value in callback_rx {
                     let method=value.get("method").and_then(Value::as_str).unwrap_or_default();
                     let params=&value["params"];
-                    // 窗口与定向拖入是宿主能力：走 plugin_window 的同一套权限、代次与配额
-                    // 检查；其余（存储）仍走 storage_call。回调线程不持插件实例锁。
-                    let window_call=method.starts_with("host.windows.")||method.starts_with("host.fileDrop.");
-                    let result=if window_call{crate::plugin_window::backend(&context,&id,generation,method,params)}else{storage_call(&namespace,&capabilities,method,params)};
+                    // 2.3.4 DLG-1/DLG-3：按方法前缀归域。窗口与 dialogs 是宿主能力，
+                    // 走各自的权限、代次与配额检查；存储仍走 storage_call。
+                    let call=host_call(method);
+                    // Dialog 分派**不写通用响应**：由 plugin_dialog 的工作线程用同一个 id
+                    // 写回（SyncSender 克隆），否则同一个请求会收到两帧；回调线程立刻继续
+                    // 服务同一插件的其它调用，不被用户迟迟不关的模态框挡住。
+                    if call==HostCall::Dialog {
+                        crate::plugin_dialog::dispatch(&context,&id,generation,value["id"].clone(),method,params.clone(),input_for_dialog.clone());
+                        continue;
+                    }
+                    let result=match call{
+                        HostCall::Window=>crate::plugin_window::backend(&context,&id,generation,method,params),
+                        HostCall::Storage=>storage_call(&namespace,&capabilities,method,params),
+                        HostCall::Dialog=>unreachable!(),
+                    };
                     let response=match result{
                         Ok(result)=>json!({"id":value["id"],"result":result}),
-                        Err(error) if window_call=>json!({"id":value["id"],"error":crate::plugin_window::failure(&error)}),
+                        Err(error) if call==HostCall::Window=>json!({"id":value["id"],"error":crate::plugin_window::failure(&error)}),
                         Err(_)=>json!({"id":value["id"],"error":{"code":"HOST_OPERATION_FAILED","message":"宿主操作失败，请检查存储类别与声明能力"}})
                     };
                     if input.send(response).is_err(){break}
@@ -410,6 +422,18 @@ impl Log {
         match fs::OpenOptions::new().create(true).append(true).open(&self.path){Ok(file)=>{self.file=file;self.size=0;true},Err(_)=>false}
     }
 }
+
+// 2.3.4 DLG-1：宿主回调按方法名前缀归域。以前只用 host.windows./host.fileDrop.
+// 判断是否走 plugin_window，host.dock.* 与将来的 host.dialogs.* 都会落进
+// storage_call 回 HOST_OPERATION_FAILED（#88 P3）。抽成纯函数以便单测。
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum HostCall { Window, Dialog, Storage }
+pub fn host_call(method:&str)->HostCall {
+    if method.starts_with("host.windows.")||method.starts_with("host.fileDrop.")||method.starts_with("host.dock.") { HostCall::Window }
+    else if method.starts_with("host.dialogs.") { HostCall::Dialog }
+    else { HostCall::Storage }
+}
+
 fn storage_call(ns:&Namespace,capabilities:&[String],method:&str,params:&Value)->Result<Value,String>{
     if !capabilities.iter().any(|c|c=="storage"){return Err("插件未声明存储能力".into());}
     let category=params["category"].as_str().ok_or("存储调用缺少类别")?;
@@ -623,6 +647,19 @@ mod tests {
         runner.uninstall(&manager,"acme.weather").unwrap();assert!(manager.list().unwrap().is_empty());
         assert_eq!(ns.read("keys","test.json").unwrap().unwrap(),b"synthetic");
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    // 2.3.4 DLG-1：把 host.* 方法路由抽成纯函数。host.dock.* 曾落进 storage_call 回
+    // HOST_OPERATION_FAILED（#88 P3）；dialogs 同理。三类前缀各归其域。
+    #[test]fn host_call_routes_window_dialog_and_storage(){
+        assert_eq!(host_call("host.windows.open"),HostCall::Window);
+        assert_eq!(host_call("host.windows.update"),HostCall::Window);
+        assert_eq!(host_call("host.fileDrop.subscribe"),HostCall::Window);
+        assert_eq!(host_call("host.dock.rect"),HostCall::Window,"host.dock.* 也走窗口域（#88 P3）");
+        assert_eq!(host_call("host.dock.subscribe"),HostCall::Window);
+        assert_eq!(host_call("host.dialogs.chooseFolder"),HostCall::Dialog);
+        assert_eq!(host_call("host.storage.read"),HostCall::Storage);
+        assert_eq!(host_call("host.storage.writeSecret"),HostCall::Storage);
+        assert_eq!(host_call("host.exec"),HostCall::Storage);
     }
     #[test]fn callbacks_are_bound_to_capability_category_and_namespace(){
         let root=std::env::temp_dir().join(format!("fish-callback-{}-{}",std::process::id(),crate::now_ms())).join(".plugin.acme.weather");

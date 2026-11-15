@@ -105,6 +105,47 @@ fn first_time(said: &mut Vec<String>, line: &str) -> bool {
     true
 }
 
+// ---- 2.3.4 SEC-1：本地端口在 handle() 之前拒绝网页请求（照上游 e143563e） ----
+// 只绑 127.0.0.1 挡不住本机浏览器里的页面：任意网页都能对这几个接口发「简单
+// 跨源请求」。除 /v1（它自己有 Host/Origin/Bearer 校验）外，网页来源一律 403，
+// 且在任何正文被读之前拒绝。下面几个是纯函数，便于单测。
+
+// 请求头，有就取第一个。
+fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
+    req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str())
+}
+
+// Host 是否指向本机（后面可以带一个纯数字端口）。
+fn is_local_host(host: &str) -> bool {
+    let name = host.rsplit_once(':').filter(|(_, port)| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit())).map_or(host, |(name, _)| name);
+    matches!(name.to_ascii_lowercase().as_str(), "127.0.0.1" | "localhost" | "[::1]")
+}
+
+// 网页发来的 Origin：站点的、文件的，或不透明来源（"null"）。
+fn is_page_origin(origin: &str) -> bool {
+    let origin = origin.trim().to_ascii_lowercase();
+    origin == "null" || ["http:", "https:", "file:"].iter().any(|scheme| origin.starts_with(scheme))
+}
+
+// 网页请求的判定核心（纯函数）：返回写进日志的理由；该服务的返回 None。
+fn turned_away_parts(method: &str, path: &str, host: Option<&str>, origin: Option<&str>) -> Option<String> {
+    if path == "/v1" || path.starts_with("/v1/") {
+        return None;
+    }
+    let from = match (origin, host) {
+        (Some(origin), _) if is_page_origin(origin) => format!("the web page {origin}"),
+        (_, Some(host)) if !is_local_host(host) => format!("a page by the name {host}"),
+        _ => return None,
+    };
+    Some(format!("{method} {path} from {from}"))
+}
+
+// 网页的请求：返回写进日志的理由；该服务的返回 None。
+fn turned_away(req: &Request) -> Option<String> {
+    let path = req.url().split('?').next().unwrap_or("");
+    turned_away_parts(req.method().as_str(), path, header(req, "Host"), header(req, "Origin"))
+}
+
 pub fn serve(sh: Arc<Shared>, server: Server) {
     // 2.0.4 T-Q：排障日志开关统一走 config（新名 FISH_DOCK_DEBUG 优先，旧
     // WAKUWAKU_DEBUG 只读兼容），不再在这里直接读环境变量。
@@ -120,7 +161,16 @@ pub fn serve(sh: Arc<Shared>, server: Server) {
         }
     });
     crate::spawn_named("server", move || {
+        // 2.3.4 SEC-1：每种被拒的请求只记一次，最多 8 种（开着的网页可以每秒发一次）。
+        let mut refused = Vec::new();
         for req in server.incoming_requests() {
+            if let Some(why) = turned_away(&req) {
+                if first_time(&mut refused, &why) {
+                    sh.log(&format!("http: {why}, turned away (a web page's)"));
+                }
+                reply(req, 403, json!({ "error": "not for web pages" }));
+                continue;
+            }
             handle(&sh, req, is_debug);
         }
     });
@@ -540,6 +590,150 @@ mod tests {
         let answer = asker.join().unwrap().unwrap();
         assert_eq!(answer.matches("HTTP/1.1 200").count(), 2, "{answer}");
         assert!(answer.ends_with("two"), "{answer}");
+    }
+
+    // ---- 2.3.4 SEC-1/SEC-3：本地端口在 handle() 之前拒绝网页请求 ----
+    // 纯函数：网页 Origin（站点的、文件的、或不透明来源 "null"）判定。
+    #[test]
+    fn a_web_page_origin_is_recognised() {
+        for origin in ["null", "NULL", " https://evil.example", "http://127.0.0.1:47213", "http://localhost:5173", "file://"] {
+            assert!(is_page_origin(origin), "{origin:?} 是网页来源");
+        }
+        for origin in ["", "moz-extension://abcd", "chrome-extension://abcd", "moz-extension://x@y"] {
+            assert!(!is_page_origin(origin), "{origin:?} 不是网页来源");
+        }
+    }
+
+    // 纯函数：Host 指向本机（可带一个纯数字端口）。
+    #[test]
+    fn a_local_host_is_recognised() {
+        for host in ["127.0.0.1", "127.0.0.1:47213", "localhost", "localhost:47213", "[::1]", "[::1]:47213", "LOCALHOST:80"] {
+            assert!(is_local_host(host), "{host:?} 是本机");
+        }
+        for host in ["evil.example:47213", "localhost.evil:47213", "127.0.0.1.evil", "evil.example", "127.0.0.1:abc", "example.com:"] {
+            assert!(!is_local_host(host), "{host:?} 不是本机");
+        }
+    }
+
+    // 被拒的请求：返回写进日志的理由；/v1 交给 agent_hub，返回 None。
+    // 用纯函数 turned_away_parts 表达（不依赖真实 socket），Decision 逐字核对。
+    #[test]
+    fn a_web_pages_requests_are_turned_away() {
+        // 6 个网页 Origin 为真、3 个非网页 Origin 为假（覆盖在上面的 origin 用例）。
+        assert!(is_page_origin("null") && is_page_origin("https://evil.example") && !is_page_origin("moz-extension://x"));
+
+        // 6 条放行请求：turned_away_parts == None。
+        let allowed: [(&str, &str, Option<&str>, Option<&str>); 6] = [
+            ("POST", "/hook", Some("localhost"), None),
+            ("POST", "/hook", Some("127.0.0.1:47213"), None),
+            ("POST", "/widget", Some("127.0.0.1"), Some("moz-extension://abcd")),
+            ("POST", "/widget", None, None),
+            ("GET", "/health", Some("127.0.0.1:9999"), None),
+            ("POST", "/hook", Some("[::1]:47213"), None),
+        ];
+        for (method, path, host, origin) in allowed {
+            assert_eq!(turned_away_parts(method, path, host, origin), None, "应放行: {method} {path} host={host:?} origin={origin:?}");
+        }
+
+        // /v1 与 /v1/*：不归它管（返回 None），即使带恶意 Origin。
+        for path in ["/v1", "/v1/info", "/v1/sessions"] {
+            assert_eq!(turned_away_parts("GET", path, Some("evil.example"), Some("https://evil.example")), None, "{path} 交给 agent_hub");
+        }
+
+        // 5 条被拒请求：403，且理由逐字匹配。
+        let refused: [(&str, &str, Option<&str>, Option<&str>, &str); 5] = [
+            ("POST", "/quit", Some("127.0.0.1"), Some("https://evil.example"), "POST /quit from the web page https://evil.example"),
+            ("POST", "/debug/eval", Some("127.0.0.1"), Some("null"), "POST /debug/eval from the web page null"),
+            ("POST", "/hook", Some("127.0.0.1"), Some("http://localhost:5173"), "POST /hook from the web page http://localhost:5173"),
+            ("POST", "/state", Some("127.0.0.1"), Some("file://"), "POST /state from the web page file://"),
+            ("GET", "/health", Some("evil.example:47213"), None, "GET /health from a page by the name evil.example:47213"),
+        ];
+        for (method, path, host, origin, why) in refused {
+            assert_eq!(turned_away_parts(method, path, host, origin).as_deref(), Some(why), "{method} {path}");
+        }
+        // 同一请求同时带网页 Origin 与本机 Host：Origin 优先。
+        assert_eq!(
+            turned_away_parts("POST", "/quit", Some("127.0.0.1"), Some("https://evil.example")).as_deref(),
+            Some("POST /quit from the web page https://evil.example")
+        );
+    }
+
+    // 被拒的 POST 正文未读时，同一条连接上的下一个请求仍正常应答（先 403、后 200）。
+    // 走真实 TCP：第一条用 serve() 同样的 turned_away/reply 早拒（不读正文），
+    // 第二条是普通 GET，仍读到并 200。
+    #[test]
+    fn a_refused_post_body_unread_keeps_the_next_request_working() {
+        use std::io::Write;
+        use std::time::Duration;
+        let server = Server::http(("127.0.0.1", 0)).unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let asker = std::thread::spawn(move || -> std::io::Result<String> {
+            let mut conn = std::net::TcpStream::connect(("127.0.0.1", port))?;
+            conn.set_read_timeout(Some(Duration::from_secs(5)))?;
+            // 一条带网页 Origin 的 POST /quit（正文完整发来，但服务端早拒、不读），
+            // 紧接一条 GET /health，同一条连接。
+            conn.write_all(b"POST /quit HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://evil.example\r\nContent-Length: 5\r\n\r\nhello")?;
+            conn.write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")?;
+            let mut answer = String::new();
+            conn.read_to_string(&mut answer)?;
+            Ok(answer)
+        });
+        // 第一条：被拒，403，正文不读。
+        let quit = server.recv_timeout(Duration::from_secs(5)).unwrap().expect("被拒的 POST");
+        assert_eq!(quit.url(), "/quit");
+        let why = turned_away(&quit).expect("应被拒");
+        reply(quit, 403, json!({ "error": "not for web pages" }));
+        assert!(why.contains("POST /quit"));
+        // 第二条：正常 GET /health，200（正文未读的 POST 没把连接弄坏）。
+        let health = server.recv_timeout(Duration::from_secs(5)).unwrap().expect("下一条 GET");
+        assert_eq!(health.url(), "/health");
+        reply(health, 200, json!({ "ok": true }));
+        let answer = asker.join().unwrap().unwrap();
+        assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
+        assert_eq!(answer.matches("HTTP/1.1 200").count(), 1, "第二个请求 200: {answer}");
+    }
+
+    // 2.3.4 SEC-1 独立复验（验证会话 ds-verify-a）：用原始 TCP 管道对真实 tiny_http
+    // Server 逐条重放攻击与放行，断言**线上字节**（状态行 + JSON 正文），不只看纯函数。
+    // 覆盖：恶 Origin 403、恶 Host 403、Origin+本机 Host 仍 403、无 Origin 的本机 curl 放行 200、
+    // /v1/* 带恶 Origin 不归 turned_away（由 agent_hub 判，这里断言不被本层拒）、
+    // 以及 403 正文逐字为 {"error":"not for web pages"}。
+    #[test]
+    fn independent_raw_tcp_replays_attacks_and_allows_native_clients() {
+        use std::io::{Read, Write};
+        use std::time::Duration;
+        fn send(port: u16, raw: &'static [u8]) -> String {
+            let mut conn = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            conn.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            conn.write_all(raw).unwrap();
+            let mut answer = String::new();
+            conn.read_to_string(&mut answer).unwrap();
+            answer
+        }
+        let server = Server::http(("127.0.0.1", 0)).unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let cases: [(&'static [u8], &str); 5] = [
+            (b"POST /quit HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://evil.example\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", "403"),
+            (b"GET /health HTTP/1.1\r\nHost: evil.example:47213\r\nConnection: close\r\n\r\n", "403"),
+            (b"POST /state HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: null\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}", "403"),
+            (b"POST /widget HTTP/1.1\r\nHost: 127.0.0.1:47213\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}", "200"),
+            (b"GET /v1/info HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://evil.example\r\nConnection: close\r\n\r\n", "200"),
+        ];
+        for (raw, want) in cases {
+            let handle = std::thread::spawn(move || send(port, raw));
+            // 服务端按 serve() 的同一判定 + 回包逻辑处理（真实 socket、真实字节）。
+            let req = server.recv_timeout(Duration::from_secs(5)).unwrap().expect("应有请求");
+            if turned_away(&req).is_some() {
+                reply(req, 403, json!({ "error": "not for web pages" }));
+            } else {
+                reply(req, 200, json!({ "ok": true }));
+            }
+            let answer = handle.join().unwrap();
+            assert!(answer.starts_with(&format!("HTTP/1.1 {want}")), "期望 {want}，实际：{answer}");
+            if want == "403" {
+                assert!(answer.contains("not for web pages"), "403 正文逐字：{answer}");
+            }
+        }
     }
 
     #[test]
