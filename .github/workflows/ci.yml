@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - name: node --test（与本地 verify 同一条命令）
         # 沙箱禁管道 stdio 时用 --test-isolation=none；CI 的 runner 无此限制，但仍沿用
         # 同一条命令以保持一致。浏览器类用例在 runner 有 Chromium 时跑；缺则如实记跳过。
@@ -65,7 +65,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - name: tools/docs/check-readme.mjs
         # 检查 README 的引用、锚点、版本卡与 tauri.conf.json 一致（渲染由 render-readme.mjs）。
         run: node tools/docs/check-readme.mjs
