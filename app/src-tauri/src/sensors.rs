@@ -1002,30 +1002,39 @@ mod imp {
         }
     }
 
+    pub(super) fn system32_exe(name: &str) -> std::path::PathBuf {
+        let root = std::env::var_os("SystemRoot")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"));
+        root.join("System32").join(format!("{name}.exe"))
+    }
+
     // The module blob for this CPU, put in her data folder from the official
     // release (the zip checked, a blob by its stem taken out with Windows'
     // own tar). Done once: a blob already there is kept.
-    fn ensure_module(data: &Path, stem: &str, log: &dyn Fn(&str)) -> Result<(), String> {
+    fn ensure_module(data: &Path, staging: &Path, stem: &str, log: &dyn Fn(&str)) -> Result<(), String> {
         let kept = dir(data).join(format!("{stem}.bin"));
         if kept.exists() {
             return Ok(());
         }
-        let temp = std::env::temp_dir().join("wakuwaku-pawnio");
-        let _ = std::fs::create_dir_all(&temp);
-        let zip = temp.join("modules.zip");
+        std::fs::create_dir_all(staging).map_err(|e| e.to_string())?;
+        let zip = staging.join("modules.zip");
         log("downloading the PawnIO modules");
         download_verify(MODULES_URL, MODULES_SHA, &zip)?;
-        let unzip = temp.join("modules");
+        let unzip = staging.join("modules");
         let _ = std::fs::remove_dir_all(&unzip);
         std::fs::create_dir_all(&unzip).map_err(|e| e.to_string())?;
         // Windows' own tar (bsdtar) extracts a zip.
-        let out = std::process::Command::new("tar").args(["-xf"]).arg(&zip).arg("-C").arg(&unzip).output().map_err(|e| e.to_string())?;
+        let out = std::process::Command::new(system32_exe("tar")).args(["-xf"]).arg(&zip).arg("-C").arg(&unzip).output().map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(&zip);
         if !out.status.success() {
+            let _ = std::fs::remove_dir_all(&unzip);
             return Err(format!("tar: {}", String::from_utf8_lossy(&out.stderr)));
         }
         let found = find_by_stem(&unzip, stem).ok_or_else(|| format!("no {stem} in the modules zip"))?;
         std::fs::create_dir_all(dir(data)).map_err(|e| e.to_string())?;
         std::fs::copy(&found, &kept).map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_dir_all(&unzip);
         log(&format!("kept the module {stem}"));
         Ok(())
     }
@@ -1049,10 +1058,9 @@ mod imp {
 
     // PawnIO's own installer, downloaded (its SHA-256 checked) and run
     // silently; this process is elevated, so no further UAC.
-    fn install_pawnio(log: &dyn Fn(&str)) -> Result<(), String> {
-        let temp = std::env::temp_dir().join("wakuwaku-pawnio");
-        let _ = std::fs::create_dir_all(&temp);
-        let setup = temp.join("PawnIO_setup.exe");
+    fn install_pawnio(staging: &Path, log: &dyn Fn(&str)) -> Result<(), String> {
+        std::fs::create_dir_all(staging).map_err(|e| e.to_string())?;
+        let setup = staging.join("PawnIO_setup.exe");
         log("downloading the PawnIO installer");
         download_verify(PAWNIO_SETUP_URL, PAWNIO_SETUP_SHA, &setup)?;
         log("installing PawnIO");
@@ -1071,13 +1079,30 @@ mod imp {
         let log_path = dir(data).join("setup.log");
         let log = |line: &str| append(&log_path, line);
         log("setup started");
+        // The helper runs with the highest rights at logon, and setup downloads
+        // and runs PawnIO elevated, so both the helper copy and the download
+        // staging folder must sit where only administrators can write.
+        let Some(admin) = admin_dir() else {
+            log("there is no ProgramFiles to put the helper in");
+            return;
+        };
+        if let Err(e) = (|| -> Result<(), String> {
+            std::fs::create_dir_all(&admin).map_err(|e| e.to_string())?;
+            set_admin_only(&admin)
+        })() {
+            log(&format!("the administrator-only folder was not set up: {e}"));
+            return;
+        }
+        let staging = admin.join("staging");
         if with_pawnio && !pawnio_installed() {
-            if let Err(e) = install_pawnio(&log) {
+            if let Err(e) = install_pawnio(&staging, &log) {
+                let _ = std::fs::remove_dir_all(&staging);
                 log(&format!("PawnIO not installed: {e}"));
                 return;
             }
         }
         if !pawnio_installed() {
+            let _ = std::fs::remove_dir_all(&staging);
             log("PawnIO is not installed: nothing to set up");
             return;
         }
@@ -1086,14 +1111,17 @@ mod imp {
             Vendor::Amd => AMD_MODULE,
             Vendor::Intel => INTEL_MODULE,
             Vendor::Other => {
+                let _ = std::fs::remove_dir_all(&staging);
                 log("this CPU is neither AMD nor Intel: nothing to read");
                 return;
             }
         };
-        if let Err(e) = ensure_module(data, stem, &log) {
+        if let Err(e) = ensure_module(data, &staging, stem, &log) {
+            let _ = std::fs::remove_dir_all(&staging);
             log(&format!("the module could not be put in place: {e}"));
             return;
         }
+        let _ = std::fs::remove_dir_all(&staging);
         if let Err(e) = (|| -> std::io::Result<()> {
             std::fs::create_dir_all(dir(data))?;
             std::fs::write(dir(data).join("token"), new_token())
@@ -1101,19 +1129,9 @@ mod imp {
             log(&format!("the token could not be written: {e}"));
             return;
         }
-        // The helper runs with the highest rights at logon, so its exe must
-        // sit where only administrators can write: her exe copied into a
-        // protected %ProgramFiles% folder, the task pointed at the copy. Her
-        // own exe usually lives where the user can write (a portable exe), so
-        // the task must never run it directly.
-        let Some(admin) = admin_dir() else {
-            log("there is no ProgramFiles to put the helper in");
-            return;
-        };
         let source = crate::data::exe().unwrap_or_default();
         let copy = admin.join(HELPER_EXE);
         if let Err(e) = (|| -> Result<(), String> {
-            std::fs::create_dir_all(&admin).map_err(|e| e.to_string())?;
             set_admin_only(&admin)?;
             if source != copy {
                 std::fs::copy(&source, &copy).map_err(|e| e.to_string())?;
@@ -1127,7 +1145,7 @@ mod imp {
         // 1.x 留下的旧任务与旧助手副本：新任务注册成功之前先收掉，避免改名后开机
         // 跑两个助手（旧的还指着 %ProgramFiles%\Wakuwaku\sensors\wakuwaku-sensors.exe）。
         let _ = crate::logon::remove(&legacy_task_name(sid));
-        let _ = std::process::Command::new("schtasks").args(["/End", "/TN", &legacy_task_name(sid)]).output();
+        let _ = std::process::Command::new(system32_exe("schtasks")).args(["/End", "/TN", &legacy_task_name(sid)]).output();
         if let Some(legacy) = legacy_admin_dir() {
             let _ = std::fs::remove_dir_all(&legacy);
             if let Some(parent) = legacy.parent() {
@@ -1145,7 +1163,7 @@ mod imp {
             }
         }
         // Start it now; the Task Scheduler runs it at the highest rights.
-        let run = std::process::Command::new("schtasks").args(["/Run", "/TN", &task_name(sid)]).output();
+        let run = std::process::Command::new(system32_exe("schtasks")).args(["/Run", "/TN", &task_name(sid)]).output();
         match run {
             Ok(out) if out.status.success() => log("the task is started"),
             Ok(out) => log(&format!("the task was registered but did not start: {}", String::from_utf8_lossy(&out.stderr))),
@@ -1161,10 +1179,10 @@ mod imp {
         // on its next round (up to 10 s while she is away), and until then
         // its exe is held open, so the copy could not be deleted (seen in
         // the test VM: the folder stayed with the exe in it).
-        let _ = std::process::Command::new("schtasks").args(["/End", "/TN", &task_name(sid)]).output();
+        let _ = std::process::Command::new(system32_exe("schtasks")).args(["/End", "/TN", &task_name(sid)]).output();
         // 旧任务（1.x 的「Wakuwaku sensors-<SID>」）也先停掉：改名后它仍会在登录时
         // 以最高权限拉起旧副本，必须一起收掉（#t16）。
-        let _ = std::process::Command::new("schtasks").args(["/End", "/TN", &legacy_task_name(sid)]).output();
+        let _ = std::process::Command::new(system32_exe("schtasks")).args(["/End", "/TN", &legacy_task_name(sid)]).output();
         match crate::logon::remove(&task_name(sid)) {
             Ok(true) => log("the task is removed"),
             Ok(false) => log("there was no task to remove"),
@@ -1388,6 +1406,13 @@ mod tests {
         // 旧名仍能被指认与删除（#t16）：改名后旧任务不能继续在登录时跑旧副本。
         assert_eq!(legacy_task_name("S-1-5-21-9"), "Wakuwaku sensors-S-1-5-21-9");
         assert_ne!(task_name("S-1-5-21-9"), legacy_task_name("S-1-5-21-9"));
+        #[cfg(windows)]
+        {
+            let tar = imp::system32_exe("tar");
+            let schtasks = imp::system32_exe("schtasks");
+            assert!(tar.is_absolute() && tar.ends_with(r"System32\tar.exe"), "{tar:?}");
+            assert!(schtasks.is_absolute() && schtasks.ends_with(r"System32\schtasks.exe"), "{schtasks:?}");
+        }
     }
 
     // The token is checked, and only a reading with a known id and a finite
