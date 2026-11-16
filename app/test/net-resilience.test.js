@@ -11,7 +11,9 @@ const vm = require('node:vm')
 const { test } = require('node:test')
 const { t } = require('../src/shared/i18n')
 
-const source = fs.readFileSync(path.join(__dirname, '../src/pet/settings.js'), 'utf8')
+// 按 LF 切片：CI 的 Windows checkout 可能把工作树换成 CRLF，这里先归一再切，
+// 否则 indexOf('\n  ...') 找不到标记，切片会截断成半截代码（SyntaxError 而非断言失败）。
+const source = fs.readFileSync(path.join(__dirname, '../src/pet/settings.js'), 'utf8').replace(/\r\n/g, '\n')
 
 // —— 关于页公告的 8 秒兜底（超时） ————————————————————————————————
 // notesKind 是「该画哪一态」的唯一裁判；aboutNotes 是文案。分两段切出来测，

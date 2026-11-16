@@ -10,7 +10,7 @@ const vm = require('node:vm')
 const { test } = require('node:test')
 const { t } = require('../src/shared/i18n')
 
-const source = fs.readFileSync(path.join(__dirname, '../src/pet/settings.js'), 'utf8')
+const source = fs.readFileSync(path.join(__dirname, '../src/pet/settings.js'), 'utf8').replace(/\r\n/g, '\n')
 const styles = fs.readFileSync(path.join(__dirname, '../src/pet/settings.css'), 'utf8')
 
 // 这次改动新增的全部代码：画眼睛、拼密码框、翻 type、跟着内容走。按函数自身的
