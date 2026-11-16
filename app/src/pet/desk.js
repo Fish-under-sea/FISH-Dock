@@ -114,6 +114,7 @@
     const ids = new Set(entries.map(e => e.id))
     for (const [id, n] of nodes)
       if (!ids.has(id)) {
+        clearTimeout(n.loadingTimer)
         n.el.remove()
         nodes.delete(id)
         tops.delete(id)
@@ -284,7 +285,7 @@
   function fillBoard(n) {
     const e = n.entry
     const box = G.boardBox(e)
-    const shape = JSON.stringify(['board', !!e.folded, e.items.map(x => [G.keyOf(x), x.size, x.at])])
+    const shape = JSON.stringify(['board', !!e.folded, e.items.map(x => [G.keyOf(x), x.size])])
     n.el.className = `dw board${e.folded ? ' folded' : ''}${n.el.classList.contains('hover') ? ' hover' : ''}${menu?.id === e.id ? ' menu' : ''}`
     n.el.style.width = `${box.w}px`
     n.el.style.height = `${box.h}px`
@@ -300,6 +301,14 @@
       n.el.innerHTML = `<div class="db"><canvas class="wpaper"></canvas><div class="btint"></div><div class="bhead"><span class="btitle"></span><span class="bbtns"><button type="button" data-bact="add">&#xE710;</button><button type="button" data-bact="more">&#xE712;</button><button type="button" data-bact="fold"></button></span></div>${tiles}${empty}</div>`
       toolTitles(n.el)
       n.painted = ''
+    } else {
+      e.items.forEach((x, i) => {
+        const tile = n.el.querySelector(`.tile[data-i="${i}"]`)
+        if (!tile) return
+        const r = G.tileRect(x.at, x.size)
+        tile.style.left = `${r.x}px`
+        tile.style.top = `${r.y}px`
+      })
     }
     // The title bar: its name (not while it is being typed), how many, or
     // folded its widgets' glyphs (six, then +N); its buttons' words.
@@ -1460,7 +1469,18 @@
   })
   askEl.addEventListener('contextmenu', ev => ev.preventDefault())
   document.addEventListener('keydown', ev => {
-    if (ev.key !== 'Escape' || !asking) return
+    if (!asking) return
+    if (ev.key === 'Tab') {
+      const btns = [...askEl.querySelectorAll('button[data-ask]')]
+      if (btns.length) {
+        ev.preventDefault()
+        const cur = btns.indexOf(document.activeElement)
+        const next = ev.shiftKey ? (cur <= 0 ? btns.length - 1 : cur - 1) : (cur + 1) % btns.length
+        btns[next]?.focus({ preventScroll: true })
+      }
+      return
+    }
+    if (ev.key !== 'Escape') return
     ev.preventDefault()
     endAsk(false)
   })

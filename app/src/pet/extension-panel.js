@@ -677,7 +677,8 @@
         const width = pct == null ? 30 : (out ? Math.max(2, 100 - pct) : pct)
         const phaseText = known && seen.switching && !out ? text('切换来源', 'Switching source') : phaseName(p.phase)
         const amount = p.total ? `${formatBytes(p.received)} / ${formatBytes(p.total)}` : formatBytes(p.received)
-        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div></div><div class="detail">${p.local === 'out' ? `${pct == null ? 0 : pct}%` : `${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}`}</div><div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div></div>`
+        const foot = out ? '' : `<div class="foot"><button type="button" class="pbtn sm" data-extension-cancel="${esc(p.id || '')}">${esc(text('取消', 'Cancel'))}</button></div>`
+        return `<div class="ext-progress"><div class="ph"><strong>${esc(name)}</strong><span>${esc(phaseText)}</span></div><div class="meter"><div class="bar${pct == null ? ' unsure' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${pct == null ? '' : ` aria-valuenow="${pct}"`}><i style="width:${width}%"></i></div></div><div class="detail">${p.local === 'out' ? `${pct == null ? 0 : pct}%` : `${pct == null ? esc(text('总量未知', 'Size unknown')) : `${pct}%`} · ${esc(amount)}`}</div>${foot}</div>`
       }
       const items = progressItems()
       // #69 S3：模态进度浮层的开关是边沿事件，不是每帧事件（render 一轮里会被调很多次）。
@@ -694,8 +695,17 @@
     }
     // #69：复制位（目录路径、失败块的下载地址）。失败只返回 false，不弹提示——
     // 剪贴板被拒是环境问题，不该把插件卡变成错误现场。
-    const copyText = async value => {
-      try { await window.navigator.clipboard.writeText(String(value ?? '')); return true } catch { return false }
+    const copyText = async (value, el) => {
+      try {
+        await window.navigator.clipboard.writeText(String(value ?? ''))
+        if (el) {
+          el.dataset.copied = '1'
+          el.title = text('已复制', 'Copied')
+        }
+        return true
+      } catch {
+        return false
+      }
     }
     // 不是 <button> 的元素（.extension-location 是 <p> 里的小字）要能点、能聚焦、能按回车：
     // 这里补 role/tabindex/title 与键盘通路。换视图重绘后 mount 会再绑一次。
@@ -704,11 +714,11 @@
       el.setAttribute('role', 'button')
       el.tabIndex = 0
       el.title = hint
-      el.onclick = () => { void copyText(target) }
+      el.onclick = () => { void copyText(target, el) }
       el.onkeydown = event => {
         if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
         event.preventDefault()
-        void copyText(target)
+        void copyText(target, el)
       }
     }
     function mount(root) {
@@ -756,7 +766,13 @@
       if (refresh) refresh.onclick = () => checkUpdates()
       panel.querySelectorAll('[data-extension-action]').forEach(b => { b.onclick = () => action(b.dataset.extensionAction, b.dataset.extensionId) })
       // t29：进度弹窗的取消——真取消（宿主在下一个块返回「已取消」）。
-      panel.querySelectorAll('[data-extension-cancel]').forEach(b => { b.onclick = () => { invoke('extension_cancel', { id: b.dataset.extensionCancel }); } })
+      panel.querySelectorAll('[data-extension-cancel]').forEach(b => {
+        b.onclick = () => {
+          b.disabled = true
+          b.textContent = text('正在取消…', 'Cancelling…')
+          void Promise.resolve(invoke('extension_cancel', { id: b.dataset.extensionCancel })).catch(() => {})
+        }
+      })
       panel.querySelectorAll('[data-extension-page]').forEach(b => { b.onclick = () => { const id = b.dataset.extensionPage.split('/')[0]; if (unlocked(id)) openPage(b.dataset.extensionPage) } })
       const saveRuntime = panel.querySelector('[data-extension-runtime]')
       const nodeBox = panel.querySelector('#extension-node')
@@ -777,7 +793,7 @@
       // #69 S1：目录路径点一下即复制（12px 次级色的小字，行为上是个复制位）。
       // #68 S4：失败块里逐源的 URL 本来就是按钮，直接绑。
       panel.querySelectorAll('.extension-card-meta .extension-location').forEach(el => bindCopy(el, el.textContent, text('点击复制目录路径', 'Click to copy the directory path')))
-      panel.querySelectorAll('[data-extension-copy-url]').forEach(b => { b.onclick = () => { void copyText(b.dataset.extensionCopyUrl) } })
+      panel.querySelectorAll('[data-extension-copy-url]').forEach(b => { b.onclick = () => { void copyText(b.dataset.extensionCopyUrl, b) } })
       // t44：挂载时若进度弹窗已经在（例如切回本页），重新点燃粒子循环；轮询也会再点。
       // 2026-11-01 用户要求：去掉粒子动效，只保留最基本的进度条（不再启动 rAF）
       void load()
