@@ -12,15 +12,24 @@
   let ticket = ''
   let ready = false
   let generation = 0
+  const MAX_CALL_BYTES = 2 * 1024 * 1024
   const pending = new Set()
 
-  function accepts(row) {
-    if (!Number.isSafeInteger(row.id) || row.id < 1 || typeof row.method !== 'string' || !/^[a-zA-Z0-9_.-]{1,100}$/.test(row.method) || /^(host|plugin)\./.test(row.method)) return false
+  function validateCall(row) {
+    if (!row || row.type !== 'fish:call' || !Number.isSafeInteger(row.id) || row.id < 1) return '插件页面请求编号无效（错误码 INVALID_REQUEST）'
+    if (typeof row.method !== 'string' || !/^[a-zA-Z0-9_.-]{1,100}$/.test(row.method) || /^(host|plugin)\./.test(row.method)) return '插件页面请求方法无效（错误码 INVALID_METHOD）'
+    let length = 0
     try {
-      return JSON.stringify(row).length <= 512 * 1024
+      length = JSON.stringify(row).length
     } catch {
-      return false
+      return '插件页面请求无法序列化为 JSON（错误码 INVALID_PAYLOAD）'
     }
+    if (length > MAX_CALL_BYTES) return `插件页面单次请求超过上限（${length} > ${MAX_CALL_BYTES} 字符，上限 2 MiB）（错误码 PAYLOAD_TOO_LARGE）`
+    return ''
+  }
+
+  function accepts(row) {
+    return validateCall(row) === ''
   }
 
   function say(text) {
@@ -79,7 +88,17 @@
       return
     }
     if (row.type !== 'fish:call') return
-    if (!accepts(row) || pending.size >= 16 || pending.has(row.id)) return
+    const validId = Number.isSafeInteger(row.id) && row.id >= 1
+    const rejected = validateCall(row)
+    if (rejected || !accepts(row)) {
+      if (validId) toPage({ type: 'fish:result', ticket, id: row.id, error: rejected })
+      return
+    }
+    if (pending.has(row.id)) return
+    if (pending.size >= 16) {
+      toPage({ type: 'fish:result', ticket, id: row.id, error: '插件页面并发请求过多（上限 16）（错误码 TOO_MANY_REQUESTS）' })
+      return
+    }
     pending.add(row.id)
     let answer
     try {

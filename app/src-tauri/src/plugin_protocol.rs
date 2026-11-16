@@ -1,7 +1,7 @@
 //! JSON 行协议；单条消息有界，响应必须匹配当前请求。
 use std::io::{BufRead, Read};
 use serde_json::Value;
-pub const MAX_LINE:u64=1024*1024;
+pub const MAX_LINE:u64=2*1024*1024;
 // 插件没说清是什么错的时候回给前端的固定提示：业务错误，插件进程仍可继续。
 pub const OPERATION_ERROR:&str="插件操作未完成，请检查配置后重试";
 // 业务错误的码要一路透传到页面（#13-1 / #14-4），编码成「<文案>（错误码 <CODE>）」：

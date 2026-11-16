@@ -28,11 +28,18 @@
   // t19 F4：先报普通页占位再缩成工具栏高度，就是换了个位置的「先大后小」。
   const FIRST_REPORT_MS = 400
 
+  const MAX_CALL_BYTES = 2 * 1024 * 1024
   function identity(event, frame, ticket) { return event.source === frame.contentWindow && event.origin === 'null' && event.data?.ticket === ticket }
+  function validateCall(row) {
+    if (!row || row.type !== 'fish:call' || !Number.isSafeInteger(row.id) || row.id < 1) return '插件页面请求编号无效（错误码 INVALID_REQUEST）'
+    if (typeof row.method !== 'string' || !/^[a-zA-Z0-9_.-]{1,100}$/.test(row.method) || /^(host|plugin)\./.test(row.method)) return '插件页面请求方法无效（错误码 INVALID_METHOD）'
+    let length = 0
+    try { length = JSON.stringify(row).length } catch { return '插件页面请求无法序列化为 JSON（错误码 INVALID_PAYLOAD）' }
+    if (length > MAX_CALL_BYTES) return `插件页面单次请求超过上限（${length} > ${MAX_CALL_BYTES} 字符，上限 2 MiB）（错误码 PAYLOAD_TOO_LARGE）`
+    return ''
+  }
   function accepts(event, frame, ticket) {
-    const row = event.data
-    if (!identity(event,frame,ticket) || row.type !== 'fish:call' || !Number.isSafeInteger(row.id) || row.id < 1 || typeof row.method !== 'string' || !/^[a-zA-Z0-9_.-]{1,100}$/.test(row.method) || /^(host|plugin)\./.test(row.method)) return false
-    try { return JSON.stringify(row).length <= 512 * 1024 } catch { return false }
+    return identity(event, frame, ticket) && validateCall(event.data) === ''
   }
   function create({ invoke, lang, onLayout = () => {}, hostWindow = window, document = window.document, parkDiscardMs = PARK_DISCARD_MS, firstLayoutMs = FIRST_LAYOUT_MS, firstReportMs = FIRST_REPORT_MS, placeholderHeight = PAGE_PLACEHOLDER_H, remembered = () => null }) {
     const frames = new Map(), parked = document.createElement('div')
@@ -200,8 +207,20 @@
         }
         return
       }
-      if (!accepts(event,record.frame,record.ticket) || record.pending.size>=16 || record.pending.has(event.data.id)) return
-      const row=event.data;record.pending.add(row.id)
+      if (event.data?.type !== 'fish:call') return
+      const row=event.data
+      const validId=Number.isSafeInteger(row.id)&&row.id>=1
+      const rejected=validateCall(row)
+      if (rejected) {
+        if (validId) record.frame.contentWindow.postMessage({type:'fish:result',ticket:record.ticket,id:row.id,error:rejected},'*')
+        return
+      }
+      if (record.pending.has(row.id)) return
+      if (record.pending.size>=16) {
+        record.frame.contentWindow.postMessage({type:'fish:result',ticket:record.ticket,id:row.id,error:'插件页面并发请求过多（上限 16）（错误码 TOO_MANY_REQUESTS）'},'*')
+        return
+      }
+      record.pending.add(row.id)
       let response
       try {
         const result=await invoke('extension_page_call',{ticket:record.ticket,method:row.method,params:row.params??{}})
@@ -245,5 +264,5 @@
     } catch { /* 没有事件桥时窗口事件不可用，业务调用照常 */ }
     return { enter,park,sync,dispose(){if(disposed)return;disposed=true;themeObserver?.disconnect();hostWindow.removeEventListener('message',receive);stopWindowEvents?.();clearDiscard();for(const key of frames.keys())retire(key);parked.remove()} }
   }
-  window.ExtensionPage = { accepts, create }
+  window.ExtensionPage = { accepts, validateCall, MAX_CALL_BYTES, create }
 })()

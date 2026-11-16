@@ -1,6 +1,6 @@
 // FISH Dock 插件协议 v1。stdout 专用于协议，业务日志请写 stderr。
 const CATEGORIES = new Set(['credentials','roster','keys','config','exports','backups','tmp']);
-const DEFAULT_LIMIT = 1024 * 1024;
+const DEFAULT_LIMIT = 2 * 1024 * 1024;
 export function createPlugin({ id, input = process.stdin, output = process.stdout,
   activate = async () => {}, deactivate = async () => {}, onEvent = async () => {}, commands = {},
   onError = () => {}, maxLine = DEFAULT_LIMIT, requestTimeout: initialTimeout = 5000 } = {}) {

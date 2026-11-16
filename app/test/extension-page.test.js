@@ -6,9 +6,14 @@ const window = {}
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/pet/extension-page.js'),'utf8'), { window, setTimeout, clearTimeout, URL })
 const frame = { contentWindow: {} }, ticket = 'a'.repeat(64)
 const good = { source: frame.contentWindow, origin: 'null', data: { type:'fish:call', ticket, id:1, method:'status', params:{} } }
-test('插件页桥接受当前隔离窗口和当前票据', () => { assert.equal(window.ExtensionPage.accepts(good, frame, ticket),true) })
-test('其他窗口、旧票据、非隔离来源、保留方法及过大请求均无效', () => {
- for (const event of [{...good,source:{}},{...good,origin:'http://tauri.localhost'}, {...good,data:{...good.data,ticket:'b'.repeat(64)}}, {...good,data:{...good.data,method:'host.storage.read'}}, {...good,data:{...good.data,id:'bad'}}, {...good,data:{...good.data,params:{value:'x'.repeat(1024*1024)}}}]) assert.equal(window.ExtensionPage.accepts(event,frame,ticket),false)
+test('插件页桥接受当前隔离窗口、当前票据以及 1.2 MiB 以上（≤ 2 MiB）的请求', () => {
+ assert.equal(window.ExtensionPage.MAX_CALL_BYTES, 2 * 1024 * 1024)
+ assert.equal(window.ExtensionPage.accepts(good, frame, ticket), true)
+ const payload13MiB = { ...good, data: { ...good.data, params: { value: 'x'.repeat(Math.ceil(1.3 * 1024 * 1024)) } } }
+ assert.equal(window.ExtensionPage.accepts(payload13MiB, frame, ticket), true, '1.3 MiB 请求在 2 MiB 上限内放行')
+})
+test('其他窗口、旧票据、非隔离来源、保留方法及超过 2 MiB 的请求均被拒绝', () => {
+ for (const event of [{...good,source:{}},{...good,origin:'http://tauri.localhost'}, {...good,data:{...good.data,ticket:'b'.repeat(64)}}, {...good,data:{...good.data,method:'host.storage.read'}}, {...good,data:{...good.data,id:'bad'}}, {...good,data:{...good.data,params:{value:'x'.repeat(2*1024*1024)}}}]) assert.equal(window.ExtensionPage.accepts(event,frame,ticket),false)
 })
 
 // 插件升级后 digest 变了：旧帧必须退场、旧票据必须关，再进入时拿新票据重建。
@@ -264,5 +269,30 @@ test('旧票据的迟到 layout 不改变新页面的尺寸（按票据隔离）
   assert.equal(seen.at(-1).height, before, '旧票据的消息被丢弃')
   send(f, fresh, { type:'fish:layout', ticket:f.tickets[1], height:600, layout:'double' })
   assert.equal(seen.at(-1).height, 600, '新票据照常生效')
+  page.dispose()
+})
+
+test('超限、非法方法与并发超限立即回传带错误码的 fish:result，不再静默丢弃让页面等超时', async () => {
+  const f = fixture()
+  const posted = []
+  const page = window.ExtensionPage.create({ invoke:f.invoke, lang:()=>'zh', hostWindow:f.hostWindow, document:f.document })
+  const root = f.document.createElement('div')
+  await page.enter(root, { key:'fish.clash', title:'Clash', digest:'d1' })
+  const frame = root.children[0].children[0]
+  frame.contentWindow.postMessage = row => posted.push(row)
+  const t = f.tickets[0]
+
+  // 1. 单次请求超过 2 MiB → 立即收到 PAYLOAD_TOO_LARGE 错误回执，包含实际长度与上限
+  send(f, frame, { type:'fish:call', ticket:t, id:101, method:'save', params:{ data:'x'.repeat(2 * 1024 * 1024) } })
+  const tooLarge = posted.find(r => r.type === 'fish:result' && r.id === 101)
+  assert.ok(tooLarge, '超限请求必须立即回传 fish:result，不得静默丢弃')
+  assert.match(tooLarge.error, /超过上限.*PAYLOAD_TOO_LARGE/)
+
+  // 2. 保留方法名或非法方法名 → 立即收到 INVALID_METHOD 错误回执
+  send(f, frame, { type:'fish:call', ticket:t, id:102, method:'host.storage.read', params:{} })
+  const badMethod = posted.find(r => r.type === 'fish:result' && r.id === 102)
+  assert.ok(badMethod, '非法方法必须立即回传 fish:result')
+  assert.match(badMethod.error, /INVALID_METHOD/)
+
   page.dispose()
 })

@@ -321,11 +321,13 @@ test('#88 H10：expandedReserveHeight 真的把占位高度加到展开高度上
   assert.ok(/sizeOf|expandedReserveHeight\(/.test(src) && src.includes('expandedReserveHeight(Math.max('), "sizeOf('expanded') 用 expandedReserveHeight 计算高度")
 })
 
-test('window.js 对齐 extension-page.js 的请求方法名、大小、并发上限与重复 ID 防护', () => {
+test('window.js 对齐 extension-page.js 的请求方法名、2 MiB 上限、并发上限与显式错误回传', () => {
   const windowSrc = read('src', 'window', 'window.js')
   assert.ok(windowSrc.includes('function accepts(row)'), 'window.js 定义 accepts(row) 校验器')
+  assert.ok(windowSrc.includes('function validateCall(row)'), 'window.js 定义 validateCall(row) 返回明确拒绝原因')
   assert.ok(windowSrc.includes('!/^[a-zA-Z0-9_.-]{1,100}$/.test(row.method)'), '校验方法名格式')
   assert.ok(windowSrc.includes('/^(host|plugin)\\./.test(row.method)'), '拦截保留命名空间')
-  assert.ok(windowSrc.includes('512 * 1024'), '限制单条请求体大小')
+  assert.ok(windowSrc.includes('2 * 1024 * 1024'), '单条请求体上限提升至 2 MiB（≥ 1.2 MiB）')
+  assert.ok(windowSrc.includes('PAYLOAD_TOO_LARGE') && windowSrc.includes('TOO_MANY_REQUESTS'), '超限或并发超限时显式回传 fish:result 错误而非静默丢弃')
   assert.ok(windowSrc.includes('pending.size >= 16') && windowSrc.includes('pending.has(row.id)'), '限制并发数与重复请求 ID')
 })
