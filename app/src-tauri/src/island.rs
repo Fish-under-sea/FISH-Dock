@@ -765,6 +765,8 @@ fn create(sh: &Arc<Shared>) {
 static OVER_MAX: AtomicBool = AtomicBool::new(false);
 static TOP_LIGHT: AtomicU8 = AtomicU8::new(2);
 static PRESS_OUTSIDE: AtomicBool = AtomicBool::new(false);
+// 按下起点位于已捕获鼠标的 Dock 内部（文本框选、滑块拖动、长按拖拽等）：整个按住期间不触发外部文件拖放穿透。
+static PRESS_IN_DOCK: AtomicBool = AtomicBool::new(false);
 // 按下点在岛窗口区域内、无法判断是否为“外面拖进来”时的计时起点（ms）。
 static HOLD_SINCE: AtomicU64 = AtomicU64::new(0);
 // 2.3.4（#88 H4）：上一次胶囊点击的时间（ms），用于区分单击/双击。
@@ -1366,6 +1368,45 @@ fn dock_hit_rects(
     rects
 }
 
+// 区分「从外部拖文件到岛上」与「在 Dock 内部框选/长按拖动」：
+// 若按下起点时 Dock 已捕获鼠标（`dock_caught`），整个按住期间标记为内部操作，绝不触发 `dropwin` 或穿透。
+fn step_drag_on_island(
+    down: bool,
+    over_zone: bool,
+    dock_caught: bool,
+    now: u64,
+    press_outside: &AtomicBool,
+    press_in_dock: &AtomicBool,
+    hold_since: &AtomicU64,
+) -> bool {
+    if !down {
+        press_outside.store(false, Ordering::SeqCst);
+        press_in_dock.store(false, Ordering::SeqCst);
+        hold_since.store(0, Ordering::SeqCst);
+        false
+    } else if press_in_dock.load(Ordering::SeqCst) {
+        false
+    } else if !press_outside.load(Ordering::SeqCst) && hold_since.load(Ordering::SeqCst) == 0 && dock_caught {
+        press_in_dock.store(true, Ordering::SeqCst);
+        false
+    } else if !over_zone {
+        press_outside.store(true, Ordering::SeqCst);
+        hold_since.store(0, Ordering::SeqCst);
+        false
+    } else if press_outside.load(Ordering::SeqCst) {
+        true
+    } else {
+        // 按下点在未捕获的检测区边缘（如从顶部窗口/桌面图标拖出）：用按住超过 260ms 区分拖拽与点击。
+        let s = hold_since.load(Ordering::SeqCst);
+        if s == 0 {
+            hold_since.store(now, Ordering::SeqCst);
+            false
+        } else {
+            now.saturating_sub(s) >= 260
+        }
+    }
+}
+
 // One look at the mouse. Returns ms until the next look.
 pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
     // She is being dragged past: the home is not being hovered.
@@ -1394,10 +1435,8 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
             }
             (isl.ct.force(Mode::Pass), None, 500, None, false)
         } else {
-            let (pos, size, sf, page_sf, held) = (isl.pos, isl.size, isl.sf(), isl.page_sf(), isl.holding);
+            let (pos, size, sf, page_sf) = (isl.pos, isl.size, isl.sf(), isl.page_sf());
             let solid = std::mem::take(&mut isl.solid);
-            let seen = isl.ct.look(cursor, pos, size, sf, page_sf, held, passive && !held, &solid);
-            isl.solid = solid.clone();
             // 拖文件到岛上：窗口透明（WS_EX_TRANSPARENT）时的系统拖放命中会跳过 wry 的
             // drop target；设成不穿透，命中的又是 WebView2 渲染面（无 OLE target）。故
             // 让岛保持穿透，由独立的 plain 窗口 dropwin.rs 覆盖胶囊上方收 WM_DROPFILES。
@@ -1444,25 +1483,21 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
             let down = crate::pet::any_down().unwrap_or(false);
             let over_zone = zone.is_some();
             let now = crate::now_ms() as u64;
-            let mut drag_on_island = false;
-            if !down {
-                PRESS_OUTSIDE.store(false, Ordering::SeqCst);
-                HOLD_SINCE.store(0, Ordering::SeqCst);
-            } else if !over_zone {
-                PRESS_OUTSIDE.store(true, Ordering::SeqCst);
-                HOLD_SINCE.store(0, Ordering::SeqCst);
-            } else if PRESS_OUTSIDE.load(Ordering::SeqCst) {
-                drag_on_island = true;
-            } else {
-                // 按下点可能本来就在岛窗口区域内（从顶部窗口/顶部图标拖出），观察不到“外面按下”；
-                // 用“按住超过 260ms”区分真实拖拽与一次点击，避免 click 被 dropwin 抢走。
-                let s = HOLD_SINCE.load(Ordering::SeqCst);
-                if s == 0 {
-                    HOLD_SINCE.store(now, Ordering::SeqCst);
-                } else if now.saturating_sub(s) >= 260 {
-                    drag_on_island = true;
-                }
-            }
+            let (px, py) = ((cursor.0 - pos.0) as f64 / page_sf, (cursor.1 - pos.1) as f64 / page_sf);
+            let on_solid = solid.iter().any(|r| px >= r[0] && px <= r[0] + r[2] && py >= r[1] && py <= r[1] + r[3]);
+            let dock_caught = isl.holding || isl.ct.over || isl.ct.caught() || on_solid;
+            let drag_on_island = step_drag_on_island(
+                down,
+                over_zone,
+                dock_caught,
+                now,
+                &PRESS_OUTSIDE,
+                &PRESS_IN_DOCK,
+                &HOLD_SINCE,
+            );
+            let held = isl.holding || PRESS_IN_DOCK.load(Ordering::SeqCst);
+            let seen = isl.ct.look(cursor, pos, size, sf, page_sf, held, (passive && !held) || drag_on_island, &solid);
+            isl.solid = solid.clone();
             crate::dropwin::note_drag(if drag_on_island { zone } else { None });
             if isl.ct.calmed() {
                 sh.log(&format!("island: mouse mode bouncing, calmed: cursor {cursor:?}, window {pos:?} {size:?}, scale {sf}"));
@@ -1478,8 +1513,7 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
             let called = call_look(&mut isl, cursor, passive, std::time::Instant::now(), || crate::pet::any_down().unwrap_or(false));
             let was_near = std::mem::replace(&mut isl.stow.near, seen.near);
             let came = seen.near && !was_near && isl.stow.closed.0 > 0.0;
-            let ignore = if drag_on_island { Some(true) } else { seen.ignore };
-            (ignore, seen.pointer, wait, called, came)
+            (seen.ignore, seen.pointer, wait, called, came)
         }
     };
     set_ignore(sh, ignore);
@@ -1499,7 +1533,7 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
 pub fn hover(sh: &Shared, is_over: bool) {
     let (ignore, came) = {
         let mut isl = sh.island.lock().unwrap();
-        let held = isl.holding;
+        let held = isl.holding || PRESS_IN_DOCK.load(Ordering::SeqCst);
         let was = isl.ct.over;
         (isl.ct.set_over(is_over, held, false), is_over && !was)
     };
@@ -2178,7 +2212,9 @@ mod strip_tests {
 
 #[cfg(test)]
 mod hit_tests {
-    use super::dock_hit_rects;
+    use super::{dock_hit_rects, step_drag_on_island};
+    use crate::pointer::ClickThrough;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
 
     // 2.3.4（#88 H10）：主岛命中集合 = 胶囊 + 页面 solid（经缩放/平移）+ 插件浮窗占位。
     #[test]
@@ -2200,5 +2236,40 @@ mod hit_tests {
         let none = dock_hit_rects(pill, &solid, 1.5, (100, 0), &[]);
         assert!(!none.contains(&(694, 52, 531, 72)), "无占位时不含浮窗矩形");
         assert_eq!(none.len(), 2, "只有胶囊 + solid 两块");
+    }
+
+    // 在 Dock 内部用鼠标选中文字或长按拖动（>= 260ms）不得触发外部拖放穿透，
+    // 且外部拖放结束后 ClickThrough 状态机必须立即恢复可点击（无需先点桌面）。
+    #[test]
+    fn selecting_or_dragging_inside_dock_never_locks_out_clicks() {
+        let press_outside = AtomicBool::new(false);
+        let press_in_dock = AtomicBool::new(false);
+        let hold_since = AtomicU64::new(0);
+
+        // 1. 在已捕获鼠标的 Dock 内部按下并长按超过 260ms（框选/长按拖动），甚至中途移出 zone 再移回：
+        assert!(!step_drag_on_island(true, true, true, 1000, &press_outside, &press_in_dock, &hold_since));
+        assert!(!step_drag_on_island(true, true, true, 1300, &press_outside, &press_in_dock, &hold_since));
+        assert!(!step_drag_on_island(true, false, true, 1500, &press_outside, &press_in_dock, &hold_since));
+        assert!(!step_drag_on_island(true, true, true, 1800, &press_outside, &press_in_dock, &hold_since));
+        // 松开鼠标：状态归零。
+        assert!(!step_drag_on_island(false, true, true, 2000, &press_outside, &press_in_dock, &hold_since));
+
+        // 2. 从外部桌面按下（dock_caught = false, over_zone = false）并拖入检测区：
+        assert!(!step_drag_on_island(true, false, false, 3000, &press_outside, &press_in_dock, &hold_since));
+        assert!(step_drag_on_island(true, true, false, 3100, &press_outside, &press_in_dock, &hold_since));
+
+        // 3. 外部拖放期间 ClickThrough 切为 Pass（Some(true)），松手后立即切回 Catch（Some(false)）：
+        let mut ct = ClickThrough::default();
+        let (pos, size) = ((0, 0), (1000, 200));
+        assert_eq!(ct.set_over(true, false, false), Some(false));
+        assert!(ct.caught());
+        // 外部拖放激活（passive = true）→ 同步切为穿透 Some(true)
+        let during_drag = ct.look((200, 20), pos, size, 1.0, 1.0, false, true, &[]);
+        assert_eq!(during_drag.ignore, Some(true));
+        assert!(!ct.caught());
+        // 松开鼠标（passive = false），光标仍在原位 (200, 20) → 立即恢复不穿透 Some(false)
+        let after_drop = ct.look((200, 20), pos, size, 1.0, 1.0, false, false, &[]);
+        assert_eq!(after_drop.ignore, Some(false));
+        assert!(ct.caught());
     }
 }
