@@ -91,25 +91,25 @@ pub fn sanitize(input: &str) -> Option<Clean> {
 // 处理一个标签（含尖括号）；决定保留、剥掉、还是整段丢弃（丢弃由调用方在更外层处理不行，
 // 这里只处理单个标签——成对丢弃用状态，简化：DROP_TAGS 的单标签与内容靠下面的状态机略过）。
 
-/// 若 `tag` 是一个**开始**的丢弃类标签（非自闭合、非结束标签），返回其小写标签名，
-/// 表示其内容直到对应闭合必须整段跳过。结束标签或自闭合不在此列（直接丢弃标签即可）。
+/// 若 `tag` 是一个**开始**的丢弃类标签（非结束标签），返回其小写标签名，
+/// 表示其内容直到对应闭合必须整段跳过。
+/// HTML5 中 `<script/>`、`<style/>`、`<iframe>` 等非空元素即使写成 `/>` 也不会自闭合，
+/// 仅空元素或外语命名空间根（input/meta/link/base/embed/svg/math）允许以 `/>` 视作无内容。
+const SELF_CLOSING_DROP_TAGS: &[&str] = &["input", "meta", "link", "base", "embed", "svg", "math"];
+
 fn dropped_open_tag(tag: &str) -> Option<String> {
     let lower = tag.to_ascii_lowercase();
     if lower.starts_with("</") {
         return None; // 结束标签：交给 emit_tag 丢弃即可
     }
-    if lower.trim_end().ends_with("/>") {
-        return None; // 自闭合：丢弃这个标签即可，无内容
-    }
     let name = tag_name(&lower);
-    if name.is_empty() {
+    if name.is_empty() || !DROP_TAGS.contains(&name.as_str()) {
         return None;
     }
-    if DROP_TAGS.contains(&name.as_str()) {
-        Some(name)
-    } else {
-        None
+    if lower.trim_end().ends_with("/>") && SELF_CLOSING_DROP_TAGS.contains(&name.as_str()) {
+        return None; // 真自闭合：丢弃这个标签即可，无内容
     }
+    Some(name)
 }
 
 /// 从 `rest` 起点跳过内容直到与 `name` 匹配的闭合标签（含）之后。
@@ -177,15 +177,20 @@ fn emit_tag(tag: &str, out: &mut String, remote_images: &mut Vec<String>, links:
         // 不在白名单：剥掉标签（连同属性），只留文字。
         return;
     }
-    // img：远程图片阻止（http/https），cid 透传为占位 data 占位。
+    // img：远程图片阻止（http/https/协议相对 //，大小写无关、去首尾空白），仅 cid: 透传，其余危险协议剥掉 src。
     if name == "img" {
-        let src = attr(tag, "src").unwrap_or_default();
-        if src.starts_with("http://") || src.starts_with("https://") {
-            remote_images.push(src.clone());
+        let raw_src = attr(tag, "src").unwrap_or_default();
+        let src = raw_src.trim();
+        let lower_src = src.to_ascii_lowercase();
+        if lower_src.starts_with("http://") || lower_src.starts_with("https://") || lower_src.starts_with("//") {
+            remote_images.push(src.to_string());
             out.push_str(&format!("<img data-blocked=\"1\" alt=\"{}\">", html_escape(&attr(tag, "alt").unwrap_or_default())));
-        } else {
-            // 保留 cid: 等；但去掉内联事件与 on*。
+        } else if lower_src.starts_with("cid:") {
+            // 保留 cid: 内联图片；去掉内联事件与 on*。
             out.push_str(&rebuild_tag(name.as_str(), tag, &["src", "alt", "width", "height"]));
+        } else {
+            // 拒绝 file:/data:/javascript: 等非 cid 协议（防 Windows SMB/NTLM 泄露与脚本注入）。
+            out.push_str(&rebuild_tag(name.as_str(), tag, &["alt", "width", "height"]));
         }
         return;
     }
@@ -302,10 +307,10 @@ fn attrs(tag: &str) -> Vec<(String, String)> {
     out
 }
 
-// href 是否安全：允许 http/https/mailto/cid；拒 javascript/vbscript/data/file 等。
+// href 是否安全：允许 http/https/mailto/cid 与站内单斜杠锚点；拒 // 协议相对、javascript/vbscript/data/file 等。
 fn safe_href(href: &str) -> bool {
     let h = href.trim().to_ascii_lowercase();
-    h.starts_with("http://") || h.starts_with("https://") || h.starts_with("mailto:") || h.starts_with("cid:") || h.starts_with("/") || h.starts_with("#")
+    h.starts_with("http://") || h.starts_with("https://") || h.starts_with("mailto:") || h.starts_with("cid:") || (h.starts_with('/') && !h.starts_with("//")) || h.starts_with('#')
 }
 
 // 从 URL 取真实域名（host）。解析不出返回空串。
@@ -476,5 +481,21 @@ mod tests {
         assert!(!c.html.contains("inner"), "{}", c.html);
         assert!(!c.html.contains("stillsvg"), "{}", c.html);
         assert!(c.html.contains("tail"), "嵌套闭合后正常内容丢失：{}", c.html);
+    }
+
+    #[test]
+    fn uppercase_and_non_cid_image_schemes_and_self_closing_script_are_blocked() {
+        let c = sanitize(
+            r#"<img src="HTTPS://Tracker.example/a.png" alt="a"><img src="//cdn.example/b.png"><img src="file://///attacker/share/c.png" alt="c"><script/>alert(1)</script><a href="//evil.example/phish">link</a><p>safe</p>"#,
+        )
+        .unwrap();
+        assert_eq!(
+            c.remote_images,
+            vec!["HTTPS://Tracker.example/a.png".to_string(), "//cdn.example/b.png".to_string()]
+        );
+        assert!(!c.html.contains("attacker"), "file:// 图片不得保留 src：{}", c.html);
+        assert!(!c.html.contains("alert(1)"), "<script/> 内容不得漏出：{}", c.html);
+        assert!(c.links.is_empty(), "// 协议相对链接不得放行：{:?}", c.links);
+        assert!(c.html.contains("safe"), "{}", c.html);
     }
 }

@@ -12,6 +12,25 @@
   let ticket = ''
   let ready = false
   let generation = 0
+  const MAX_CALL_BYTES = 2 * 1024 * 1024
+  const pending = new Set()
+
+  function validateCall(row) {
+    if (!row || row.type !== 'fish:call' || !Number.isSafeInteger(row.id) || row.id < 1) return '插件页面请求编号无效（错误码 INVALID_REQUEST）'
+    if (typeof row.method !== 'string' || !/^[a-zA-Z0-9_.-]{1,100}$/.test(row.method) || /^(host|plugin)\./.test(row.method)) return '插件页面请求方法无效（错误码 INVALID_METHOD）'
+    let length = 0
+    try {
+      length = JSON.stringify(row).length
+    } catch {
+      return '插件页面请求无法序列化为 JSON（错误码 INVALID_PAYLOAD）'
+    }
+    if (length > MAX_CALL_BYTES) return `插件页面单次请求超过上限（${length} > ${MAX_CALL_BYTES} 字符，上限 2 MiB）（错误码 PAYLOAD_TOO_LARGE）`
+    return ''
+  }
+
+  function accepts(row) {
+    return validateCall(row) === ''
+  }
 
   function say(text) {
     if (!note) return
@@ -32,6 +51,7 @@
     }
     ticket = grant.ticket
     generation = grant.generation
+    pending.clear()
     document.title = grant.title || '插件窗口'
     // 透明浮窗：窗口自己透出桌面；带原生标题栏的普通窗口给一块中性底色。
     document.documentElement.classList.toggle('opaque', grant.transparent !== true)
@@ -68,12 +88,25 @@
       return
     }
     if (row.type !== 'fish:call') return
-    if (!Number.isSafeInteger(row.id) || row.id < 1 || typeof row.method !== 'string') return
+    const validId = Number.isSafeInteger(row.id) && row.id >= 1
+    const rejected = validateCall(row)
+    if (rejected || !accepts(row)) {
+      if (validId) toPage({ type: 'fish:result', ticket, id: row.id, error: rejected })
+      return
+    }
+    if (pending.has(row.id)) return
+    if (pending.size >= 16) {
+      toPage({ type: 'fish:result', ticket, id: row.id, error: '插件页面并发请求过多（上限 16）（错误码 TOO_MANY_REQUESTS）' })
+      return
+    }
+    pending.add(row.id)
     let answer
     try {
       answer = { result: await invoke('plugin_window_call', { method: row.method, params: row.params || {} }) }
     } catch (error) {
       answer = { error: String((error && error.message) || error) }
+    } finally {
+      pending.delete(row.id)
     }
     toPage({ type: 'fish:result', ticket, id: row.id, ...answer })
   })

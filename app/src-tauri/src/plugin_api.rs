@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde_json::{json,Value};
 use tauri::{WebviewWindow,Manager as _};
 use crate::{plugin_install::Manager,storage_context::Context};
-fn trusted(window:&WebviewWindow)->Result<(),String>{
+pub(crate) fn trusted(window:&WebviewWindow)->Result<(),String>{
     let url=window.url().map_err(|_|"设置窗口来源读取失败")?;
     if !local_source(window.label(),&url){return Err("插件管理仅允许本机设置窗口调用".into());}Ok(())
 }
@@ -139,7 +139,7 @@ pub async fn extension_thirdparty(window:WebviewWindow,action:String,query:Strin
 #[tauri::command]
 pub fn extension_progress()->Value{crate::plugin_progress::snapshot()}
 #[tauri::command]
-pub fn extension_cancel(_window:WebviewWindow,id:String)->Result<Value,String>{crate::plugin_progress::cancel(&id)?;Ok(crate::plugin_progress::snapshot())}
+pub fn extension_cancel(window:WebviewWindow,id:String)->Result<Value,String>{trusted(&window)?;crate::plugin_progress::cancel(&id)?;Ok(crate::plugin_progress::snapshot())}
 #[tauri::command]
 pub async fn extension_auth(window:WebviewWindow,action:String)->Result<Value,String>{
     trusted(&window)?;

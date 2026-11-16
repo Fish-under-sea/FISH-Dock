@@ -338,6 +338,15 @@
   const entered = new Set()
   document.addEventListener('mouseenter', e => e.target instanceof Element && e.target !== document.documentElement && entered.add(e.target), true)
   document.addEventListener('mouseleave', e => entered.delete(e.target), true)
+  // 禁止在选中文本或普通元素上长按拖动时触发 WebView2 原生 OLE DoDragDrop（否则会吞掉 pointerup/mouseup 并打断悬停状态）。
+  document.addEventListener(
+    'dragstart',
+    e => {
+      const el = e.target instanceof Element ? e.target : e.target?.parentElement
+      if (!el?.closest?.('[draggable="true"]')) e.preventDefault()
+    },
+    true,
+  )
 
   function chainAt(x, y) {
     const chain = []

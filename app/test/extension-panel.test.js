@@ -991,3 +991,14 @@ test('官方插件与命名不合规同时出现时，两句提示都在', async
   assert.match(html, /本页已隐藏 2 个不符合/)
   assert.match(html, /本页另有 1 个官方插件的 npm 包/)
 })
+
+test('卸载进度卡不渲染无效的取消按钮，下载取消按钮点击后立即禁用防连点', async () => {
+  let release; const gate = new Promise(r => { release = r })
+  const { panel, timers } = make({ installed: [row], manage: () => gate, progressState: () => ({ items: [] }) })
+  await panel.load()
+  const pending = panel.action('uninstall', 'fish.magpie')
+  await nextTimer(timers, 50)
+  assert.doesNotMatch(panel.render(), /data-extension-cancel/, '卸载进度卡不显示取消按钮')
+  release({ installed: [] })
+  await pending
+})

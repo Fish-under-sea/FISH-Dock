@@ -116,6 +116,7 @@ impl ClickThrough {
         self.last = cursor;
         if passive {
             self.on_solid = false;
+            self.last = (i32::MIN, i32::MIN);
             let ignore = self.force(Mode::Pass);
             return Look { ignore, pointer: self.gone(), near: false, moved, forward: false };
         }

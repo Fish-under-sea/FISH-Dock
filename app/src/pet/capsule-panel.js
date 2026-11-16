@@ -38,6 +38,7 @@
   document.body.append(panel)
   let open = false
   let drawn = ''
+  let drawnStruct = ''
   let rowDrag = null
 
   const home = () => Isle.home()
@@ -53,17 +54,20 @@
     })
   }
 
-  function html() {
-    const ms = members()
+  function saidOf(m, detailed) {
+    const w = m.w
+    return w ? WCards.briefOf(w, { lang: Isle.lang, light: Isle.winLight, detailed }).value : T('taskbar.w.none')
+  }
+
+  function html(ms = members(), detailed = Isle.isDetailed()) {
     const list = ms.map(({ key, mode }) => ({ key, mode }))
-    const detailed = Isle.isDetailed()
     const count = C.MODES.map(mode => [mode, ms.filter(m => m.mode === mode).length]).filter(([, n]) => n)
     const head = `<div class="cp-head"><b>${esc(T('capsule.title'))}</b><span class="cp-count">${esc(count.map(([mode, n]) => T(`capsule.count.${mode}`, { n })).join(' · '))}</span><button type="button" class="pk-ib" data-cp="close" title="${esc(T('picker.close'))}"><span class="pk-fi" aria-hidden="true">&#xE8BB;</span></button></div>`
     const seg = (key, mode, on, why = '') => `<button type="button" class="pk-seg${on ? ' on' : ''}" data-cp="mode" data-key="${esc(key)}" data-v="${mode}"${why ? ` aria-disabled="true" title="${esc(why)}"` : ''}>${esc(T(`capsule.${mode === 'open' ? 'openOnly' : mode}`))}</button>`
     const rows = ms.map(m => {
       const w = m.w
       const name = Picker.nameOfKey(m.key)
-      const said = w ? WCards.briefOf(w, { lang: Isle.lang, light: Isle.winLight, detailed }).value : T('taskbar.w.none')
+      const said = saidOf(m, detailed)
       const icon = w ? Widgets.iconHTML(w, Isle.lang) : Widgets.icon('dot')
       const why = m.mode !== 'pin' && !C.canPin(list, m.key) ? T('capsule.pinFull') : ''
       return `<div class="cp-row" data-key="${esc(m.key)}"><span class="cp-grip" title="${esc(T('capsule.drag'))}">${GRIP}</span><span class="pk-wi" style="--c:${w ? Picker.colorOf(w) : 'currentColor'}">${icon}</span><span class="cp-name">${esc(name)}</span><span class="cp-val">${esc(said)}</span><span class="pk-segs">${seg(m.key, 'turn', m.mode === 'turn')}${seg(m.key, 'pin', m.mode === 'pin', why)}${seg(m.key, 'open', m.mode === 'open')}</span><button type="button" class="cp-out" data-cp="out" data-key="${esc(m.key)}" title="${esc(T('capsule.out'))}"><span class="pk-fi" aria-hidden="true">&#xE711;</span></button></div>`
@@ -74,14 +78,29 @@
   }
 
   // Drawn anew when what it says changed (the monitor's readings every 2 s),
-  // not while a row is being dragged.
+  // not while a row is being dragged. When only .cp-val readings changed,
+  // update them in place so keyboard focus and hover state are preserved.
   function draw(force = false) {
     if (!open || rowDrag) return
     panel.classList.toggle('pk-l', Isle.winLight)
     panel.dataset.home = home()
-    const now = html()
+    panel.setAttribute('aria-label', T('capsule.title'))
+    const ms = members()
+    const detailed = Isle.isDetailed()
+    const now = html(ms, detailed)
     if (now === drawn && !force) return place()
+    const struct = JSON.stringify([Isle.lang, Isle.winLight, C.spinOf(Isle.config), ms.map(m => [m.key, m.mode, Picker.nameOfKey(m.key), m.w ? Picker.colorOf(m.w) : '', m.w ? Widgets.iconHTML(m.w, Isle.lang) : ''])])
+    if (!force && struct === drawnStruct && panel.querySelectorAll('.cp-row .cp-val').length === ms.length) {
+      drawn = now
+      const vals = panel.querySelectorAll('.cp-row .cp-val')
+      ms.forEach((m, i) => {
+        const text = saidOf(m, detailed)
+        if (vals[i] && vals[i].textContent !== text) vals[i].textContent = text
+      })
+      return place()
+    }
     drawn = now
+    drawnStruct = struct
     panel.innerHTML = now
     place()
   }
@@ -206,6 +225,12 @@
     },
     true,
   )
+  document.addEventListener('keydown', e => {
+    if (open && e.key === 'Escape') {
+      e.preventDefault()
+      hide()
+    }
+  })
   // Its words and values follow the widgets and the settings.
   window.pet.onWidgets(() => draw())
   window.pet.onUpdate(() => draw())

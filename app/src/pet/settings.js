@@ -2545,14 +2545,14 @@
 
   function openMenu(account, uid, folder, x, y) {
     const found = snap.mailAgents || {}
-    const at = `data-account="${esc(account)}" data-folder="${folder || 'inbox'}" data-uid="${uid}"`
+    const at = `data-account="${esc(account)}" data-folder="${esc(folder || 'inbox')}" data-uid="${esc(uid)}"`
     const item = (ag, how, label) =>
       `<button class="mi" data-hand="${ag}:${how}" ${at} ${found[ag] ? '' : 'disabled'}>${esc(label)}${found[ag] ? '' : ` <span class="d">${esc(T('mail.hand.missing'))}</span>`}</button>`
     const ag = firstAgent()
     const talks = item(ag, 'talk', T('mail.hand.talk', { agent: AGENTS[ag] }))
     const terminals = item(ag, 'open', T('mail.hand.open', { agent: AGENTS[ag] }))
     const l = listed(account, folder, uid) || (isReading(account, folder, uid) ? reading.letter : null)
-    const starItem = `<button class="mi" data-star="${esc(account)}" data-folder="${folder || 'inbox'}" data-uid="${uid}">${esc(T(l?.flagged ? 'mail.unstar' : 'mail.star'))}</button>`
+    const starItem = `<button class="mi" data-star="${esc(account)}" data-folder="${esc(folder || 'inbox')}" data-uid="${esc(uid)}">${esc(T(l?.flagged ? 'mail.unstar' : 'mail.star'))}</button>`
     const replies = [
       ['reply', 'mail.reply'],
       ['all', 'mail.replyAll'],
