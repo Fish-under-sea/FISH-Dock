@@ -73,6 +73,14 @@ pub fn sanitize(input: &str) -> Option<Clean> {
         };
         let tag = &after[..=gt];
         rest = &after[gt + 1..];
+        // t16（t9 发现）：script/style/iframe/object/embed/svg/math 等丢弃类标签，
+        // 其**内容**（直到对应闭合标签）也必须整段跳过，不能作为文字流出——
+        // 否则 <style>body{background:red}</style> 会漏出 body{…}、<script>alert(1)</script>
+        // 漏出 alert(1)。用状态机按标签名找匹配闭合（对 svg/math 支持同名嵌套）。
+        if let Some(name) = dropped_open_tag(tag) {
+            rest = skip_until_close(rest, &name);
+            continue;
+        }
         emit_tag(tag, &mut out, &mut remote_images, &mut links);
     }
     out.push_str(rest);
@@ -82,6 +90,75 @@ pub fn sanitize(input: &str) -> Option<Clean> {
 
 // 处理一个标签（含尖括号）；决定保留、剥掉、还是整段丢弃（丢弃由调用方在更外层处理不行，
 // 这里只处理单个标签——成对丢弃用状态，简化：DROP_TAGS 的单标签与内容靠下面的状态机略过）。
+
+/// 若 `tag` 是一个**开始**的丢弃类标签（非自闭合、非结束标签），返回其小写标签名，
+/// 表示其内容直到对应闭合必须整段跳过。结束标签或自闭合不在此列（直接丢弃标签即可）。
+fn dropped_open_tag(tag: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    if lower.starts_with("</") {
+        return None; // 结束标签：交给 emit_tag 丢弃即可
+    }
+    if lower.trim_end().ends_with("/>") {
+        return None; // 自闭合：丢弃这个标签即可，无内容
+    }
+    let name = tag_name(&lower);
+    if name.is_empty() {
+        return None;
+    }
+    if DROP_TAGS.contains(&name.as_str()) {
+        Some(name)
+    } else {
+        None
+    }
+}
+
+/// 从 `rest` 起点跳过内容直到与 `name` 匹配的闭合标签（含）之后。
+/// 支持同名嵌套（svg/math 内可再有 svg/math）：用深度计数，深度回到 0 即匹配的闭合。
+/// 找不到闭合时返回空串（剩余整段丢弃——宁可少显示也不漏内容）。
+fn skip_until_close<'a>(rest: &'a str, name: &str) -> &'a str {
+    let open = format!("<{name}");
+    let close = format!("</{name}");
+    let mut depth = 1usize;
+    let mut cursor = rest;
+    while let Some(lt) = cursor.find('<') {
+        let after = &cursor[lt..];
+        let Some(gt) = after.find('>') else {
+            return ""; // 没有闭合的 '<'：剩余全丢
+        };
+        let tag = &after[..=gt];
+        let lower = tag.to_ascii_lowercase();
+        if lower.starts_with(&close)
+            && lower[close.len()..]
+                .chars()
+                .next()
+                .map_or(true, |c| c == '>' || c.is_ascii_whitespace() || c == '/')
+        {
+            depth -= 1;
+            cursor = &after[gt + 1..];
+            if depth == 0 {
+                return cursor;
+            }
+            continue;
+        }
+        // 同名开始标签（且非自闭合）→ 深度 +1。
+        if lower.starts_with(&open)
+            && !lower.trim_end().ends_with("/>")
+            && lower[open.len()..]
+                .chars()
+                .next()
+                .map_or(false, |c| c == '>' || c.is_ascii_whitespace() || c == '/')
+        {
+            // 排除 open 前缀刚好吞掉更长标签名（如 <svgx）：要求定界符。
+            let boundary = lower[open.len()..].chars().next();
+            if boundary.map_or(true, |c| c == '>' || c.is_ascii_whitespace() || c == '/') {
+                depth += 1;
+            }
+        }
+        cursor = &after[gt + 1..];
+    }
+    "" // 无匹配闭合：剩余丢弃
+}
+
 fn emit_tag(tag: &str, out: &mut String, remote_images: &mut Vec<String>, links: &mut Vec<Link>) {
     let lower = tag.to_ascii_lowercase();
     // 丢弃类标签：整个标签不输出（其文本内容仍会作为文字流出——对 script/style 不理想，
@@ -360,5 +437,44 @@ mod tests {
         let c = sanitize("<p>Hello <b>world</b></p><ul><li>a</li></ul>").unwrap();
         assert!(c.html.contains("<b>world</b>"), "{}", c.html);
         assert!(c.html.contains("<li>a</li>"), "{}", c.html);
+    }
+
+    // t16（t9 发现）：丢弃类标签的内容必须整段跳过，不能作为文字流出。
+    #[test]
+    fn dropped_tag_contents_never_reach_the_output() {
+        let c = sanitize(
+            r#"<p>Before</p><style>body{background:red}</style><script>alert(1)</script><p>After</p>"#,
+        )
+        .unwrap();
+        assert!(!c.html.contains("body{"), "style 内容漏出：{}", c.html);
+        assert!(!c.html.contains("background:red"), "style 内容漏出：{}", c.html);
+        assert!(!c.html.contains("alert(1)"), "script 内容漏出：{}", c.html);
+        // 正常正文不受影响。
+        assert!(c.html.contains("Before"), "正文 Before 丢失：{}", c.html);
+        assert!(c.html.contains("After"), "正文 After 丢失：{}", c.html);
+    }
+
+    #[test]
+    fn dropped_container_tags_do_not_leak_text() {
+        for (html, leak) in [
+            ("<iframe src=x>fallback iframe text</iframe><p>ok</p>", "fallback iframe text"),
+            ("<object data=x>object fallback text</object><p>ok</p>", "object fallback text"),
+            ("<embed src=x>embedtext</embed><p>ok</p>", "embedtext"),
+            ("<svg><text>svgtext</text></svg><p>ok</p>", "svgtext"),
+            ("<math><mi>mathtext</mi></math><p>ok</p>", "mathtext"),
+        ] {
+            let c = sanitize(html).unwrap();
+            assert!(!c.html.contains(leak), "内容漏出（{leak}）：{}", c.html);
+            assert!(c.html.contains("ok"), "正常正文 ok 丢失：{}", c.html);
+        }
+    }
+
+    // 同名嵌套：只跳到匹配的闭合，不提前截断，也不多吞后面的正常内容。
+    #[test]
+    fn nested_svg_skips_to_the_matching_close_only() {
+        let c = sanitize("<svg><svg>inner</svg>stillsvg</svg><p>tail</p>").unwrap();
+        assert!(!c.html.contains("inner"), "{}", c.html);
+        assert!(!c.html.contains("stillsvg"), "{}", c.html);
+        assert!(c.html.contains("tail"), "嵌套闭合后正常内容丢失：{}", c.html);
     }
 }
