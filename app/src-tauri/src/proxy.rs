@@ -398,7 +398,7 @@ pub fn test(via: &Via) -> Value {
         // answer (the person's own words, not a tunnel's).
         if let (Some(proxy), Some(address)) = (way_proxy(&way), way.proxy_at()) {
             if !port_open(&proxy, crate::config::proxy_probe_timeout()) {
-                failed = json!({ "ok": false, "via": address, "error": port_closed_text(&address), "portClosed": true });
+                failed = json!({ "ok": false, "via": address, "error": port_closed_text(&address, crate::i18n::lang("")), "portClosed": true });
                 continue;
             }
         }
@@ -435,8 +435,9 @@ pub(crate) fn port_open(proxy: &Proxy, wait: Duration) -> bool {
 }
 
 // What the page says of a proxy's port nothing answers on.
-fn port_closed_text(address: &str) -> String {
-    match crate::i18n::lang("") {
+// 语言显式传入：测试要能分别断言中文与英文两支，不依赖运行环境的 locale。
+fn port_closed_text(address: &str, lang: &str) -> String {
+    match lang {
         "zh" => format!("代理 {address} 没有开：这个端口上没有程序在听，先启动代理软件，或换一个地址"),
         _ => format!("the proxy at {address} is not listening: nothing answers on that port — start the proxy app, or try another address"),
     }
@@ -573,8 +574,12 @@ mod tests {
         };
         assert!(!port_open(&closed, Duration::from_millis(300)), "无人监听的端口应判为关");
         // 代理两种说法都在：直连一句话，代理失败一句话。
-        let zh = port_closed_text("127.0.0.1:7890");
+        // 文案随系统语言（CI 的 runner 是英文，本地多为中文）：两种语言都显式断言，
+        // 不假设运行环境的 locale。
+        let zh = port_closed_text("127.0.0.1:7890", "zh");
         assert!(zh.contains("7890") && zh.contains("没有开"), "{zh}");
+        let en = port_closed_text("127.0.0.1:7890", "en");
+        assert!(en.contains("7890") && en.contains("not listening"), "{en}");
         let at = Way::Manual(Proxy { kind: Kind::Socks5, host: "127.0.0.1".into(), port: 10808 });
         assert_eq!(way_proxy(&at).map(|p| p.at()).as_deref(), Some("127.0.0.1:10808"));
         assert_eq!(way_proxy(&Way::Straight), None);
