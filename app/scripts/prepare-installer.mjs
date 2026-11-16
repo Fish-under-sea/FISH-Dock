@@ -25,6 +25,9 @@ export const REQUIRED = [
 // 缺失由 Setup 的前置检测挡下（见 installer.mjs 的 WEBVIEW2_UPDATE_KEY）。
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+/// 仓库根（`app/` 的上一级）。许可原文合并到仓根 `LICENSE`（见提交 7a5bfce），
+/// 不再放在 `app/LICENSE`；从 `root` 取会指向已删除的 `app/LICENSE` 并 ENOENT。
+export const REPO_ROOT = path.resolve(root, '..')
 
 export async function hashFile(file) {
   const hash = createHash('sha256')
@@ -74,6 +77,13 @@ function run(command, args, quiet = false) {
   if (result.status !== 0) throw new Error(`${command} failed with ${result.status}`)
 }
 
+/// 上游许可原文（Wakuwaku 条款，随包复制成 `licenses/Wakuwaku.txt`）的来源文件。
+/// 合并到仓根 `LICENSE`（提交 7a5bfce）；不再读已删除的 `app/LICENSE`。
+/// 单独抽出便于回归测试钉住路径（不依赖真实下载，也不触发解包）。
+export function upstreamLicenseSource() {
+  return path.join(REPO_ROOT, 'LICENSE')
+}
+
 /// 安装包里随附的第三方许可说明。2.1.9 起不再随包分发固定版 WebView2 与它的许可原文，
 /// 这段文字里也就不能再出现固定版与它的条款文件（Setup 只负责检测系统 Evergreen 运行时）。
 export const NOTICE_TEXT = [
@@ -103,7 +113,7 @@ export async function prepareResources(downloads, output, options = {}) {
   run('tar.exe', ['-xf', file, '-C', unpackNode], true)
   await fs.rename(path.join(unpackNode, lock.node.directory), path.join(resources, 'node'))
   await fs.mkdir(path.join(resources, 'licenses'))
-  await fs.copyFile(path.join(root, 'LICENSE'), path.join(resources, 'licenses/Wakuwaku.txt'))
+  await fs.copyFile(upstreamLicenseSource(), path.join(resources, 'licenses/Wakuwaku.txt'))
   await fs.writeFile(path.join(resources, 'licenses/runtime-sources.json'), `${JSON.stringify(lock, null, 2)}\n`)
   await fs.writeFile(path.join(resources, 'licenses/NOTICE.txt'), NOTICE_TEXT)
   // 解包目录已用完：安装资源就是 resources/，安装器不再压缩打包。
