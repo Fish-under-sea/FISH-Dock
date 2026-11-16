@@ -282,11 +282,24 @@ fn is_ime(class: &str) -> bool {
     class == "IME" || class == "MSCTFIME UI"
 }
 
+// Which of a thread's windows says best whose it is: one that names her main
+// thread or her taskbar's (crash.rs holds_the_strip) first, then any but an
+// IME's (upstream 40227647's rank).
+pub(super) fn rank(class: &str) -> u8 {
+    if super::holds_the_strip(class) {
+        2
+    } else if is_ime(class) {
+        0
+    } else {
+        1
+    }
+}
+
 // The threads of process `pid` with a window Windows takes for not
 // answering (IsHungAppWindow: five seconds and more without a look at its
 // messages, the judgment behind its ghost window and its "not responding"
-// box; nothing is sent to her), each with the class of one of its windows
-// (not an IME's, if it has another).
+// box; nothing is sent to her), each with the class of the one of its windows
+// that says best whose it is (rank).
 pub fn hung(pid: u32) -> Vec<(u32, String)> {
     struct Seen {
         pid: u32,
@@ -302,7 +315,7 @@ pub fn hung(pid: u32) -> Vec<(u32, String)> {
         if pid == seen.pid && unsafe { IsHungAppWindow(hwnd) } != 0 {
             let class = class_of(hwnd);
             match seen.found.iter_mut().find(|(t, _)| *t == thread) {
-                Some((_, was)) if is_ime(was) && !is_ime(&class) => *was = class,
+                Some((_, was)) if rank(&class) > rank(was) => *was = class,
                 Some(_) => {}
                 None => seen.found.push((thread, class)),
             }
@@ -390,8 +403,22 @@ pub fn stack_of(pid: u32, thread: u32) -> Vec<String> {
         let handle = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, 0, thread);
         let mut pcs = Vec::with_capacity(32);
         options(OPTIONS);
-        // Its modules listed (invade), for their tables and bases.
-        if handle != 0 && init(process, std::ptr::null(), 1) != 0 {
+        // Its modules listed (invade), for their tables and bases. A list that
+        // changes as it is read (a module loaded meanwhile — module load time,
+        // upstream 40227647) fails it, STATUS_INFO_LENGTH_MISMATCH: taken back
+        // and tried again, a few times. (The upstream failure seen one run in
+        // six as other tests loaded modules; the retry covers both that and a
+        // thread hung while its own modules were still loading.)
+        let invaded = handle != 0
+            && (0..4).any(|_| {
+                if init(process, std::ptr::null(), 1) != 0 {
+                    return true;
+                }
+                cleanup(process);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                false
+            });
+        if invaded {
             if SuspendThread(handle) != u32::MAX {
                 let mut context = Context([0; 154]);
                 context.0[6] = CONTEXT_FULL;

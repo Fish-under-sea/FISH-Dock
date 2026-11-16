@@ -241,3 +241,82 @@ test('主岛拖放检测不再用虚构的 500×36 矩形', () => {
   const production = source.split('#[cfg(test)]')[0]
   assert.ok(!production.includes('(500.0, 36.0)'), 'closed_rect 不再用默认虚构尺寸兜底')
 })
+
+// 2.3.4（#88 P6）：贴顶时 island home 仍恒定上报 compact 尺寸（旧条件 `&& !screenTop`
+// 会报 (0,0) → 宿主 closed_rect=None → 文件拖不到主岛、capsule 窗口回落整窗）。
+test('#88 P6：setStow 在 island home 恒定上报 sizeOf(compact)，与是否贴顶无关', () => {
+  const island = read('src', 'pet', 'island.js')
+  const body = island.slice(island.indexOf('function setStow()'), island.indexOf('function setStow()') + 800)
+  assert.ok(!body.includes("home() === 'island' && !screenTop"), 'setStow 不再带 !screenTop 分支（P6）')
+  assert.ok(body.includes("home() === 'island' ? sizeOf('compact')"), 'island home 恒报 compact 尺寸')
+})
+
+// 2.3.4（#88 B3）：容器页 window.js 用 ...payload 全量转发 dock 事件的 type/action/rect，
+// 不再只挑固定字段（旧代码把 dock 内容全丢了）。投递类型与 extension-page.js 一致。
+test('#88 B3：window.js 用 ...payload 全量转发，保留 dock 的 type/action/rect', () => {
+  const window = read('src', 'window', 'window.js')
+  assert.ok(window.includes("type: 'fish:window-event', ticket, ...payload"), 'window.js 必须 ...payload 全量转发')
+  assert.ok(!window.includes("event: payload.event, handle: payload.handle, reason: payload.reason"), '不再手工挑字段')
+  // 与 extension-page.js 同形：都是 fish:window-event + ...payload。
+  const page = read('src', 'pet', 'extension-page.js')
+  assert.ok(page.includes("type:'fish:window-event'") || page.includes("type: 'fish:window-event'"))
+})
+
+// 2.3.4（#88 H6/H10）：浏览器 SDK 暴露 reopen（保留句柄/订阅）与 dock.reserve/release。
+test('#88 H6/H10：browser SDK 暴露 windows.reopen 与 dock.reserve/release 并真发协议', async () => {
+  const f = sdk()
+  assert.equal(typeof f.api.windows.reopen, 'function')
+  assert.equal(typeof f.api.dock.reserve, 'function')
+  assert.equal(typeof f.api.dock.release, 'function')
+  const reopening = f.api.windows.reopen('h-1', { width: 420, height: 72, duration: 200 })
+  await until(() => f.calls().length === 1, 'reopen 发出')
+  const reopen = f.calls()[0]
+  assert.equal(reopen.method, 'dock.windows.reopen')
+  assert.deepEqual(plain(reopen.params), { width: 420, height: 72, duration: 200, handle: 'h-1' })
+  f.answer(reopen.id, { handle: 'h-1', ready: true })
+  await reopening
+  // reserve：需要先订阅（不过 SDK 只负责转发，能力由宿主校验）。
+  const reserving = f.api.dock.reserve({ x: 8, y: 132, w: 420, h: 120 }, 'reserve-x')
+  await until(() => f.calls().length >= 2, 'reserve 发出')
+  const reserve = f.calls().find(row => row.method === 'dock.dock.reserve')
+  assert.ok(reserve, 'reserve 发出 dock.dock.reserve')
+  assert.deepEqual(plain(reserve.params.rect), { x: 8, y: 132, w: 420, h: 120 })
+  f.answer(reserve.id, { reserved: true })
+  await reserving
+})
+
+// 2.3.4（#88 H9/DEC-1）：吸收覆盖窗页面存在，且用 Canvas/SVG 回放「液滴→颈→球」。
+test('#88 H9：存在 goo 吸收覆盖页（Canvas 回放液滴→颈→球）', () => {
+  const goo = read('src', 'window', 'goo.html')
+  assert.ok(goo.includes('canvas') || goo.includes('svg'), '覆盖页用 Canvas/SVG 画 goo')
+  assert.ok(goo.includes('requestAnimationFrame'), '逐帧回放')
+  // 起点来自真实落点坐标（fx/fy），目标来自子岛中心（tx/ty）：不是写死动画。
+  assert.ok(goo.includes("q.get('fx')") || goo.includes("num('fx'"), '读取真实落点坐标')
+})
+
+// 2.3.4（#88 H10）：桥暴露 onReserve，主岛页面消费预留高度（占位不是只登记不生效）。
+test('#88 H10：桥暴露 onReserve，island.js 消费占位预留高度', () => {
+  const bridge = read('src', 'pet', 'bridge.js')
+  assert.ok(bridge.includes("onReserve: on('island:reserve')"), 'bridge 暴露 onReserve')
+  const island = read('src', 'pet', 'island.js')
+  assert.ok(island.includes('window.pet.onReserve'), 'island.js 订阅 onReserve')
+  assert.ok(island.includes('--isl-reserve-extra'), 'island.js 用预留高度作用到布局')
+})
+
+// 2.3.4（#88 H10）：预留高度要真正抬高展开高度（行为，不是字符串）。把 island.js 的纯函数
+// `expandedReserveHeight` 抽出在 vm 里跑，断言 extra>0 时才加高、<=0/NaN 时原样——若只是
+// 「设了个没人用的 CSS 变量」，这条会红（之前那种静态 includes 测试做不到）。
+test('#88 H10：expandedReserveHeight 真的把占位高度加到展开高度上', () => {
+  const src = read('src', 'pet', 'island.js')
+  const m = src.match(/function expandedReserveHeight\([^)]*\)\s*\{[\s\S]*?\n  \}/)
+  assert.ok(m, 'island.js 里应能找到 expandedReserveHeight 的纯函数定义')
+  const sandbox = {}
+  vm.runInNewContext(`${m[0]}; this.expandedReserveHeight = expandedReserveHeight`, sandbox)
+  const f = sandbox.expandedReserveHeight
+  assert.equal(f(100, 0), 100, '没有占位时高度不变（2.2.3 逐像素一致）')
+  assert.equal(f(100, 128), 228, '一个 120 高浮窗 + 8 缝 → 展开高 +128')
+  assert.equal(f(84, -5), 84, '负预留不加（防御坏输入）')
+  assert.equal(f(84, NaN), 84, 'NaN 预留不加')
+  // 真接线：sizeOf('expanded') 必须经过这个函数，而不是硬加。
+  assert.ok(/sizeOf|expandedReserveHeight\(/.test(src) && src.includes('expandedReserveHeight(Math.max('), "sizeOf('expanded') 用 expandedReserveHeight 计算高度")
+})

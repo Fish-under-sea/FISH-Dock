@@ -200,6 +200,8 @@ mod imp {
         fn MonitorFromPoint(pt: Point, flags: u32) -> *mut c_void;
         fn GetMonitorInfoW(monitor: *mut c_void, info: *mut MonitorInfo) -> i32;
         fn GetSystemMetrics(index: i32) -> i32;
+        fn GetForegroundWindow() -> Hwnd;
+        fn GetWindowTextW(hwnd: Hwnd, text: *mut u16, max: i32) -> i32;
     }
 
     #[link(name = "shcore")]
@@ -251,6 +253,11 @@ mod imp {
     const MONITOR_DEFAULTTONEAREST: u32 = 2;
     const MDT_EFFECTIVE_DPI: u32 = 0;
     const SM_XVIRTUALSCREEN: i32 = 76;
+    // The primary display's size (what a display change most often alters):
+    // SM_CXSCREEN / SM_CYSCREEN, and SM_CMONITORS for how many are on.
+    const SM_CXSCREEN: i32 = 0;
+    const SM_CYSCREEN: i32 = 1;
+    const SM_CMONITORS: i32 = 80;
     const WS_POPUP: u32 = 0x8000_0000;
     const WS_EX_TOOLWINDOW: u32 = 0x80;
     const WS_EX_TOPMOST: u32 = 0x8;
@@ -1645,6 +1652,10 @@ mod imp {
     // loss would tell. A low-level mouse hook, on the host's thread (whose
     // loop it needs) and only while asked for.
     const WM_WATCH_PRESSES: u32 = 0x8010;
+    // Debug only (/debug/hang, upstream cdb0270b): this thread held still for
+    // wparam seconds, as a hang of it is (her guard's ten seconds, shell.rs
+    // HangBack), for a real test of the give-back.
+    const WM_HOLD_STILL: u32 = 0x8012;
     const WH_MOUSE_LL: i32 = 14;
     const WM_LBUTTONDOWN: u32 = 0x0201;
     const WM_RBUTTONDOWN: u32 = 0x0204;
@@ -1672,6 +1683,16 @@ mod imp {
     pub fn watch_presses(on: bool) {
         // SAFETY: a posted message to the host's own window.
         unsafe { PostMessageW(OURS.load(Ordering::SeqCst) as Hwnd, WM_WATCH_PRESSES, on as usize, 0) };
+    }
+
+    // Debug only (/debug/hang): this thread held still for `secs`, as a hang
+    // of it is (her guard's ten seconds, shell.rs HangBack). Posted to the
+    // strip's window and slept in its own message loop, so the give-back can
+    // be tried on a real desktop. False when the window is not up.
+    pub fn hold_still(secs: u64) -> bool {
+        let ours = OURS.load(Ordering::SeqCst);
+        // SAFETY: our own window; the post waits on nothing.
+        ours != 0 && unsafe { PostMessageW(ours as Hwnd, WM_HOLD_STILL, secs as usize, 0) } != 0
     }
 
     // On the host's thread.
@@ -2385,25 +2406,51 @@ mod imp {
     // Windows' taskbar shown again as fast as she puts it away: another
     // program shows or hides it too (a dock that keeps it hidden, as
     // MyDockFinder: zhoupengjie/Wakuwaku#69), and the two fought over it
-    // some times a second, the screen stuttering. So many times within any
-    // so many ticks is that: about a second of #69's, some four seconds of
-    // the timer alone seeing it shown at every tick, at most ten of one
-    // showing it once a second or so. In normal use it is next to never
-    // shown again (none in 71 hours of the taskbar home, 2026-10-20); a few
-    // at once (Explorer started again on several displays) is nothing.
-    const TUG_TICKS: u32 = 20;
-    const TUG_TIMES: usize = 8;
+    // some times a second, the screen stuttering. Upstream #115
+    // (24e44747 + bdabdbef) judged the window too tight at 8 times / 10 s and
+    // widened it to 24 times / 30 s, so that a burst from a display switch
+    // (Explorer starting again on several monitors, which can show the bar a
+    // dozen times in a second) is not mistaken for a rival. A tick here is
+    // half a second (the WM_TIMER's own pace, ticks below), so 30 s is 60
+    // ticks, and 24 shows within it (a rival that keeps showing every tick,
+    // #69's 7 or 8 a second among them) is the tug of war.
+    const TUG_TICKS: u32 = 60;
+    const TUG_TIMES: usize = 24;
+
+    // On a display change she stops counting for the same 30 s: the shows a
+    // switch itself makes (Explorer merging taskbars, DPI recomputed, a
+    // monitor gone) are not a rival's. Upstream resets the count on
+    // WM_DISPLAYCHANGE; here the display list and the main display's size are
+    // read each tick (below), and any change starts the quiet spell.
+    const TUG_QUIET_TICKS: u32 = 60;
 
     struct Tug {
         // The ticks of the last TUG_TIMES times (a ring), and how many in all.
         at: [u32; TUG_TIMES],
         seen: usize,
         lost: bool,
+        // The main display's size and how many displays, as last read; and
+        // the tick a change was seen at, before which no show is counted.
+        display: Option<((i32, i32), usize)>,
+        quiet_until: u32,
     }
 
     impl Tug {
         const fn new() -> Self {
-            Tug { at: [0; TUG_TIMES], seen: 0, lost: false }
+            Tug { at: [0; TUG_TIMES], seen: 0, lost: false, display: None, quiet_until: 0 }
+        }
+
+        // The displays as they are now (the main one's width and height, and
+        // how many): a change forgets every count so far and starts the quiet
+        // spell. Called each tick before shown(); a pure part of it (the
+        // comparison) is testable with_no_windows too.
+        fn note_display(&mut self, now: Option<((i32, i32), usize)>, tick: u32) {
+            if self.display != now {
+                self.display = now;
+                self.seen = 0;
+                self.lost = false;
+                self.quiet_until = tick.saturating_add(TUG_QUIET_TICKS);
+            }
         }
 
         // Shown again once more, at this tick: whether that makes it the
@@ -2414,8 +2461,9 @@ mod imp {
         // five pulls, three shots in a row "won" the tug and the home fell
         // to the island for nothing. A real rival (a program that shows the
         // bar and keeps it shown) pulls on later ticks and is still caught.
+        // No show is counted within the quiet spell a display change started.
         fn shown(&mut self, tick: u32) -> bool {
-            if self.lost {
+            if self.lost || tick < self.quiet_until {
                 return false;
             }
             if self.seen > 0 && self.at[(self.seen + TUG_TIMES - 1) % TUG_TIMES] == tick {
@@ -2427,28 +2475,69 @@ mod imp {
             self.lost = self.seen >= TUG_TIMES && tick.saturating_sub(self.at[self.seen % TUG_TIMES]) < TUG_TICKS;
             self.lost
         }
+
+        // A short note for the log when a show is counted, so a sudden burst
+        // can be traced to what was in front (foreground window), per #115.
+        fn why(fg: &str) -> String {
+            format!("shown again at tick {} with {fg} in front", TICKS.load(Ordering::SeqCst))
+        }
     }
 
     static TUG: Mutex<Tug> = Mutex::new(Tug::new());
+
+    // Windows' taskbar shown again by her guard while a thread of hers did not
+    // answer (shell.rs HangBack): left up till the guard takes its mark away as
+    // she answers again (upstream cdb0270b).
+    fn shown_for_hang() -> bool {
+        sh().is_some_and(|sh| shell::shown_for_hang(&sh.dir.join("taskbar.json")))
+    }
+
+    // Said once for each time her guard shows Windows' taskbar for a hang.
+    static LEFT_FOR_HANG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
     fn put_away_again(how: &str) {
         if HANDING_BACK.load(Ordering::SeqCst) || TUG.lock().unwrap().lost {
             return;
         }
+        // Shown by her guard while she did not answer: no tug of war, and up
+        // till the guard says she answers; then the timer finds it shown and
+        // puts it away as ever.
+        if shown_for_hang() {
+            if !LEFT_FOR_HANG.swap(true, Ordering::SeqCst) {
+                log(&format!("Windows' shown by her guard while she did not answer ({how}): left up till she does"));
+            }
+            return;
+        }
+        LEFT_FOR_HANG.store(false, Ordering::SeqCst);
         let fullscreen = sh().is_some_and(|sh| sh.is_fullscreen());
-        if !explorer_check() && TUG.lock().unwrap().shown(TICKS.load(Ordering::SeqCst)) {
-            // A game or a video full screen: Windows re-shows the bar for
-            // its toasts, the clock, Game Bar — the re-shows come while the
-            // person cannot see the tug's words at all, so a give_up here
-            // reads as "the taskbar mode broke for nothing" when they come
-            // back. Hide it again, and leave the tug out of it: a real
-            // rival still pulls on later looks after the full screen ends.
-            if fullscreen {
-                shell::rehide();
+        if !explorer_check() {
+            // The displays now, for the count: a change (switch, DPI, one
+            // gone) forgets the count and quiets it for 30 s (upstream #115).
+            let tick = TICKS.load(Ordering::SeqCst);
+            let now = displays_now();
+            let lost = {
+                let mut tug = TUG.lock().unwrap();
+                tug.note_display(now, tick);
+                tug.shown(tick)
+            };
+            if lost {
+                // A game or a video full screen: Windows re-shows the bar for
+                // its toasts, the clock, Game Bar — the re-shows come while the
+                // person cannot see the tug's words at all, so a give_up here
+                // reads as "the taskbar mode broke for nothing" when they come
+                // back. Hide it again, and leave the tug out of it: a real
+                // rival still pulls on later looks after the full screen ends.
+                if fullscreen {
+                    shell::rehide();
+                    return;
+                }
+                // The foreground window at the moment of giving up, so a sudden
+                // burst can be traced (upstream #115).
+                let fg = before_them();
+                log(&Tug::why(&fg));
+                give_up();
                 return;
             }
-            give_up();
-            return;
         }
         shell::rehide();
         log(&format!("Windows' shown again ({how}): put away"));
@@ -2456,6 +2545,38 @@ mod imp {
             log("tray: Explorer's window had come first; ours put ahead again");
             ask_soon();
         }
+    }
+
+    // The displays now: the primary one's size and how many there are, the two
+    // things a switch, a DPI change or a monitor gone alters (upstream #115
+    // watches WM_DISPLAYCHANGE; here each tick reads these). None when the
+    // calls fail, so a failing reading does not look like a change.
+    fn displays_now() -> Option<((i32, i32), usize)> {
+        let (w, h, n) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), GetSystemMetrics(SM_CMONITORS)) };
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        Some(((w, h), n.max(1) as usize))
+    }
+
+    // What was in front at the moment of a give-up (the foreground window's
+    // title and class), for the log so a sudden burst can be traced (#115).
+    fn before_them() -> String {
+        let hwnd = unsafe { GetForegroundWindow() };
+        if hwnd.is_null() {
+            return "nothing in front".to_string();
+        }
+        let mut title = [0u16; 128];
+        let mut class = [0u16; 128];
+        let (tt, ct) = unsafe {
+            (
+                GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32),
+                GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32),
+            )
+        };
+        let title = String::from_utf16_lossy(&title[..tt.max(0) as usize]);
+        let class = String::from_utf16_lossy(&class[..ct.max(0) as usize]);
+        format!("{class:?} {title:?}")
     }
 
     // The tug of war given up: Windows' taskbar left to the other program,
@@ -2477,7 +2598,7 @@ mod imp {
 
     #[cfg(test)]
     mod tug_tests {
-        use super::{Tug, TUG_TICKS, TUG_TIMES};
+        use super::{Tug, TUG_QUIET_TICKS, TUG_TICKS, TUG_TIMES};
 
         // Shown again now and then (once every three ticks, for a long
         // while: TUG_TIMES of them never within TUG_TICKS): never a tug of war.
@@ -2485,6 +2606,54 @@ mod imp {
         fn now_and_then_is_nothing() {
             let mut tug = Tug::new();
             assert!((0..2000).step_by(3).all(|tick| !tug.shown(tick)));
+        }
+
+        // Upstream #115: 8 times within 10 seconds (20 ticks) is no longer the
+        // tug; the window is 24 within 30 seconds (60 ticks). Eight shows, one
+        // every 2.5 s, spread over 10 s, is what a display switch looks like
+        // and must not give her home up.
+        #[test]
+        fn eight_within_ten_seconds_is_not_the_tug() {
+            // 8 shows at ticks 0,3,6,...,21 (over 10.5 s, 21 ticks).
+            let mut tug = Tug::new();
+            let told: Vec<bool> = (0..8u32).map(|i| tug.shown(i * 3)).collect();
+            assert!(!told.iter().any(|t| *t), "8 次 / 10 秒不再判为抢任务栏");
+        }
+
+        // 24 shows within 30 seconds is the tug (upstream's new threshold).
+        #[test]
+        fn twenty_four_within_thirty_seconds_is_the_tug() {
+            let mut tug = Tug::new();
+            // One every 2 ticks (second): the 24th at tick 46 is within 30 s.
+            let at = (0..200).step_by(2).find(|&tick| tug.shown(tick));
+            assert_eq!(at, Some(2 * (TUG_TIMES as u32 - 1)));
+        }
+
+        // After a display change the count is forgotten and 30 seconds are
+        // quiet: no show within the quiet spell counts, so a burst Explorer
+        // makes on a switch is not a rival.
+        #[test]
+        fn display_change_quiets_thirty_seconds() {
+            let mut tug = Tug::new();
+            tug.note_display(Some(((1920, 1080), 1)), 0);
+            let quiet = TUG_QUIET_TICKS;
+            // A burst of shows inside the quiet spell, at every tick: none
+            // counted, none the tug.
+            assert!((1..quiet).all(|t| !tug.shown(t)), "显示变化后 30 秒内不判定");
+            // Past the quiet spell, a rival shown at every tick is caught.
+            assert!((0..TUG_TICKS).any(|i| tug.shown(quiet + i)));
+        }
+
+        // A change of the display list (a monitor added or gone) resets the
+        // count even mid-spell; the same list twice is no change.
+        #[test]
+        fn a_new_display_list_starts_the_spell_again() {
+            let mut tug = Tug::new();
+            tug.note_display(Some(((1920, 1080), 1)), 0);
+            tug.note_display(Some(((1920, 1080), 1)), 5); // same: nothing
+            assert_eq!(tug.quiet_until, TUG_QUIET_TICKS);
+            tug.note_display(Some(((2560, 1440), 2)), 10); // a change
+            assert_eq!(tug.quiet_until, 10 + TUG_QUIET_TICKS);
         }
 
         // A burst within one tick (a screenshot's overlay: four or five show
@@ -2521,7 +2690,7 @@ mod imp {
         }
 
         // Seen by the timer at every tick, put away and shown again each
-        // time: the TUG_TIMES-th tick (four seconds).
+        // time: the TUG_TIMES-th tick (twelve seconds).
         #[test]
         fn every_tick_is_a_tug_of_war() {
             let mut tug = Tug::new();
@@ -2534,7 +2703,7 @@ mod imp {
         #[test]
         fn once_a_second_is_a_tug_of_war() {
             let mut tug = Tug::new();
-            let at = (0..200).step_by(2).find(|&tick| tug.shown(tick));
+            let at = (0..400).step_by(2).find(|&tick| tug.shown(tick));
             assert_eq!(at, Some(2 * (TUG_TIMES as u32 - 1)));
         }
 
@@ -2543,7 +2712,7 @@ mod imp {
         // after (counted from the first, both halves would fall short).
         #[test]
         fn the_window_slides() {
-            // 持续的对手（每 tick 都有回显）：旧拉扯滑出 20-tick 窗口后，
+            // 持续的对手（每 tick 都有回显）：旧拉扯滑出 60-tick 窗口后，
             // 新的照旧触发。同 tick 的多次只算一次（截屏豁免）。
             let mut tug = Tug::new();
             assert!(!tug.shown(0));
@@ -2710,7 +2879,11 @@ mod imp {
             return;
         }
         log("Explorer started again");
-        shell::rehide();
+        // Not while her guard shows Windows' for a hang (put_away_again): it
+        // is up till she answers, not to be put away as a new Explorer's.
+        if !shown_for_hang() {
+            shell::rehide();
+        }
         take_strip_again();
         systray::keep_first();
         ask_soon();
@@ -3186,6 +3359,7 @@ mod imp {
                 unsafe { PostQuitMessage(0) }
             }
             WM_WATCH_PRESSES => watch(wparam != 0),
+            WM_HOLD_STILL => std::thread::sleep(std::time::Duration::from_secs(wparam as u64)),
             WM_PRESS_SEEN => press_seen(wparam as u32 as i32, lparam as i32),
             _ if msg == CREATED_MSG.load(Ordering::SeqCst) && msg != 0 => on_created(),
             _ if msg == SHELL_MSG.load(Ordering::SeqCst) && msg != 0 => on_shell(wparam, lparam),
@@ -3243,6 +3417,9 @@ mod imp {
     }
     pub fn watch_presses(_on: bool) {}
     pub fn note(_line: &str) {}
+    pub fn hold_still(_secs: u64) -> bool {
+        false
+    }
     pub fn end_task_on() -> bool {
         false
     }
@@ -3273,7 +3450,7 @@ mod imp {
     }
 }
 
-pub use imp::{end_task_on, explorer_room, give_back, handing_back, is_up, set_edge, look_for_other, look_now, look_value, note, resend, strip_moved, strip_picture, task_view_on, take, waiting, wake, windows_now, work_area_bottom, work_area_rect};
+pub use imp::{end_task_on, explorer_room, give_back, handing_back, hold_still, is_up, set_edge, look_for_other, look_now, look_value, note, resend, strip_moved, strip_picture, task_view_on, take, waiting, wake, windows_now, work_area_bottom, work_area_rect};
 
 // Windows' End task setting's number (end_task_on): on once set, but for 0.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -3288,6 +3465,29 @@ fn end_task_set(value: Option<u32>) -> bool {
 #[cfg_attr(not(windows), allow(dead_code))]
 fn task_view_set(value: Option<u32>) -> bool {
     value != Some(0)
+}
+
+// Windows 11's own Task view icons, read once from its private resource
+// (pri.rs): the light and dark SVGs. None on Windows 10 (no such .pri) or when
+// it cannot be read, so the page falls back to the U+E7C4 glyph (#89). Cached
+// against the resource file's own identity (size + last write time): the icon
+// resource changes across Windows builds (and on an in-place Windows update), so
+// a read on one build/file is never reused for another — a different file
+// re-reads once.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn task_view_icons() -> Option<crate::pri::TaskViewIcons> {
+    use std::sync::Mutex;
+    static ICONS: Mutex<Option<(String, Option<crate::pri::TaskViewIcons>)>> = Mutex::new(None);
+    let key = crate::pri::resource_key();
+    let mut cache = ICONS.lock().unwrap();
+    match &*cache {
+        Some((k, icons)) if *k == key => icons.clone(),
+        _ => {
+            let icons = crate::pri::task_view_icons();
+            *cache = Some((key, icons.clone()));
+            icons
+        }
+    }
 }
 
 // Windows' "Show seconds in system clock" (Settings → Personalization → Taskbar →
@@ -3364,7 +3564,7 @@ fn resize(src: &[u8], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{end_task_set, resize, seconds_set, task_view_set};
+    use super::{end_task_set, icons_json, resize, seconds_set, task_view_set};
 
     // 2.0.4 T-G：Windows' "Show seconds in system clock" (0/1/缺省) is off unless 1.
     #[test]
@@ -3391,6 +3591,25 @@ mod tests {
         assert!(task_view_set(Some(1)));
         assert!(task_view_set(Some(2)));
         assert!(!task_view_set(Some(0)));
+    }
+
+    // #89：任务视图两张 SVG 交给页面的形状是**字符串**，不是字节数组。Vec<u8> 走
+    // serde_json 会变成一串数字（[60,115,…]），页面的 encodeURIComponent(svg) 会把
+    // 它拼成 "60%2C115%2C…" 的假 data URL，图标永远画不出来。这里钉住线上形状。
+    #[test]
+    fn task_view_icons_are_strings_on_the_wire() {
+        let icons = crate::pri::TaskViewIcons {
+            light: br#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M1,7H17"/></svg>"#.to_vec(),
+            dark: br#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M7,1H23"/></svg>"#.to_vec(),
+        };
+        let value = icons_json(Some(icons));
+        let light = value.get("light").and_then(|v| v.as_str()).expect("light 是字符串");
+        let dark = value.get("dark").and_then(|v| v.as_str()).expect("dark 是字符串");
+        assert!(light.starts_with("<svg"), "light 是 SVG 源：{light}");
+        assert!(dark.ends_with("</svg>"), "dark 是 SVG 源：{dark}");
+        assert!(value.get("light").and_then(|v| v.as_array()).is_none(), "不是数字数组");
+        // 读不到（Windows 10 / 资源缺失）一律 null，页面回退 U+E7C4 字形。
+        assert_eq!(icons_json(None), serde_json::Value::Null);
     }
 
     #[test]
@@ -3477,6 +3696,32 @@ pub async fn taskbar_end_task() -> bool {
 #[tauri::command]
 pub async fn taskbar_task_view() -> bool {
     task_view_on()
+}
+
+// The two SVGs as the page takes them (#89): **UTF-8 strings**, not byte
+// arrays. A `Vec<u8>` in serde_json is a list of numbers, and the page's
+// `encodeURIComponent(svg)` would turn [60, 115, …] into "60%2C115%2C…" — a
+// data URL that is not the SVG at all, so the icon never draws. Kept a pure
+// function so the shape is pinned by a test.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn icons_json(icons: Option<crate::pri::TaskViewIcons>) -> serde_json::Value {
+    match icons {
+        Some(icons) => serde_json::json!({
+            "light": String::from_utf8_lossy(&icons.light),
+            "dark": String::from_utf8_lossy(&icons.dark),
+        }),
+        None => serde_json::Value::Null,
+    }
+}
+
+// Windows 11's own Task view icons (#89, upstream c1bead2c): the light and
+// dark SVG Windows draws in its own taskbar, read once from its private
+// resource (pri.rs, OnceLock here). { light, dark } as SVG source strings, or
+// null on Windows 10 and where the resource cannot be read, so the page keeps
+// the U+E7C4 glyph.
+#[tauri::command]
+pub async fn taskbar_task_view_icons() -> serde_json::Value {
+    icons_json(task_view_icons())
 }
 
 // The input methods to pick from (the mark's right press), each with its

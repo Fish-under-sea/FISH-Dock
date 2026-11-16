@@ -1,10 +1,10 @@
 // 安装资源清单与构建期准备：先红后绿，覆盖安装版关键约束。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, stat, copyFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { hashFile, inventory, writeManifest, NOTICE_TEXT, REQUIRED, MANIFEST_SCHEMA, PRODUCT, productVersion } from './prepare-installer.mjs'
+import { hashFile, inventory, writeManifest, NOTICE_TEXT, REQUIRED, MANIFEST_SCHEMA, PRODUCT, productVersion, upstreamLicenseSource, REPO_ROOT } from './prepare-installer.mjs'
 
 async function fakeResources() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'fish-res-'))
@@ -99,4 +99,27 @@ test('产品版本取自 tauri.conf.json，安装包版本不会另行漂移', a
   assert.equal(await productVersion(), config.version)
   const cargo = await readFile(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8')
   assert.match(cargo, new RegExp(`^version = "${config.version.replace(/\./g, '\\.')}"$`, 'm'), 'Cargo.toml 与 tauri.conf.json 的版本必须一致')
+})
+
+// #t4 回归：上游许可原文合并到仓根 LICENSE（提交 7a5bfce 删除了 app/LICENSE）。
+// 若复制来源仍指向 app/LICENSE，prepareResources 会在 mkdir licenses 之后 ENOENT，
+// writeManifest 永远走不到。这里钉住来源路径解析在真实仓库里存在，且复制逻辑能跑通——
+// 不依赖官方下载件的解包，只测「许可原文从哪来、复制到 licenses/Wakuwaku.txt」这一段。
+test('许可原文从仓根 LICENSE 复制，不再引用已删除的 app/LICENSE', async () => {
+  const source = upstreamLicenseSource()
+  assert.equal(source, path.join(REPO_ROOT, 'LICENSE'), '来源必须是仓根 LICENSE')
+  assert.equal(path.dirname(source), REPO_ROOT, 'LICENSE 位于仓库根，不是 app/')
+  assert.notEqual(source, path.join(REPO_ROOT, 'app', 'LICENSE'), '不得再指向已删除的 app/LICENSE')
+  // 真实仓库里这个文件必须存在，否则 prepareResources 复制时会 ENOENT。
+  assert.equal((await stat(source)).isFile(), true, '仓根 LICENSE 必须是真实文件')
+  // 复制逻辑本身：读得到内容、写得进 licenses/Wakuwaku.txt，且非空。
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'fish-license-'))
+  try {
+    await mkdir(path.join(dir, 'licenses'), { recursive: true })
+    const dest = path.join(dir, 'licenses/Wakuwaku.txt')
+    await copyFile(source, dest)
+    const copied = await readFile(dest, 'utf8')
+    assert.ok(copied.length > 0, '复制出来的许可原文不能为空')
+    assert.equal(copied, await readFile(source, 'utf8'), '复制内容应与源文件一致')
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })

@@ -29,6 +29,7 @@
 | `documentation` | 文档与说明 |
 | `question` | 需要澄清 |
 | `crash` | 崩溃、卡死、WebView 异常（配 `crash.md`） |
+| `security` | 安全缺陷：本地端口被网页/跨源利用、权限或来源校验缺失、凭据泄露风险。正文写清影响面与复现边界，**不贴可直接运行的攻击页**（细节留在受控渠道或私有安全通告） |
 
 `duplicate`、`invalid`、`wontfix`、`good first issue`、`help wanted` 只由维护者打。
 

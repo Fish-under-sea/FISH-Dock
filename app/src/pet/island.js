@@ -309,6 +309,35 @@
   // 下面的上报一行都不执行——不装插件、装了不启用、或启用没订阅的用户
   // 走的是与 2.2.1 完全相同的路径。
   let watchDock = false
+  // 2.3.4（#88 H10）：插件浮窗占位——预留高度、横向并集与矩形表（物理像素）。
+  let reserveExtra = 0
+  let reserveSpan = null
+  let reserveRects = []
+  let reserveApplied = 0
+  // 2.3.4（#88 H10）：展开高度的纯函数——base 是既有高度，extra 是浮窗预留（GAP+barHeight+8）。
+  // 抽成独立函数便于单测直接验证「占位真的抬高展开高度」，而不是只看字符串。extra<=0 时原样返回。
+  function expandedReserveHeight(base, extra) {
+    const e = Number(extra)
+    return Number.isFinite(e) && e > 0 ? base + e : base
+  }
+  // 把占位预留作用到布局：展开时的高度按 reserveExtra 让出（见 sizeOf('expanded')），
+  // 并触发一次重排让新高度生效。不改任何既有布局宽度/形态；extra 恒为 0 时不改变任何东西
+  // （与 2.2.3 逐像素一致）。
+  function applyReserve() {
+    if (!isOn()) return
+    if (reserveExtra > 0) {
+      island.style.setProperty('--isl-reserve-extra', `${reserveExtra}px`)
+      body.classList.add('isl-reserve')
+    } else {
+      island.style.removeProperty('--isl-reserve-extra')
+      body.classList.remove('isl-reserve')
+    }
+    // 高度真的变了才重排（避免每次同值 reserve 事件都整轮重画）。
+    if (reserveExtra !== reserveApplied) {
+      reserveApplied = reserveExtra
+      if (typeof update === 'function') update()
+    }
+  }
   let lastSentView = ''
   // 2.2.3（E4）：滑出动画逐帧上报的时长。transition 是 220ms，多留尾巴。
   const CAPSULE_TRACK_MS = 320
@@ -1357,7 +1386,10 @@
     body.classList.toggle('isl-stowed', on)
     // Main told whether it is up, and the closed island's size, where a
     // window under it is looked for (none on the taskbar).
-    const { width, height } = home() === 'island' && !screenTop ? sizeOf('compact') : { width: 0, height: 0 }
+    // 2.3.4（#88 P6）：island home 时**恒定**上报 sizeOf('compact')，与是否贴顶无关。
+    // 旧条件 `&& !screenTop` 在贴顶时上报 (0,0) → 宿主 closed_rect=None，导致文件拖不到
+    // 主岛、anchorBase:'capsule' 的窗口回落整窗。
+    const { width, height } = home() === 'island' ? sizeOf('compact') : { width: 0, height: 0 }
     const sent = JSON.stringify([on, width, height])
     if (sent !== stowSent) {
       stowSent = sent
@@ -1418,6 +1450,15 @@
       window.pet.view(view)
     }
   })
+  // 2.3.4（#88 H10）：插件浮窗占位回推。宿主给出预留高度 extra 与横向并集；页面把它
+  // 记下来，供展开布局预留空间（避免长条压住主岛内容），并把占位矩形并入命中面。
+  // 没有插件登记占位时 extra 恒为 0，这里不改变任何既有布局。
+  window.pet.onReserve(({ extra, left, right, rects } = {}) => {
+    reserveExtra = Number(extra) > 0 ? Number(extra) : 0
+    reserveSpan = Number.isFinite(left) && Number.isFinite(right) && right > left ? [left, right] : null
+    reserveRects = Array.isArray(rects) ? rects : []
+    if (typeof applyReserve === 'function') applyReserve()
+  })
 
   function setSize({ width, height }) {
     island.style.width = `${width}px`
@@ -1455,9 +1496,11 @@
     }
     if (name === 'expanded') {
       // As tall as what it says, never shorter than her.
+      // 2.3.4（#88 H10）：插件浮窗登记了占位时，展开高度再让出 reserveExtra（GAP+barHeight+8），
+      // 避免浮窗长条压住主岛内容。没有占位时 reserveExtra 恒为 0，高度与 2.2.3 逐像素一致。
       return withHer
-        ? { width: Math.min(OPEN_MAX_W, Math.max(320, expanded.offsetWidth)), height: Math.max(OPEN_H, expanded.offsetHeight) }
-        : { width: Math.min(OPEN_BARE_MAX_W, Math.max(300, expanded.offsetWidth)), height: Math.max(84, expanded.offsetHeight) }
+        ? { width: Math.min(OPEN_MAX_W, Math.max(320, expanded.offsetWidth)), height: expandedReserveHeight(Math.max(OPEN_H, expanded.offsetHeight), reserveExtra) }
+        : { width: Math.min(OPEN_BARE_MAX_W, Math.max(300, expanded.offsetWidth)), height: expandedReserveHeight(Math.max(84, expanded.offsetHeight), reserveExtra) }
     }
     if (isSide()) return sideCapsule(isHinting() || !!time())
     return { width: compactWidth, height: home() === 'taskbar' ? taskCompactH() : screenTop ? screenTop.height : 36 }
@@ -1593,16 +1636,40 @@
   // look has come), so hers is never forced where Windows hid it.
   const taskViewButton = el('span', 'tview')
   taskViewButton.dataset.bar = 'tasks'
-  taskViewButton.append(el('span', 'fi', '\u{e7c4}'))
+  // The fallback glyph first (Windows 10 and any path with no SVG); Windows 11's
+  // own双色 SVG, read once out of its private resource, replaces it (issue #89,
+  // upstream c1bead2c). Light on a light strip, dark on a dark one.
+  const taskViewGlyph = el('span', 'fi', '\u{e7c4}')
+  taskViewButton.append(taskViewGlyph)
   let taskViewOn = true
+  let taskViewIcons = null
   const drawTaskView = () => {
     taskViewButton.hidden = !taskViewOn
+    // Pick the SVG by the strip's brightness: Windows' own Taskview_Light.svg is
+    // the *dark* glyph (for a light bar) and Taskview_Dark.svg the light one (for
+    // a dark bar), so a light bar takes `light` — as tview.js has it, with the
+    // shape guard and the U+E7C4 fallback (Windows 10, resource missing).
+    const url = window.TView ? window.TView.dataUrl(taskViewIcons, isLight()) : null
+    if (url) {
+      taskViewButton.classList.add('svg')
+      taskViewGlyph.hidden = true
+      taskViewButton.style.setProperty('--tview-svg', url)
+    } else {
+      taskViewButton.classList.remove('svg')
+      taskViewGlyph.hidden = false
+      taskViewButton.style.removeProperty('--tview-svg')
+    }
   }
   // Asked before the strip's look arrives, so the cell is there from the
   // first draw or not at all; the look keeps it as Windows' setting changes
   // (WM_SETTINGCHANGE, taskbar.rs send_look).
   window.pet.taskbar.taskView().then(on => {
     taskViewOn = on !== false
+    drawTaskView()
+  })
+  // The two SVGs, once: Windows 11's own; null on Windows 10 (the glyph).
+  window.pet.taskbar.taskViewIcons().then(icons => {
+    taskViewIcons = window.TView ? window.TView.usable(icons) : null
     drawTaskView()
   })
 
@@ -5108,6 +5175,13 @@
   // always did; any other press closes it, rather than opening the settings
   // and leaving it to its time.
   function pressNudge() {
+    // What was kept for the next look, shown as the person opened the island:
+    // not open by itself, so a press does what any other does (the settings;
+    // upstream 2d5ba793). End the nudge and fall through to plain press.
+    if (pressOn(nudge) === 'press') {
+      endNudge()
+      return window.pet.openSettings()
+    }
     const open = nudge?.widget?.open
     endNudge()
     // A word that points somewhere (an agent answered about a letter): there.
@@ -5438,18 +5512,29 @@
 
   // Opened (by a hover, mostly) with something kept: it is what the island
   // shows, for as long as it would have by itself; gone if its time is up.
+  // Kept (upstream 2d5ba793, #45's neighbouring fix): what was kept for the
+  // next look was shown as the person opened the island (a hover, the peek),
+  // not open by itself — a press on it then does what any other does (the
+  // settings), which is the first click after a start opening them.
   function takePending() {
     if (!pending || isNudging()) return
     const p = pending
     pending = null
     if (Date.now() > p.until) return
-    nudge = { until: Date.now() + p.ms, clip: p.clip, text: p.text, widget: p.widget }
+    nudge = { until: Date.now() + p.ms, clip: p.clip, text: p.text, widget: p.widget, kept: true }
     clearTimeout(nudgeTimer)
     nudgeTimer = setTimeout(() => {
       nudge = null
       update()
     }, p.ms)
   }
+
+  // What a press on the island does while something is open in it that way
+  // (nudging), not on a session's or a widget's row (upstream 2d5ba793,
+  // island-state.ts pressOn): what its words point to opens ('there'); one that
+  // opened by itself closes ('close', #45); what was kept and shown as the
+  // person opened the island presses as any other ('press', the settings).
+  const pressOn = n => window.Nudge.pressOn(n)
 
   // Now and then a blink, as a class for a moment (no running animation).
   function blink() {
@@ -5614,6 +5699,12 @@
       // pointer, is this press too: not one to open the settings.
       if (view === 'ask') return
       if (!isNudging()) return window.pet.openSettings()
+      // What was kept for the next look (a hello after a start) presses as any
+      // other; one open by itself closes (upstream 2d5ba793).
+      if (pressOn(nudge) === 'press') {
+        endNudge()
+        return window.pet.openSettings()
+      }
       pulledAt = Date.now()
       return pressNudge()
     }
@@ -5992,7 +6083,15 @@
         if (isNudging()) dismiss()
         return jumpTo(id)
       }
-      if (isNudging() && !e.target.closest('[data-widget]')) return pressNudge()
+      if (isNudging() && !e.target.closest('[data-widget]')) {
+        // What was kept (a hello after a start) presses as any other: the
+        // settings. One open by itself closes (upstream 2d5ba793, pressOn).
+        if (pressOn(nudge) === 'press') {
+          endNudge()
+        } else {
+          return pressNudge()
+        }
+      }
       // Not connected: "don't remind me" puts the hint away; any other
       // press but on a session's or a widget's row opens the settings'
       // welcome (a session listed still goes to its window: the hooks

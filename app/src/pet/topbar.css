@@ -1,0 +1,136 @@
+/* DEC-2：顶栏 / dock 样式。顶栏（mode=topbar）：一条细横条，亚克力/纯色随主题；左时间、
+   中缩略项、右入口。dock（mode=dock）：底部一条圆角图标带。颜色沿用主岛的深/浅主题变量，
+   这里给最小可用的一套，跟随 body[data-light]。 */
+:root {
+  --tb-h: 34px;
+  --tb-bg: rgba(28, 28, 30, 0.72);
+  --tb-fg: #f2f2f2;
+  --tb-hover: rgba(255, 255, 255, 0.12);
+}
+body[data-light='1'],
+body.b-light {
+  --tb-bg: rgba(246, 246, 248, 0.78);
+  --tb-fg: #1b1b1b;
+  --tb-hover: rgba(0, 0, 0, 0.08);
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font: 13px/1.2 'Segoe UI', system-ui, sans-serif;
+  color: var(--tb-fg);
+  -webkit-user-select: none;
+  user-select: none;
+}
+#mica {
+  position: fixed;
+  inset: 0;
+  background: var(--tb-bg);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+}
+#bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 8px;
+  gap: 8px;
+}
+body[data-mode='topbar'] #bar {
+  height: var(--tb-h);
+}
+body[data-mode='dock'] #bar {
+  justify-content: center;
+  padding: 6px 10px;
+  height: 100%;
+  border-radius: 16px;
+}
+#lead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  opacity: 0.92;
+}
+#items {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+body[data-mode='dock'] #items {
+  flex: 0 0 auto;
+}
+.item {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  max-width: 160px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+body[data-mode='dock'] .item {
+  width: 44px;
+  height: 44px;
+  padding: 4px;
+}
+.item:hover {
+  background: var(--tb-hover);
+}
+.item img {
+  height: 100%;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.item .fb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.item .fb .ic {
+  font-size: 16px;
+  line-height: 1;
+}
+.item .fb .ti {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body[data-mode='dock'] .item .fb .ti {
+  display: none;
+}
+#end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.st {
+  width: 28px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: 15px 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  cursor: pointer;
+}
+.st:hover {
+  background: var(--tb-hover);
+}

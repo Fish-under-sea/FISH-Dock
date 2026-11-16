@@ -812,6 +812,18 @@ fn bearer_ok(api: &AgentApi, req: &Request) -> Result<(), String> {
     Ok(())
 }
 
+/// 给宿主其它 loopback 接口（如 DEC-7 的 POST /ask）复用同一套鉴权：Host 与 Origin 必须
+/// 是本机同端口，Bearer 必须正确。返回 Err 时 caller 把它当 401/403/400 处理。
+pub(crate) fn loopback_authorized(api: &AgentApi, req: &Request, port: u16) -> Result<(), (u16, String)> {
+    if !host_ok(req, port) {
+        return Err((400, "bad host".into()));
+    }
+    if !origin_ok(req, port) {
+        return Err((403, "bad origin".into()));
+    }
+    bearer_ok(api, req).map_err(|why| (401, why))
+}
+
 fn param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query.split('&').find_map(|pair| {
         let (name, value) = pair.split_once('=')?;

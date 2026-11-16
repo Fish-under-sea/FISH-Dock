@@ -241,3 +241,146 @@ test('窗口事件：能力不足时宿主通知被拒绝且监听器不被调�
     finally{g.plugin.close()}
   } finally {f.plugin.close();}
 });
+
+// 2.3.4 DLG-4：SDK 提供 context.dialogs.chooseFolder，参数本地拒绝矩阵，能力缺失错误文案。
+test('dialogs.chooseFolder：能力门、参数本地拒绝、成功/取消形状', async () => {
+  const f=fixture({commands:{
+    pick:async(_,ctx)=>ctx.dialogs.chooseFolder({title:'选择备份文件夹'}),
+    pickBare:async(_,ctx)=>ctx.dialogs.chooseFolder(),
+    badTitle:async(_,ctx)=>ctx.dialogs.chooseFolder({title:''}),
+    long:async(_,ctx)=>ctx.dialogs.chooseFolder({title:'字'.repeat(81)}),
+    ctrl:async(_,ctx)=>ctx.dialogs.chooseFolder({title:'含\n换行'}),
+    badParent:async(_,ctx)=>ctx.dialogs.chooseFolder({parent:'window'}),
+    unknown:async(_,ctx)=>ctx.dialogs.chooseFolder({bogus:1}),
+    nonObj:async(_,ctx)=>ctx.dialogs.chooseFolder('x'),
+  }});
+  try{
+    // 未声明 dialogs：能力缺失错误（文案与规格一致）。
+    await handshake(f,['storage']);
+    f.send({id:3,method:'pick'});
+    assert.equal((await f.next()).error.code,'COMMAND_FAILED','未声明能力时本地就拒绝');
+    assert.equal(f.rows.length,0,'本地拒绝不该向宿主发请求');
+  } finally {f.plugin.close();}
+  const g=fixture({commands:{
+    pick:async(_,ctx)=>ctx.dialogs.chooseFolder({title:'选择备份文件夹'}),
+    pickBare:async(_,ctx)=>ctx.dialogs.chooseFolder(),
+    badTitle:async(_,ctx)=>ctx.dialogs.chooseFolder({title:''}),
+    ctrl:async(_,ctx)=>ctx.dialogs.chooseFolder({title:'含\n换行'}),
+    badParent:async(_,ctx)=>ctx.dialogs.chooseFolder({parent:'window'}),
+    unknown:async(_,ctx)=>ctx.dialogs.chooseFolder({bogus:1}),
+    nonObj:async(_,ctx)=>ctx.dialogs.chooseFolder('x'),
+  }});
+  try{
+    await handshake(g,['storage','dialogs']);
+    // 成功：发 host.dialogs.chooseFolder，返回 {dir}。
+    g.send({id:3,method:'pick'});
+    const req=await g.next();
+    assert.equal(req.method,'host.dialogs.chooseFolder');
+    assert.deepEqual(req.params,{title:'选择备份文件夹',parent:'main'});
+    g.send({id:req.id,result:{dir:'C:\\Users\\Fish\\Backups'}});
+    assert.deepEqual((await g.next()).result,{dir:'C:\\Users\\Fish\\Backups'});
+    // 取消：{dir:null}。
+    g.send({id:4,method:'pickBare'});
+    const bare=await g.next();
+    assert.deepEqual(bare.params,{parent:'main'});
+    g.send({id:bare.id,result:{dir:null}});
+    assert.deepEqual((await g.next()).result,{dir:null});
+    // 参数本地拒绝：不发请求。
+    for (const method of ['badTitle','ctrl','badParent','unknown','nonObj']){
+      g.send({id:10,method,params:{}});
+      const row=await g.next();
+      assert.equal(row.error.code,'COMMAND_FAILED',`${method} 本地拒绝`);
+      assert.equal(g.rows.length,0,`${method} 不应发请求`);
+    }
+  } finally {g.plugin.close();}
+});
+
+// 2.3.4 DLG-3：chooseFolder 走无超时 pending —— 6 秒后才回响应仍 resolve；会话关闭则 reject。
+test('dialogs.chooseFolder 不被 5 秒宿主超时打断，会话关闭仍 reject', async () => {
+  const f=fixture({requestTimeout:50,commands:{pick:async(_,ctx)=>ctx.dialogs.chooseFolder({title:'慢'})}});
+  try{
+    await handshake(f,['storage','dialogs']);
+    // 故意把宿主调用时限压到 50ms，验证 dialogs 不受它约束。
+    f.send({id:3,method:'pick'});
+    const req=await f.next();
+    assert.equal(req.method,'host.dialogs.chooseFolder');
+    // 等 150ms（远超 50ms 时限）再回响应：普通方法早已超时，dialogs 必须仍在等。
+    await new Promise(r=>setTimeout(r,150));
+    assert.equal(f.rows.length,0,'dialogs 不应在普通时限内被拒绝');
+    f.send({id:req.id,result:{dir:'C:\\late'}});
+    assert.deepEqual((await f.next()).result,{dir:'C:\\late'},'延迟响应仍 resolve');
+  } finally {f.plugin.close();}
+  // 会话关闭：待决的 chooseFolder reject，不悬挂。
+  // 让命令把内层 Promise 的结局写到外部变量（会话关闭时应在 close() 里 reject）。
+  let settled=null;
+  const g=fixture({requestTimeout:50,commands:{pick:async(_,ctx)=>{try{const r=await ctx.dialogs.chooseFolder({title:'慢'});settled={ok:r};return r}catch(error){settled={error:error.message};throw error}}}});
+  await handshake(g,['storage','dialogs']);
+  g.send({id:3,method:'pick'});
+  const req=await g.next(); // 请求已发出
+  assert.equal(req.method,'host.dialogs.chooseFolder');
+  g.plugin.close();
+  // close() 同步 reject 所有待决；给命令内部的 catch 一个微任务周期。
+  await new Promise(r=>setTimeout(r,10));
+  assert.ok(settled&&settled.error,'会话关闭后待决的 chooseFolder 必须 reject，不悬挂');
+  assert.match(settled.error,/关闭/);
+});
+
+// 2.3.4 DLG-4：页面 SDK（bridge.js）不提供 FishDock.dialogs。
+test('页面桥不提供 FishDock.dialogs（页面侧不开放选文件夹）', async () => {
+  const fs=await import('node:fs');
+  const url=await import('node:url');
+  const file=url.fileURLToPath(new URL('../browser/bridge.js',import.meta.url));
+  const source=fs.readFileSync(file,'utf8');
+  assert.ok(!/dialogs\s*[:,]/.test(source.replace(/不提供[^\n]*/g,'')),'bridge.js 不该导出 dialogs 成员');
+  assert.ok(!/chooseFolder/.test(source),'bridge.js 不该出现 chooseFolder');
+});
+
+test('窗口事件：dock 事件按 dock 能力分发给 dock 监听器（#88 B3）', async () => {
+  const dockSeen=[],windowsSeen=[];
+  const f=fixture({commands:{wire:async(_,ctx)=>{
+    ctx.dock.onEvent(row=>dockSeen.push(row)).catch(()=>{});
+    ctx.windows.onEvent(row=>windowsSeen.push(row));
+    return 'wired';
+  }}});
+  try{
+    await handshake(f,['storage','windows','dock']);
+    f.send({id:3,method:'wire'});
+    // dock.onEvent 内部会先发 host.dock.subscribe；回执它，命令才返回。
+    const sub=await f.next();assert.equal(sub.method,'host.dock.subscribe');f.send({id:sub.id,result:{subscribed:true}});
+    assert.equal((await f.next()).result,'wired');
+    // dock 几何事件：必须走 dock 能力、进 dock 监听器（旧代码误判为 windows 且从不遍历 dock）。
+    f.send({id:9,method:'plugin.windowEvent',params:{event:'dock',type:'geometry',rect:{window:null,capsule:null}}});
+    assert.deepEqual((await f.next()).result,{handled:true});
+    assert.equal(dockSeen.length,1,'dock 监听器收到 dock 事件');
+    assert.equal(dockSeen[0].type,'geometry');
+    assert.equal(windowsSeen.length,1,'dock 事件也进 windows 监听器（兼容既有约定）');
+  } finally {f.plugin.close();}
+});
+test('窗口事件：只有 windows 能力时 dock 事件被拒（#88 B3）', async () => {
+  const f=fixture({commands:{wire:async(_,ctx)=>{ctx.dock.onEvent(()=>{}).catch(()=>{});return 'wired'}}});
+  try{
+    await handshake(f,['storage','windows']); // 缺 dock
+    f.send({id:3,method:'wire'});assert.equal((await f.next()).result,'wired');
+    f.send({id:9,method:'plugin.windowEvent',params:{event:'dock',type:'pointer',action:'enter'}});
+    assert.equal((await f.next()).error.code,'CAPABILITY_REQUIRED','dock 事件需要 dock 能力，不能借用 windows');
+  } finally {f.plugin.close();}
+});
+test('windows.reopen / dock.reserve / dock.release 走对应宿主方法（#88 H6/H10）', async () => {
+  const f=fixture({commands:{wire:async(_,ctx)=>{
+    const reopened=await ctx.windows.reopen('h-1',{width:420,height:72,duration:200});
+    const res=await ctx.dock.reserve({x:8,y:132,w:420,h:120},'reserve-x');
+    const rel=await ctx.dock.release('reserve-x');
+    return {reopened,res,rel};
+  }}});
+  try{
+    await handshake(f,['storage','windows','dock']);
+    f.send({id:3,method:'wire'});
+    // 宿主回执三条：reopen / reserve / release。
+    const methods=[];
+    for(let i=0;i<3;i++){const req=await f.next();methods.push(req.method);f.send({id:req.id,result:{ok:true,reserved:true}});}
+    const out=await f.next();
+    assert.deepEqual(methods,['host.windows.reopen','host.dock.reserve','host.dock.release']);
+    assert.equal(out.result.reopened.ok,true);
+    assert.equal(out.result.res.reserved,true);
+  } finally {f.plugin.close();}
+});

@@ -664,6 +664,18 @@ fn clear_waiting(data: &Path) {
 // answering (IsHungAppWindow): before the guard can see it.
 const HUNG_AFTER_S: u64 = 5;
 
+// A line of the guard's in her log (recent.log; debug.log is hers to write).
+pub fn guard_said(data: &Path, line: &str) {
+    tail(data, &log_line(&format!("guard: {line}")));
+}
+
+// Whether a window's class is one of her main thread's or her taskbar's: the
+// two whose hang leaves the screen without a taskbar (shell.rs HangBack,
+// upstream cdb0270b).
+fn holds_the_strip(class: &str) -> bool {
+    matches!(class, "Tauri Window" | "Tao Thread Event Target" | "tray_icon_app" | "FISH-DockTaskbarHost" | "WakuwakuTaskbarHost" | "Shell_TrayWnd" | "FISH-DockThumbs" | "WakuwakuThumbs")
+}
+
 // Which thread of hers a window's class says it is.
 fn thread_said(class: &str) -> String {
     match class {
@@ -687,12 +699,13 @@ pub struct Hang {
 }
 
 impl Hang {
-    pub fn look(&mut self, data: &Path, pid: u32) {
+    pub fn look(&mut self, data: &Path, pid: u32) -> bool {
         #[cfg(windows)]
         {
             let file = folder(data).join(format!("hang-{pid}.txt"));
-            let log = |line: &str| tail(data, &log_line(&format!("guard: {line}")));
-            match (self.since, win::hung(pid).first()) {
+            let log = |line: &str| guard_said(data, line);
+            let hung = win::hung(pid);
+            match (self.since, hung.first()) {
                 (None, Some((thread, class))) => {
                     let now = crate::now_ms();
                     let frames = win::stack_of(pid, *thread);
@@ -713,9 +726,13 @@ impl Hang {
                 }
                 _ => {}
             }
+            hung.iter().any(|(_, class)| holds_the_strip(class))
         }
         #[cfg(not(windows))]
-        let _ = (data, pid);
+        {
+            let _ = (data, pid);
+            false
+        }
     }
 }
 
@@ -1201,7 +1218,7 @@ pub fn webview_failed(sh: &Arc<Shared>, label: &str, kind: i32, reason: i32, cod
 
 #[cfg(test)]
 mod tests {
-    use super::{found_for, is_crash_code, is_frame, iso_minute, thread_said, webview_crash};
+    use super::{found_for, holds_the_strip, is_crash_code, is_frame, iso_minute, thread_said, webview_crash};
     use serde_json::{json, Value};
     // 导出用例都会读写同一个 EXPORTED 静态，串行跑，避免并行互相踩。
     static EXPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -1361,6 +1378,33 @@ mod tests {
         assert_eq!(thread_said("FISH-DockTaskbarHost"), "her taskbar's thread");
         assert_eq!(thread_said(""), "a thread of hers");
         assert_eq!(thread_said("Odd/Class‹x›"), "a thread of hers (OddClassx)");
+    }
+
+    // Which of a thread's windows best says whose it is (win::rank, upstream
+    // 40227647): one of the strip's threads' first, then any but an IME's.
+    #[cfg(windows)]
+    #[test]
+    fn the_best_class_of_a_thread() {
+        assert_eq!(super::win::rank("Tauri Window"), 2);
+        assert_eq!(super::win::rank("FISH-DockTaskbarHost"), 2);
+        assert_eq!(super::win::rank("Chrome_WidgetWin_0"), 1);
+        assert_eq!(super::win::rank("IME"), 0);
+        assert_eq!(super::win::rank("MSCTFIME UI"), 0);
+        // A strip thread's window beats an ordinary one, which beats an IME's.
+        assert!(super::win::rank("Shell_TrayWnd") > super::win::rank("Notepad"));
+        assert!(super::win::rank("Notepad") > super::win::rank("IME"));
+    }
+
+    // The threads whose hang leaves the screen with no taskbar: her main
+    // thread's windows and her taskbar's (shell.rs HangBack), no other.
+    #[test]
+    fn the_strips_threads() {
+        for class in ["Tauri Window", "Tao Thread Event Target", "tray_icon_app", "FISH-DockTaskbarHost", "WakuwakuTaskbarHost", "Shell_TrayWnd", "FISH-DockThumbs", "WakuwakuThumbs"] {
+            assert!(holds_the_strip(class), "{class}");
+        }
+        for class in ["", "IME", "MSCTFIME UI", "Chrome_WidgetWin_0", "Notepad"] {
+            assert!(!holds_the_strip(class), "{class}");
+        }
     }
 
     // A thread of this test's own process, held deep in a call, its stack read

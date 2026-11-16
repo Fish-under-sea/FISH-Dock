@@ -319,6 +319,11 @@ pub fn display(sh: &Shared) -> Option<(i32, i32, i32, i32)> {
     area(sh).map(|a| a.mon)
 }
 
+// DEC-2/4：「家」所在的显示器与缩放（顶栏/dock 窗口按它摆放）。
+pub fn home_display(sh: &Shared) -> Option<((i32, i32, i32, i32), f64)> {
+    area(sh).map(|a| (a.mon, a.sf))
+}
+
 // Where the window goes, by home. Returns the physical rect if it moved.
 fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
     let home = sh.home();
@@ -739,6 +744,8 @@ fn create(sh: &Arc<Shared>) {
                     crate::tasks::no_transitions(hwnd.0 as isize);
                 }
                 sh.own_window(&win);
+                // DEC-3：岛窗口建好后，若开着嵌入任务栏就尝试嵌入（默认关，失败回落）。
+                crate::embed::refresh(&sh, sh.island.lock().unwrap().hwnd);
                 // Its renderer gone: told, and the page loaded again (crash.rs).
                 crate::crash::watch(&sh, &win);
             }
@@ -760,6 +767,11 @@ static TOP_LIGHT: AtomicU8 = AtomicU8::new(2);
 static PRESS_OUTSIDE: AtomicBool = AtomicBool::new(false);
 // 按下点在岛窗口区域内、无法判断是否为“外面拖进来”时的计时起点（ms）。
 static HOLD_SINCE: AtomicU64 = AtomicU64::new(0);
+// 2.3.4（#88 H4）：上一次胶囊点击的时间（ms），用于区分单击/双击。
+static PILL_CLICK_AT: AtomicU64 = AtomicU64::new(0);
+// 2.3.4（#88 H3）：上一次看到的「左键按下」状态。指针线程每轮看一次光标，用它检出
+// 「从松到按」的那一刻，作为全局的外部按下信号分给插件窗口（窗外点击）。
+static PREV_DOWN: AtomicBool = AtomicBool::new(false);
 
 pub fn look_over_max(sh: &Arc<Shared>) {
     let looks = sh.setting("islandTopLook");
@@ -1289,6 +1301,17 @@ pub fn handoff_out(sh: &Shared) {
 // put back where it was put if Windows moved it: the taskbar's window, which
 // reaches over its own strip, was pushed up into the work area by the strip's
 // height (2026-10-10, as a game went full screen and back).
+// DEC-4：显示变更后「家」的显示器变了（home.rs 判定）：把岛/顶栏移动到解出的显示器
+// （homeMonitor）。这里只做重定位，不再各自听显示变化（main.rs 的 ticker 统一驱动）。
+pub fn on_home_display_moved(sh: &Arc<Shared>, home_monitor: Option<(i32, i32, i32, i32)>) {
+    // 保存新显示器到 dockScreen 让 area() 的「按设定屏」路径生效，再重摆。
+    if let Some(mon) = home_monitor {
+        sh.change(json!({ "dockScreen": [mon.0, mon.1, mon.2, mon.3] }));
+    }
+    place(sh);
+    lay_again(sh, "home display moved");
+}
+
 pub fn keep_on_screen(sh: &Shared) {
     // A display come or gone: her taskbar on the others too (bars.rs).
     crate::bars::sync(&crate::shared(&sh.app));
@@ -1316,10 +1339,47 @@ pub fn keep_on_screen(sh: &Shared) {
     }
 }
 
+// 2.3.4（#88 H10）：主岛在物理像素下的拖放/点击命中矩形集合 = 胶囊 + 页面自报的 solid
+// + 插件浮窗登记的占位（等价旧产物 `solids()`）。`solid` 是页面逻辑像素（相对岛窗口），
+// 用 `pos`(岛物理原点) 与 `psf`(页面缩放) 换算；`reservations` 已是屏幕物理像素，直接并入。
+// 纯函数：输入相同则输出相同，便于单测。
+fn dock_hit_rects(
+    pill: Option<(i32, i32, i32, i32)>,
+    solid: &[[f64; 4]],
+    psf: f64,
+    pos: (i32, i32),
+    reservations: &[(f64, f64, f64, f64)],
+) -> Vec<(i32, i32, i32, i32)> {
+    let mut rects: Vec<(i32, i32, i32, i32)> = Vec::new();
+    if let Some(r) = pill { rects.push(r); }
+    for s in solid.iter() {
+        let x = pos.0 + (s[0] * psf) as i32;
+        let y = pos.1 + (s[1] * psf) as i32;
+        let w = (s[2] * psf) as i32;
+        let h = (s[3] * psf) as i32;
+        if w > 2 && h > 2 { rects.push((x, y, w, h)); }
+    }
+    for (rx, ry, rw, rh) in reservations.iter().copied() {
+        let rect = (rx.round() as i32, ry.round() as i32, rw.round() as i32, rh.round() as i32);
+        if rect.2 > 2 && rect.3 > 2 { rects.push(rect); }
+    }
+    rects
+}
+
 // One look at the mouse. Returns ms until the next look.
 pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
     // She is being dragged past: the home is not being hovered.
     let passive = crate::pet::is_dragged(sh);
+    // 2.3.4（#88 H3）：全局左键上升沿 → 通知订阅了 windows 的插件「窗外按下」。
+    // 与主岛自身的按下处理无关，纯广播一个时刻；插件自行判断这个点是否在自己的窗口外。
+    {
+        let down = crate::pet::any_down().unwrap_or(false);
+        if down && !PREV_DOWN.swap(true, Ordering::SeqCst) {
+            crate::plugin_hit::outside_press(cursor);
+        } else if !down {
+            PREV_DOWN.store(false, Ordering::SeqCst);
+        }
+    }
     let (ignore, pointer, wait, called, came) = {
         let mut isl = sh.island.lock().unwrap();
         if !isl.ready {
@@ -1352,21 +1412,27 @@ pub fn poll(sh: &Shared, cursor: (i32, i32)) -> u64 {
                     isl.pointer_on = on;
                     crate::plugin_dock::notify_pointer(on);
                 }
+                // 2.3.4（#88 H4）：指针停在胶囊上时连续推 move（带坐标与形态）。
+                if on {
+                    let view = if isl.view.is_empty() { "compact" } else { isl.view };
+                    crate::plugin_dock::notify_pointer_move(cursor.0, cursor.1, view, isl.stow.stowed, isl.over_full);
+                    // 胶囊上的「按下」上升沿 = 一次点击（双击由双击间隔判定）。
+                    if crate::pet::any_down().unwrap_or(false) {
+                        let last = PILL_CLICK_AT.load(Ordering::SeqCst);
+                        let nowms = crate::now_ms() as u64;
+                        if nowms.saturating_sub(last) > 250 {
+                            PILL_CLICK_AT.store(nowms, Ordering::SeqCst);
+                            let late = nowms.saturating_sub(last);
+                            let button = if late <= 500 && last != 0 { "double" } else { "left" };
+                            crate::plugin_dock::notify_click(button, cursor.0, cursor.1);
+                        }
+                    }
+                }
             }
             let psf = page_sf;
             let pad = (12.0 * sf) as i32;
             // 检测区只在“胶囊”和“子子灵动岛”周围一圈，不再覆盖大片桌面。
-            let mut rects: Vec<(i32, i32, i32, i32)> = Vec::new();
-            if let Some(r) = pill { rects.push(r); }
-            // 2.2.0 §7：原先在 pet 小圆窗口旁边挂一个 36 px 的「子岛小球」命中区，只有
-            // 宿主暂存子岛会用到；子岛删除后这里也不再往落点表里塞这个虚构区域。
-            for s in solid.iter() {
-                let x = pos.0 + (s[0] * psf) as i32;
-                let y = pos.1 + (s[1] * psf) as i32;
-                let w = (s[2] * psf) as i32;
-                let h = (s[3] * psf) as i32;
-                if w > 2 && h > 2 { rects.push((x, y, w, h)); }
-            }
+            let rects = dock_hit_rects(pill, &solid, psf, pos, &crate::plugin_dock::reservations());
             let mut hit: Option<(i32, i32, i32, i32)> = None;
             for r in rects.iter() {
                 if crate::pointer::within(cursor, (r.0, r.1), (r.2, r.3), pad) {
@@ -2107,5 +2173,32 @@ mod strip_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod hit_tests {
+    use super::dock_hit_rects;
+
+    // 2.3.4（#88 H10）：主岛命中集合 = 胶囊 + 页面 solid（经缩放/平移）+ 插件浮窗占位。
+    #[test]
+    fn reservations_and_solid_join_the_dock_hit_set() {
+        // 胶囊在物理像素下 (100,8,300,36)。
+        let pill = Some((100, 8, 300, 36));
+        // 页面 solid：逻辑像素 (10, 40, 20, 20)，页面缩放 1.5、岛原点 (100, 0)
+        // → 物理 (100+15, 0+60, 30, 30)。
+        let solid: Vec<[f64; 4]> = vec![[10.0, 40.0, 20.0, 20.0]];
+        // 插件浮窗占位（已是物理像素）：(694, 52, 531, 72) —— 就是 #88 B2 里那条长条。
+        let reservations: Vec<(f64, f64, f64, f64)> = vec![(694.0, 52.0, 531.0, 72.0)];
+
+        let rects = dock_hit_rects(pill, &solid, 1.5, (100, 0), &reservations);
+        assert!(rects.contains(&(100, 8, 300, 36)), "胶囊在命中集合里");
+        assert!(rects.contains(&(115, 60, 30, 30)), "页面上报的 solid 经缩放/平移到物理坐标");
+        assert!(rects.contains(&(694, 52, 531, 72)), "插件浮窗占位并入主岛命中集合（#88 H10）");
+
+        // 没有占位时，命中集合不含浮窗矩形——与 2.2.3 一致。
+        let none = dock_hit_rects(pill, &solid, 1.5, (100, 0), &[]);
+        assert!(!none.contains(&(694, 52, 531, 72)), "无占位时不含浮窗矩形");
+        assert_eq!(none.len(), 2, "只有胶囊 + solid 两块");
     }
 }

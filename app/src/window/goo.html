@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FISH Dock 吸收动画</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+      /* 顶层透明覆盖窗：整个画面透明，只画 goo 液滴 */
+      canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <canvas id="goo"></canvas>
+    <script>
+      // 2.3.4（#88 H9，DEC-1 方案 A）：宿主在真实拖放落点创建这个顶层透明覆盖窗口，
+      // 在窗内用 SVG/Canvas 滤镜回放「液滴 → 颈 → 球」吸收与抖动，结束由宿主销毁窗口。
+      // 这里只画动画；落点、目标都来自宿主注入的 query（?cx=&cy=&tx=&ty=&scale=）。
+      ;(function () {
+        const q = new URLSearchParams(location.search)
+        const num = (k, d) => {
+          const v = Number(q.get(k))
+          return Number.isFinite(v) ? v : d
+        }
+        // 起点（真实落点，覆盖窗本地坐标 = 屏幕物理坐标 - 窗口原点）
+        const fromX = num('fx', 0), fromY = num('fy', 0)
+        // 目标（子岛/胶囊中心，同坐标系）
+        const toX = num('tx', 0), toY = num('ty', fromY)
+        const scale = num('scale', 1)
+        const dpr = window.devicePixelRatio || 1
+        const canvas = document.getElementById('goo')
+        const ctx = canvas.getContext('2d')
+        function fit() {
+          canvas.width = Math.max(1, Math.round(innerWidth * dpr))
+          canvas.height = Math.max(1, Math.round(innerHeight * dpr))
+        }
+        fit()
+        window.addEventListener('resize', fit)
+
+        // 时长与曲线：液滴 320ms 吸入 + 末端 360ms 抖动，与旧产物 ssub-wobble 对齐。
+        const ABSORB_MS = 320
+        const WOBBLE_MS = 360
+        const total = ABSORB_MS + WOBBLE_MS
+        const start = performance.now()
+        const r0 = 10 * scale // 液滴初始半径
+
+        function blob(cx, cy, r) {
+          // 一个带轻微不规则的黑色液滴（goo 观感的关键是纯黑 + 熔接）
+          ctx.beginPath()
+          const lobes = 12
+          for (let i = 0; i <= lobes; i++) {
+            const a = (i / lobes) * Math.PI * 2
+            const wob = 1 + 0.08 * Math.sin(a * 3 + performance.now() / 90)
+            const px = cx + Math.cos(a) * r * wob
+            const py = cy + Math.sin(a) * r * wob
+            if (i === 0) ctx.moveTo(px, py)
+            else ctx.lineTo(px, py)
+          }
+          ctx.closePath()
+          ctx.fillStyle = '#000'
+          ctx.fill()
+        }
+
+        function frame(now) {
+          const t = now - start
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+          ctx.save()
+          ctx.scale(dpr, dpr)
+          // 液滴沿 from → to 用 easeOutCubic 吸入；末端在目标处抖动。
+          const p = Math.min(1, t / ABSORB_MS)
+          const e = 1 - Math.pow(1 - p, 3)
+          const cx = fromX + (toX - fromX) * e
+          const cy = fromY + (toY - fromY) * e
+          // 半径先鼓一下再收进目标：t<ABSORB 时膨胀，之后收缩到 0。
+          let r
+          if (t <= ABSORB_MS) {
+            r = r0 * (1 + 0.6 * Math.sin(p * Math.PI))
+          } else {
+            const w = Math.min(1, (t - ABSORB_MS) / WOBBLE_MS)
+            // 抖动：半径振荡收敛到 0
+            r = r0 * 0.8 * (1 - w) * (0.6 + 0.4 * Math.abs(Math.cos(w * Math.PI * 4)))
+          }
+          // 一条「颈」从落点连到目标，末端收细
+          if (t <= ABSORB_MS && e > 0.05) {
+            ctx.strokeStyle = '#000'
+            ctx.lineCap = 'round'
+            ctx.lineWidth = r0 * 0.9 * (1 - e) + 1
+            ctx.beginPath()
+            ctx.moveTo(fromX, fromY)
+            ctx.lineTo(cx, cy)
+            ctx.stroke()
+          }
+          if (r > 0.3) blob(cx, cy, r)
+          ctx.restore()
+          if (t < total) {
+            requestAnimationFrame(frame)
+          } else {
+            // 动画结束：通知宿主销毁覆盖窗（宿主也会在超时后自行销毁兜底）。
+            try { if (window.__TAURI__ && window.__TAURI__.core) window.__TAURI__.core.invoke('plugin_goo_done') } catch {}
+          }
+        }
+        requestAnimationFrame(frame)
+      })()
+    </script>
+  </body>
+</html>

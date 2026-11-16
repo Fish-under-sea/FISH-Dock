@@ -1,14 +1,15 @@
 {
   "format": "fish-dock/source-snapshot",
-  "version": "2.0.4",
+  "version": "2.3.4",
   "projects": [
     {
       "path": "app",
       "repository": "https://github.com/zhoupengjie/Wakuwaku",
       "baseCommit": "f1441cbbcf6801d18c27a1d241fd4e5475086e3b",
-      "selectedUpstreamThrough": "ab0eb65a",
+      "selectedUpstreamThrough": "e143563e4363c6c16bd290499bde2ce778f64f80",
       "license": "LICENSE",
       "selectedChanges": [
+        "Local port turns away web pages' requests (403), all but /v1 (upstream e143563e, v0.4.3)",
         "Settings WebView DPI/hit testing and clipping",
         "Explorer startup/restart taskbar handoff",
         "Hang stack capture (upstream #96, 744cc065)",
@@ -31,7 +32,16 @@
         "Upstream P2 product-semantics items that conflict with our own implementation (evaluated in issue #48)",
         "agy PreToolUse approval subsystem (upstream #91 chain 237197d3 + 44664d4c + e0bf5ceb + 5a0fee56): built on the agent-core crate this repository removed, so it needs a rewrite against our own asks.rs rather than a port (issue #51)",
         "Upstream's taskbar tug-of-war debounce (upstream #98, efbcfb52): implemented here first, independently (6376a35), and already equivalent",
-        "Upstream's pets' gallery proxy plumbing (upstream #99, 513f9979): implemented here first with a stricter variant (pet budget, HTTP status not an error, config-driven site); only its documentation was missing"
+        "Upstream's pets' gallery proxy plumbing (upstream #99, 513f9979): implemented here first with a stricter variant (pet budget, HTTP status not an error, config-driven site); only its documentation was missing",
+        "Upstream v0.4.0 third home (top bar + dock, 49-file subsystem): evaluated in docs/plans/plan-20261115-upstream-043.md §3.3; product-level decision pending (DEC-2), not silently dropped",
+        "Upstream v0.4.1 dock acrylic flicker / Alt+Tab white bar: this repository has no dock/top-bar subsystem (equivalence evidence in docs/plans/plan-20261115-upstream-043.md)",
+        "Upstream v0.4.2 embedding the island into the Windows taskbar (upstream #105, SetParent + UIA): needs a new embedding subsystem; product-level decision pending (DEC-3)",
+        "Upstream v0.4.2 the home on any display (upstream #104): depends on the top-bar/dock layout abstraction; product-level decision pending (DEC-4)",
+        "Upstream v0.4.2 built-in calendar / now-playing plugin: official plugins live in the plugin repository; product-level decision pending (DEC-5)",
+        "Upstream v0.4.3 mail HTML rendering / remote images / links / codes on the island (upstream #114/#150): new feature with a security surface; decision pending (DEC-6)",
+        "Upstream v0.4.3 external approval protocol POST /ask (upstream #149): new external protocol + permission model; decision pending (DEC-7)",
+        "Upstream v0.4.3 whole-page TypeScript rewrite / file splitting / thread cleanup: NOT done in 2.3.4 (pages stay JS); deferred to 2.4.0, tracked by an issue (DEC-8)",
+        "Upstream v0.4.3 GitHub Actions CI (b32e9352): this repository's test/release chain differs; decision pending (DEC-9)"
       ]
     },
     {
@@ -56,6 +66,7 @@
     "OFM business source and distribution are maintained separately; the old snapshot and staging scripts are removed.",
     "Selected Wakuwaku v0.3.7–v0.3.9 fixes preserve FISH Dock plugin protocols and storage isolation.",
     "2.0.3 drops a claim carried since 2.0.1: 5a0fee56 (globalPermissionGrants) was listed as selected but no such code exists here — there is no agy approval subsystem to attach it to, and it is now recorded as excluded under issue #51.",
+    "Upstream v0.4.0–v0.4.3 evaluated for 2.3.4 in docs/plans/plan-20261115-upstream-043.md: only e143563e (local-port security) is ported as-is; 0.4.x product-level items (top bar/dock, taskbar embed, any-display home, calendar/now-playing, mail HTML, POST /ask, whole-page TS, CI) are recorded as excluded-until-decided (DEC-2…DEC-9) and are not claimed as selected.",
     "Original author copyright notices are retained. No user credentials or runtime state are published."
   ]
 }

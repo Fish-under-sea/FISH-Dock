@@ -20,7 +20,7 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     input.off('data', receive); input.off('end', ended); input.off('error', failed);
     output.off('error', failed);
     input.pause();
-    for (const { reject, timer } of pending.values()) { clearTimeout(timer); reject(new Error('插件会话已关闭')); }
+    for (const { reject, timer } of pending.values()) { if (timer) clearTimeout(timer); reject(new Error('插件会话已关闭')); }
     pending.clear(); buffer = Buffer.alloc(0);
   }
   function failed() { close(); onError(new Error('插件通信已中断')); }
@@ -30,15 +30,18 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     if (bytes.length > maxLine || output.writableLength > maxLine * 4) { close(); throw new Error('插件通信队列或帧超过限制'); }
     output.write(bytes);
   }
-  function hostFor(capability, method, params) {
+  function hostFor(capability, method, params, opts) {
     if (!hello?.capabilities.includes(capability)) return Promise.reject(new Error(capability === 'storage' ? '插件未声明存储能力' : `插件未声明 ${capability} 能力`));
     if (closed || pending.size >= 64) return Promise.reject(new Error('宿主请求队列已满或已关闭'));
     const requestId = `sdk-${++sequence}`;
+    // noTimeout：宿主不设超时（dialogs.chooseFolder 等用户慢慢选）；会话关闭才 reject。
+    const noTimeout = opts?.noTimeout === true;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(requestId); reject(new Error('宿主调用超时')); }, requestTimeout);
+      // 无超时也用 timer 占位为 null；close() 清理时按 null 处理，pending 里统一结构。
+      const timer = noTimeout ? null : setTimeout(() => { pending.delete(requestId); reject(new Error('宿主调用超时')); }, requestTimeout);
       pending.set(requestId, { resolve, reject, timer });
       try { send({ id: requestId, method, params }); }
-      catch (error) { clearTimeout(timer); pending.delete(requestId); reject(error); }
+      catch (error) { if (timer) clearTimeout(timer); pending.delete(requestId); reject(error); }
     });
   }
   function host(method, params) { return hostFor('storage', method, params); }
@@ -67,6 +70,10 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     },
     async update(handle, options = {}) {
       return hostFor('windows', 'host.windows.update', { ...options, handle: handleOf(handle, '窗口') });
+    },
+    // 2.3.4（#88 H6）：单窗口多形态 / keepAlive 回原位，保留句柄与订阅。
+    async reopen(handle, options = {}) {
+      return hostFor('windows', 'host.windows.reopen', { ...options, handle: handleOf(handle, '窗口') });
     },
     async close(handle) {
       const result = await hostFor('windows', 'host.windows.close', { handle: handleOf(handle, '窗口') });
@@ -121,6 +128,15 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
       if (typeof pageId !== 'string' || !pageId) throw new Error('openPage 需要一个页面 ID');
       return hostFor('dock', 'host.dock.openPage', { page: pageId });
     },
+    // 2.3.4（#88 H10）：登记一块浮窗占位 {x,y,w,h}（页面逻辑像素），主岛据此避让。
+    async reserve(rect, handle) {
+      if (!rect || typeof rect !== 'object') throw new Error('reserve 需要一个 {x,y,w,h} 矩形');
+      return hostFor('dock', 'host.dock.reserve', { rect, handle });
+    },
+    // 释放占位：给 handle 按句柄释放，缺省释放本插件全部占位。
+    async release(handle) {
+      return hostFor('dock', 'host.dock.release', { handle });
+    },
   });
   const context = Object.freeze({
     get dataDirectory() { return hello?.dataDirectory; },
@@ -130,6 +146,28 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
     fileDrop,
     // 2.2.2：主岛几何与状态。
     dock,
+    // 2.3.4（DLG-4）：宿主原生选文件夹。参数在本地先校验（与宿主同一套规则），
+    // 未知字段/非法 title/非法 parent 一律本地拒绝、不发请求；无 SDK 超时，会话关闭才 reject。
+    // 页面侧（sdk/browser）不提供同名方法。
+    dialogs: Object.freeze({
+      async chooseFolder(options = {}) {
+        if (!options || typeof options !== 'object' || Array.isArray(options)) throw new Error('选文件夹参数应为对象');
+        for (const key of Object.keys(options)) if (key !== 'title' && key !== 'parent') throw new Error('选文件夹参数含未知字段');
+        const parent = options.parent ?? 'main';
+        if (parent !== 'main') throw new Error("parent 只能是 'main'");
+        let params = { parent };
+        if (options.title !== undefined) {
+          if (typeof options.title !== 'string') throw new Error('title 必须是字符串');
+          const title = options.title.trim();
+          if (!title) throw new Error('title 不能为空');
+          if ([...title].length > 80) throw new Error('title 最长 80 字');
+          if (/[\u0000-\u001f\u007f-\u009f]/.test(title)) throw new Error('title 不能包含控制字符');
+          params = { title, parent };
+        }
+        // 能力在 hostFor 里再查一次：没声明 dialogs 会得到「插件未声明 dialogs 能力」。
+        return hostFor('dialogs', 'host.dialogs.chooseFolder', params, { noTimeout: true });
+      },
+    }),
     secrets: Object.freeze({
       async read(category, name) {
         const params=file(category,name);if(!['credentials','keys'].includes(category))throw new Error('加密凭据仅允许 credentials 或 keys 类别');
@@ -178,13 +216,20 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
       // 与 plugin.event 分开：窗口事件属于 windows / file-drop 能力，不要求 events。
       if (row.method === 'plugin.windowEvent') {
         const payload = row.params ?? {};
-        const need = payload.event === 'fileDrop' ? 'file-drop' : 'windows';
+        // 2.3.4（#88 B3）：dock 事件需要 dock 能力（此前被误判成 windows）；
+        // 且必须遍历 listeners.dock——旧代码从不遍历，后端 dock.onEvent 永远收不到。
+        const need = payload.event === 'fileDrop' ? 'file-drop' : payload.event === 'dock' ? 'dock' : 'windows';
         if (!hello.capabilities.includes(need)) return error('CAPABILITY_REQUIRED',`插件未声明 ${need} 能力`);
         for (const listener of [...listeners.windows]) {
           try { await listener(payload); } catch { /* 监听器自己的错不该断会话 */ }
         }
         if (payload.event === 'fileDrop') {
           for (const listener of [...listeners.fileDrop]) {
+            try { await listener(payload); } catch { /* 同上 */ }
+          }
+        }
+        if (payload.event === 'dock') {
+          for (const listener of [...listeners.dock]) {
             try { await listener(payload); } catch { /* 同上 */ }
           }
         }
@@ -213,7 +258,7 @@ export function createPlugin({ id, input = process.stdin, output = process.stdou
       // 编号已经作废（宿主晚付的回执）就丢掉：这里以前直接 throw，receive 的 catch 会
       // close() 整个会话——一次超时之后插件再也不应答，宿主只能重启进程。
       if (!waiter) return;
-      pending.delete(row.id); clearTimeout(waiter.timer);
+      pending.delete(row.id); if (waiter.timer) clearTimeout(waiter.timer);
       if (Object.hasOwn(row,'result') === Object.hasOwn(row,'error')) return waiter.reject(new Error('宿主响应结构无效'));
       if (row.error) waiter.reject(new Error('宿主存储操作失败')); else waiter.resolve(row.result);
       return;
