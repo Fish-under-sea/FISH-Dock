@@ -1917,8 +1917,29 @@ pub fn count() -> usize {
 
 /// 当前是否有活着的吸收覆盖窗口（同一时刻至多一个；连续拖放串行，不叠窗）。
 static GOO_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// 吸收覆盖窗的单调代次：每次 `play_absorb` 取一个新代次，TTL 线程捕获它，
+/// 到点时**只在代次仍是当前代次**时才销毁并清 GOO_ACTIVE——否则会误销毁后一次
+/// `play_absorb` 刚建的新窗（旧 TTL 到点把新窗关掉）。（repair t16 / t9 发现）
+static GOO_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// 覆盖窗口兜底销毁时长（动画约 700ms；2s 后强制销毁，页面异常也不常驻）。
 const GOO_TTL: Duration = Duration::from_secs(2);
+
+/// 取下一个吸收覆盖窗代次（单调 +1；跳过 0 以免与「未开始」混淆）。
+fn next_goo_generation() -> u64 {
+    GOO_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+/// 当前吸收覆盖窗代次（供测试与取消逻辑读取）。
+fn goo_generation() -> u64 {
+    GOO_GENERATION.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// 某个 TTL/完成/取消动作捕获的代次是否仍代表当前覆盖窗。
+/// 仅当代次相等时，该动作才允许销毁窗口并清 GOO_ACTIVE——旧代次的迟到 TTL
+/// 不会销毁后一次 `play_absorb` 的新窗。
+fn goo_generation_is_current(captured: u64) -> bool {
+    captured == goo_generation()
+}
 
 /// 2.3.4（#88 H9）：吸收覆盖窗按落点所在显示器的 DPI 缩放（DEC-1 要求「DPI/多屏换算」）。
 /// 落点（物理像素）落在哪块屏就用它的 `sf`；拿不到时回落 1.0，绝不给 0 或 NaN。
@@ -1939,6 +1960,8 @@ fn goo_scale_for(screens: &crate::screen::Screens, point: (i32, i32)) -> f64 {
 /// 动画结束或 TTL 到点即销毁。**动画失败绝不阻断实际 drop**——所有错误只记日志后返回。
 pub fn play_absorb(from: (i32, i32), to: (i32, i32), scale: f64) {
     let app = match app_handle() { Ok(app) => app.clone(), Err(_) => return };
+    // 取新代次：后一次 play_absorb 让先前所有在途 TTL/完成动作失效。
+    let generation = next_goo_generation();
     // 只能有一个覆盖窗；已有就先销毁，避免重叠。
     if GOO_ACTIVE.swap(true, std::sync::atomic::Ordering::SeqCst) {
         if let Some(win) = app.get_webview_window("plugin-goo") { let _ = win.destroy(); }
@@ -1986,16 +2009,21 @@ pub fn play_absorb(from: (i32, i32), to: (i32, i32), scale: f64) {
         }
     }
     // TTL 兜底：到点销毁（页面自己调 plugin_goo_done 时也会销毁）。
+    // 捕获本窗代次：到点时若代次已被后一次 play_absorb 顶替，则不动新窗、不清 GOO_ACTIVE。
     let app2 = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(GOO_TTL);
-        if let Some(win) = app2.get_webview_window("plugin-goo") { let _ = win.destroy(); }
-        GOO_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+        if goo_generation_is_current(generation) {
+            if let Some(win) = app2.get_webview_window("plugin-goo") { let _ = win.destroy(); }
+            GOO_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
     });
 }
 
 /// 页面动画结束回调：销毁覆盖窗口。
+/// 先推进代次使本窗的在途 TTL 失效，再销毁——避免 TTL 与完成回调争相销毁。
 pub fn goo_done() {
+    let _ = next_goo_generation();
     if let Ok(app) = app_handle() {
         if let Some(win) = app.get_webview_window("plugin-goo") { let _ = win.destroy(); }
     }
@@ -2006,6 +2034,8 @@ pub fn goo_done() {
 /// 插件窗口销毁、主岛全局隐藏（收起滑出/全屏避让）时调用——DEC-1 要求这两种情形取消动画，
 /// 不留下悬空的顶层覆盖窗（TTL 兜底之外再显式收一次）。幂等。
 fn cancel_goo() {
+    // 先推进代次：使本窗的在途 TTL 失效，之后它到点也不会再动（可能已被新窗占用的）资源。
+    let _ = next_goo_generation();
     if !GOO_ACTIVE.swap(false, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
@@ -2762,6 +2792,25 @@ mod tests {
         // 空屏表也绝不返回 0/NaN：回落 1.0。
         let empty = Screens { areas:vec![], primary:None };
         assert_eq!(goo_scale_for(&empty, (10, 10)), 1.0, "拿不到显示器时回落 1.0");
+    }
+
+    // t16（t9 发现）：吸收覆盖窗的单调代次。连续两次 play_absorb，旧窗的 TTL 捕获旧代次，
+    // 后一次取新代次使旧代次失效——旧 TTL 到点不得销毁新窗、不得清 GOO_ACTIVE。
+    // 这里用纯代次函数表达「旧 TTL 是否仍属当前窗」：只用公开的代次/判定函数，不建真窗。
+    #[test]
+    fn a_second_play_absorb_invalidates_the_first_windows_ttl() {
+        // 第一次 play_absorb 取代次 g1（模拟其 TTL 线程捕获 g1）。
+        let g1 = next_goo_generation();
+        assert!(goo_generation_is_current(g1), "刚取到的代次是当前代次");
+        // 第二次 play_absorb 取新代次 g2：g1 的在途 TTL 立即失效。
+        let g2 = next_goo_generation();
+        assert!(g2 > g1, "代次单调递增");
+        assert!(!goo_generation_is_current(g1), "旧代次不再当前：旧 TTL 到点不会销毁新窗");
+        assert!(goo_generation_is_current(g2), "新代次是当前代次");
+        // goo_done / cancel_goo 会推进代次：使其后任何在途 TTL 失效（用 next_goo_generation 表达）。
+        let g3 = next_goo_generation();
+        assert!(!goo_generation_is_current(g2), "完成/取消后再推进代次，先前 TTL 亦失效");
+        assert!(goo_generation_is_current(g3));
     }
 
     // H2：补间帧序列——首帧靠近起点、末帧精确到目标、步骤数随 duration 缩放。
