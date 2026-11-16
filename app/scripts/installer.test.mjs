@@ -459,7 +459,7 @@ test('#27-D：只有安装器显式传 --migrate-home 才动用户数据目录�
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
-test('生成的脚本能被离线 makensis 真正编译出安装包', async () => {
+test('生成的脚本能被离线 makensis 真正编译出安装包', { skip: !existsSync(makensisTool()) && '缺少离线 NSIS（app/.tools 或 FISH_MAKENSIS），本机未准备工具树' }, async () => {
   const makensis = makensisTool()
   assert.ok(existsSync(makensis), `缺少离线 NSIS：${makensis}`)
   const env = await fakeResources()
@@ -685,7 +685,7 @@ test('2.2.0 更新包不再带下载 Setup 的兜底，失败只回滚并明确�
   } finally { await rm(env.dir, { recursive: true, force: true }) }
 })
 
-test('2.2.0 过渡版仍能构建以 2.1.0 为基线的增量 Update 包，包内没有兜底脚本', async () => {
+test('2.2.0 过渡版仍能构建以 2.1.0 为基线的增量 Update 包，包内没有兜底脚本', { skip: !existsSync(makensisTool()) && '缺少离线 NSIS（app/.tools 或 FISH_MAKENSIS），本机未准备工具树' }, async () => {
   const makensis = makensisTool()
   assert.ok(existsSync(makensis), `缺少离线 NSIS：${makensis}`)
   const env = await fakeResources()
