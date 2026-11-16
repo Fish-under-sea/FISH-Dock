@@ -75,7 +75,7 @@
 | [`docs/specs/widgets.md`](../specs/widgets.md) | `/widget` 一节注明网页来源 403，脚本与 Thunderbird 扩展照常 |
 | [`docs/guides/plugin-windows-2.2.0.md`](../guides/plugin-windows-2.2.0.md) | 能力表加 `dialogs`；Node SDK 表加 `chooseFolder`；补示例、超时与「页面侧不提供」 |
 | [`UPSTREAM.json`](../../UPSTREAM.json) | `version` → 2.3.0；`selectedUpstreamThrough` → `e143563e…`；`selectedChanges` / `excludedChanges` / `notes` 按上游评估 §5 更新 |
-| [`docs/releases/release-2.3.0.md`](../releases/release-2.3.0.md) | 发行说明（本文件已附草案） |
+| `docs/releases/release-2.3.0.md`（草案已随 5fc81eb 删除，不再保留） | 发行说明（原文件已并入库根发布流程，改由 `docs/releases/release-2.3.4.md` 承接） |
 
 ### T5 版本位与 README
 
