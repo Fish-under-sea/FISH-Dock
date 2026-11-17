@@ -710,7 +710,9 @@ pub fn page(plugin: &str, digest: &str, generation: u64, _host: &str, method: &s
         "dock.fileDrop.subscribe" => subscribe(&context, plugin, generation, params),
         "dock.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
         // 2.2.2：主岛几何与状态归 plugin_dock，窗口模块只做转发。
-        "dock.dock.rect" | "dock.dock.subscribe" | "dock.dock.unsubscribe" | "dock.dock.openPage" => crate::plugin_dock::page(plugin, method, params),
+        // 2026-11-16 本地补丁：把 dock.reserve/release（2.3.4 H10 占位）也转发给 plugin_dock——
+        // 上游 plugin_dock::dispatch 已实现这两个方法，但这里漏了转发，导致插件调 reserve 报「方法无效」。
+        "dock.dock.rect" | "dock.dock.subscribe" | "dock.dock.unsubscribe" | "dock.dock.openPage" | "dock.dock.reserve" | "dock.dock.release" => crate::plugin_dock::page(plugin, method, params),
         _ => Err("插件窗口方法无效".into()),
     }
 }
@@ -731,7 +733,7 @@ pub fn backend(context: &Context, plugin: &str, generation: u64, method: &str, p
         "host.windows.list" => list(context, plugin, generation),
         "host.fileDrop.subscribe" => subscribe(context, plugin, generation, params),
         "host.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
-        "host.dock.rect" | "host.dock.subscribe" | "host.dock.unsubscribe" | "host.dock.openPage" => crate::plugin_dock::backend(context, plugin, generation, method, params),
+        "host.dock.rect" | "host.dock.subscribe" | "host.dock.unsubscribe" | "host.dock.openPage" | "host.dock.reserve" | "host.dock.release" => crate::plugin_dock::backend(context, plugin, generation, method, params),
         // 2.2.3（B3）：把本窗口里的文件拖回资源管理器。
         "host.windows.beginDragOut" => begin_drag_out(plugin, generation, params),
         _ => Err("插件窗口方法无效".into()),
@@ -831,7 +833,12 @@ fn build(handle: &str) -> Result<(), String> {
         book.windows.get(handle).cloned().ok_or_else(|| "窗口记录已消失".to_string())?
     };
     let app = app_handle()?.clone();
-    on_main(move || -> Result<(), String> {
+    // 2026-11-16 本地补丁（上游 2.3.4 缺陷）：原实现把 WebviewWindowBuilder::build()
+    // 放进 std::thread::spawn 子线程，同时主线程 recv_timeout(6s) 阻塞等待。
+    // Tauri v2 的 build() 需要主线程执行（内部 run_on_main_thread），主线程此刻被
+    // recv_timeout 占住 -> 死锁 -> 每次都 "插件窗口创建在主线程超时"，窗口永远建不出来。
+    // 改为在调用线程（RPC 线程，非主线程）直接同步 build，由 Tauri 自己投递主线程并等待。
+    {
         if !book().windows.contains_key(&snapshot.handle) { return Err("窗口创建已取消".into()); }
         let shared = crate::shared(&app);
         // 2.3.4（#88 P1）：WebView2 不能在主线程同步 build（与消息泵冲突报
@@ -844,32 +851,23 @@ fn build(handle: &str) -> Result<(), String> {
         let height = snapshot.height;
         let label = snapshot.label.clone();
         let title = snapshot.title.clone();
-        let (tell, told) = std::sync::mpsc::channel::<Result<WebviewWindow, String>>();
-        let app_for_build = app.clone();
-        std::thread::spawn(move || {
-            let built = WebviewWindowBuilder::new(&app_for_build, &label, WebviewUrl::App("window/window.html".into()))
-                .title(&title)
-                .inner_size(capacity, height)
-                .decorations(!snapshot.transparent)
-                .transparent(snapshot.transparent)
-                .resizable(true)
-                .maximizable(false)
-                .minimizable(true)
-                .skip_taskbar(true)
-                .focused(false)
-                .always_on_top(snapshot.z_order == ZOrder::AboveDock)
-                .additional_browser_args(&browser_args)
-                .data_directory(data_dir)
-                .visible(false)
-                .build()
-                .map_err(|error| format!("插件窗口创建失败：{error}"));
-            let _ = tell.send(built);
-        });
-        let win = match told.recv_timeout(MAIN_WAIT) {
-            Ok(Ok(win)) => win,
-            Ok(Err(error)) => return Err(error),
-            Err(_) => return Err("插件窗口创建在主线程超时".to_string()),
-        };
+        let win = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("window/window.html".into()))
+            .title(&title)
+            .inner_size(capacity, height)
+            .decorations(!snapshot.transparent)
+            .transparent(snapshot.transparent)
+            .resizable(true)
+            .maximizable(false)
+            .minimizable(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .always_on_top(snapshot.z_order == ZOrder::AboveDock)
+            .additional_browser_args(&browser_args)
+            .data_directory(data_dir)
+            .shadow(false)
+            .visible(false)
+            .build()
+            .map_err(|error| format!("插件窗口创建失败：{error}"))?;
         let watched = win.clone();
         win.on_window_event(move |event| window_event(&watched, event));
         if !book().windows.contains_key(&snapshot.handle) {
@@ -877,7 +875,13 @@ fn build(handle: &str) -> Result<(), String> {
             return Err("窗口创建已取消".into());
         }
         // 2.3.4（#88 P2）：透明窗剥掉原生标题栏/边框；非透明窗保持系统标题栏。
-        if snapshot.transparent { strip_chrome(&win); }
+        if snapshot.transparent {
+            // 2026-11-16 本地补丁：Tauri v2 未把 transparent 透传给 WebView2 controller，
+            // 默认白底 -> 小球外面一圈白色方框、展开时大白框。显式设 alpha=0 透明背景
+            //（Windows 上 alpha 非 0 会被强制改成 255，只有 0 才是真正透明）。
+            let _ = win.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+            strip_chrome(&win);
+        }
         if let Err(error) = place(&win, &snapshot) { let _ = win.destroy(); return Err(error); }
         // H7：记下首帧外框，供后续胶囊短暂未知时保持位置。
         record_rect(&snapshot.handle, geometry_of(&win));
@@ -890,8 +894,9 @@ fn build(handle: &str) -> Result<(), String> {
                 crate::plugin_hit::place(&snapshot.label, Some(rect), win.scale_factor().unwrap_or(1.0));
             }
         }
-        Ok(())
-    })?
+        Ok::<(), String>(())
+    };
+    Ok(())
 }
 
 /// 2.2.2（C4）：主岛胶囊的逻辑宽度，供 `width:'dock'` 用。
@@ -2185,21 +2190,24 @@ fn show_without_activating(win: &WebviewWindow) {
     type Hwnd = *mut std::ffi::c_void;
     extern "system" {
         fn SetWindowPos(hwnd: Hwnd, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+        fn GetForegroundWindow() -> Hwnd;
+        fn SetForegroundWindow(hwnd: Hwnd) -> i32;
     }
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_NOACTIVATE: u32 = 0x0010;
     const SWP_SHOWWINDOW: u32 = 0x0040;
-    match win.hwnd() {
-        Ok(hwnd) => {
-            // 显示但不激活：当前主界面的焦点不被抢走；用户点进来时仍能正常获焦。
-            unsafe {
-                SetWindowPos(hwnd.0 as Hwnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-            }
-        }
-        Err(_) => {
-            let _ = win.show();
-        }
+    // 2026-11-16 本地补丁：Tauri v2 用 .visible(false) 建窗时 WebView2 controller 也是隐藏的，
+    // 仅 SetWindowPos(SWP_SHOWWINDOW) 只显示 Win32 壳、内容不绘制（屏幕空白，PrintWindow 却有画面，
+    // IsWindowVisible 仍为 false）。必须先走 win.show() 让 controller 可见；再 SetWindowPos 压住不激活，
+    // 并把前台窗口还回去，尽量保持「首显不抢焦点」。
+    let prev = unsafe { GetForegroundWindow() };
+    let _ = win.show();
+    if let Ok(hwnd) = win.hwnd() {
+        unsafe { SetWindowPos(hwnd.0 as Hwnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW); }
+    }
+    if !prev.is_null() {
+        unsafe { SetForegroundWindow(prev); }
     }
 }
 
@@ -2218,6 +2226,7 @@ fn strip_chrome(win: &WebviewWindow) {
         fn GetWindowLongW(hwnd: Hwnd, index: i32) -> i32;
         fn SetWindowLongW(hwnd: Hwnd, index: i32, value: i32) -> i32;
         fn SetWindowPos(hwnd: Hwnd, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+        fn GetAncestor(hwnd: Hwnd, flags: u32) -> Hwnd;
     }
     const GWL_STYLE: i32 = -16;
     const WS_CAPTION: i32 = 0x00c0_0000;
@@ -2226,7 +2235,12 @@ fn strip_chrome(win: &WebviewWindow) {
     const WS_MINIMIZEBOX: i32 = 0x0002_0000;
     const WS_MAXIMIZEBOX: i32 = 0x0001_0000;
     if let Ok(hwnd) = win.hwnd() {
-        let hwnd = hwnd.0 as Hwnd;
+        // 2026-11-16 本地补丁：Tauri v2 的 WebviewWindow::hwnd() 给的是 WebView2 子窗口，
+        // 直接 SetWindowLong 作用在子窗口上、顶层样式不变（WS_CAPTION/WS_THICKFRAME 仍在，
+        // 于是内容外面多出一圈 8px 的非客户区白框）。先 GetAncestor(GA_ROOT) 取顶层窗口再剥。
+        let child = hwnd.0 as Hwnd;
+        let root = unsafe { GetAncestor(child, 2) };
+        let hwnd = if root.is_null() { child } else { root };
         unsafe {
             let style = GetWindowLongW(hwnd, GWL_STYLE);
             let naked = style & !(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
