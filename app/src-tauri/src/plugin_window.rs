@@ -700,19 +700,22 @@ fn generation_fresh(plugin: &str, generation: u64) -> bool {
 pub fn page(plugin: &str, digest: &str, generation: u64, _host: &str, method: &str, params: &Value) -> Result<Value, String> {
     if !generation_fresh(plugin, generation) { return Err("页面会话已撤销".into()); }
     let context = crate::storage_context::current().ok_or("存储尚未就绪")?;
+    page_with_context(&context, plugin, digest, generation, method, params)
+}
+
+fn page_with_context(context: &Context, plugin: &str, digest: &str, generation: u64, method: &str, params: &Value) -> Result<Value, String> {
+    if !generation_fresh(plugin, generation) { return Err("页面会话已撤销".into()); }
     match method {
-        "dock.windows.open" => open(&context, plugin, digest, generation, params),
-        "dock.windows.update" => update(&context, plugin, generation, params),
+        "dock.windows.open" => open(context, plugin, digest, generation, params),
+        "dock.windows.update" => update(context, plugin, generation, params),
         "dock.windows.close" => close_owned(plugin, generation, params, "plugin"),
-        "dock.windows.list" => list(&context, plugin, generation),
+        "dock.windows.list" => list(context, plugin, generation),
         // 2.2.3（B3）：页面里拖动文件出去
         "dock.windows.beginDragOut" => begin_drag_out(plugin, generation, params),
-        "dock.fileDrop.subscribe" => subscribe(&context, plugin, generation, params),
+        "dock.fileDrop.subscribe" => subscribe(context, plugin, generation, params),
         "dock.fileDrop.unsubscribe" => unsubscribe(plugin, generation, params),
-        // 2.2.2：主岛几何与状态归 plugin_dock，窗口模块只做转发。
-        // 2026-11-16 本地补丁：把 dock.reserve/release（2.3.4 H10 占位）也转发给 plugin_dock——
-        // 上游 plugin_dock::dispatch 已实现这两个方法，但这里漏了转发，导致插件调 reserve 报「方法无效」。
-        "dock.dock.rect" | "dock.dock.subscribe" | "dock.dock.unsubscribe" | "dock.dock.openPage" | "dock.dock.reserve" | "dock.dock.release" => crate::plugin_dock::page(plugin, method, params),
+        // 2.2.2：主岛几何与状态归 plugin_dock，窗口模块只做转发（含 2.3.4 H10 占位）。
+        "dock.dock.rect" | "dock.dock.subscribe" | "dock.dock.unsubscribe" | "dock.dock.openPage" | "dock.dock.reserve" | "dock.dock.release" => crate::plugin_dock::page(context, plugin, method, params),
         _ => Err("插件窗口方法无效".into()),
     }
 }
@@ -828,74 +831,66 @@ fn wait_ready(handle: &str) -> Result<Value, String> {
 }
 
 fn build(handle: &str) -> Result<(), String> {
+    if MAIN.get() == Some(&std::thread::current().id()) {
+        return Err("不能在主线程直接创建插件窗口".into());
+    }
     let snapshot = {
         let book = book();
         book.windows.get(handle).cloned().ok_or_else(|| "窗口记录已消失".to_string())?
     };
     let app = app_handle()?.clone();
-    // 2026-11-16 本地补丁（上游 2.3.4 缺陷）：原实现把 WebviewWindowBuilder::build()
-    // 放进 std::thread::spawn 子线程，同时主线程 recv_timeout(6s) 阻塞等待。
-    // Tauri v2 的 build() 需要主线程执行（内部 run_on_main_thread），主线程此刻被
-    // recv_timeout 占住 -> 死锁 -> 每次都 "插件窗口创建在主线程超时"，窗口永远建不出来。
-    // 改为在调用线程（RPC 线程，非主线程）直接同步 build，由 Tauri 自己投递主线程并等待。
-    {
-        if !book().windows.contains_key(&snapshot.handle) { return Err("窗口创建已取消".into()); }
-        let shared = crate::shared(&app);
-        // 2.3.4（#88 P1）：WebView2 不能在主线程同步 build（与消息泵冲突报
-        // `0x8007139F`，插件外部窗口一个都开不出来）。改在独立线程创建，主线程用
-        // mpsc 超时等待；并补 `.additional_browser_args` / `.data_directory`
-        // 复用全局 WebView 配置。
-        let browser_args = crate::browser_args(&shared).to_string();
-        let data_dir = crate::webview_dir(&shared);
-        let capacity = snapshot.width.resolve(capsule_width_logical(&app));
-        let height = snapshot.height;
-        let label = snapshot.label.clone();
-        let title = snapshot.title.clone();
-        let win = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("window/window.html".into()))
-            .title(&title)
-            .inner_size(capacity, height)
-            .decorations(!snapshot.transparent)
-            .transparent(snapshot.transparent)
-            .resizable(true)
-            .maximizable(false)
-            .minimizable(true)
-            .skip_taskbar(true)
-            .focused(false)
-            .always_on_top(snapshot.z_order == ZOrder::AboveDock)
-            .additional_browser_args(&browser_args)
-            .data_directory(data_dir)
-            .shadow(false)
-            .visible(false)
-            .build()
-            .map_err(|error| format!("插件窗口创建失败：{error}"))?;
-        let watched = win.clone();
-        win.on_window_event(move |event| window_event(&watched, event));
-        if !book().windows.contains_key(&snapshot.handle) {
-            let _ = win.destroy();
-            return Err("窗口创建已取消".into());
+    if !book().windows.contains_key(&snapshot.handle) { return Err("窗口创建已取消".into()); }
+    let shared = crate::shared(&app);
+    // 2.3.6（#94/#95）：WebviewWindowBuilder::build() 内部向主线程投递并等待建窗，
+    // 不能外包一层 on_main 在主线程里阻塞等子线程，否则双方互相等待必超 6s 死锁。
+    // 改为在后台调用线程直接 build（上面已守卫非 MAIN 线程），并补 `.shadow(!snapshot.transparent)`
+    // 与 `.additional_browser_args` / `.data_directory`。
+    let browser_args = crate::browser_args(&shared).to_string();
+    let data_dir = crate::webview_dir(&shared);
+    let capacity = snapshot.width.resolve(capsule_width_logical(&app));
+    let height = snapshot.height;
+    let label = snapshot.label.clone();
+    let title = snapshot.title.clone();
+    let win = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("window/window.html".into()))
+        .title(&title)
+        .inner_size(capacity, height)
+        .decorations(!snapshot.transparent)
+        .transparent(snapshot.transparent)
+        .resizable(true)
+        .maximizable(false)
+        .minimizable(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .always_on_top(snapshot.z_order == ZOrder::AboveDock)
+        .additional_browser_args(&browser_args)
+        .data_directory(data_dir)
+        .shadow(!snapshot.transparent)
+        .visible(false)
+        .build()
+        .map_err(|error| format!("插件窗口创建失败：{error}"))?;
+    let watched = win.clone();
+    win.on_window_event(move |event| window_event(&watched, event));
+    if !book().windows.contains_key(&snapshot.handle) {
+        let _ = win.destroy();
+        return Err("窗口创建已取消".into());
+    }
+    // 2.3.4（#88 P2）+ 2.3.6（#95）：透明窗同时将 WebView2 背景设为 alpha=0 并剥掉原生标题栏/边框。
+    if snapshot.transparent {
+        let _ = win.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+        strip_chrome(&win);
+    }
+    if let Err(error) = place(&win, &snapshot) { let _ = win.destroy(); return Err(error); }
+    // H7：记下首帧外框，供后续胶囊短暂未知时保持位置。
+    record_rect(&snapshot.handle, geometry_of(&win));
+    // 2.2.3（B4）：只有 hitTest:'opaque' 的窗口才登记命中规则。
+    // 其余窗口连登记都不做，plugin_hit 的规则表为空 → 主循环不会调 poll，
+    // 与 2.2.2 的指针节奏一模一样。
+    if snapshot.hit_test == HitTest::Opaque {
+        crate::plugin_hit::watch(&snapshot.label, snapshot.hit_rects.clone());
+        if let Some(rect) = geometry_of(&win) {
+            crate::plugin_hit::place(&snapshot.label, Some(rect), win.scale_factor().unwrap_or(1.0));
         }
-        // 2.3.4（#88 P2）：透明窗剥掉原生标题栏/边框；非透明窗保持系统标题栏。
-        if snapshot.transparent {
-            // 2026-11-16 本地补丁：Tauri v2 未把 transparent 透传给 WebView2 controller，
-            // 默认白底 -> 小球外面一圈白色方框、展开时大白框。显式设 alpha=0 透明背景
-            //（Windows 上 alpha 非 0 会被强制改成 255，只有 0 才是真正透明）。
-            let _ = win.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-            strip_chrome(&win);
-        }
-        if let Err(error) = place(&win, &snapshot) { let _ = win.destroy(); return Err(error); }
-        // H7：记下首帧外框，供后续胶囊短暂未知时保持位置。
-        record_rect(&snapshot.handle, geometry_of(&win));
-        // 2.2.3（B4）：只有 hitTest:'opaque' 的窗口才登记命中规则。
-        // 其余窗口连登记都不做，plugin_hit 的规则表为空 → 主循环不会调 poll，
-        // 与 2.2.2 的指针节奏一模一样。
-        if snapshot.hit_test == HitTest::Opaque {
-            crate::plugin_hit::watch(&snapshot.label, snapshot.hit_rects.clone());
-            if let Some(rect) = geometry_of(&win) {
-                crate::plugin_hit::place(&snapshot.label, Some(rect), win.scale_factor().unwrap_or(1.0));
-            }
-        }
-        Ok::<(), String>(())
-    };
+    }
     Ok(())
 }
 
@@ -2197,16 +2192,18 @@ fn show_without_activating(win: &WebviewWindow) {
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_NOACTIVATE: u32 = 0x0010;
     const SWP_SHOWWINDOW: u32 = 0x0040;
-    // 2026-11-16 本地补丁：Tauri v2 用 .visible(false) 建窗时 WebView2 controller 也是隐藏的，
-    // 仅 SetWindowPos(SWP_SHOWWINDOW) 只显示 Win32 壳、内容不绘制（屏幕空白，PrintWindow 却有画面，
-    // IsWindowVisible 仍为 false）。必须先走 win.show() 让 controller 可见；再 SetWindowPos 压住不激活，
-    // 并把前台窗口还回去，尽量保持「首显不抢焦点」。
+    // 2.3.6（#94/#95）：`.visible(false)` 建窗时 WebView2 controller 同步处于隐藏态，
+    // 仅 `SetWindowPos(SWP_SHOWWINDOW)` 只会显示 Win32 壳而内部不绘制。
+    // 先调用 `win.show()` 让 WebView2 controller 可见，再以 `SWP_NOACTIVATE` 保持非激活并归还前台焦点。
     let prev = unsafe { GetForegroundWindow() };
     let _ = win.show();
     if let Ok(hwnd) = win.hwnd() {
-        unsafe { SetWindowPos(hwnd.0 as Hwnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW); }
-    }
-    if !prev.is_null() {
+        let hwnd = hwnd.0 as Hwnd;
+        unsafe { SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW); }
+        if !prev.is_null() && prev != hwnd {
+            unsafe { SetForegroundWindow(prev); }
+        }
+    } else if !prev.is_null() {
         unsafe { SetForegroundWindow(prev); }
     }
 }
@@ -2235,12 +2232,10 @@ fn strip_chrome(win: &WebviewWindow) {
     const WS_MINIMIZEBOX: i32 = 0x0002_0000;
     const WS_MAXIMIZEBOX: i32 = 0x0001_0000;
     if let Ok(hwnd) = win.hwnd() {
-        // 2026-11-16 本地补丁：Tauri v2 的 WebviewWindow::hwnd() 给的是 WebView2 子窗口，
-        // 直接 SetWindowLong 作用在子窗口上、顶层样式不变（WS_CAPTION/WS_THICKFRAME 仍在，
-        // 于是内容外面多出一圈 8px 的非客户区白框）。先 GetAncestor(GA_ROOT) 取顶层窗口再剥。
-        let child = hwnd.0 as Hwnd;
-        let root = unsafe { GetAncestor(child, 2) };
-        let hwnd = if root.is_null() { child } else { root };
+        // 先经 `GetAncestor(GA_ROOT)` 确保落到顶层宿主窗口 HWND（与 `.shadow(false)` 共同消除非客户区外框）。
+        let raw = hwnd.0 as Hwnd;
+        let root = unsafe { GetAncestor(raw, 2) };
+        let hwnd = if root.is_null() { raw } else { root };
         unsafe {
             let style = GetWindowLongW(hwnd, GWL_STYLE);
             let naked = style & !(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
@@ -2852,5 +2847,67 @@ mod tests {
         // 32×32 合法、31×31 拒绝：契约边界一致。
         assert!(Options::parse(&json!({"key":"ball","page":"main","width":32.0,"height":32.0})).is_ok());
         assert!(Options::parse(&json!({"key":"ball","page":"main","width":31.0,"height":32.0})).is_err());
+    }
+
+    // 2.3.6（#94/#95）：dock.dock.reserve/release 与 host.dock.reserve/release 必须转发进 plugin_dock。
+    #[test]
+    fn dock_reserve_and_release_route_for_page_and_backend() {
+        let root = std::env::temp_dir().join(format!("fish-win-route-{}-{}", std::process::id(), crate::now_ms()));
+        let host_dir = root.join(".fish-dock").join("host");
+        for sub in ["config", "tmp", "backups"] {
+            std::fs::create_dir_all(host_dir.join(sub)).unwrap();
+        }
+        let host = crate::storage_context::Namespace {
+            root: host_dir,
+            identity: crate::storage_context::Identity {
+                plugin_id: "host".into(),
+                directory: "host".into(),
+                plugin_version: env!("CARGO_PKG_VERSION").into(),
+                data_schema: 1,
+            },
+        };
+        let context = Context { root: root.join(".fish-dock"), host };
+        let plugin = "acme.route-dock";
+        let registry = json!({
+            "schema": 1,
+            "entries": {
+                plugin: {
+                    "manifest": {
+                        "schema": 1,
+                        "id": plugin,
+                        "name": "Route Dock",
+                        "version": "1.0.0",
+                        "hostApi": 1,
+                        "platforms": [crate::plugin_install::platform()],
+                        "storage": { "directory": ".plugin.acme.route-dock", "dataSchema": 1 },
+                        "backend": { "runtime": "node", "entry": "index.js", "args": [] },
+                        "capabilities": ["dock"],
+                        "pages": [],
+                        "files": { "index.js": "0".repeat(64) }
+                    },
+                    "digest": "0".repeat(64),
+                    "official": false,
+                    "enabled": true,
+                    "autostart": false
+                }
+            }
+        });
+        context.host.write("config", "installed-plugins.json", &serde_json::to_vec(&registry).unwrap()).unwrap();
+        let (tx, _rx) = std::sync::mpsc::sync_channel(4);
+        let session = begin_session(plugin, tx);
+        let generation = session.generation;
+
+        // 未知方法仍拒；reserve/release 已进入 plugin_dock（先判未订阅再清占位，不走「插件窗口方法无效」）。
+        assert_eq!(page_with_context(&context, plugin, "d", generation, "dock.dock.unknown", &json!({})).unwrap_err(), "插件窗口方法无效");
+        assert_eq!(backend(&context, plugin, generation, "host.dock.unknown", &json!({})).unwrap_err(), "插件窗口方法无效");
+
+        let rect = json!({"x": 8, "y": 132, "w": 420, "h": 120});
+        assert_eq!(page_with_context(&context, plugin, "d", generation, "dock.dock.reserve", &rect).unwrap_err(), "请先订阅主岛事件再登记占位");
+        assert_eq!(backend(&context, plugin, generation, "host.dock.reserve", &rect).unwrap_err(), "请先订阅主岛事件再登记占位");
+        assert_eq!(page_with_context(&context, plugin, "d", generation, "dock.dock.release", &json!({})).unwrap()["reserved"], false);
+        assert_eq!(backend(&context, plugin, generation, "host.dock.release", &json!({})).unwrap()["reserved"], false);
+
+        drop(session);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

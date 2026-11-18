@@ -24,14 +24,15 @@ static SUBSCRIBERS: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
 static LAST: Mutex<Option<crate::island::DockSnapshot>> = Mutex::new(None);
 
 /// 2.3.4（#88 H10）：插件浮窗向主岛登记的占位矩形（物理像素 x, y, w, h），键是订阅句柄。
+/// 值顺带记录所属插件 ID（直调 `reserve` 时为空串），防止自定义句柄跨插件覆盖或遗漏清理。
 /// 主岛据此把展开高度让出 `h + 8`，并把矩形并进命中/拖放面。按订阅句柄归零，撤销即清。
-static RESERVED: Mutex<BTreeMap<String, (f64, f64, f64, f64)>> = Mutex::new(BTreeMap::new());
+static RESERVED: Mutex<BTreeMap<String, (String, (f64, f64, f64, f64))>> = Mutex::new(BTreeMap::new());
 /// 占位上限：与 `island::set_editing` 的 solids 同一约束（最多 8 块）。
 const MAX_RESERVE: usize = 8;
 /// 主岛在预留的浮窗高度下额外留的缝（与旧产物 `GAP + barHeight + 8` 的 +8 对齐）。
 const RESERVE_GAP: f64 = 8.0;
 
-fn reserved() -> MutexGuard<'static, BTreeMap<String, (f64, f64, f64, f64)>> {
+fn reserved() -> MutexGuard<'static, BTreeMap<String, (String, (f64, f64, f64, f64))>> {
     RESERVED.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
@@ -75,26 +76,50 @@ pub fn validate_reserve_list(list: &[Value]) -> Result<Vec<(f64, f64, f64, f64)>
 
 /// 主岛当前占位（物理像素）。没有任何登记时为空，主岛一行代码都不用执行。
 pub fn reservations() -> Vec<(f64, f64, f64, f64)> {
-    reserved().values().copied().collect()
+    reserved().values().map(|(_, rect)| *rect).collect()
 }
 
-/// 占位登记/更新：句柄由拖入/给窗订阅提供，一把锁里替换，天然串行。
-pub fn reserve(handle: &str, rect: (f64, f64, f64, f64)) -> Result<Value, String> {
+fn reserve_for(owner: &str, handle: &str, rect: (f64, f64, f64, f64)) -> Result<Value, String> {
     let mut table = reserved();
-    if !table.contains_key(handle) && table.len() >= MAX_RESERVE {
+    if let Some((existing_owner, _)) = table.get(handle) {
+        if !owner.is_empty() && !existing_owner.is_empty() && existing_owner != owner {
+            return Err("占位句柄已被其他插件占用".into());
+        }
+    } else if table.len() >= MAX_RESERVE {
         return Err(format!("占位最多 {MAX_RESERVE} 块"));
     }
-    table.insert(handle.to_string(), rect);
+    table.insert(handle.to_string(), (owner.to_string(), rect));
     drop(table);
     notify_reserve();
     Ok(json!({"reserved": true}))
 }
 
-/// 释放一个占位（对应订阅句柄）。幂等：不存在也返回成功。
-pub fn release(handle: &str) -> Result<Value, String> {
-    reserved().remove(handle);
-    notify_reserve();
+fn release_for(owner: &str, handle: &str) -> Result<Value, String> {
+    let removed = {
+        let mut table = reserved();
+        match table.get(handle) {
+            Some((existing_owner, _)) if existing_owner.is_empty() || existing_owner == owner => {
+                table.remove(handle).is_some()
+            }
+            _ => false,
+        }
+    };
+    if removed {
+        emit_reserve();
+    } else {
+        notify_reserve();
+    }
     Ok(json!({"reserved": false}))
+}
+
+fn clear_plugin_reservations(plugin: &str) -> bool {
+    let prefix = format!("reserve-{plugin}-");
+    let mut table = reserved();
+    let before = table.len();
+    table.retain(|handle, (owner, _)| {
+        owner != plugin && !(owner.is_empty() && handle.starts_with(&prefix))
+    });
+    table.len() != before
 }
 
 /// H10：把当前占位算出的预留高度推给主岛页面，页面据此把展开高度让出 `h+8`
@@ -103,6 +128,10 @@ fn notify_reserve() {
     if watchers() == 0 {
         return;
     }
+    emit_reserve();
+}
+
+fn emit_reserve() {
     let Ok(app) = crate::plugin_window::app_handle() else { return };
     use tauri::Emitter as _;
     let list = reservations();
@@ -293,37 +322,32 @@ pub fn subscribe(plugin: &str, generation: u64) -> Result<Value, String> {
     Ok(json!({"subscribed": true}))
 }
 
-/// 退订。回到 0 时通知主岛页面停止上报，并清掉去重快照——
-/// 下一个订阅者要拿到的是现状，不是上一次的缓存。
-pub fn unsubscribe(plugin: &str) -> Result<Value, String> {
+fn detach_subscriber(plugin: &str) {
     let after = {
         let mut table = subscribers();
         table.remove(plugin);
         table.len()
     };
-    // H10：退订即撤销该插件的全部占位，主岛避让随之回落。
-    let prefix = format!("reserve-{plugin}");
-    reserved().retain(|handle, _| !handle.starts_with(&prefix));
+    // H10：退订或停用即撤销该插件的全部占位，并推送更新让主岛避让随之回落。
+    if clear_plugin_reservations(plugin) {
+        emit_reserve();
+    }
     if after == 0 {
         *last() = None;
         tell_island(false);
     }
+}
+
+/// 退订。回到 0 时通知主岛页面停止上报，并清掉去重快照——
+/// 下一个订阅者要拿到的是现状，不是上一次的缓存。
+pub fn unsubscribe(plugin: &str) -> Result<Value, String> {
+    detach_subscriber(plugin);
     Ok(json!({"subscribed": false}))
 }
 
 /// 插件被停用/卸载时清掉它的订阅（不依赖它自己记得退订）。
 pub fn forget(plugin: &str) {
-    let after = {
-        let mut table = subscribers();
-        table.remove(plugin);
-        table.len()
-    };
-    let prefix = format!("reserve-{plugin}");
-    reserved().retain(|handle, _| !handle.starts_with(&prefix));
-    if after == 0 {
-        *last() = None;
-        tell_island(false);
-    }
+    detach_subscriber(plugin);
 }
 
 /// 告诉主岛页面开/关按需上报。页面未创建时静默失败——它起来后会自己问一次。
@@ -357,9 +381,8 @@ pub fn require_capability(context: &crate::storage_context::Context, plugin: &st
 
 /// 页面桥的 `dock.dock.*`。身份与代次已由 `plugin_window::page` 验过，
 /// 这里只按方法名分发；能力由本模块再校验一次（页面票据证明不了能力）。
-pub fn page(plugin: &str, method: &str, params: &Value) -> Result<Value, String> {
-    let context = crate::storage_context::current().ok_or("存储尚未就绪")?;
-    require_capability(&context, plugin)?;
+pub fn page(context: &crate::storage_context::Context, plugin: &str, method: &str, params: &Value) -> Result<Value, String> {
+    require_capability(context, plugin)?;
     let generation = crate::plugin_window::current_generation(plugin);
     dispatch(plugin, generation, method, params)
 }
@@ -398,17 +421,19 @@ fn reserve_op(plugin: &str, generation: u64, params: &Value) -> Result<Value, St
     let (x, y, w, h) = (rect.0 * sf, rect.1 * sf, rect.2 * sf, rect.3 * sf);
     let handle = params.get("handle").and_then(Value::as_str).filter(|h| !h.is_empty()).map(str::to_owned)
         .unwrap_or_else(|| format!("reserve-{plugin}-{generation}"));
-    reserve(&handle, (x, y, w, h))
+    reserve_for(plugin, &handle, (x, y, w, h))
 }
 
 fn release_op(plugin: &str, params: &Value) -> Result<Value, String> {
-    // 显式给句柄按句柄释放；否则把该插件的所有占位（句柄前缀 reserve-<plugin>-）一起清。
+    // 显式给句柄按归属释放；否则把该插件的所有占位（含自定义句柄与 reserve-<plugin>- 前缀）一起清。
     if let Some(handle) = params.get("handle").and_then(Value::as_str).filter(|h| !h.is_empty()) {
-        return release(handle);
+        return release_for(plugin, handle);
     }
-    let prefix = format!("reserve-{plugin}");
-    let mut table = reserved();
-    table.retain(|handle, _| !handle.starts_with(&prefix));
+    if clear_plugin_reservations(plugin) {
+        emit_reserve();
+    } else {
+        notify_reserve();
+    }
     Ok(json!({"reserved": false}))
 }
 
@@ -609,5 +634,39 @@ mod tests {
         assert_eq!(watchers(), 1, "表里有条目");
         assert!(live_subscribers().is_empty(), "但代次已失效，不该被推");
         forget("acme.dock-retired");
+    }
+
+    // 零参 release_op 只清本插件（含自定义句柄与 reserve-<plugin>- 前缀），
+    // 不误伤同前缀的 acme.reltest-other，也不会让其他插件的占位凭空消失。
+    #[test]
+    fn release_op_clears_only_calling_plugins_reservations() {
+        let plugin = "acme.reltest";
+        let other = "acme.reltest-other";
+        let h_default = "reserve-acme.reltest-1".to_string();
+        let h_custom = "custom-acme-reltest-panel".to_string();
+        let h_other_prefix = "reserve-acme.reltest-other-1".to_string();
+        let h_other_custom = "custom-other-reltest-panel".to_string();
+        {
+            let mut table = reserved();
+            table.insert(h_default.clone(), (String::new(), (0.0, 0.0, 100.0, 40.0)));
+            table.insert(h_custom.clone(), (plugin.into(), (10.0, 10.0, 80.0, 30.0)));
+            table.insert(h_other_prefix.clone(), (other.into(), (20.0, 20.0, 90.0, 50.0)));
+            table.insert(h_other_custom.clone(), (other.into(), (30.0, 30.0, 60.0, 20.0)));
+        }
+        // 其他插件不得借显式句柄删掉别人的自定义占位。
+        release_op(other, &json!({"handle": h_custom})).unwrap();
+        assert!(reserved().contains_key(&h_custom), "他人句柄不可误删");
+        // 本插件零参释放：默认前缀 + 本插件名下的自定义句柄一起撤；同类 sibling 保留。
+        let res = release_op(plugin, &json!({})).unwrap();
+        assert_eq!(res["reserved"], false);
+        {
+            let mut table = reserved();
+            assert!(!table.contains_key(&h_default));
+            assert!(!table.contains_key(&h_custom));
+            assert!(table.contains_key(&h_other_prefix), "不得按没有连字符的前缀误伤他人");
+            assert!(table.contains_key(&h_other_custom));
+            table.remove(&h_other_prefix);
+            table.remove(&h_other_custom);
+        }
     }
 }
