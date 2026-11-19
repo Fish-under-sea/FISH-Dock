@@ -254,6 +254,8 @@ pub struct Shared {
     // Until when (ms) a loss of focus is our own doing: showing a window of
     // hers makes it the active one, and that is no click elsewhere.
     pub shuffle_until: std::sync::atomic::AtomicU64,
+    // 本次运行时标记为「极速放行」的 Antigravity 会话 ID（单会话极速模式免拦截）。
+    pub agy_turbo_sessions: Mutex<std::collections::HashSet<String>>,
     // Debug only: answers to /debug/eval, by id.
     pub evals: Mutex<(u64, std::collections::HashMap<u64, std::sync::mpsc::Sender<Value>>)>,
 }
@@ -1158,6 +1160,27 @@ async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
         return ok;
     }
     let lang = sh.lang();
+    if choice["action"].as_str() == Some("turbo_session") {
+        let session = sh
+            .asks
+            .lock()
+            .unwrap()
+            .views()
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["id"] == json!(id)))
+            .and_then(|row| row["session"].as_str())
+            .unwrap_or("")
+            .to_string();
+        if !session.is_empty() {
+            sh.agy_turbo_sessions.lock().unwrap().insert(session.clone());
+        }
+        let ok = sh.asks.lock().unwrap().dismiss(id);
+        sh.log(&format!("agy turbo_session {id} ({session}) -> {ok}"));
+        if ok {
+            sh.push_asks();
+        }
+        return ok;
+    }
     let agent = sh.asks.lock().unwrap().views().as_array().and_then(|rows| rows.iter().find(|row| row["id"] == json!(id))).and_then(|row| row["agent"].as_str()).unwrap_or("").to_string();
     let ok = sh.asks.lock().unwrap().answer(id, &choice, lang);
     sh.log(&format!("answer {id}: {choice} -> {ok}"));
@@ -1585,12 +1608,15 @@ fn agy_hook(port: u16, name: &str) {
             fields.insert("hook_event_name".into(), json!(name));
         }
         let is_q = events_agy::is_question(&event);
-        if !is_q && !events_agy::needs_approval(&event) {
-            let mut out = std::io::stdout();
-            let _ = out.write_all(br#"{"decision":"allow"}"#);
-            let _ = out.flush();
-            post_and_go(port, "agy", &event);
-            return;
+        if !is_q {
+            let decision = events_agy::evaluate_pre_tool_use(&event, events_agy::read_host_efficiency_mode());
+            if let Some(reply_json) = events_agy::pre_tool_stdout(decision) {
+                let mut out = std::io::stdout();
+                let _ = out.write_all(reply_json.as_bytes());
+                let _ = out.flush();
+                post_and_go(port, "agy", &event);
+                return;
+            }
         }
         let answer = if jump::is_listening(port) {
             let agent = ureq::Agent::config_builder()
@@ -2222,6 +2248,7 @@ fn main() {
                 prev_focus: Mutex::new(0),
                 push_pending: AtomicBool::new(false),
                 shuffle_until: std::sync::atomic::AtomicU64::new(0),
+                agy_turbo_sessions: Mutex::new(std::collections::HashSet::new()),
                 evals: Mutex::new((0, std::collections::HashMap::new())),
             });
             app.manage(sh.clone());

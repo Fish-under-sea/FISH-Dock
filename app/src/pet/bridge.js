@@ -31,6 +31,7 @@
   let queue = Promise.resolve()
   const send = (cmd, args) => {
     queue = queue.then(() => invoke(cmd, args)).catch(err => console.error(cmd, err))
+    return queue
   }
 
   window.pet = {

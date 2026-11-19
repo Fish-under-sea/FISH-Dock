@@ -420,6 +420,9 @@
                 dismiss,
                 'ghost',
               ),
+              ask.from === 'agy' && ask.kind === 'permission'
+                ? button(T('panel.agyTurbo'), 'turbo_session', () => answer({ action: 'turbo_session' }), 'ghost')
+                : null,
               more,
             ),
           ]),

@@ -638,6 +638,10 @@ pub fn take_strip_again(sh: &Shared) {
 // out 1830 x 615 for 2560 x 860, the strip floating up the screen and short
 // of its end, until she was restarted (zhoupengjie/Wakuwaku#37).
 fn lay(win: &WebviewWindow, (x, y): (i32, i32), (w, h): (i32, i32)) {
+    if win.outer_position().ok().map(|p| (p.x, p.y)) == Some((x, y)) {
+        let _ = win.set_size(PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
+        return;
+    }
     let _ = win.set_position(PhysicalPosition::new(x, y));
     let _ = win.set_size(PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
     let _ = win.set_position(PhysicalPosition::new(x, y));
@@ -1596,7 +1600,17 @@ pub fn set_room(sh: &Shared, measured: &Value) {
         _ => None,
     };
     sh.island.lock().unwrap().room = room;
-    place(sh);
+    if sh.home() == "taskbar" {
+        place(sh);
+        return;
+    }
+    let fitted = fit(sh);
+    fit_zoom(sh);
+    tell_strip(sh, false);
+    if let (Some((pos, size)), Some(win)) = (fitted, window(sh)) {
+        lay(&win, pos, size);
+    }
+    crate::notch::settle(sh);
 }
 
 // A page's devicePixelRatio as it told it, if it is one.

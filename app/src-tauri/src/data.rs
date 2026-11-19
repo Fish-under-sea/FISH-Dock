@@ -233,6 +233,8 @@ fn defaults() -> Map<String, Value> {
         "dnd": false,
         "hideInFullscreen": true,
         "onboarded": false,
+        // Antigravity PreToolUse 效率模式（events_agy.rs）：开启时，非极速模式下的普通工作区读写与非高危命令自动 auto_approve。
+        "agyEfficiencyMode": true,
         // 全局快捷键（shortcuts.rs）：Alt+Y 允许 / Alt+N 拒绝 / Alt+W 展开收起。
         // 默认关着，开了才占这些组合键。
         "shortcutsEnabled": false,

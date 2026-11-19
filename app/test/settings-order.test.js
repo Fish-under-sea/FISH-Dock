@@ -191,3 +191,13 @@ test('规格 6/7：软件更新一节给四样，关于只给版本行与说明'
   inOrder('关于', about, ['about-mark', 's.version', 'data-update="check"', 'data-site="repo"', 'class="slogan"'])
   assert.doesNotMatch(about, /data-update="update"/, '关于里不许再有「应用内更新」（与软件更新一节重叠）')
 })
+
+test('Antigravity 详情含效率模式开关（默认开）且面板仅对 AGY 批准提供极速放行', () => {
+  const details = slice('  function agentDetails(id, state)', '  function pageAgents()')
+  assert.match(details, /id === 'agy'/)
+  assert.match(details, /s\.agyEfficiency/)
+  assert.match(details, /sw\('agyEfficiencyMode'/)
+  const panelSrc = fs.readFileSync(path.join(__dirname, '../src/pet/panel.js'), 'utf8')
+  assert.match(panelSrc, /ask\.from === 'agy' && ask\.kind === 'permission'/)
+  assert.match(panelSrc, /'turbo_session'/)
+})

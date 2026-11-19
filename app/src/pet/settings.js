@@ -3095,9 +3095,13 @@
           : `<button class="pbtn sm al" data-agent="${id}:install" ${connecting ? 'disabled' : ''}>${busy ? `<span class="spin"></span>${esc(T('wc.busy'))}` : esc(T(state === 'failed' ? 'wc.toolRetry' : 'ag.do.install'))}</button>`
     // A version she does not connect to: no file of hers to show.
     const top = id === 'claude' ? claudeWays() : id === 'dsh' ? `${dshWay()}${agentFiles(id)}` : `${field('ag.via', esc(viaOf(id)))}${state === 'unsupported' ? '' : agentFiles(id)}`
+    const agyOption = id === 'agy'
+      ? `<div class="ag-way"><div class="ag-way-h"><b>${esc(T('s.agyEfficiency'))}</b><span class="grow"></span>${sw('agyEfficiencyMode', snap.settings.agyEfficiencyMode !== false)}</div><div class="d">${esc(T('s.agyEfficiencyNote'))}</div></div>`
+      : ''
     return `<div class="ag-det">${agentSteps(id, state)}${failed[id] ? failedHTML(id) : ''}${top}
         <div class="ag-what">${esc(T(Agents.whatOf(snap, id)))}</div>
         <div class="ag-caps">${caps}</div>
+        ${agyOption}
         ${agentNotes(id, state)}
         ${id === 'claude' ? '' : `<div class="ag-btns">${buttons}</div>`}
       </div>`
@@ -4080,6 +4084,7 @@
       if (key === 'widgetNudge') return patch({ widgetNudge: s.widgetNudge === false })
       if (key === 'mailCodes') return patch({ mailCodes: s.mailCodes === false })
       if (key === 'appAsks') return patch({ appAsks: s.appAsks === false })
+      if (key === 'agyEfficiencyMode') return patch({ agyEfficiencyMode: s.agyEfficiencyMode === false })
       // One of the monitor's parts on or off.
       if (key.startsWith('mon:')) return patch({ monitor: { ...(s.monitor || {}), [key.slice(4)]: (s.monitor || {})[key.slice(4)] === false } })
       // One of the hardware's sensors picked or not, LibreHardwareMonitor's

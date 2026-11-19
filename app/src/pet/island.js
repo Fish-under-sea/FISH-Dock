@@ -250,6 +250,14 @@
   const panel = document.getElementById('panel')
   const stage = document.getElementById('stage')
 
+  function syncScreenH() {
+    const h = Math.max(480, (typeof screen !== 'undefined' ? screen?.availHeight || screen?.height : 0) || 900)
+    document.documentElement.style.setProperty('--screen-h', `${h}px`)
+  }
+  syncScreenH()
+
+  let growSeq = 0
+  let growTimer = 0
   let lang = 'en'
   let now = { mood: 'idle', detail: '', project: '', since: null, took: null, others: 0, sessions: 0, list: [] }
   let config = {}
@@ -1106,19 +1114,19 @@
     if (on && !was && isOn() && home() === 'taskbar') window.pet.raise()
   }
 
-  // Returns true when the window has to grow first.
+  // Returns { grows, ready } when the window has to grow first.
   function setRoom(next) {
     const size = r => r || baseRoom()
     clearTimeout(roomTimer)
-    if (JSON.stringify(next) === JSON.stringify(room)) return false
+    if (JSON.stringify(next) === JSON.stringify(room)) return { grows: false, ready: null }
     const grows = size(next).width > size(room).width || size(next).height > size(room).height
     const apply = () => {
       room = next
-      window.pet.panel(next)
+      return Promise.resolve(window.pet.panel(next))
     }
-    if (grows) apply()
-    else roomTimer = setTimeout(apply, SPRING_MS)
-    return grows
+    if (grows) return { grows: true, ready: apply() }
+    roomTimer = setTimeout(apply, SPRING_MS)
+    return { grows: false, ready: null }
   }
 
   // fn once the island's size spring is over: its width's or height's
@@ -1329,7 +1337,10 @@
   }
 
   // Resized for its room, the window moves the island in the page.
-  window.addEventListener('resize', () => plateSent && !plateMove && showPlate(0))
+  window.addEventListener('resize', () => {
+    syncScreenH()
+    if (plateSent && !plateMove) showPlate(0)
+  })
 
   // Over a maximized window (one on her display, taskbar.rs "max"), a
   // see-through ground the plate does not blur goes to DEEP_OP while open,
@@ -5092,10 +5103,15 @@
     if (view === 'settings' && isSide()) placeSideSettings(want.height)
     // Reaching for her keeps the room to reach in; the picker and the
     // capsule's panel in the island's home want theirs (picker.js).
+    const seq = ++growSeq
+    clearTimeout(growTimer)
     const nextRoom = isReaching ? PULL_ROOM : window.Picker ? window.Picker.roomOver(roomFor(want), baseRoom()) : roomFor(want)
-    const grows = setRoom(nextRoom)
+    const { grows, ready } = setRoom(nextRoom)
     // The window has its room before the island (and she) grow into it.
     const grow = () => {
+      clearTimeout(growTimer)
+      growTimer = 0
+      island.classList.remove('ask-sizing')
       const resized = island.style.width !== `${want.width}px` || island.style.height !== `${want.height}px`
       // Where it is, for the plate under it to stay covered as it changes.
       const from = resized && plateSent ? island.getBoundingClientRect() : null
@@ -5113,11 +5129,28 @@
       placePlate(resized, from, fromRadius)
       placeNews()
       placeFlow()
+      sendSolid()
     }
-    if (grows) setTimeout(grow, 40)
-    else if (late) {
+    if (grows) {
+      if (view === 'ask' && was !== 'ask') island.classList.add('ask-sizing')
+      Promise.race([
+        ready || Promise.resolve(),
+        new Promise(r => {
+          growTimer = setTimeout(r, 80)
+        }),
+      ]).then(() =>
+        requestAnimationFrame(() => {
+          if (seq !== growSeq) return
+          grow()
+        }),
+      )
+    } else if (late) {
+      island.classList.remove('ask-sizing')
       hidePlate(PLATE_OUT_MS)
-      setTimeout(grow, late)
+      setTimeout(() => {
+        if (seq !== growSeq) return
+        grow()
+      }, late)
     } else grow()
 
     // 新-1（二次测量兜底，T-N / A16）：ask 的正文（diff 摘要）在长文换行/
@@ -5126,14 +5159,15 @@
     //   · 字体先就位：等 document.fonts.ready，最多 300ms，超时按正常测量走；
     //   · 差值 ≤2px 当取整/字体噪声忽略（原来 >1px 就 update()，几乎必然多画一轮）；
     //   · >2px 只 setRoom + setSize —— 不再调用 update()，避免再触发一轮分段生长。
-    // 40ms 那一步是否要合并，需要真机时间戳/录屏证据，这里先不动（见 handoff 待验项）。
     if (view === 'ask') {
       const remeasure = () => {
         if (view !== 'ask' || !isAsking()) return
         const again = sizeOf('ask')
-        if (Math.abs(again.height - want.height) <= 2) return
+        if (Math.abs(again.height - want.height) <= 2 && Math.abs(again.width - want.width) <= 2) return
         setRoom(roomFor(again))
         setSize(again)
+        placeHer(again)
+        sendSolid()
       }
       const later = () => requestAnimationFrame(() => setTimeout(remeasure, 0))
       const fonts = document.fonts

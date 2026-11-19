@@ -88,6 +88,7 @@
       'panel.appChip': '外部程序',
       'panel.backTo': '交回 {app}',
       'panel.gotIt': '知道了',
+      'panel.agyTurbo': '本会话极速放行',
       'panel.more': '还有 {n} 个',
       'panel.cannotAnswer': '这道题需要在终端里回答。',
       'panel.mailCode': '验证码',
@@ -722,6 +723,8 @@
       's.her': '她',
       's.details': '显示具体内容',
       's.detailsNote': '会话名、命令、文件和 Claude 的回复；共享屏幕时可以关掉',
+      's.agyEfficiency': '效率模式',
+      's.agyEfficiencyNote': '请求人工审查下自动放行非危险命令与工作区内读写，仅高危或越界操作弹上 Dock；极速模式始终遵循 Antigravity 全放行',
       'jump.hint': '点一下，去它的窗口',
       'jump.notFound': '找不到它的窗口了',
 
@@ -1759,6 +1762,7 @@
       'panel.appChip': 'Another program',
       'panel.backTo': 'Back to {app}',
       'panel.gotIt': 'Got it',
+      'panel.agyTurbo': 'Turbo passthrough',
       'panel.more': '{n} more',
       'panel.cannotAnswer': 'Please answer this one in the terminal.',
       'panel.mailCode': 'Verification code',
@@ -2389,6 +2393,8 @@
       's.her': 'Her',
       's.details': 'Show the specifics',
       's.detailsNote': "Session names, commands, files and Claude's replies; turn off when sharing your screen",
+      's.agyEfficiency': 'Efficiency mode',
+      's.agyEfficiencyNote': 'Auto-approve safe commands and in-workspace file actions under review mode; only risky or out-of-workspace calls prompt on Dock. Turbo mode always defers to Antigravity',
       'jump.hint': 'Click to go to its window',
       'jump.notFound': "Can't find its window any more",
 

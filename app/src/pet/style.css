@@ -150,8 +150,8 @@ body {
 #panel .code {
   margin: 0 0 8px;
   padding: 6px 8px;
-  /* 40vh 内滚动（新-1）：正文/diff 需要的高度（至多此限），不再被 96px 卡死。 */
-  max-height: min(40vh, 220px);
+  /* 按屏幕高度变量设限，脱离悬浮岛 132px 初始窗高对 40vh 的压扁与二次拉高抖动。 */
+  max-height: min(calc(var(--screen-h, 900px) * 0.38), 220px);
   overflow: auto;
   border-radius: 6px;
   background: #f3f4f7;
@@ -162,7 +162,7 @@ body {
 }
 
 #panel .code.plan {
-  max-height: min(40vh, 260px);
+  max-height: min(calc(var(--screen-h, 900px) * 0.42), 260px);
   font-family: inherit;
 }
 
@@ -1133,6 +1133,11 @@ body {
 [data-view='ask'] #panel {
   opacity: 1;
   transition-delay: 0.2s;
+}
+
+#island.ask-sizing #panel {
+  opacity: 0;
+  transition: none;
 }
 
 .island #panel .chip,

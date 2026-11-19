@@ -620,6 +620,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "widgetSize" => v.as_object().is_some_and(|m| m.len() <= 64 && m.iter().all(|(id, s)| crate::widgets::is_id(id) && matches!(s.as_str(), Some("S" | "M")))),
         "appearance" => crate::tab_order::valid(v),
         "dockLook" => is_dock_look(v),
+        "agyEfficiencyMode" => is_bool,
         "plugins" => plugins::is_ok(v),
         "monitor" => v.as_object().is_some_and(|m| {
             m.iter().all(|(k, v)| match k.as_str() {
