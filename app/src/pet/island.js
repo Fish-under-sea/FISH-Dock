@@ -4026,9 +4026,12 @@
   let paper = null
 
   function drawMica() {
+    const { mode } = dockLookInfo()
+    const light = mode === 'light'
     const clearMica = isClear() && clearWhen() === 'mica'
     body.classList.toggle('tb-mica', isMica())
-    body.classList.toggle('tb-light', isLight())
+    body.classList.toggle('tb-light', light || (isLight() && view !== 'settings'))
+    applyDockLook()
     body.classList.toggle('tb-capsule', isCapsule())
     body.classList.toggle('tb-clear', isClear())
     body.classList.toggle('tb-clear-mica', clearMica)
@@ -4112,9 +4115,51 @@
   // ground: Windows' light mode's, or a light one of the settings' own
   // (groundLight; null: none given); in the settings, theirs, as Windows'
   // mode.
+  function dockLookInfo() {
+    const dl = config.dockLook || {}
+    const mode = ['light', 'dark', 'glass'].includes(dl.mode) ? dl.mode : 'dark'
+    const g = dl.glass || {}
+    return { dl, mode, g }
+  }
+
+  function applyDockLook() {
+    const { dl, mode, g } = dockLookInfo()
+    const light = mode === 'light'
+    const glassOn = mode === 'glass'
+    const root = document.documentElement.style
+    body.classList.toggle('dock-light', light)
+    body.classList.toggle('dock-glass', glassOn)
+    body.classList.toggle('tb-light', light || (isLight() && view !== 'settings'))
+    body.dataset.dockMode = mode
+    body.dataset.dockGlass = glassOn ? '1' : '0'
+    const sysAccent = (look.mode === 'light' ? look.accent?.dark : look.accent?.light) || ''
+    const accent = dl.accentMode === 'custom' && /^#[0-9a-f]{6}$/i.test(dl.accent || '')
+      ? dl.accent.toLowerCase()
+      : (/^#[0-9a-f]{6}$/i.test(sysAccent) ? sysAccent : (light ? '#005fb8' : '#5e9bff'))
+    root.setProperty('--sys-accent', accent)
+    root.setProperty('--dock-accent', accent)
+    if (dl.textColor && /^#[0-9a-f]{6}$/i.test(dl.textColor)) root.setProperty('--dock-fg', dl.textColor)
+    else root.removeProperty('--dock-fg')
+    if (dl.mutedColor && /^#[0-9a-f]{6}$/i.test(dl.mutedColor)) root.setProperty('--dock-muted', dl.mutedColor)
+    else root.removeProperty('--dock-muted')
+    root.setProperty('--dock-glass-surface-op', String((g.surfaceOp ?? 38) / 100))
+    root.setProperty('--dock-glass-surface-blur', `${g.surfaceBlur ?? 18}px`)
+    root.setProperty('--dock-glass-card-op', String((g.cardOp ?? 22) / 100))
+    root.setProperty('--dock-glass-card-blur', `${g.cardBlur ?? 12}px`)
+    root.setProperty('--dock-glass-overlay-op', String((g.overlayOp ?? 45) / 100))
+    root.setProperty('--dock-glass-overlay-blur', `${g.overlayBlur ?? 16}px`)
+    root.setProperty('--dock-glass-control-op', String((g.controlOp ?? 28) / 100))
+    root.setProperty('--dock-glass-control-blur', `${g.controlBlur ?? 8}px`)
+    const paperUrl = now.dockPaperUrl || ''
+    if (paperUrl) root.setProperty('--dock-wallpaper-url', `url("${paperUrl}")`)
+    else root.removeProperty('--dock-wallpaper-url')
+    root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
+  }
+
   function setInk() {
+    const { mode } = dockLookInfo()
     const own = view === 'settings' ? null : groundLight
-    inkLight = own === null ? isLight() : own
+    inkLight = mode === 'light' ? true : mode === 'dark' || mode === 'glass' ? (own === null ? false : own) : (own === null ? isLight() : own)
     body.classList.toggle('isl-light', inkLight)
   }
 
@@ -5892,6 +5937,7 @@
       oledOn = !!config.oledShift
       oledShift()
     }
+    applyDockLook()
     if (config.out !== true) isComingHome = false
     spriteUrl = data.sprite
     second = data.second || null

@@ -132,28 +132,26 @@ test('规格 11/13/34：闲置分钟、等你回答秒数、轮流显示秒数�
   assert.match(source, /const SPINS = \[0, 5, 8, 15\]/, '规格 34：关（0）/ 5 / 8 / 15')
 })
 
-test('规格 16–24：外观页 显示方式 → 内置（任务栏 → 灵动岛 → Windows）→ 标签页排序 → 她 → 宠物与图库', () => {
-  const look = slice('  function pageLook()', '  function pageWindows()')
+test('规格 16–24：外观页 显示方式 → 内置（任务栏 → 灵动岛外观）→ 标签页排序 → 她 → 宠物与图库', () => {
+  const look = slice('  function pageLook()', '  // Windows\' own mode and accent colour')
   inOrder('外观页', look, [
-    'home.display', // 17 显示方式（灵动岛 / 任务栏二选一卡片）
+    'home.display', // 17 显示方式
     's.builtin', // 18 内置（分组）
     's.taskbarEdge', // 19 任务栏参数
     'islandPosRow()', // 20 灵动岛参数
-    'pageWindows()', // 21 Windows（壁纸）
+    'ilookRow()', // 灵动岛外观（含主题三选一 / 强调色 / 壁纸 / 液态玻璃 / 字体颜色）
     'pageTabOrder()', // 22 标签页排序
     's.her', // 23 她
     'pagePets()', // 24 宠物与图库
   ])
-  // 19 的五样、20 的四样、23 的四样、24 的三样，逐个在各自片段里对序。
+  assert.doesNotMatch(look, /pageWindows\(/, '外观页不再渲染独立的 Windows / 系统壁纸分节')
   inOrder('任务栏参数', look, ['s.taskbarEdge', 'displaysRow()', 's.taskbarMaterial', 's.clearWhen', 's.taskbarButtons'])
-  inOrder('灵动岛参数', look, ['islandPosRow()', 's.islandWidth', 'hideUnderRow()', 's.oledShift'])
+  inOrder('灵动岛参数', look, ['islandPosRow()', 's.islandWidth', 'hideUnderRow()', 's.oledShift', 'ilookRow()'])
   inOrder('她', look, ['menu.size', 's.details', 's.walk', 's.look'])
+  const panel = slice('  function ilookPanel()', '  // A slider moved')
+  inOrder('灵动岛外观面板', panel, ['s.dockTheme', 's.dockAccent', 's.dockPaper', 's.glass', 's.typo'])
   const pets = slice('  function pagePets()', '  // --- Her island')
   inOrder('宠物与图库', pets, ['home.installed', 's.download', '${more}'])
-  const windows = slice('  function pageWindows()', '  let pickingPaper = false')
-  inOrder('Windows', windows, ['s.winMode', 's.winAccent', 'pagePaper()'])
-  // 2.1.6：Windhawk 设置面整体移除（后端能力保留，界面上不再有这张卡）。
-  assert.doesNotMatch(windows, /windhawk/i, '外观页的 Windows 分节不得再出现 Windhawk 面板')
 })
 
 test('规格 25–29：邮件页 邮箱 → 本地保留 → 邮件代理 → 收件箱', () => {

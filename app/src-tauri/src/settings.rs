@@ -181,6 +181,7 @@ pub fn snapshot(sh: &Shared) -> Value {
         "winLook": win_look,
         // The desktop's picture as it is (paper.rs).
         "winPaper": crate::paper::now(),
+        "dockPaperUrl": data::dock_paper_url(&sh.dir, &sh.setting("dockLook")),
         "version": sh.app.package_info().version.to_string(),
         // Her updates: this version, the latest, an update under way (updates.rs).
         "update": crate::updates::view(&sh),
@@ -618,6 +619,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // (island.js rowSize).
         "widgetSize" => v.as_object().is_some_and(|m| m.len() <= 64 && m.iter().all(|(id, s)| crate::widgets::is_id(id) && matches!(s.as_str(), Some("S" | "M")))),
         "appearance" => crate::tab_order::valid(v),
+        "dockLook" => is_dock_look(v),
         "plugins" => plugins::is_ok(v),
         "monitor" => v.as_object().is_some_and(|m| {
             m.iter().all(|(k, v)| match k.as_str() {
@@ -826,6 +828,89 @@ pub async fn settings_wallpaper(app: AppHandle, what: String, value: Option<Stri
                 std::thread::sleep(std::time::Duration::from_millis(600));
                 crate::taskbar::look_now();
             });
+        }
+    }
+    snapshot(&sh)
+}
+
+fn is_hex_or_empty(v: &Value) -> bool {
+    v.as_str().is_some_and(|s| s.is_empty() || (s.len() == 7 && s.starts_with('#') && s[1..].bytes().all(|b| b.is_ascii_hexdigit())))
+}
+
+fn is_dock_look(v: &Value) -> bool {
+    let Some(m) = v.as_object() else { return false };
+    m.iter().all(|(k, v)| match k.as_str() {
+        "mode" => matches!(v.as_str(), Some("light" | "dark" | "glass")),
+        "accentMode" => matches!(v.as_str(), Some("system" | "custom")),
+        "accent" | "textColor" | "mutedColor" => is_hex_or_empty(v),
+        "wallpaper" => v.as_str().is_some_and(|s| s.is_empty() || (s.len() <= 128 && !s.contains(['/', '\\']) && !s.contains(".."))),
+        "wallpaperDim" => v.as_u64().is_some_and(|n| n <= 100),
+        "glass" => v.as_object().is_some_and(|g| {
+            g.iter().all(|(gk, gv)| match gk.as_str() {
+                "preset" => matches!(gv.as_str(), Some("off" | "light" | "balanced" | "clear" | "custom")),
+                "surfaceOp" | "cardOp" | "overlayOp" | "controlOp" => gv.as_u64().is_some_and(|n| n <= 100),
+                "surfaceBlur" | "cardBlur" | "overlayBlur" | "controlBlur" => gv.as_u64().is_some_and(|n| n <= 32),
+                _ => false,
+            })
+        }),
+        _ => false,
+    })
+}
+
+/// Pick or remove Dock's own background wallpaper stored under `<data>/config/`.
+#[tauri::command]
+pub async fn settings_dock_wallpaper(app: AppHandle, action: String) -> Value {
+    let sh = shared(&app);
+    let owner = crate::island::hwnd(&sh);
+    let lang = sh.lang();
+    let t = move |key: &str| crate::i18n::t(lang, key);
+    let config_dir = sh.dir.join("config");
+    let clear_old = |dir: &std::path::Path| {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with("dock-wallpaper.") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    };
+    if action == "remove" {
+        clear_old(&config_dir);
+        let mut cur = sh.setting("dockLook");
+        if !cur.is_object() {
+            cur = json!({});
+        }
+        cur["wallpaper"] = json!("");
+        sh.change(json!({ "dockLook": cur }));
+        return snapshot(&sh);
+    }
+    if action == "pick" {
+        let picked = tauri::async_runtime::spawn_blocking(move || {
+            crate::paper::pick(false, &t("wallpaper.pickPicture"), &t("wallpaper.pictures"), owner)
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(src) = picked {
+            let src_path = std::path::Path::new(&src);
+            let ext = src_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_ascii_lowercase())
+                .filter(|s| matches!(s.as_str(), "png" | "jpg" | "jpeg" | "webp" | "bmp" | "gif"))
+                .unwrap_or_else(|| "png".to_string());
+            let _ = std::fs::create_dir_all(&config_dir);
+            clear_old(&config_dir);
+            let filename = format!("dock-wallpaper.{ext}");
+            if std::fs::copy(src_path, config_dir.join(&filename)).is_ok() {
+                let mut cur = sh.setting("dockLook");
+                if !cur.is_object() {
+                    cur = json!({});
+                }
+                cur["wallpaper"] = json!(filename);
+                sh.change(json!({ "dockLook": cur }));
+            }
         }
     }
     snapshot(&sh)
@@ -1569,5 +1654,40 @@ mod layout_tests {
         // The taskbar not her home: its layout is not there to show it.
         assert!(!super::is_placed_out(&json!([]), &bar, false, "today"));
         assert!(!super::is_placed_out(&desk, &bar, true, "weather"));
+    }
+
+    #[test]
+    fn dock_look_validates_modes_glass_and_paths() {
+        let valid = json!({
+            "mode": "glass",
+            "accentMode": "custom",
+            "accent": "#5e9bff",
+            "wallpaper": "dock-wallpaper.png",
+            "wallpaperDim": 58,
+            "glass": {
+                "preset": "balanced",
+                "surfaceOp": 38, "surfaceBlur": 18,
+                "cardOp": 22, "cardBlur": 12,
+                "overlayOp": 45, "overlayBlur": 16,
+                "controlOp": 28, "controlBlur": 8
+            },
+            "textColor": "#ffffff",
+            "mutedColor": ""
+        });
+        assert!(super::is_dock_look(&valid));
+        for mode in ["light", "dark", "glass"] {
+            assert!(super::is_dock_look(&json!({ "mode": mode })), "{mode}");
+        }
+        for bad in [
+            json!({ "mode": "neon" }),
+            json!({ "wallpaper": "../secret.png" }),
+            json!({ "wallpaperDim": 101 }),
+            json!({ "textColor": "red" }),
+            json!({ "glass": { "surfaceBlur": 33 } }),
+            json!({ "glass": { "cardOp": 105 } }),
+            json!({ "unknownField": true }),
+        ] {
+            assert!(!super::is_dock_look(&bad), "{bad}");
+        }
     }
 }

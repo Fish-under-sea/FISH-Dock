@@ -92,7 +92,7 @@
   let extensionLayoutFrame = 0
   // remembered：首个 layout 之前先用这一页上次的高度（宿主侧记忆，不碰沙盒 iframe 的
   // localStorage）；没有记忆时由 extension-page.js 给固定占位高度。
-  const extensionPage = window.ExtensionPage.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, remembered: key => extensionLayouts.get(key), onLayout: (key, value) => {
+  const extensionPage = window.ExtensionPage.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, getAppearance: () => buildAppearancePayload(), remembered: key => extensionLayouts.get(key), onLayout: (key, value) => {
     if (JSON.stringify(extensionLayouts.get(key)) === JSON.stringify(value)) return
     extensionLayouts.set(key, value)
     cancelAnimationFrame(extensionLayoutFrame)
@@ -787,14 +787,132 @@
     return `<div class="ilook-pv ${mode}${inkDark ? ' ink-dark' : ''}${look.bare ? ' bare' : ''}${big ? ' big' : ''}${plate ? ' plate' : ''}${top ? ' top' : ''}" style="${style}"><span class="cap"><span class="top"><i class="face"></i><span class="w">${esc(T('s.ilookSample'))}</span><span class="t">1:42</span></span>${more}</span></div>`
   }
 
+  const DOCK_LOOK_DEFAULT = {
+    mode: 'dark',
+    accentMode: 'system',
+    accent: '#0078d4',
+    wallpaper: '',
+    wallpaperDim: 58,
+    glass: {
+      preset: 'balanced',
+      surfaceOp: 38,
+      surfaceBlur: 18,
+      cardOp: 22,
+      cardBlur: 12,
+      overlayOp: 45,
+      overlayBlur: 16,
+      controlOp: 28,
+      controlBlur: 8,
+    },
+    textColor: '',
+    mutedColor: '',
+  }
+  const GLASS_PRESETS = {
+    off: { surfaceOp: 100, surfaceBlur: 0, cardOp: 100, cardBlur: 0, overlayOp: 100, overlayBlur: 0, controlOp: 100, controlBlur: 0 },
+    light: { surfaceOp: 62, surfaceBlur: 10, cardOp: 46, cardBlur: 8, overlayOp: 68, overlayBlur: 12, controlOp: 52, controlBlur: 6 },
+    balanced: { surfaceOp: 38, surfaceBlur: 18, cardOp: 22, cardBlur: 12, overlayOp: 45, overlayBlur: 16, controlOp: 28, controlBlur: 8 },
+    clear: { surfaceOp: 18, surfaceBlur: 24, cardOp: 12, cardBlur: 16, overlayOp: 25, overlayBlur: 20, controlOp: 16, controlBlur: 10 },
+  }
+  const dockLookOf = () => {
+    const raw = snap?.settings?.dockLook || {}
+    return {
+      ...DOCK_LOOK_DEFAULT,
+      ...raw,
+      glass: { ...DOCK_LOOK_DEFAULT.glass, ...(raw.glass || {}) },
+    }
+  }
+  function buildAppearancePayload() {
+    if (!snap?.settings) return null
+    const dl = dockLookOf()
+    const mode = ['light', 'dark', 'glass'].includes(dl.mode) ? dl.mode : 'dark'
+    const light = mode === 'light'
+    const sysAccent = String(snap?.winLook?.accent || '').toLowerCase()
+    const accent = dl.accentMode === 'custom' && /^#[0-9a-f]{6}$/i.test(dl.accent)
+      ? dl.accent.toLowerCase()
+      : (/^#[0-9a-f]{6}$/i.test(sysAccent) ? sysAccent : (light ? '#005fb8' : '#5e9bff'))
+    const g = dl.glass || DOCK_LOOK_DEFAULT.glass
+    return {
+      mode,
+      baseMode: light ? 'light' : 'dark',
+      accent,
+      glass: { enabled: mode === 'glass', ...g },
+      wallpaper: { url: snap.dockPaperUrl || '', dim: dl.wallpaperDim ?? 58 },
+      typography: { textColor: dl.textColor || '', mutedColor: dl.mutedColor || '' },
+    }
+  }
+  function dockLookSave(next, keep = true) {
+    if (!snap?.settings) return
+    snap.settings.dockLook = next
+    applyDockThemeVars()
+    if (keep) patch({ dockLook: next })
+    else {
+      draw()
+      extensionPage.refreshTheme?.()
+    }
+  }
+  function dockLookInput(target, keep) {
+    const cur = dockLookOf()
+    const key = target.dataset.dockLook
+    if (key === 'wallpaperDim') {
+      const val = Math.min(100, Math.max(0, Number(target.value) || 0))
+      const rv = target.parentElement?.querySelector('.rv')
+      if (rv) rv.textContent = `${val}%`
+      return dockLookSave({ ...cur, wallpaperDim: val }, keep)
+    }
+    if (key === 'textColor' || key === 'mutedColor') {
+      return dockLookSave({ ...cur, [key]: String(target.value || '').toLowerCase() }, keep)
+    }
+    if (key.startsWith('glass.')) {
+      const gk = key.slice(6)
+      const val = Math.max(0, Number(target.value) || 0)
+      const glass = { ...cur.glass, preset: 'custom', [gk]: val }
+      const rv = target.parentElement?.querySelector('.rv')
+      if (rv) rv.textContent = `${val}${gk.endsWith('Blur') ? 'px' : '%'}`
+      return dockLookSave({ ...cur, glass }, keep)
+    }
+  }
+  function applyDockThemeVars() {
+    const info = buildAppearancePayload()
+    if (!info) return
+    const dl = dockLookOf()
+    const root = document.documentElement.style
+    const light = info.mode === 'light'
+    const glassOn = info.glass.enabled
+    document.body.classList.toggle('dock-light', light)
+    document.body.classList.toggle('dock-glass', glassOn)
+    if (light) document.body.classList.add('tb-light')
+    else document.body.classList.remove('tb-light')
+    document.body.dataset.dockMode = info.mode
+    document.body.dataset.dockGlass = glassOn ? '1' : '0'
+    layer.style.setProperty('--sys-accent', info.accent)
+    root.setProperty('--sys-accent', info.accent)
+    root.setProperty('--dock-accent', info.accent)
+    if (info.typography.textColor && /^#[0-9a-f]{6}$/i.test(info.typography.textColor)) root.setProperty('--dock-fg', info.typography.textColor)
+    else root.removeProperty('--dock-fg')
+    if (info.typography.mutedColor && /^#[0-9a-f]{6}$/i.test(info.typography.mutedColor)) root.setProperty('--dock-muted', info.typography.mutedColor)
+    else root.removeProperty('--dock-muted')
+    const g = info.glass
+    root.setProperty('--dock-glass-surface-op', String((g.surfaceOp ?? 38) / 100))
+    root.setProperty('--dock-glass-surface-blur', `${g.surfaceBlur ?? 18}px`)
+    root.setProperty('--dock-glass-card-op', String((g.cardOp ?? 22) / 100))
+    root.setProperty('--dock-glass-card-blur', `${g.cardBlur ?? 12}px`)
+    root.setProperty('--dock-glass-overlay-op', String((g.overlayOp ?? 45) / 100))
+    root.setProperty('--dock-glass-overlay-blur', `${g.overlayBlur ?? 16}px`)
+    root.setProperty('--dock-glass-control-op', String((g.controlOp ?? 28) / 100))
+    root.setProperty('--dock-glass-control-blur', `${g.controlBlur ?? 8}px`)
+    if (info.wallpaper.url) root.setProperty('--dock-wallpaper-url', `url("${info.wallpaper.url}")`)
+    else root.removeProperty('--dock-wallpaper-url')
+    root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
+  }
+
   function ilookPanel() {
     const s = snap.settings
+    const dl = dockLookOf()
+    const g = dl.glass
     const mode = ilookFor()
     const look = ilookOf(mode)
     const active = ilookPreset(mode)
     const top = isTop()
-    // On the black strip in the dark, she is part of it: none of this
-    // shows. At the top of the screen, its own look.
     const isCapsule = (s.taskbarMaterial || 'clear') !== 'black' || winMode() === 'light'
     const note = top ? T('s.ilookTop') : isCapsule ? '' : T('s.ilookBlack')
     const cards = ilookPresets(mode)
@@ -805,13 +923,53 @@
       .join('')
     const picker = `<span class="ilook-sw">${swatches}<input type="color" class="swc-in" data-ilook="bg" value="${esc(look.bg)}" title="${esc(T('s.ilookPick'))}"></span>`
     const range = (key, min, max, unit) => `<span class="ilook-rng"><input type="range" class="rng" data-ilook="${key}" min="${min}" max="${max}" step="1" value="${look[key]}"><span class="rv">${look[key]}${unit}</span></span>`
-    // At the top no bare capsule, and a blur only where Windows' acrylic
-    // can go under the island.
+    const dockRange = (key, min, max, unit, val) => `<span class="ilook-rng"><input type="range" class="rng" data-dock-look="${key}" min="${min}" max="${max}" step="1" value="${val}"><span class="rv">${val}${unit}</span></span>`
     const blurRow = top && snap.plate !== true ? '' : row(esc(T('s.ilookBlur')), esc(T(top ? 's.ilookBlurTopNote' : 's.ilookBlurNote')), range('blur', 0, 60, 'px'))
+
+    const curAccent = String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
+    const colours = /^#[0-9a-f]{6}$/.test(curAccent) && !ACCENTS.includes(curAccent) ? [...ACCENTS, curAccent] : ACCENTS
+    const accentSwatches = colours.map(c => `<span class="acc${c === curAccent ? ' on' : ''}" data-dock-accent="${c}" style="background:${c}" title="${c}"></span>`).join('')
+    const paperPreview = snap.dockPaperUrl
+      ? `<div class="dock-paper-row"><img class="dock-paper-thumb" src="${esc(snap.dockPaperUrl)}" alt=""><button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperChange'))}</button><button type="button" class="pbtn sm" data-dock-paper="remove">${esc(T('s.dockPaperRemove'))}</button></div>`
+      : `<button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperPick'))}</button>`
+    const glassPresets = ['off', 'light', 'balanced', 'clear', 'custom']
+      .map(p => `<button type="button" class="${g.preset === p ? 'on' : ''}" data-glass-preset="${p}">${esc(T(`s.glass.${p}`))}</button>`)
+      .join('')
+    const typoRow = (key, label) => {
+      const val = dl[key] || ''
+      return `<div class="r"><div class="grow"><div>${esc(label)}</div></div><span class="btns"><input type="color" class="swc-in" data-dock-look="${key}" value="${esc(val || (dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7'))}"><span class="d mono">${esc(val || '—')}</span>${val ? `<button type="button" class="pbtn sm" data-dock-typo-clear="${key}">${esc(T('s.typo.clear'))}</button>` : ''}</span></div>`
+    }
+
     return `<div class="ilook">
         ${note ? `<div class="note">${esc(note)}</div>` : ''}
+        ${row(esc(T('s.dockTheme')), esc(T('s.dockThemeNote')), `<span class="seg">${['light', 'dark', 'glass'].map(m => `<button type="button" class="${dl.mode === m ? 'on' : ''}" data-dock-theme="${m}">${esc(T(`s.dockTheme.${m}`))}</button>`).join('')}</span>`)}
+        <div class="r col"><div class="t">${esc(T('s.dockAccent'))}</div><div class="winaccent-mode">${[['system', lang === 'zh' ? '跟随系统' : 'Follow system'], ['custom', lang === 'zh' ? '自定义' : 'Custom']]
+          .map(([k, label]) => `<button type="button" class="pbtn sm${dl.accentMode === k ? ' al' : ''}" data-dock-accent-mode="${k}" aria-pressed="${dl.accentMode === k}">${esc(label)}</button>`)
+          .join('')}${dl.accentMode === 'system' ? `<span class="acc on" style="background:${esc(curAccent)}" title="${esc(curAccent)}"></span><span class="d">${esc(curAccent)}</span>` : ''}</div>${dl.accentMode === 'custom' ? `<div class="accents">${accentSwatches}</div>` : ''}</div>
+        <div class="ilook-sub">${esc(T('s.dockPaper'))}</div>
+        <div class="note">${esc(T('s.dockPaperNote'))}</div>
+        ${row(esc(T('s.dockPaper')), '', paperPreview)}
+        ${row(esc(T('s.dockPaperDim')), esc(T('s.dockPaperDimNote')), dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58))}
+        <div class="ilook-sub">${esc(T('s.glass'))}</div>
+        <div class="note">${esc(T('s.glassNote'))}</div>
+        <div class="seg dock-glass-seg">${glassPresets}</div>
+        ${row(esc(T('s.glass.surface')), esc(T('s.glass.surfaceNote')), '')}
+        ${row(esc(T('s.glass.op')), '', dockRange('glass.surfaceOp', 0, 100, '%', g.surfaceOp))}
+        ${row(esc(T('s.glass.blur')), '', dockRange('glass.surfaceBlur', 0, 32, 'px', g.surfaceBlur))}
+        ${row(esc(T('s.glass.card')), esc(T('s.glass.cardNote')), '')}
+        ${row(esc(T('s.glass.op')), '', dockRange('glass.cardOp', 0, 100, '%', g.cardOp))}
+        ${row(esc(T('s.glass.blur')), '', dockRange('glass.cardBlur', 0, 32, 'px', g.cardBlur))}
+        ${row(esc(T('s.glass.overlay')), esc(T('s.glass.overlayNote')), '')}
+        ${row(esc(T('s.glass.op')), '', dockRange('glass.overlayOp', 0, 100, '%', g.overlayOp))}
+        ${row(esc(T('s.glass.blur')), '', dockRange('glass.overlayBlur', 0, 32, 'px', g.overlayBlur))}
+        ${row(esc(T('s.glass.control')), esc(T('s.glass.controlNote')), '')}
+        ${row(esc(T('s.glass.op')), '', dockRange('glass.controlOp', 0, 100, '%', g.controlOp))}
+        ${row(esc(T('s.glass.blur')), '', dockRange('glass.controlBlur', 0, 32, 'px', g.controlBlur))}
+        <div class="ilook-sub">${esc(T('s.typo'))}</div>
+        <div class="note">${esc(T('s.typoNote'))}</div>
+        ${typoRow('textColor', T('s.typo.text'))}
+        ${typoRow('mutedColor', T('s.typo.muted'))}
         <div class="ilook-top">${seg('ilookMode', [['dark', T('s.ilookDark')], ['light', T('s.ilookLight')]], mode)}<span class="grow"></span><button class="pbtn sm" data-ilook-reset ${sameLook(look, ilookDefault(mode)) ? 'disabled' : ''}>${esc(T('s.ilookReset'))}</button></div>
-        ${mode === winMode() ? '' : `<div class="note">${esc(T('s.ilookOther'))}</div>`}
         ${ilookPreview(mode, look, true)}
         <div class="ilook-cards">${cards}</div>
         ${row(esc(T('s.ilookBg')), esc(T('s.ilookBgNote')), picker)}
@@ -865,8 +1023,9 @@
 
   // The fold's own row: how the island looks in Windows' mode now.
   function ilookRow() {
+    const dl = dockLookOf()
     const mode = winMode()
-    const now = T('s.ilookNow', { mode: T(mode === 'dark' ? 's.ilookDark' : 's.ilookLight'), name: ilookName(mode, ilookPreset(mode)) })
+    const now = T('s.ilookNow', { mode: T(`s.dockTheme.${dl.mode}`), name: ilookName(mode, ilookPreset(mode)) })
     return `${row(esc(T('s.ilook')), esc(now), `<button class="pbtn sm" data-ilook-fold>${esc(T(ilookOpen ? 's.ilookFold' : 's.ilookAdjust'))}</button>`)}${ilookOpen ? ilookPanel() : ''}`
   }
 
@@ -930,7 +1089,6 @@
       ${sec(T('s.builtin'))}
       ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div>${row(esc(T('s.embedTaskbar')), esc(T('s.embedTaskbarNote')), sw('embedTaskbar', s.embedTaskbar))}</div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
       ${part('place', '')}<div class="grp">${islandPosRow()}${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
-      ${pageWindows()}
       ${pageTabOrder()}
       ${sec(T('s.her'))}<div class="grp">
         ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
@@ -3595,10 +3753,8 @@
     layer.style.width = width ? `${Math.min(width, screen.availWidth - 40)}px` : ''
     // 2026-11-01：把「跟随系统」的强调色发布成 CSS 变量，供插件进度弹窗的弹性动效取值
     // （用户要求动效配色跟随 Windows 主题色，而不是写死一套示例色）。
-    {
-      const want = String(snap?.winLook?.accent || '').toLowerCase()
-      layer.style.setProperty('--sys-accent', /^#[0-9a-f]{6}$/.test(want) ? want : '#5e9bff')
-    }
+    applyDockThemeVars()
+    extensionPage.refreshTheme?.()
     // 关于页的公告：还在读就排一次「八秒后改成超时」的重绘（见 aboutHTML）。
     noteNotesLoading(tab === 'now' ? snap.update?.notes?.state || 'loading' : 'ok')
     // 打开关于页且缓存超过 5 分钟：问一次宿主（#39；同一份缓存只问一次）。
@@ -4055,6 +4211,47 @@
     }
     const ilookBg = at('[data-ilook-bg]')
     if (ilookBg) return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bg: ilookBg.dataset.ilookBg })
+    const dockTheme = at('[data-dock-theme]')
+    if (dockTheme) {
+      const cur = dockLookOf()
+      const mode = dockTheme.dataset.dockTheme
+      const glass = mode === 'glass' && cur.glass.preset === 'off' ? { ...GLASS_PRESETS.balanced, preset: 'balanced' } : cur.glass
+      return dockLookSave({ ...cur, mode, glass }, true)
+    }
+    const dockAccentMode = at('[data-dock-accent-mode]')
+    if (dockAccentMode) {
+      const cur = dockLookOf()
+      return dockLookSave({ ...cur, accentMode: dockAccentMode.dataset.dockAccentMode }, true)
+    }
+    const dockAccent = at('[data-dock-accent]')
+    if (dockAccent) {
+      const cur = dockLookOf()
+      return dockLookSave({ ...cur, accentMode: 'custom', accent: dockAccent.dataset.dockAccent }, true)
+    }
+    const dockPaper = at('[data-dock-paper]')
+    if (dockPaper) {
+      const action = dockPaper.dataset.dockPaper
+      pickingPaper = action === 'pick'
+      return window.pet.settings.dockWallpaper(action).then(got => {
+        snap = got
+      }).finally(() => {
+        pickingPaper = false
+        draw()
+      })
+    }
+    const glassPreset = at('[data-glass-preset]')
+    if (glassPreset) {
+      const cur = dockLookOf()
+      const p = glassPreset.dataset.glassPreset
+      const vals = GLASS_PRESETS[p] || cur.glass
+      const mode = p === 'off' && cur.mode === 'glass' ? 'dark' : p !== 'off' ? 'glass' : cur.mode
+      return dockLookSave({ ...cur, mode, glass: { ...cur.glass, ...vals, preset: p } }, true)
+    }
+    const typoClear = at('[data-dock-typo-clear]')
+    if (typoClear) {
+      const cur = dockLookOf()
+      return dockLookSave({ ...cur, [typoClear.dataset.dockTypoClear]: '' }, true)
+    }
     if (at('[data-ilook-reset]')) return ilookSave(ilookFor(), ilookDefault(ilookFor()))
     // Windows' colour dialog takes the focus: not a click outside.
     if (e.target.matches('input[type="color"]')) picking = true
@@ -4709,6 +4906,7 @@
       keepDraft()
     }
     if (e.target.dataset.ilook) ilookInput(e.target, false)
+    if (e.target.dataset.dockLook) dockLookInput(e.target, false)
     if (e.target.id === 's-ref') {
       typedRef = e.target.value
       // Not mid-word in an input method: once the word is chosen.
@@ -4735,6 +4933,7 @@
   layer.addEventListener('change', e => {
     if (e.target.matches('[data-w-file]')) return addFiles(e.target)
     if (e.target.dataset.ilook) return ilookInput(e.target, true)
+    if (e.target.dataset.dockLook) return dockLookInput(e.target, true)
     if (e.target.dataset.proxyAt !== undefined) return proxyAddress(e.target.dataset.proxyAt, e.target.value)
     if (e.target.dataset.mon) return monitorField(e.target.dataset.mon)
     if (e.target.dataset.hold) return holdTyped(e.target)

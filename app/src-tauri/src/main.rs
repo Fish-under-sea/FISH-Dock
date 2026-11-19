@@ -485,6 +485,7 @@ impl Shared {
             (isl.temp, isl.settings_open)
         };
         now["config"] = Value::Object(settings);
+        now["dockPaperUrl"] = json!(data::dock_paper_url(&self.dir, &self.setting("dockLook")));
         now["lang"] = json!(self.lang());
         now["sprite"] = sprite.map_or(Value::Null, |p| json!(data::asset_url(&p.sheet)));
         now["spriteVersion"] = json!(sprite.map_or(2, |p| p.version));
@@ -2053,6 +2054,7 @@ fn main() {
             settings::settings_login,
             settings::settings_win_look,
             settings::settings_wallpaper,
+            settings::settings_dock_wallpaper,
             settings::settings_hooks,
             settings::settings_codex_hooks,
             settings::settings_agy_hooks,

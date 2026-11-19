@@ -41,7 +41,7 @@
   function accepts(event, frame, ticket) {
     return identity(event, frame, ticket) && validateCall(event.data) === ''
   }
-  function create({ invoke, lang, onLayout = () => {}, hostWindow = window, document = window.document, parkDiscardMs = PARK_DISCARD_MS, firstLayoutMs = FIRST_LAYOUT_MS, firstReportMs = FIRST_REPORT_MS, placeholderHeight = PAGE_PLACEHOLDER_H, remembered = () => null }) {
+  function create({ invoke, lang, getAppearance = () => null, onLayout = () => {}, hostWindow = window, document = window.document, parkDiscardMs = PARK_DISCARD_MS, firstLayoutMs = FIRST_LAYOUT_MS, firstReportMs = FIRST_REPORT_MS, placeholderHeight = PAGE_PLACEHOLDER_H, remembered = () => null }) {
     const frames = new Map(), parked = document.createElement('div')
     parked.hidden = true; document.body.appendChild(parked)
     let current = '', revision = 0
@@ -49,16 +49,38 @@
     let parkedKey = '', discarding = null
     const text = (zh,en) => lang() === 'en' ? en : zh
     function theme(record) {
-      const light = document.body.classList.contains('tb-light')
+      const appearance = typeof getAppearance === 'function' ? getAppearance() : null
+      const light = appearance ? appearance.mode === 'light' : document.body.classList.contains('tb-light')
+      const dockMode = appearance?.mode || (light ? 'light' : 'dark')
       const target = document.getElementById('island-settings') || document.body
       const style = hostWindow.getComputedStyle?.(target)
+      const rootStyle = hostWindow.getComputedStyle?.(document.documentElement)
       const colors = { '--dock-bg': light ? '#f3f3f3' : '#000' }
       for (const [name, source] of Object.entries({ card:'--g1',control:'--g2',line:'--g3',muted:'--g5',text:'--fg' })) {
         const value = style?.getPropertyValue(source).trim()
         if (value) colors[`--dock-${name}`] = value
       }
-      colors['--dock-accent'] = light ? '#005fb8' : '#5e9bff'
-      record.frame.contentWindow.postMessage({ type:'fish:theme', ticket:record.ticket, title:record.title, mode:light?'light':'dark', colors }, '*')
+      if (appearance?.typography?.textColor) colors['--dock-text'] = appearance.typography.textColor
+      if (appearance?.typography?.mutedColor) colors['--dock-muted'] = appearance.typography.mutedColor
+      const accent = appearance?.accent || rootStyle?.getPropertyValue('--dock-accent').trim() || (light ? '#005fb8' : '#5e9bff')
+      colors['--dock-accent'] = accent
+      const g = appearance?.glass
+      if (g?.enabled) {
+        colors['--dock-glass-surface'] = `rgba(24, 26, 36, ${((g.surfaceOp ?? 38) / 100).toFixed(2)})`
+        colors['--dock-glass-card'] = `rgba(28, 30, 42, ${((g.cardOp ?? 22) / 100).toFixed(2)})`
+        colors['--dock-glass-overlay'] = `rgba(24, 26, 36, ${((g.overlayOp ?? 45) / 100).toFixed(2)})`
+        colors['--dock-glass-control'] = `rgba(42, 46, 62, ${((g.controlOp ?? 28) / 100).toFixed(2)})`
+        colors['--dock-glass-border'] = 'rgba(255, 255, 255, 0.16)'
+      }
+      record.frame.contentWindow.postMessage({
+        type: 'fish:theme',
+        ticket: record.ticket,
+        title: record.title,
+        mode: light ? 'light' : 'dark',
+        dockMode,
+        colors,
+        appearance,
+      }, '*')
     }
     // 首个有效 layout 之前用宿主侧 per-key 记忆（settings.js 的 extensionLayouts），
     // 不要求沙盒 iframe 访问 localStorage；没有记忆才退到固定占位高度。
@@ -241,7 +263,8 @@
       if ([...frames.values()].includes(record)) record.frame.contentWindow.postMessage({type:'fish:result',ticket:record.ticket,id:row.id,...response},'*')
     }
     const themeObserver = hostWindow.MutationObserver ? new hostWindow.MutationObserver(() => { for (const record of frames.values()) if (record.ready) theme(record) }) : null
-    themeObserver?.observe(document.body, { attributes:true, attributeFilter:['class'] })
+    themeObserver?.observe(document.body, { attributes:true, attributeFilter:['class', 'data-dock-mode', 'data-dock-glass'] })
+    function refreshTheme() { for (const record of frames.values()) if (record.ready) theme(record) }
     hostWindow.addEventListener('message',receive)
     // 2.2.0：宿主的插件外部窗口事件只转给**这个插件**的帧（别的插件收不到，路径不广播）。
     // 设置面板里的插件页与外部窗口共用同一份 FishDock.windows / fileDrop 接口。
@@ -262,7 +285,7 @@
         }).catch(() => {})
       }
     } catch { /* 没有事件桥时窗口事件不可用，业务调用照常 */ }
-    return { enter,park,sync,dispose(){if(disposed)return;disposed=true;themeObserver?.disconnect();hostWindow.removeEventListener('message',receive);stopWindowEvents?.();clearDiscard();for(const key of frames.keys())retire(key);parked.remove()} }
+    return { enter,park,sync,refreshTheme,dispose(){if(disposed)return;disposed=true;themeObserver?.disconnect();hostWindow.removeEventListener('message',receive);stopWindowEvents?.();clearDiscard();for(const key of frames.keys())retire(key);parked.remove()} }
   }
   window.ExtensionPage = { accepts, validateCall, MAX_CALL_BYTES, create }
 })()

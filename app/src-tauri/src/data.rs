@@ -190,6 +190,27 @@ fn defaults() -> Map<String, Value> {
         "mailCodes": true,
         // Other programs' approvals on her prompt panel (app_asks.rs).
         "appAsks": true,
+        // Dock's own appearance (light / dark / glass, accent, wallpaper, liquid glass, typography).
+        "dockLook": {
+            "mode": "dark",
+            "accentMode": "system",
+            "accent": "#0078d4",
+            "wallpaper": "",
+            "wallpaperDim": 58,
+            "glass": {
+                "preset": "balanced",
+                "surfaceOp": 38,
+                "surfaceBlur": 18,
+                "cardOp": 22,
+                "cardBlur": 12,
+                "overlayOp": 45,
+                "overlayBlur": 16,
+                "controlOp": 28,
+                "controlBlur": 8
+            },
+            "textColor": "",
+            "mutedColor": ""
+        },
         "walk": true,
         "look": true,
         // Done, changed or failed: shown 8 s, or until seen ("seen"); 30 and
@@ -396,6 +417,16 @@ pub fn forget_pets() {
 /// or bundled source-tree pets) can be deleted from the UI.
 pub fn pet_deletable(dir: &Path, pet: &PetInfo) -> bool {
     !pet.from_codex && dir.join("pets").join(&pet.id).is_dir()
+}
+
+/// Asset URL for Dock's own wallpaper stored under `<dir>/config/<name>`.
+pub fn dock_paper_url(dir: &Path, dock_look: &Value) -> Option<String> {
+    let name = dock_look.get("wallpaper").and_then(Value::as_str)?.trim();
+    if name.is_empty() || name.contains(['/', '\\']) || name.contains("..") {
+        return None;
+    }
+    let path = dir.join("config").join(name);
+    path.is_file().then(|| asset_url(&path))
 }
 
 pub fn pets(dir: &Path) -> Vec<PetInfo> {
@@ -641,5 +672,17 @@ mod tests {
         let mut s = settings(json!({ "taskbarLayout": null }));
         drop_part(&mut s, "tags");
         assert_eq!(s["taskbarLayout"], Value::Null);
+    }
+
+    #[test]
+    fn dock_paper_url_checks_config_file_and_blocks_traversal() {
+        let dir = std::env::temp_dir().join(format!("fish-dock-paper-{}", crate::now_ms()));
+        let cfg = dir.join("config");
+        fs::create_dir_all(&cfg).unwrap();
+        assert_eq!(dock_paper_url(&dir, &json!({ "wallpaper": "dock-wallpaper.png" })), None);
+        assert_eq!(dock_paper_url(&dir, &json!({ "wallpaper": "../evil.png" })), None);
+        fs::write(cfg.join("dock-wallpaper.png"), b"png").unwrap();
+        assert!(dock_paper_url(&dir, &json!({ "wallpaper": "dock-wallpaper.png" })).is_some());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
