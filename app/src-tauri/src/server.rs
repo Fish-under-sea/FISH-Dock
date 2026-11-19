@@ -282,16 +282,24 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
             // reasonix_hook), so she only waits with it
             // (zhoupengjie/Wakuwaku#60, phase 1); nor is one of DSH's her
             // plugin cannot take an answer to.
-            let is_prompt = event["hook_event_name"] == "PermissionRequest" && !answers_none(agent, &event);
+            let is_agy_prompt = agent == Some("agy")
+                && event["hook_event_name"] == "PreToolUse"
+                && (events_agy::is_question(&event) || events_agy::needs_approval(&event));
+            let is_prompt = is_agy_prompt || (event["hook_event_name"] == "PermissionRequest" && !answers_none(agent, &event));
             let holds = is_prompt && sh.asks_seen();
             let msg = match agent {
                 Some("codex") => events_codex::to_message(&event),
                 Some("agy") => {
                     events_agy::with_transcript(&mut event);
+                    events_agy::with_seen(&mut event);
                     if let Some(line) = events_agy::log_line(&event) {
                         sh.log(&line);
                     }
-                    events_agy::to_message(&event)
+                    if is_agy_prompt {
+                        events_agy::to_message(&events_agy::for_ask(&event))
+                    } else {
+                        events_agy::to_message(&event)
+                    }
                 }
                 Some("opencode") => events_opencode::to_message(&event),
                 Some("omp") => events_omp::to_message(&event),
@@ -342,8 +350,12 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
                 if is_codex {
                     wait = wait.min(CODEX_ASK_MS);
                 }
-                // DSH's in Claude Code's words, as the panel shows them.
-                let event = if agent == Some("dsh") { events_dsh::for_ask(&event) } else { event };
+                // DSH's & AGY's in Claude Code's words, as the panel shows them.
+                let event = match agent {
+                    Some("dsh") => events_dsh::for_ask(&event),
+                    Some("agy") => events_agy::for_ask(&event),
+                    _ => event,
+                };
                 let added = sh.asks.lock().unwrap().add(event, respond, now_ms(), wait);
                 match added {
                     Ok(id) => {
@@ -803,5 +815,21 @@ mod tests {
             first_time(&mut said, &format!("{n}"));
         }
         assert_eq!(said.len(), 8, "a few kinds kept, no more");
+    }
+
+    #[test]
+    fn agy_pre_tool_use_prompt_classification_and_for_ask_wire_up() {
+        let aq = json!({
+            "hook_event_name": "PreToolUse",
+            "conversationId": "5064aa2e",
+            "workspacePaths": ["Z:/nowhere/agyws"],
+            "stepIdx": 3,
+            "toolCall": { "name": "ask_question", "args": { "questions": [{ "question": "Pick", "options": ["A", "B"], "is_multi_select": false }] } }
+        });
+        assert!(events_agy::is_question(&aq));
+        let ask = events_agy::for_ask(&aq);
+        assert_eq!(ask["hook_event_name"], "PermissionRequest");
+        assert_eq!(ask["tool_name"], "AskUserQuestion");
+        assert_eq!(ask["agent"], "agy");
     }
 }

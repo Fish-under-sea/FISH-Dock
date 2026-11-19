@@ -13,7 +13,7 @@
 ;(function () {
   const { t } = window.I18n
   // The other agents a prompt may come from, named on it (Claude Code's: none).
-  const FROM = { codex: 'Codex', opencode: 'OpenCode', omp: 'omp', zcode: 'ZCode', dsh: 'DeepSeek Harness' }
+  const FROM = { codex: 'Codex', agy: 'Antigravity', opencode: 'OpenCode', omp: 'omp', zcode: 'ZCode', dsh: 'DeepSeek Harness' }
   // Apps whose own dialog stays open meanwhile: a prompt is handled there.
   const IN_APP = new Set(['zcode', 'dsh'])
 

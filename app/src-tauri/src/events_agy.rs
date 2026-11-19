@@ -167,6 +167,380 @@ fn tail(path: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+fn first_str<'a>(args: &'a Value, keys: &[&str]) -> &'a str {
+    keys.iter().find_map(|k| args.get(*k).and_then(Value::as_str)).unwrap_or("")
+}
+
+pub fn is_question(e: &Value) -> bool {
+    e.get("toolCall").and_then(|c| c.get("name")).and_then(Value::as_str) == Some("ask_question")
+}
+
+// Map an Antigravity toolCall to Claude Code's (tool_name, tool_input) and the
+// permission category ("command" | "write_file" | "read_file" | "read_url" | "mcp"),
+// or None when the tool is internal and never requires approval.
+fn classify_tool(raw_tool: &str, raw_args: &Value) -> (String, Value, Option<(&'static str, String)>) {
+    match raw_tool {
+        "run_command" | "pwsh" | "bash" => {
+            let cmd = first_str(raw_args, &["CommandLine", "command"]);
+            let desc = first_str(raw_args, &["toolSummary", "toolAction", "description"]);
+            let mut input = json!({ "command": cmd });
+            if !desc.is_empty() {
+                input["description"] = json!(desc);
+            }
+            ("Bash".into(), input, Some(("command", cmd.trim().to_string())))
+        }
+        "send_command_input" => {
+            let cmd = first_str(raw_args, &["Input", "CommandId"]);
+            let mut input = json!({ "command": cmd });
+            let desc = first_str(raw_args, &["toolSummary", "toolAction"]);
+            if !desc.is_empty() {
+                input["description"] = json!(desc);
+            }
+            ("Bash".into(), input, None)
+        }
+        "write_file" | "write_to_file" => {
+            let path = first_str(raw_args, &["Path", "TargetFile", "file_path"]);
+            let content = first_str(raw_args, &["Content", "CodeContent", "content"]);
+            ("Write".into(), json!({ "file_path": path, "content": content }), Some(("write_file", path.into())))
+        }
+        "edit_file" | "replace_file_content" | "multi_replace_file_content" | "sed_file" => {
+            let path = first_str(raw_args, &["Path", "TargetFile", "file_path"]);
+            let mut old = first_str(raw_args, &["Target", "TargetContent", "old_string"]).to_string();
+            let mut new = first_str(raw_args, &["Replacement", "ReplacementContent", "new_string"]).to_string();
+            if old.is_empty() && new.is_empty() {
+                if let Some(chunk) = raw_args.get("ReplacementChunks").and_then(Value::as_array).and_then(|a| a.first()) {
+                    old = first_str(chunk, &["TargetContent"]).to_string();
+                    new = first_str(chunk, &["ReplacementContent"]).to_string();
+                }
+            }
+            ("Edit".into(), json!({ "file_path": path, "old_string": old, "new_string": new }), Some(("write_file", path.into())))
+        }
+        "notebook_edit" => {
+            let path = first_str(raw_args, &["NotebookPath", "Path", "TargetFile", "notebook_path"]);
+            let src = first_str(raw_args, &["NewSource", "Content", "new_source"]);
+            ("NotebookEdit".into(), json!({ "notebook_path": path, "new_source": src }), Some(("write_file", path.into())))
+        }
+        "read_file" | "view_file" | "view_code_item" => {
+            let path = first_str(raw_args, &["Path", "AbsolutePath", "File", "file_path"]);
+            ("Read".into(), json!({ "file_path": path }), Some(("read_file", path.into())))
+        }
+        "read_url_content" => {
+            let url = first_str(raw_args, &["Url", "url"]);
+            ("WebFetch".into(), json!({ "url": url }), Some(("read_url", url.into())))
+        }
+        "ask_question" => {
+            let questions: Vec<Value> = raw_args
+                .get("questions")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|q| {
+                    let options: Vec<Value> = q
+                        .get("options")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(|label| json!({ "label": label, "description": "" }))
+                        .collect();
+                    json!({
+                        "question": s(q, "question"),
+                        "header": "",
+                        "multiSelect": q.get("is_multi_select") == Some(&Value::Bool(true)),
+                        "options": options,
+                    })
+                })
+                .collect();
+            ("AskUserQuestion".into(), json!({ "questions": questions }), None)
+        }
+        other if other.starts_with("mcp_") => {
+            let suffix = other.strip_prefix("mcp_").unwrap_or(other);
+            let target = suffix.split_once('_').map_or_else(|| suffix.to_string(), |(srv, tool)| format!("{srv}/{tool}"));
+            (other.to_string(), raw_args.clone(), Some(("mcp", target)))
+        }
+        other => (other.to_string(), raw_args.clone(), None),
+    }
+}
+
+fn norm_path(p: &str) -> String {
+    let decoded = p.trim().replace("%3A", ":").replace("%3a", ":");
+    let stripped = decoded.strip_prefix("file:///").unwrap_or(&decoded);
+    let s = stripped.replace('\\', "/").trim_end_matches('/').to_string();
+    if cfg!(windows) || s.as_bytes().get(1) == Some(&b':') {
+        s.to_ascii_lowercase()
+    } else {
+        s
+    }
+}
+
+fn path_in_roots(target: &str, roots: &[String]) -> bool {
+    if target.is_empty() || target.contains("..") {
+        return false;
+    }
+    let norm = norm_path(target);
+    let is_abs = norm.starts_with('/') || norm.as_bytes().get(1) == Some(&b':');
+    if !is_abs {
+        return true;
+    }
+    roots.iter().map(|r| norm_path(r)).any(|r| !r.is_empty() && (norm == r || norm.starts_with(&format!("{r}/"))))
+}
+
+fn is_inside_ws_or_artifacts(e: &Value, target: &str) -> bool {
+    let mut roots: Vec<String> = e
+        .get("workspacePaths")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(String::from)
+        .collect();
+    for key in ["cwd", "artifactDirectoryPath"] {
+        let v = s(e, key);
+        if !v.is_empty() {
+            roots.push(v.to_string());
+        }
+    }
+    path_in_roots(target, &roots)
+}
+
+fn parse_grant(g: &str) -> Option<(&str, &str)> {
+    let g = g.trim();
+    if let Some(open) = g.find('(') {
+        let close = g.strip_suffix(')').map(|_| g.len() - 1)?;
+        Some((g[..open].trim(), g[open + 1..close].trim()))
+    } else {
+        Some((g, "*"))
+    }
+}
+
+fn grant_matches(grant: &str, action: &str, target: &str) -> bool {
+    let Some((g_action, g_target)) = parse_grant(grant) else { return false };
+    if g_action != action {
+        return false;
+    }
+    if g_target == "*" {
+        return true;
+    }
+    match action {
+        "command" => {
+            let t = target.trim();
+            if let Some(prefix) = g_target.strip_suffix('*') {
+                t.starts_with(prefix.trim_end())
+            } else {
+                t == g_target
+            }
+        }
+        "write_file" | "read_file" => norm_path(target) == norm_path(g_target) || path_in_roots(target, &[g_target.to_string()]),
+        "read_url" => target.contains(g_target),
+        _ => target == g_target,
+    }
+}
+
+fn rules_of<'a>(grants: &'a Value, key: &str) -> Vec<&'a str> {
+    grants.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect()
+}
+
+// Under Antigravity 2.0 default mode ("Agent Decides"), normal safe workspace
+// commands auto-run; only destructive/risky commands or explicit review-mode
+// policies require approval on the island.
+fn is_risky_command(cmd: &str) -> bool {
+    let lower = cmd.to_ascii_lowercase();
+    let risky_tokens = [
+        "rm ", "rm\t", "rmdir ", "del ", "erase ", "remove-item", "format ",
+        "stop-process", "taskkill", "shutdown", "restart-computer", "reg ",
+        "set-executionpolicy", "invoke-webrequest", "iwr ", "curl ", "wget ",
+        "git push --force", "git push -f", "git reset --hard", "git clean -f",
+        "chmod ", "chown ", "takeown ", "icacls ",
+    ];
+    risky_tokens.iter().any(|tok| lower.contains(tok))
+}
+
+fn config_dir() -> std::path::PathBuf {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default();
+    std::path::PathBuf::from(home).join(".gemini").join("config")
+}
+
+fn read_json_file(path: &std::path::Path) -> Value {
+    std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)
+}
+
+fn load_project_config(dir: &std::path::Path, e: &Value) -> Value {
+    let projects_dir = dir.join("projects");
+    let Ok(entries) = std::fs::read_dir(projects_dir) else { return Value::Null };
+    let mut targets: Vec<String> = e
+        .get("workspacePaths")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(norm_path)
+        .collect();
+    if !s(e, "cwd").is_empty() {
+        targets.push(norm_path(s(e, "cwd")));
+    }
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let val = read_json_file(&p);
+        let matched = val["projectResources"]["resources"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|r| r["folderUri"].as_str())
+            .map(norm_path)
+            .any(|uri| targets.iter().any(|t| !uri.is_empty() && t == &uri));
+        if matched {
+            return val;
+        }
+    }
+    Value::Null
+}
+
+pub fn needs_approval(e: &Value) -> bool {
+    let dir = config_dir();
+    let cfg = read_json_file(&dir.join("config.json"));
+    let proj = load_project_config(&dir, e);
+    needs_approval_with(e, &cfg, &proj)
+}
+
+pub fn needs_approval_with(e: &Value, config: &Value, project: &Value) -> bool {
+    if is_question(e) {
+        return false;
+    }
+    let call = e.get("toolCall").unwrap_or(&Value::Null);
+    let (_, _, Some((action, target))) = classify_tool(s(call, "name"), call.get("args").unwrap_or(&Value::Null)) else {
+        return false;
+    };
+    let global_settings = config.get("userSettings").unwrap_or(&Value::Null);
+    let proj_settings = project.get("settings").unwrap_or(&Value::Null);
+    let preset = proj_settings.get("permissionPreset").or_else(|| global_settings.get("permissionPreset")).and_then(Value::as_str).unwrap_or("");
+    if preset == "AGENT_PERMISSION_PRESET_TURBO" {
+        return false;
+    }
+    let global_grants = global_settings.get("globalPermissionGrants").unwrap_or(&Value::Null);
+    let proj_grants = project.get("permissionGrants").and_then(|g| g.get("permissionGrants").or(Some(g))).unwrap_or(&Value::Null);
+    let has_rule = |key: &str| {
+        rules_of(proj_grants, key)
+            .into_iter()
+            .chain(rules_of(global_grants, key))
+            .any(|g| grant_matches(g, action, &target))
+    };
+    if has_rule("deny") {
+        return false;
+    }
+    if has_rule("ask") {
+        return true;
+    }
+    if has_rule("allow") {
+        return false;
+    }
+    match action {
+        "read_file" | "write_file" => !is_inside_ws_or_artifacts(e, &target),
+        "read_url" | "mcp" => true,
+        "command" => {
+            let policy = proj_settings
+                .get("autoExecutionPolicy")
+                .or_else(|| global_settings.get("autoExecutionPolicy"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            match policy {
+                "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER" | "always-proceed" => false,
+                "CASCADE_COMMANDS_AUTO_EXECUTION_OFF"
+                | "CASCADE_COMMANDS_AUTO_EXECUTION_REQUEST_REVIEW"
+                | "request-review"
+                | "strict" => true,
+                _ => is_risky_command(&target),
+            }
+        }
+        _ => false,
+    }
+}
+
+// Convert an Antigravity PreToolUse event into Claude Code's PermissionRequest
+// shape for asks.rs. Intentionally omits `permission_suggestions` so the Dock
+// presents only Yes (Allow) and No (Deny).
+pub fn for_ask(e: &Value) -> Value {
+    let call = e.get("toolCall").unwrap_or(&Value::Null);
+    let (tool, input, _) = classify_tool(s(call, "name"), call.get("args").unwrap_or(&Value::Null));
+    let session = s(e, "conversationId");
+    let cwd = e
+        .get("workspacePaths")
+        .and_then(Value::as_array)
+        .and_then(|a| a.first())
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| s(e, "cwd"));
+    let step = e.get("stepIdx").and_then(Value::as_i64).map(|v| v.to_string()).unwrap_or_default();
+    json!({
+        "hook_event_name": "PermissionRequest",
+        "session_id": session,
+        "conversationId": session,
+        "cwd": cwd,
+        "agent": "agy",
+        "tool_name": tool,
+        "tool_input": input,
+        "tool_use_id": format!("{session}-{step}"),
+    })
+}
+
+pub fn to_output(body: &str, is_q: bool) -> String {
+    let Ok(val) = serde_json::from_str::<Value>(body) else {
+        return r#"{"decision":"allow"}"#.to_string();
+    };
+    let Some(decision) = val.get("hookSpecificOutput").and_then(|h| h.get("decision")) else {
+        return r#"{"decision":"allow"}"#.to_string();
+    };
+    match decision.get("behavior").and_then(Value::as_str) {
+        Some("allow") if is_q => {
+            let lines: Vec<String> = decision["updatedInput"]["answers"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(q, a)| format!("- {q}: {}", a.as_str().unwrap_or("")))
+                .collect();
+            if lines.is_empty() {
+                return r#"{"decision":"allow"}"#.to_string();
+            }
+            let reason = format!(
+                "用户已在 FISH Dock 中选好了方案（请直接按以下选择继续执行，不要重复调用 ask_question）：\n{}",
+                lines.join("\n")
+            );
+            json!({ "decision": "deny", "reason": reason }).to_string()
+        }
+        Some("allow") => r#"{"decision":"auto_approve"}"#.to_string(),
+        Some("deny") => {
+            let msg = decision.get("reason").and_then(Value::as_str).or_else(|| decision.get("message").and_then(Value::as_str)).unwrap_or("The user denied this action on FISH Dock.");
+            json!({ "decision": "deny", "reason": msg }).to_string()
+        }
+        _ => r#"{"decision":"allow"}"#.to_string(),
+    }
+}
+
+pub fn with_seen(e: &mut Value) {
+    let session = s(e, "conversationId").to_string();
+    if session.is_empty() {
+        return;
+    }
+    let is_post = s(e, "hook_event_name") == "PostToolUse";
+    let step = e.get("stepIdx").and_then(Value::as_i64).map(|v| v.to_string());
+    let mapped = is_post.then(|| {
+        let call = e.get("toolCall").unwrap_or(&Value::Null);
+        classify_tool(s(call, "name"), call.get("args").unwrap_or(&Value::Null))
+    });
+    if let Some(fields) = e.as_object_mut() {
+        fields.entry("session_id".to_string()).or_insert_with(|| json!(session));
+        if let Some((tool, input, _)) = mapped {
+            fields.entry("tool_name".to_string()).or_insert_with(|| json!(tool));
+            fields.entry("tool_input".to_string()).or_insert(input);
+            if let Some(step) = step {
+                fields.entry("tool_use_id".to_string()).or_insert_with(|| json!(format!("{session}-{step}")));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,5 +687,85 @@ mod tests {
         assert_eq!(line("PreInvocation", json!({ "invocationNum": 0, "userStep": 6 })).as_deref(), Some("agy PreInvocation 0, the person's step 6 (5064aa2e)"));
         assert_eq!(line("Stop", json!({ "fullyIdle": false, "terminationReason": "NO_TOOL_CALL", "error": "" })).as_deref(), Some("agy Stop, fullyIdle false, NO_TOOL_CALL (5064aa2e)"));
         assert!(line("PreInvocation", json!({ "invocationNum": 1 })).is_none() && line("PostToolUse", json!({})).is_none());
+    }
+
+    #[test]
+    fn needs_approval_respects_risk_workspace_and_policies() {
+        let ws = ["Z:/nowhere/agyws"];
+        let pre = |tool: &str, args: Value| json!({
+            "hook_event_name": "PreToolUse",
+            "conversationId": "5064aa2e",
+            "workspacePaths": ws,
+            "cwd": "Z:\\nowhere\\agyws",
+            "artifactDirectoryPath": "Z:/nowhere/brain/5064aa2e",
+            "stepIdx": 5,
+            "toolCall": { "name": tool, "args": args }
+        });
+        let empty = Value::Null;
+        // Safe workspace read/write & safe commands auto-run under default mode.
+        assert!(!needs_approval_with(&pre("read_file", json!({ "Path": r"Z:\nowhere\agyws\a.txt" })), &empty, &empty));
+        assert!(!needs_approval_with(&pre("write_file", json!({ "Path": r"Z:\nowhere\agyws\b.txt" })), &empty, &empty));
+        assert!(!needs_approval_with(&pre("run_command", json!({ "CommandLine": "git status" })), &empty, &empty));
+        assert!(!needs_approval_with(&pre("run_command", json!({ "CommandLine": "cargo test -j 1" })), &empty, &empty));
+        // Outside workspace & risky commands & web & mcp require approval.
+        assert!(needs_approval_with(&pre("read_file", json!({ "Path": r"C:\outside\secret.txt" })), &empty, &empty));
+        assert!(needs_approval_with(&pre("write_file", json!({ "Path": r"C:\outside\evil.txt" })), &empty, &empty));
+        assert!(needs_approval_with(&pre("run_command", json!({ "CommandLine": "rm -rf foo" })), &empty, &empty));
+        assert!(needs_approval_with(&pre("run_command", json!({ "CommandLine": "Remove-Item -Recurse C:\\tmp" })), &empty, &empty));
+        assert!(needs_approval_with(&pre("read_url_content", json!({ "Url": "https://example.com" })), &empty, &empty));
+        assert!(needs_approval_with(&pre("mcp_github_get_issue", json!({ "issue_number": 1 })), &empty, &empty));
+        // ask_question is routed via is_question, not needs_approval.
+        let aq = pre("ask_question", json!({ "questions": [{ "question": "Pick", "options": ["A", "B"], "is_multi_select": false }] }));
+        assert!(is_question(&aq));
+        assert!(!needs_approval_with(&aq, &empty, &empty));
+        // Request review policy forces safe commands to ask; project config overrides global.
+        let review_cfg = json!({ "userSettings": { "autoExecutionPolicy": "CASCADE_COMMANDS_AUTO_EXECUTION_REQUEST_REVIEW" } });
+        assert!(needs_approval_with(&pre("run_command", json!({ "CommandLine": "git status" })), &review_cfg, &empty));
+        let turbo_proj = json!({ "settings": { "permissionPreset": "AGENT_PERMISSION_PRESET_TURBO" } });
+        assert!(!needs_approval_with(&pre("run_command", json!({ "CommandLine": "rm -rf foo" })), &review_cfg, &turbo_proj));
+    }
+
+    #[test]
+    fn for_ask_and_to_output_handle_yes_no_only_and_ask_question() {
+        let cmd = event("PreToolUse", json!({
+            "stepIdx": 7,
+            "workspacePaths": ["Z:/nowhere/agyws"],
+            "toolCall": { "name": "run_command", "args": { "CommandLine": "rm -rf tmp", "toolSummary": "Remove tmp" } }
+        }));
+        let req = for_ask(&cmd);
+        assert_eq!(req["hook_event_name"], "PermissionRequest");
+        assert_eq!(req["agent"], "agy");
+        assert_eq!(req["tool_name"], "Bash");
+        assert_eq!(req["tool_input"]["command"], "rm -rf tmp");
+        assert!(req.get("permission_suggestions").is_none());
+
+        assert_eq!(to_output(&json!({ "hookSpecificOutput": { "decision": { "behavior": "allow" } } }).to_string(), false), r#"{"decision":"auto_approve"}"#);
+        assert_eq!(to_output(&json!({ "hookSpecificOutput": { "decision": { "behavior": "deny", "reason": "no" } } }).to_string(), false), r#"{"decision":"deny","reason":"no"}"#);
+        assert_eq!(to_output("", false), r#"{"decision":"allow"}"#);
+
+        let aq = event("PreToolUse", json!({
+            "stepIdx": 8,
+            "workspacePaths": ["Z:/nowhere/agyws"],
+            "toolCall": { "name": "ask_question", "args": { "questions": [{ "question": "选哪个？", "options": ["A", "B"], "is_multi_select": false }] } }
+        }));
+        let aq_req = for_ask(&aq);
+        assert_eq!(aq_req["tool_name"], "AskUserQuestion");
+        assert_eq!(aq_req["tool_input"]["questions"][0]["options"][0]["label"], "A");
+        assert_eq!(aq_req["tool_input"]["questions"][0]["multiSelect"], false);
+
+        let answered = json!({ "hookSpecificOutput": { "decision": { "behavior": "allow", "updatedInput": { "answers": { "选哪个？": "B" } } } } });
+        let out: Value = serde_json::from_str(&to_output(&answered.to_string(), true)).unwrap();
+        assert_eq!(out["decision"], "deny");
+        assert!(out["reason"].as_str().unwrap().contains("- 选哪个？: B"));
+        assert_eq!(to_output("", true), r#"{"decision":"allow"}"#);
+    }
+
+    #[test]
+    fn with_seen_populates_session_and_tool_use_id() {
+        let mut post = event("PostToolUse", json!({ "stepIdx": 7, "toolCall": { "name": "run_command", "args": { "CommandLine": "rm -rf tmp" } } }));
+        with_seen(&mut post);
+        assert_eq!(post["session_id"], "5064aa2e");
+        assert_eq!(post["tool_name"], "Bash");
+        assert_eq!(post["tool_use_id"], "5064aa2e-7");
     }
 }

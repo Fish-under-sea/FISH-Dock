@@ -1531,17 +1531,45 @@ fn codex_hook(port: u16) {
 // or a turn begins (kept till then; some 10 ms: most of a hook is its
 // process starting, some 50 to 80 ms).
 fn agy_hook(port: u16, name: &str) {
+    if name == "PreToolUse" {
+        let Some(mut event) = read_event() else {
+            let _ = std::io::stdout().write_all(br#"{"decision":"allow"}"#);
+            return;
+        };
+        if let Some(fields) = event.as_object_mut() {
+            fields.insert("hook_event_name".into(), json!(name));
+        }
+        let is_q = events_agy::is_question(&event);
+        if !is_q && !events_agy::needs_approval(&event) {
+            let mut out = std::io::stdout();
+            let _ = out.write_all(br#"{"decision":"allow"}"#);
+            let _ = out.flush();
+            post_and_go(port, "agy", &event);
+            return;
+        }
+        let answer = if jump::is_listening(port) {
+            let agent = ureq::Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(connection::AGY_PROMPT_TIMEOUT - 5)))
+                .build()
+                .new_agent();
+            match agent.post(&format!("http://127.0.0.1:{port}/hook?from=wakuwaku&agent=agy")).send_json(&event) {
+                Ok(mut res) => events_agy::to_output(&res.body_mut().read_to_string().unwrap_or_default(), is_q),
+                Err(_) => r#"{"decision":"allow"}"#.to_string(),
+            }
+        } else {
+            r#"{"decision":"allow"}"#.to_string()
+        };
+        let mut out = std::io::stdout();
+        let _ = out.write_all(answer.as_bytes());
+        let _ = out.flush();
+        return;
+    }
     let answer = if name == "Stop" { r#"{"decision":"allow"}"# } else { "{}" };
     let mut out = std::io::stdout();
     let _ = out.write_all(answer.as_bytes());
     let _ = out.flush();
     let Some(mut event) = read_event() else { return };
     let who = || starts::hook_who("Antigravity", name, &[], &hook_parents());
-    if !data::may_start(&data::folder()) {
-        // Said in her log as its session starts (start_or_say).
-        start_or_say(starts::Hook::Agy, name, who);
-        return;
-    }
     let turn = name == "SessionStart" || (name == "PreInvocation" && event.get("invocationNum").and_then(Value::as_u64) == Some(0));
     if let Some(fields) = event.as_object_mut() {
         fields.insert("hook_event_name".into(), json!(name));

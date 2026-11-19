@@ -814,6 +814,7 @@ pub fn write_codex_hooks(action: &str, waiting: &str) -> Result<(), String> {
 
 const AGY_BLOCK: &str = "wakuwaku";
 const AGY_TIMEOUT: u64 = 10;
+pub const AGY_PROMPT_TIMEOUT: u64 = 300;
 
 pub fn gemini_dir() -> PathBuf {
     PathBuf::from(std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default()).join(".gemini")
@@ -871,12 +872,13 @@ pub fn agy_program(exe: &str) -> Option<String> {
 // agy_hooks_status 以块全等判 ok/stale，故缺这一项不会误报 stale
 // （agy_hooks_without_pre_tool_use_is_ok 钉住）。
 fn agy_block(program: &str) -> Value {
-    let hook = |event: &str| json!({ "type": "command", "command": format!("{program} {AGY_FLAG} {event}"), "timeout": AGY_TIMEOUT });
+    let hook = |event: &str, timeout: u64| json!({ "type": "command", "command": format!("{program} {AGY_FLAG} {event}"), "timeout": timeout });
     json!({
-        "SessionStart": [hook("SessionStart")],
-        "PreInvocation": [hook("PreInvocation")],
-        "PostToolUse": [{ "matcher": "", "hooks": [hook("PostToolUse")] }],
-        "Stop": [hook("Stop")],
+        "SessionStart": [hook("SessionStart", AGY_TIMEOUT)],
+        "PreInvocation": [hook("PreInvocation", AGY_TIMEOUT)],
+        "PreToolUse": [{ "matcher": "", "hooks": [hook("PreToolUse", AGY_PROMPT_TIMEOUT)] }],
+        "PostToolUse": [{ "matcher": "", "hooks": [hook("PostToolUse", AGY_TIMEOUT)] }],
+        "Stop": [hook("Stop", AGY_TIMEOUT)],
     })
 }
 
@@ -3429,26 +3431,24 @@ mod tests {
         assert_eq!(agy_status_of(&off, Some(program)), "ok");
     }
 
-    // 2.0.1 不含 agy 岛上审批（issue #46 → #51）：PreToolUse 故意不装，agy 走
-    // 它原生的 EnsurePermissions。钉住三件事：hook 文件里没有 PreToolUse；缺
-    // 它不算 stale（agy_status_of 按块全等，四个事件齐就 ok）；events_agy 对
-    // PreToolUse 依旧一条消息不出（她只跟随，不弹审批）。
+    // agy 岛上审批与提问（PreToolUse）：装上全部五个事件（PreToolUse matcher ""，
+    // 超时 300 s 给用户审批留够时间）；缺少 PreToolUse 的旧配置按 stale 提示修复。
     #[test]
-    fn agy_hooks_without_pre_tool_use_is_ok() {
+    fn agy_hooks_include_pre_tool_use() {
         let program = r"D:\pet\wakuwaku.exe";
         let with = agy_install(&json!({}), program);
-        // 装上的四个事件，一个不多。
         let events: Vec<&str> = with["wakuwaku"].as_object().unwrap().keys().map(String::as_str).collect();
-        assert_eq!(events.len(), 4, "{events:?}");
-        for name in ["SessionStart", "PreInvocation", "PostToolUse", "Stop"] {
+        assert_eq!(events.len(), 5, "{events:?}");
+        for name in ["SessionStart", "PreInvocation", "PreToolUse", "PostToolUse", "Stop"] {
             assert!(events.contains(&name), "{name}");
         }
-        assert!(!events.contains(&"PreToolUse"), "2.0.1 不装 PreToolUse（审批未纳入，issue #51）");
-        assert!(!with.to_string().contains("PreToolUse"));
-        // 缺它不是 stale：照这份文件装出来的块就是 ok 的。
+        assert_eq!(with["wakuwaku"]["PreToolUse"][0]["matcher"], "");
+        assert_eq!(with["wakuwaku"]["PreToolUse"][0]["hooks"][0]["timeout"], AGY_PROMPT_TIMEOUT);
+        assert_eq!(with["wakuwaku"]["PreToolUse"][0]["hooks"][0]["command"], r"D:\pet\wakuwaku.exe --fish-dock-agy-hook PreToolUse");
         assert_eq!(agy_status_of(&with, Some(program)), "ok");
-        // 反向：哪天真装了（别的版本装的），这里的状态语义会说 stale，由
-        // agy_hooks_install_status_and_uninstall 的 stale 用例兜着。
+        let mut legacy = with.clone();
+        legacy["wakuwaku"].as_object_mut().unwrap().remove("PreToolUse");
+        assert_eq!(agy_status_of(&legacy, Some(program)), "stale");
     }
 
     #[test]
