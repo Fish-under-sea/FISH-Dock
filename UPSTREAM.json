@@ -1,6 +1,6 @@
 {
   "format": "fish-dock/source-snapshot",
-  "version": "2.3.6",
+  "version": "2.3.7",
   "projects": [
     {
       "path": "app",
