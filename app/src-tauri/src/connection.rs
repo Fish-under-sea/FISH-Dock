@@ -854,13 +854,18 @@ fn short_path(_path: &str) -> Option<String> {
     None
 }
 
-// This program as agy's cmd reads it: as it is, or by its 8.3 name; None
-// when neither will do (a space in it, and short names turned off there).
+// This program as agy's cmd reads it: bare path if safe, else its 8.3 short
+// name when bare, else `call "<exe>"` (so paths with spaces or parentheses on
+// non-OS drives without 8.3 short names, like H:\FISH Dock, still run cleanly
+// inside `cmd /c "<command>"`). None only if the path holds `"`, `%` or newline.
 pub fn agy_program(exe: &str) -> Option<String> {
     if is_bare(exe) {
         return Some(exe.to_string());
     }
-    short_path(exe).filter(|s| is_bare(s))
+    if let Some(short) = short_path(exe).filter(|s| is_bare(s)) {
+        return Some(short);
+    }
+    (!exe.is_empty() && !exe.chars().any(|c| "\"%\r\n".contains(c))).then(|| format!("call \"{exe}\""))
 }
 
 // Our block: the event's name after the flag (the payload has none).
@@ -4049,6 +4054,9 @@ mod tests {
         assert!(!is_bare(r"C:\Program Files (x86)\w.exe"));
         assert!(!is_bare(r"C:\a&b\w.exe"));
         assert_eq!(agy_program(r"D:\pet\wakuwaku.exe").as_deref(), Some(r"D:\pet\wakuwaku.exe"));
+        assert_eq!(agy_program(r"H:\FISH Dock\FISH-Dock.exe").as_deref(), Some(r#"call "H:\FISH Dock\FISH-Dock.exe""#));
+        assert_eq!(agy_program(r"Z:\Program Files (x86)\FISH Dock\FISH-Dock.exe").as_deref(), Some(r#"call "Z:\Program Files (x86)\FISH Dock\FISH-Dock.exe""#));
+        assert_eq!(agy_program(r"Z:\bad%dir\FISH-Dock.exe"), None);
         assert_eq!(super::error_kind(&format!("x: {AGY_NO_NAME} (a space)")), "path");
     }
 

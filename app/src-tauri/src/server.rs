@@ -39,6 +39,7 @@ const MAX_BODY: u64 = 16 * 1024 * 1024;
 // Codex waits on a prompt's hook before it shows its own dialog: the panel
 // holds one this long at most.
 const CODEX_ASK_MS: u64 = 60 * 1000;
+const AGY_ASK_MS: u64 = (crate::connection::AGY_PROMPT_TIMEOUT - 10) * 1000;
 
 // Which agent's hook the request comes from (?agent=codex, ?agent=agy,
 // ?agent=zcode, ?agent=dsh, ?agent=reasonix: handed on by this program,
@@ -349,6 +350,8 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
                 let mut wait = sh.setting("promptWaitSec").as_u64().unwrap_or(290) * 1000;
                 if is_codex {
                     wait = wait.min(CODEX_ASK_MS);
+                } else if agent == Some("agy") {
+                    wait = wait.min(AGY_ASK_MS);
                 }
                 // DSH's & AGY's in Claude Code's words, as the panel shows them.
                 let event = match agent {

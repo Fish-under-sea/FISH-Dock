@@ -86,6 +86,13 @@ fn mood_of(e: &Value) -> Option<Value> {
             }
             m
         }
+        "PermissionRequest" => {
+            let mut m = crate::events::to_message(e)?;
+            m.as_object_mut().map(|o| {
+                o.remove("agent");
+                Value::Object(o.clone())
+            })?
+        }
         _ => return None,
     };
     Some(m)
@@ -262,8 +269,28 @@ fn classify_tool(raw_tool: &str, raw_args: &Value) -> (String, Value, Option<(&'
     }
 }
 
+fn decode_percent(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(val) = u8::from_str_radix(hex, 16) {
+                    out.push(val);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn norm_path(p: &str) -> String {
-    let decoded = p.trim().replace("%3A", ":").replace("%3a", ":");
+    let decoded = decode_percent(p.trim());
     let stripped = decoded.strip_prefix("file:///").unwrap_or(&decoded);
     let s = stripped.replace('\\', "/").trim_end_matches('/').to_string();
     if cfg!(windows) || s.as_bytes().get(1) == Some(&b':') {
@@ -342,17 +369,27 @@ fn rules_of<'a>(grants: &'a Value, key: &str) -> Vec<&'a str> {
 
 // Under Antigravity 2.0 default mode ("Agent Decides"), normal safe workspace
 // commands auto-run; only destructive/risky commands or explicit review-mode
-// policies require approval on the island.
+// policies require approval on the island. Matches command verbs per segment
+// rather than raw substring checks so words like "model" or "--format" do not
+// false-positive on "del" or "format".
 fn is_risky_command(cmd: &str) -> bool {
     let lower = cmd.to_ascii_lowercase();
-    let risky_tokens = [
-        "rm ", "rm\t", "rmdir ", "del ", "erase ", "remove-item", "format ",
-        "stop-process", "taskkill", "shutdown", "restart-computer", "reg ",
-        "set-executionpolicy", "invoke-webrequest", "iwr ", "curl ", "wget ",
-        "git push --force", "git push -f", "git reset --hard", "git clean -f",
-        "chmod ", "chown ", "takeown ", "icacls ",
+    let multi_word = ["git push --force", "git push -f", "git reset --hard", "git clean -f"];
+    if multi_word.iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+    let risky_verbs = [
+        "rm", "rmdir", "del", "erase", "remove-item", "format",
+        "stop-process", "taskkill", "shutdown", "restart-computer", "reg",
+        "set-executionpolicy", "invoke-webrequest", "iwr", "curl", "wget",
+        "chmod", "chown", "takeown", "icacls",
     ];
-    risky_tokens.iter().any(|tok| lower.contains(tok))
+    lower.split([';', '|', '&', '\n']).any(|seg| {
+        let mut words = seg.split_whitespace();
+        let Some(first) = words.next() else { return false };
+        let verb = first.rsplit(['/', '\\']).next().unwrap_or(first).trim_end_matches(".exe");
+        risky_verbs.contains(&verb)
+    })
 }
 
 fn config_dir() -> std::path::PathBuf {
@@ -707,10 +744,12 @@ mod tests {
         assert!(!needs_approval_with(&pre("write_file", json!({ "Path": r"Z:\nowhere\agyws\b.txt" })), &empty, &empty));
         assert!(!needs_approval_with(&pre("run_command", json!({ "CommandLine": "git status" })), &empty, &empty));
         assert!(!needs_approval_with(&pre("run_command", json!({ "CommandLine": "cargo test -j 1" })), &empty, &empty));
+        assert!(!needs_approval_with(&pre("run_command", json!({ "CommandLine": "echo model confirm --format json" })), &empty, &empty));
         // Outside workspace & risky commands & web & mcp require approval.
         assert!(needs_approval_with(&pre("read_file", json!({ "Path": r"C:\outside\secret.txt" })), &empty, &empty));
         assert!(needs_approval_with(&pre("write_file", json!({ "Path": r"C:\outside\evil.txt" })), &empty, &empty));
         assert!(needs_approval_with(&pre("run_command", json!({ "CommandLine": "rm -rf foo" })), &empty, &empty));
+        assert!(needs_approval_with(&pre("run_command", json!({ "CommandLine": "echo ok && rm -rf foo" })), &empty, &empty));
         assert!(needs_approval_with(&pre("run_command", json!({ "CommandLine": "Remove-Item -Recurse C:\\tmp" })), &empty, &empty));
         assert!(needs_approval_with(&pre("read_url_content", json!({ "Url": "https://example.com" })), &empty, &empty));
         assert!(needs_approval_with(&pre("mcp_github_get_issue", json!({ "issue_number": 1 })), &empty, &empty));
@@ -767,5 +806,18 @@ mod tests {
         assert_eq!(post["session_id"], "5064aa2e");
         assert_eq!(post["tool_name"], "Bash");
         assert_eq!(post["tool_use_id"], "5064aa2e-7");
+    }
+
+    #[test]
+    fn permission_request_becomes_waiting_message_and_uri_spaces_decode() {
+        let cmd = event("PreToolUse", json!({
+            "stepIdx": 9,
+            "workspacePaths": ["H:/FISH Dock"],
+            "toolCall": { "name": "run_command", "args": { "CommandLine": "rm -rf tmp" } }
+        }));
+        let msg = to_message(&for_ask(&cmd)).expect("PermissionRequest should become waiting message");
+        assert_eq!(msg["mood"], "waiting");
+        assert_eq!(msg["agent"], "agy");
+        assert_eq!(norm_path("file:///h%3A/FISH%20Dock"), norm_path(r"H:\FISH Dock"));
     }
 }
