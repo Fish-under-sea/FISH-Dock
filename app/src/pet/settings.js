@@ -1551,7 +1551,7 @@
       }
     }
 
-    const spanOf = () => Math.max(1, track.clientWidth - 72)
+    const spanOf = () => Math.max(1, track.clientWidth - 48)
 
     track.addEventListener('pointerenter', () => { hovered = true; wake() })
     track.addEventListener('pointerleave', () => { hovered = false; wake() })
@@ -1560,7 +1560,7 @@
       e.preventDefault()
       const rect = track.getBoundingClientRect()
       const span = spanOf()
-      const rel = (e.clientX - rect.left - 36) / span
+      const rel = (e.clientX - rect.left - 24) / span
       pressed = true
       dragging = true
       moved = false
@@ -1581,7 +1581,7 @@
       if (!moved) return
       const rect = track.getBoundingClientRect()
       const span = spanOf()
-      const raw = (e.clientX - rect.left - 36) / span - dragOffset
+      const raw = (e.clientX - rect.left - 24) / span - dragOffset
       const now = performance.now()
       const dt = Math.max(0.004, (now - lastT) / 1000)
       const prevP = p

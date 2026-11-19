@@ -3333,15 +3333,15 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
-/* 底部浅色 / 深色 / 玻璃全宽三态 3D 光学拟物场景胶囊开关（欠阻尼弹簧物理 + 绕行白炽灯带弧 + 玻璃内全反射 + 4层同心光圈 + 云海/星群/水珠） */
+/* 底部浅色 / 深色 / 玻璃全宽修长三态 3D 光学拟物场景胶囊开关（48px 紧致高度 + 欠阻尼弹簧物理 + 绕行灯带弧 + TIR 内全反射） */
 #island-settings .dock-theme-pill {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 8px;
+  gap: 5px;
   width: 100%;
-  margin-top: 6px;
-  padding-top: 10px;
+  margin-top: 4px;
+  padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
@@ -3352,7 +3352,7 @@
 #island-settings .dtp-track {
   position: relative;
   width: 100%;
-  height: 72px;
+  height: 48px;
   border-radius: 999px;
   overflow: hidden;
   user-select: none;
@@ -3373,10 +3373,10 @@
   --dtp-spin-moon: 0deg;
   --dtp-spin-glass: 105deg;
   box-shadow:
-    0 2px 3px rgba(255, 255, 255, 0.2),
-    0 -1px 2px rgba(0, 0, 0, 0.44),
-    0 12px 26px rgba(0, 0, 0, 0.3),
-    0 3px 8px rgba(0, 0, 0, 0.24);
+    0 1.5px 2px rgba(255, 255, 255, 0.2),
+    0 -1px 2px rgba(0, 0, 0, 0.42),
+    0 8px 20px rgba(0, 0, 0, 0.28),
+    0 2px 6px rgba(0, 0, 0, 0.22);
   transition: box-shadow 0.45s ease;
 }
 
@@ -3482,7 +3482,7 @@
     );
 }
 
-/* 跟随滚珠平滑弹跳的四层同心阶梯光环（完美铺满全宽胶囊） */
+/* 跟随滚珠平滑弹跳的四层同心阶梯光环（适配 48px 修长全宽胶囊） */
 #island-settings .dtp-rings {
   position: absolute;
   inset: 0;
@@ -3492,17 +3492,17 @@
 
 #island-settings .dtp-rings > i {
   position: absolute;
-  top: 7px;
-  left: calc(7px + (100% - 72px) * var(--dtp-p, 0));
-  width: 58px;
-  height: 58px;
+  top: 5px;
+  left: calc(5px + (100% - 48px) * var(--dtp-p, 0));
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   background: transparent;
   box-shadow:
-    0 0 0 30px rgba(255, 255, 255, 0.13),
-    0 0 0 70px rgba(255, 255, 255, 0.09),
-    0 0 0 116px rgba(255, 255, 255, 0.055),
-    0 0 0 166px rgba(255, 255, 255, 0.032);
+    0 0 0 22px rgba(255, 255, 255, 0.13),
+    0 0 0 54px rgba(255, 255, 255, 0.09),
+    0 0 0 94px rgba(255, 255, 255, 0.055),
+    0 0 0 140px rgba(255, 255, 255, 0.032);
   transition:
     left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1),
     box-shadow 0.52s ease;
@@ -3510,28 +3510,28 @@
 
 #island-settings .dtp-track[data-mode='light'] .dtp-rings > i {
   box-shadow:
-    0 0 0 30px rgba(255, 255, 255, 0.17),
-    0 0 0 70px rgba(255, 255, 255, 0.12),
-    0 0 0 116px rgba(255, 255, 255, 0.08),
-    0 0 0 166px rgba(255, 255, 255, 0.045);
+    0 0 0 22px rgba(255, 255, 255, 0.17),
+    0 0 0 54px rgba(255, 255, 255, 0.12),
+    0 0 0 94px rgba(255, 255, 255, 0.08),
+    0 0 0 140px rgba(255, 255, 255, 0.045);
 }
 
 #island-settings .dtp-track[data-mode='glass'] .dtp-rings > i {
   box-shadow:
-    0 0 0 30px color-mix(in srgb, var(--dock-accent, #7dd3fc) 22%, rgba(255, 255, 255, 0.15)),
-    0 0 0 70px color-mix(in srgb, var(--dock-accent, #c084fc) 14%, rgba(255, 255, 255, 0.1)),
-    0 0 0 116px rgba(255, 255, 255, 0.065),
-    0 0 0 166px rgba(255, 255, 255, 0.036);
+    0 0 0 22px color-mix(in srgb, var(--dock-accent, #7dd3fc) 22%, rgba(255, 255, 255, 0.15)),
+    0 0 0 54px color-mix(in srgb, var(--dock-accent, #c084fc) 14%, rgba(255, 255, 255, 0.1)),
+    0 0 0 94px rgba(255, 255, 255, 0.065),
+    0 0 0 140px rgba(255, 255, 255, 0.036);
 }
 
-/* 1) 日间绵延双层蓬松云海（随物理权重连续升降并带柔风漂浮） */
+/* 1) 日间绵延双层蓬松云海（适配 48px 修长胶囊） */
 #island-settings .dtp-clouds {
   position: absolute;
   inset: 0;
   z-index: 2;
   pointer-events: none;
   opacity: var(--dtp-w-light, 0);
-  transform: translateY(calc((1 - var(--dtp-w-light, 0)) * 58px));
+  transform: translateY(calc((1 - var(--dtp-w-light, 0)) * 40px));
   transition:
     transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
     opacity 0.44s ease;
@@ -3539,42 +3539,42 @@
 
 #island-settings .dtp-cloud-back {
   position: absolute;
-  right: 26px;
-  bottom: -14px;
-  width: 52px;
-  height: 52px;
+  right: 22px;
+  bottom: -12px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: rgba(218, 240, 255, 0.66);
   box-shadow:
-    34px -12px 0 6px rgba(218, 240, 255, 0.66),
-    -38px 5px 0 -2px rgba(218, 240, 255, 0.64),
-    -78px 12px 0 -3px rgba(218, 240, 255, 0.6),
-    -118px 9px 0 -1px rgba(218, 240, 255, 0.56),
-    -160px 16px 0 -5px rgba(218, 240, 255, 0.52),
-    -204px 19px 0 -6px rgba(218, 240, 255, 0.48),
-    -248px 23px 0 -8px rgba(218, 240, 255, 0.44),
-    -290px 26px 0 -10px rgba(218, 240, 255, 0.38);
+    24px -8px 0 4px rgba(218, 240, 255, 0.66),
+    -30px 4px 0 -2px rgba(218, 240, 255, 0.64),
+    -64px 9px 0 -3px rgba(218, 240, 255, 0.6),
+    -98px 7px 0 -1px rgba(218, 240, 255, 0.56),
+    -134px 12px 0 -4px rgba(218, 240, 255, 0.52),
+    -172px 14px 0 -5px rgba(218, 240, 255, 0.48),
+    -212px 16px 0 -6px rgba(218, 240, 255, 0.44),
+    -254px 18px 0 -8px rgba(218, 240, 255, 0.38);
 }
 
 #island-settings .dtp-cloud-front {
   position: absolute;
-  right: 8px;
-  bottom: -20px;
-  width: 48px;
-  height: 48px;
+  right: 6px;
+  bottom: -16px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: #ffffff;
   box-shadow:
-    28px -14px 0 8px #ffffff,
-    -34px 4px 0 -1px #ffffff,
-    -72px 10px 0 -3px #ffffff,
-    -110px 14px 0 -4px #ffffff,
-    -148px 11px 0 -2px #ffffff,
-    -188px 17px 0 -5px #ffffff,
-    -228px 20px 0 -6px #ffffff,
-    -268px 24px 0 -8px rgba(255, 255, 255, 0.96),
-    -308px 28px 0 -11px rgba(255, 255, 255, 0.92),
-    0 -3px 12px rgba(255, 255, 255, 0.48);
+    20px -10px 0 6px #ffffff,
+    -28px 3px 0 -1px #ffffff,
+    -58px 7px 0 -2px #ffffff,
+    -90px 10px 0 -3px #ffffff,
+    -124px 8px 0 -1px #ffffff,
+    -158px 12px 0 -4px #ffffff,
+    -194px 14px 0 -5px #ffffff,
+    -232px 17px 0 -6px rgba(255, 255, 255, 0.96),
+    -270px 19px 0 -8px rgba(255, 255, 255, 0.92),
+    0 -2px 10px rgba(255, 255, 255, 0.48);
 }
 
 #island-settings .dtp-track[data-mode='light'] .dtp-cloud-back {
@@ -3590,18 +3590,18 @@
     transform: translateX(0);
   }
   100% {
-    transform: translateX(-8px);
+    transform: translateX(-7px);
   }
 }
 
-/* 2) 夜间全幅星群与闪烁四角星（左右对称铺展，随物理权重连续升降） */
+/* 2) 夜间全幅星群与闪烁四角星（左右对称铺展，适配 48px 高度安全区） */
 #island-settings .dtp-stars {
   position: absolute;
   inset: 0;
   z-index: 2;
   pointer-events: none;
   opacity: var(--dtp-w-dark, 0);
-  transform: translateY(calc((1 - var(--dtp-w-dark, 0)) * -50px));
+  transform: translateY(calc((1 - var(--dtp-w-dark, 0)) * -36px));
   transition:
     transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
     opacity 0.44s ease;
@@ -3610,39 +3610,39 @@
 /* 左侧大小圆点星群 */
 #island-settings .dtp-star-a {
   position: absolute;
-  top: 17px;
+  top: 11px;
   left: 20%;
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: #ffffff;
   box-shadow:
-    -52px 8px 0 -3.2px rgba(255, 255, 255, 0.88),
-    -38px 18px 0 -3.5px rgba(255, 255, 255, 0.72),
-    -26px 34px 0 -1.8px #ffffff,
-    24px -5px 0 -2.2px #ffffff,
-    18px 24px 0 -3.2px rgba(255, 255, 255, 0.84),
-    42px 33px 0 -1.2px #ffffff,
-    56px 11px 0 -3.4px rgba(255, 255, 255, 0.78);
+    -48px 6px 0 -2.4px rgba(255, 255, 255, 0.88),
+    -34px 13px 0 -2.6px rgba(255, 255, 255, 0.72),
+    -22px 23px 0 -1.2px #ffffff,
+    24px -3px 0 -1.8px #ffffff,
+    18px 16px 0 -2.4px rgba(255, 255, 255, 0.84),
+    40px 22px 0 -1px #ffffff,
+    56px 7px 0 -2.6px rgba(255, 255, 255, 0.78);
 }
 
 /* 右侧大小圆点星群 */
 #island-settings .dtp-star-d {
   position: absolute;
-  top: 20px;
+  top: 13px;
   right: 19%;
-  width: 8px;
-  height: 8px;
+  width: 6.5px;
+  height: 6.5px;
   border-radius: 50%;
   background: #ffffff;
   box-shadow:
-    -54px -6px 0 -1.4px #ffffff,
-    -42px 20px 0 -3px rgba(255, 255, 255, 0.82),
-    -24px 33px 0 -2px rgba(255, 255, 255, 0.92),
-    26px -7px 0 -2.6px rgba(255, 255, 255, 0.88),
-    36px 14px 0 -3.2px rgba(255, 255, 255, 0.74),
-    22px 29px 0 -1.2px #ffffff,
-    52px 6px 0 -2.4px rgba(255, 255, 255, 0.86);
+    -52px -4px 0 -1px #ffffff,
+    -38px 14px 0 -2.2px rgba(255, 255, 255, 0.82),
+    -22px 22px 0 -1.5px rgba(255, 255, 255, 0.92),
+    24px -5px 0 -2px rgba(255, 255, 255, 0.88),
+    34px 10px 0 -2.4px rgba(255, 255, 255, 0.74),
+    20px 20px 0 -1px #ffffff,
+    50px 4px 0 -1.8px rgba(255, 255, 255, 0.86);
 }
 
 #island-settings .dtp-star-b,
@@ -3655,34 +3655,34 @@
 }
 
 #island-settings .dtp-star-b {
-  top: 26px;
+  top: 17px;
   left: 7%;
-  width: 13px;
-  height: 13px;
+  width: 10px;
+  height: 10px;
 }
 
 #island-settings .dtp-star-b::after {
   content: '';
-  top: -12px;
-  left: 112px;
-  width: 8px;
-  height: 8px;
+  top: -8px;
+  left: 108px;
+  width: 7px;
+  height: 7px;
   opacity: 0.85;
 }
 
 #island-settings .dtp-star-c {
-  top: 14px;
+  top: 10px;
   right: 8%;
-  width: 13px;
-  height: 13px;
+  width: 10px;
+  height: 10px;
 }
 
 #island-settings .dtp-star-c::after {
   content: '';
-  top: 32px;
-  right: 108px;
-  width: 9px;
-  height: 9px;
+  top: 20px;
+  right: 104px;
+  width: 7px;
+  height: 7px;
   opacity: 0.88;
 }
 
@@ -3705,14 +3705,14 @@
   }
 }
 
-/* 3) 液态玻璃宽幅棱镜流光带 + 6 颗 3D 悬浮液态水珠 */
+/* 3) 液态玻璃宽幅棱镜流光带 + 6 颗 3D 悬浮液态水珠（适配 48px 高度） */
 #island-settings .dtp-glass-fx {
   position: absolute;
   inset: 0;
   z-index: 2;
   pointer-events: none;
   opacity: var(--dtp-w-glass, 0);
-  transform: translateY(calc((1 - var(--dtp-w-glass, 0)) * 36px)) scale(calc(0.94 + var(--dtp-w-glass, 0) * 0.06));
+  transform: translateY(calc((1 - var(--dtp-w-glass, 0)) * 28px)) scale(calc(0.94 + var(--dtp-w-glass, 0) * 0.06));
   transition:
     transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
     opacity 0.44s ease;
@@ -3739,18 +3739,18 @@
   border-radius: 50%;
   background: radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.3) 48%, rgba(255, 255, 255, 0.56) 100%);
   box-shadow:
-    inset 0 1.5px 2px rgba(255, 255, 255, 0.96),
-    inset 0 -1.5px 3px rgba(56, 189, 248, 0.48),
-    0 3px 8px rgba(0, 0, 0, 0.24),
-    0 0 0 0.75px rgba(255, 255, 255, 0.48);
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.96),
+    inset 0 -1px 2.5px rgba(56, 189, 248, 0.48),
+    0 2px 6px rgba(0, 0, 0, 0.24),
+    0 0 0 0.7px rgba(255, 255, 255, 0.48);
 }
 
-#island-settings .dtp-gb.b1 { top: 14px; left: 7%; width: 18px; height: 18px; }
-#island-settings .dtp-gb.b2 { top: 41px; left: 18%; width: 12px; height: 12px; }
-#island-settings .dtp-gb.b3 { top: 15px; left: 31%; width: 14px; height: 14px; }
-#island-settings .dtp-gb.b4 { top: 44px; left: 45%; width: 16px; height: 16px; }
-#island-settings .dtp-gb.b5 { top: 14px; left: 58%; width: 11px; height: 11px; }
-#island-settings .dtp-gb.b6 { top: 38px; left: 71%; width: 15px; height: 15px; }
+#island-settings .dtp-gb.b1 { top: 9px; left: 7%; width: 13px; height: 13px; }
+#island-settings .dtp-gb.b2 { top: 28px; left: 19%; width: 9px; height: 9px; }
+#island-settings .dtp-gb.b3 { top: 10px; left: 32%; width: 11px; height: 11px; }
+#island-settings .dtp-gb.b4 { top: 27px; left: 46%; width: 12px; height: 12px; }
+#island-settings .dtp-gb.b5 { top: 10px; left: 60%; width: 9px; height: 9px; }
+#island-settings .dtp-gb.b6 { top: 25px; left: 73%; width: 11px; height: 11px; }
 
 #island-settings .dtp-track[data-mode='glass'] .dtp-gb.b1 { animation: dtp-bubble-float 2.8s ease-in-out infinite alternate; }
 #island-settings .dtp-track[data-mode='glass'] .dtp-gb.b2 { animation: dtp-bubble-float 3.2s ease-in-out 0.4s infinite alternate; }
@@ -3761,20 +3761,20 @@
 
 @keyframes dtp-bubble-float {
   0% {
-    transform: translateY(2.5px);
+    transform: translateY(2px);
   }
   100% {
-    transform: translateY(-3.5px);
+    transform: translateY(-2.5px);
   }
 }
 
 /* 3.5) Glass Light Toggle 同款凹槽环境溢光洗墙（Track Wash） */
 #island-settings .dtp-wash {
   position: absolute;
-  top: 7px;
-  left: calc(7px + (100% - 72px) * var(--dtp-p, 0));
-  width: 58px;
-  height: 58px;
+  top: 5px;
+  left: calc(5px + (100% - 48px) * var(--dtp-p, 0));
+  width: 38px;
+  height: 38px;
   z-index: 3;
   pointer-events: none;
   transition: left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1);
@@ -3782,10 +3782,10 @@
 
 #island-settings .dtp-wash > i {
   position: absolute;
-  left: -38px;
-  top: -38px;
-  width: 134px;
-  height: 134px;
+  left: -32px;
+  top: -32px;
+  width: 102px;
+  height: 102px;
   border-radius: 50%;
   background: radial-gradient(
     circle at 50% 24%,
@@ -3793,7 +3793,7 @@
     color-mix(in srgb, var(--dtp-led-color, #6f86ff) 24%, transparent) 42%,
     transparent 70%
   );
-  filter: blur(8px);
+  filter: blur(7px);
   opacity: calc(0.66 * var(--dtp-boost, 1));
   transform: rotate(var(--dtp-led-deg, 180deg));
   transition: transform 0.68s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
@@ -3802,13 +3802,13 @@
 /* 3.8) Glass Light Toggle 同款绕行白炽灯带弧（Orbiting Light Strip） */
 #island-settings .dtp-led-wrap {
   position: absolute;
-  top: 4px;
-  left: calc(4px + (100% - 72px) * var(--dtp-p, 0));
-  width: 64px;
-  height: 64px;
+  top: 2px;
+  left: calc(2px + (100% - 48px) * var(--dtp-p, 0));
+  width: 44px;
+  height: 44px;
   z-index: 5;
   pointer-events: none;
-  transform: translateY(calc(var(--dtp-lift, 0) * -1.2px)) scale(var(--dtp-sx, 1), var(--dtp-sy, 1));
+  transform: translateY(calc(var(--dtp-lift, 0) * -1px)) scale(var(--dtp-sx, 1), var(--dtp-sy, 1));
   transition: left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1), transform 0.28s var(--spring);
 }
 
@@ -3822,7 +3822,7 @@
 }
 
 #island-settings .dtp-led-halo {
-  inset: -4px;
+  inset: -3px;
   background: conic-gradient(
     from -50deg,
     transparent 0deg,
@@ -3831,9 +3831,9 @@
     var(--dtp-led-color, #6f86ff) 78deg,
     transparent 100deg
   );
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 4px), #000 100%);
-  mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 4px), #000 100%);
-  filter: blur(5px);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 3px), #000 100%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 3px), #000 100%);
+  filter: blur(4px);
   mix-blend-mode: screen;
   opacity: calc(0.95 * var(--dtp-boost, 1));
 }
@@ -3850,28 +3850,28 @@
     var(--dtp-led-color, #6f86ff) 78deg,
     transparent 92deg
   );
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.6px), #000 100%);
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.6px), #000 100%);
-  filter: drop-shadow(0 0 3px var(--dtp-led-color, #6f86ff));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.2px), #000 calc(100% - 1.4px), #000 100%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.2px), #000 calc(100% - 1.4px), #000 100%);
+  filter: drop-shadow(0 0 2.5px var(--dtp-led-color, #6f86ff));
   opacity: calc(1 * var(--dtp-boost, 1));
 }
 
-/* 三态 3D 物理滑动滚珠（太阳 → 陨石坑月球 → 液态玻璃折射晶球 + TIR 内折射） */
+/* 三态 3D 物理滑动滚珠（38×38px 紧凑比例 + TIR 内折射） */
 #island-settings .dtp-orb {
   position: absolute;
-  top: 7px;
-  left: calc(7px + (100% - 72px) * var(--dtp-p, 0));
-  width: 58px;
-  height: 58px;
+  top: 5px;
+  left: calc(5px + (100% - 48px) * var(--dtp-p, 0));
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   z-index: 4;
   overflow: hidden;
   pointer-events: none;
-  transform: translateY(calc(var(--dtp-lift, 0) * -1.2px)) scale(var(--dtp-sx, 1), var(--dtp-sy, 1));
+  transform: translateY(calc(var(--dtp-lift, 0) * -1px)) scale(var(--dtp-sx, 1), var(--dtp-sy, 1));
   box-shadow:
-    0 calc(5px + var(--dtp-lift, 0) * 3px) calc(15px + var(--dtp-lift, 0) * 6px) rgba(0, 0, 0, 0.44),
-    0 2px 5px rgba(0, 0, 0, 0.28),
-    0 0 calc(14px * var(--dtp-boost, 1)) color-mix(in srgb, var(--dtp-led-color, #6f86ff) 32%, transparent);
+    0 calc(3.5px + var(--dtp-lift, 0) * 2.5px) calc(11px + var(--dtp-lift, 0) * 5px) rgba(0, 0, 0, 0.44),
+    0 1.5px 4px rgba(0, 0, 0, 0.28),
+    0 0 calc(11px * var(--dtp-boost, 1)) color-mix(in srgb, var(--dtp-led-color, #6f86ff) 32%, transparent);
   transition:
     left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1),
     box-shadow 0.42s ease,
@@ -3892,18 +3892,18 @@
   opacity: var(--dtp-w-light, 0);
   background: radial-gradient(circle at 32% 28%, #fff8c4 0%, #facc15 48%, #e29d00 100%);
   box-shadow:
-    inset 2px 3px 5px rgba(255, 255, 255, 0.84),
-    inset -3px -4px 7px rgba(176, 98, 0, 0.44);
+    inset 1.5px 2.5px 4px rgba(255, 255, 255, 0.84),
+    inset -2.5px -3px 5px rgba(176, 98, 0, 0.44);
   transform: rotate(var(--dtp-spin-sun, -105deg)) scale(calc(0.86 + var(--dtp-w-light, 0) * 0.14));
 }
 
-/* 球面 B：3D 银白陨石坑月球（还原参考图三大立体凹坑） */
+/* 球面 B：3D 银白陨石坑月球（三大立体凹坑等比微缩） */
 #island-settings .dtp-face-moon {
   opacity: var(--dtp-w-dark, 0);
   background: radial-gradient(circle at 30% 26%, #f5f7fb 0%, #d1d7e2 58%, #aab3c4 100%);
   box-shadow:
-    inset 2px 3px 5px rgba(255, 255, 255, 0.94),
-    inset -3px -4px 7px rgba(66, 74, 90, 0.46);
+    inset 1.5px 2.5px 4px rgba(255, 255, 255, 0.94),
+    inset -2.5px -3px 5px rgba(66, 74, 90, 0.46);
   transform: rotate(var(--dtp-spin-moon, 0deg)) scale(calc(0.86 + var(--dtp-w-dark, 0) * 0.14));
 }
 
@@ -3913,29 +3913,29 @@
   border-radius: 50%;
   background: #9aa3b4;
   box-shadow:
-    inset 1.5px 2px 3px rgba(62, 70, 86, 0.52),
-    0 1px 0 rgba(255, 255, 255, 0.58);
+    inset 1px 1.5px 2px rgba(62, 70, 86, 0.52),
+    0 0.8px 0 rgba(255, 255, 255, 0.58);
 }
 
 #island-settings .dtp-crater.c1 {
-  left: 11px;
-  bottom: 11px;
-  width: 18px;
-  height: 18px;
-}
-
-#island-settings .dtp-crater.c2 {
-  left: 25px;
-  top: 8px;
+  left: 7px;
+  bottom: 7px;
   width: 12px;
   height: 12px;
 }
 
+#island-settings .dtp-crater.c2 {
+  left: 16px;
+  top: 5px;
+  width: 8px;
+  height: 8px;
+}
+
 #island-settings .dtp-crater.c3 {
-  right: 8px;
-  bottom: 10px;
-  width: 13px;
-  height: 13px;
+  right: 5px;
+  bottom: 6px;
+  width: 9px;
+  height: 9px;
 }
 
 /* 球面 C：3D 液态玻璃折射晶球（高光弯月 + 底部焦散 + 边缘微色散） */
@@ -3948,23 +3948,23 @@
     color-mix(in srgb, var(--dock-accent, #5e9bff) 44%, rgba(139, 92, 246, 0.28)) 68%,
     rgba(255, 255, 255, 0.74) 100%
   );
-  backdrop-filter: blur(8px) saturate(1.65);
-  -webkit-backdrop-filter: blur(8px) saturate(1.65);
+  backdrop-filter: blur(7px) saturate(1.65);
+  -webkit-backdrop-filter: blur(7px) saturate(1.65);
   box-shadow:
-    inset 0 2.5px 5px rgba(255, 255, 255, 0.96),
-    inset 2px 0 4px rgba(56, 189, 248, 0.52),
-    inset -2px 0 4px rgba(244, 114, 182, 0.48),
-    inset 0 -5px 9px color-mix(in srgb, var(--dock-accent, #38bdf8) 68%, rgba(168, 85, 247, 0.45)),
+    inset 0 2px 4px rgba(255, 255, 255, 0.96),
+    inset 1.5px 0 3px rgba(56, 189, 248, 0.52),
+    inset -1.5px 0 3px rgba(244, 114, 182, 0.48),
+    inset 0 -4px 7px color-mix(in srgb, var(--dock-accent, #38bdf8) 68%, rgba(168, 85, 247, 0.45)),
     inset 0 0 0 1px rgba(255, 255, 255, 0.64);
   transform: rotate(var(--dtp-spin-glass, 105deg)) scale(calc(0.86 + var(--dtp-w-glass, 0) * 0.14));
 }
 
 #island-settings .dtp-glass-glint {
   position: absolute;
-  top: 8px;
-  left: 11px;
-  width: 21px;
-  height: 11px;
+  top: 5px;
+  left: 7px;
+  width: 14px;
+  height: 7px;
   border-radius: 50%;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.08));
   transform: rotate(-28deg);
@@ -3972,10 +3972,10 @@
 
 #island-settings .dtp-glass-caustic {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
-  width: 17px;
-  height: 10px;
+  right: 5px;
+  bottom: 5px;
+  width: 12px;
+  height: 7px;
   border-radius: 50%;
   background: radial-gradient(circle, rgba(255, 255, 255, 0.8), transparent 72%);
   transform: rotate(-22deg);
@@ -4061,11 +4061,11 @@
 }
 
 #island-settings .dtp-label-btn:first-child {
-  padding-right: 46px;
+  padding-right: 54px;
 }
 
 #island-settings .dtp-label-btn:last-child {
-  padding-left: 46px;
+  padding-left: 54px;
 }
 
 #island-settings .dtp-label-btn {
