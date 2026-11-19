@@ -48,7 +48,7 @@ struct SearchAnswer { #[serde(default)] total: Option<u64>, objects: Vec<SearchO
 #[derive(Deserialize)]
 struct SearchObject { package: SearchPackage }
 #[derive(Deserialize)]
-struct SearchPackage { name: String, version: String, #[serde(default)] description: String, #[serde(default)] date: String, #[serde(default)] publisher: Option<Publisher> }
+struct SearchPackage { name: String, version: String, #[serde(default)] description: String, #[serde(default)] keywords: Vec<String>, #[serde(default)] date: String, #[serde(default)] publisher: Option<Publisher> }
 #[derive(Deserialize)]
 struct Publisher { #[serde(default)] username: String }
 
@@ -342,6 +342,36 @@ fn metadata_url(primary: &str, name: &str) -> String {
     format!("{}/{}", primary, urlencode(name).replace("%2F", "/").replace("%40", "@"))
 }
 
+// 用户只输入短名（如 `rayburst` 或 `@says693/rayburst`）时，推导对应的合规插件包名
+// `fish-dock-plugin-rayburst` / `@says693/fish-dock-plugin-rayburst`。
+fn prefixed_plugin_name(name: &str) -> Option<String> {
+    if plugin_package_name(name).is_ok() { return None; }
+    let stem = plugin_stem();
+    let candidate = match name.strip_prefix('@') {
+        Some(rest) => {
+            let (scope, bare) = rest.split_once('/')?;
+            format!("@{scope}/{stem}{bare}")
+        }
+        None => format!("{stem}{name}"),
+    };
+    plugin_package_name(&candidate).ok()
+}
+
+// 兜底源按 `fish-dock-plugin` 前缀拉回全量合规包后，对非默认发现词做本地关键词匹配
+//（包名、描述、keywords、发布者任一命中全部空格分词即可）。
+fn query_matches(row: &SearchPackage, text: &str) -> bool {
+    let name = row.name.to_lowercase();
+    let desc = row.description.to_lowercase();
+    let pub_name = row.publisher.as_ref().map(|p| p.username.to_lowercase()).unwrap_or_default();
+    text.split_whitespace().all(|term| {
+        let t = term.to_lowercase();
+        name.contains(&t)
+            || desc.contains(&t)
+            || pub_name.contains(&t)
+            || row.keywords.iter().any(|k| k.to_lowercase().contains(&t))
+    })
+}
+
 // search 的注入版（测试用，默认页）：源链与单地址 GET 都注入，不读 config、不碰网络。
 fn search_via<F>(sources: &NpmSources, query: &str, log: &mut Vec<String>, fetch: F) -> Result<SearchReport, String>
 where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
@@ -374,6 +404,7 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
     // 发现式浏览与第二页起都不做：前者不是点名要包，后者那条命中已在第一页。
     if !page.discovery && from == 0 {
         if let Ok(name) = package_name(text) {
+            let mut exact_hidden = false;
             let url = metadata_url(&sources.primary, &name);
             if let Ok(bytes) = get_via_with(sources, &url, META_LIMIT, log, &mut fetch) {
                 if let Ok(meta) = serde_json::from_slice::<Meta>(&bytes) {
@@ -389,10 +420,35 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
                                 publisher: meta.maintainers.first().map(|m| m.name.clone()).unwrap_or_default(),
                                 updated: truncate(meta.time.get("modified").map(String::as_str).unwrap_or(""), 40),
                             });
-                            seen.insert(name);
+                            seen.insert(name.clone());
                         } else {
-                            // 精确命中但不合规范：拒收，计入 hidden。
+                            // 精确命中但不合规范：暂记 hidden；若后续短名补前缀命中真插件则抵消。
                             hidden += 1;
+                            exact_hidden = true;
+                        }
+                    }
+                }
+            }
+            // 用户只输入插件短名（如 `rayburst`）时，同步尝试 `fish-dock-plugin-rayburst` 元数据精确查：
+            // 新发布包在 npm search 索引尚未刷新或 searchScore=0 时也能零延迟置顶命中。
+            if let Some(prefixed) = prefixed_plugin_name(&name) {
+                let purl = metadata_url(&sources.primary, &prefixed);
+                if let Ok(bytes) = get_via_with(sources, &purl, META_LIMIT, log, &mut fetch) {
+                    if let Ok(meta) = serde_json::from_slice::<Meta>(&bytes) {
+                        if meta.name.eq_ignore_ascii_case(&prefixed) {
+                            if let Some(latest) = meta.dist_tags.get("latest").cloned() {
+                                if official_package(&prefixed).is_none() && plugin_package_name(&prefixed).is_ok() {
+                                    if exact_hidden { hidden = hidden.saturating_sub(1); }
+                                    hits.push(Hit {
+                                        name: prefixed.clone(),
+                                        version: latest,
+                                        description: truncate(&meta.description, 240),
+                                        publisher: meta.maintainers.first().map(|m| m.name.clone()).unwrap_or_default(),
+                                        updated: truncate(meta.time.get("modified").map(String::as_str).unwrap_or(""), 40),
+                                    });
+                                    seen.insert(prefixed);
+                                }
+                            }
                         }
                     }
                 }
@@ -414,12 +470,13 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
     // （t19 F2：用可见条数会把整页被过滤的页原地卡死；t42 F-B：registry 返回的
     // 对象多于 size 时，按整个数组前进会跳过没展示给用户的那一段）。
     let rows = answer.objects.len().min(size);
+    let mut search_hidden = 0usize;
     for object in answer.objects.into_iter().take(size) {
         let row = object.package;
         // #72：官方三个插件的 npm 包先排除、单独计数——它们的包名本身合规，
         // 混进 hidden 的「不符合命名规范」里等于把理由说错。
         if official_package(&row.name).is_some() { official += 1; continue; }
-        if plugin_package_name(&row.name).is_err() { hidden += 1; continue; }
+        if plugin_package_name(&row.name).is_err() { hidden += 1; search_hidden += 1; continue; }
         // 去重后再计数：精确命中已置顶的同名包不会再算一次「本页可用」（t19 F5）。
         if !seen.insert(row.name.clone()) { continue; }
         filtered += 1;
@@ -430,6 +487,37 @@ where F: FnMut(&str, usize) -> Result<Vec<u8>, String> {
             name: row.name,
             version: row.version,
         });
+    }
+    // ③ 兜底源前缀补全：npmjs 的 /-/v1/search 会把 `fish-dock-plugin` 按连字符拆成
+    // `fish | dock | plugin`（命中 30 万+ 无关包），且新发布、月下载为 0 的社区插件
+    // 在 npmjs 上 searchScore=0，会被挤到 30 万名之后；而 npmmirror 对 `fish-dock-plugin`
+    // 做包名前缀/子串匹配，能完整返回所有 `fish-dock-plugin-*` 包。当主源本页出现非插件噪音
+    //（search_hidden > 0）且配置了兜底源时，向兜底源查询前缀列表并合并未见过的合规第三方包。
+    if from == 0 && search_hidden > 0 {
+        if let Some(fallback) = &sources.fallback {
+            let sup_url = format!("{}/-/v1/search?text={}&size={}", fallback, urlencode(DISCOVERY_QUERY), size);
+            let label = source_label(fallback, &sup_url);
+            if let Ok(sup_bytes) = fetch(&sup_url, SEARCH_LIMIT) {
+                log.push(format!("{label} 补全读到 {} 字节", sup_bytes.len()));
+                if let Ok(sup_answer) = serde_json::from_slice::<SearchAnswer>(&sup_bytes) {
+                    for object in sup_answer.objects.into_iter().take(size) {
+                        let row = object.package;
+                        if official_package(&row.name).is_some() { continue; }
+                        if plugin_package_name(&row.name).is_err() { continue; }
+                        if text != DISCOVERY_QUERY && !query_matches(&row, text) { continue; }
+                        if !seen.insert(row.name.clone()) { continue; }
+                        filtered += 1;
+                        hits.push(Hit {
+                            publisher: row.publisher.map(|p| p.username).unwrap_or_default(),
+                            description: truncate(&row.description, 240),
+                            updated: truncate(&row.date, 40),
+                            name: row.name,
+                            version: row.version,
+                        });
+                    }
+                }
+            }
+        }
     }
     let total = answer.total.map(|n| n as usize).unwrap_or(0);
     let next_from = from.saturating_add(rows);
@@ -455,6 +543,7 @@ fn urlencode(value: &str) -> String {
 
 #[derive(Deserialize)]
 struct Meta {
+    #[serde(default)] name: String,
     #[serde(rename = "dist-tags")] dist_tags: BTreeMap<String, String>,
     versions: BTreeMap<String, Version>,
     // 精确包名兜底要用的展示字段（registry 的包文档根上有 description / maintainers / time）。
@@ -1109,5 +1198,58 @@ mod tests {
         assert!(full.has_more, "满页且无 total：按「可能还有」处理");
         let short = search_page_via(&sources, "fish-dock-plugin", &page(0, 2, true), &mut log, |_, _| Ok(paged_fixture(0, 1))).unwrap();
         assert!(!short.has_more, "不满一页：到底了");
+    }
+
+    // 新发布的社区插件（如 fish-dock-plugin-rayburst）：
+    // 1. 发现式浏览：npmjs 因拆词与 searchScore=0 将其淹没在 30 万无关包后（本页有 hidden 噪音），
+    //    兜底源 npmmirror 的前缀检索将其补齐进 hits；
+    // 2. 用户只输短名 `rayburst`：自动补前缀 `fish-dock-plugin-rayburst` 精确查元数据并置顶。
+    #[test]
+    fn newly_published_community_plugin_is_found_via_discovery_supplement_and_short_slug() {
+        let sources = NpmSources::new("https://registry.npmjs.org", "https://registry.npmmirror.com");
+        let npmjs_discovery = serde_json::json!({
+            "total": 308465,
+            "objects": [
+                { "package": { "name": "@fish-under-sea/fish-dock-plugin-magpie", "version": "2.4.8", "description": "official", "date": "2026-11-19" } },
+                { "package": { "name": "fish-dock-plugin-filemgr", "version": "1.2.1", "description": "file manager", "date": "2026-11-18" } },
+                { "package": { "name": "react-dock", "version": "1.0.0", "description": "unrelated noise", "date": "2026-01-01" } }
+            ]
+        }).to_string().into_bytes();
+        let mirror_discovery = serde_json::json!({
+            "total": 3,
+            "objects": [
+                { "package": { "name": "@fish-under-sea/fish-dock-plugin-magpie", "version": "2.4.8", "description": "official", "date": "2026-11-19" } },
+                { "package": { "name": "fish-dock-plugin-filemgr", "version": "1.2.1", "description": "file manager", "date": "2026-11-18" } },
+                { "package": { "name": "fish-dock-plugin-rayburst", "version": "1.0.2", "description": "Rayburst download manager plugin for FISH-Dock", "keywords": ["fish-dock", "rayburst", "aria2"], "date": "2026-11-19" } }
+            ]
+        }).to_string().into_bytes();
+        let mut log = Vec::new();
+        let discovery_report = search_page_via(&sources, "", &page(0, 20, true), &mut log, |url, _| {
+            if url.starts_with("https://registry.npmjs.org/") { Ok(npmjs_discovery.clone()) }
+            else { Ok(mirror_discovery.clone()) }
+        }).unwrap();
+        let names: Vec<&str> = discovery_report.hits.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, vec!["fish-dock-plugin-filemgr", "fish-dock-plugin-rayburst"]);
+        assert_eq!(discovery_report.filtered, 2);
+
+        // 短名 `rayburst` 精确元数据补前缀置顶
+        let rayburst_meta = serde_json::json!({
+            "name": "fish-dock-plugin-rayburst",
+            "dist-tags": { "latest": "1.0.2" },
+            "versions": {},
+            "description": "Rayburst download manager plugin for FISH-Dock",
+            "maintainers": [{ "name": "says693" }],
+            "time": { "modified": "2026-11-19T15:08:50.503Z" }
+        }).to_string().into_bytes();
+        let mut log2 = Vec::new();
+        let slug_report = search_via(&sources, "rayburst", &mut log2, |url, _| {
+            if url == "https://registry.npmjs.org/fish-dock-plugin-rayburst" { Ok(rayburst_meta.clone()) }
+            else if url.contains("/-/v1/search") { Ok(search_fixture(serde_json::json!([]))) }
+            else { Err("HTTP 404（不存在）".to_string()) }
+        }).unwrap();
+        assert_eq!(slug_report.hits.len(), 1);
+        assert_eq!(slug_report.hits[0].name, "fish-dock-plugin-rayburst");
+        assert_eq!(slug_report.hits[0].version, "1.0.2");
+        assert_eq!(slug_report.hidden, 0);
     }
 }
