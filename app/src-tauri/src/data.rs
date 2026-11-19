@@ -197,6 +197,10 @@ fn defaults() -> Map<String, Value> {
             "accent": "#0078d4",
             "wallpaper": "",
             "wallpaperDim": 58,
+            "wallpaperFit": "auto",
+            "wallpaperPosX": 50,
+            "wallpaperPosY": 50,
+            "wallpaperZoom": 100,
             "glass": {
                 "preset": "balanced",
                 "surfaceOp": 38,

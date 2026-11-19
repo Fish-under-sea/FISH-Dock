@@ -150,6 +150,8 @@ test('规格 16–24：外观页 显示方式 → 主题模式胶囊 → 任务�
   inOrder('她', look, ['menu.size', 's.details', 's.walk', 's.look'])
   const panel = slice('  function ilookPanel()', '  // A slider moved')
   inOrder('灵动岛外观独立卡片', panel, ['s.dockPaper', 's.glass', 's.dockAccent', 's.typo'])
+  assert.match(panel, /data-glass-card\$\{dl\.mode === 'glass' \? '' : ' hidden'\}/, '非玻璃模式下应隐藏液态玻璃卡片')
+  assert.match(panel, /data-dock-paper-preview/, '背景图片缩略图应提供预览与调位入口')
   const pets = slice('  function pagePets()', '  // --- Her island')
   inOrder('宠物与图库', pets, ['home.installed', 's.download', '${more}'])
 })
@@ -173,6 +175,7 @@ test('规格 30–36：插件页 身份 → 插件扩展页签 → 插件和小�
   // 32 插件扩展页签也在这块卡里：render() 之后紧跟小工具折叠卡（w.section），中间不再插备份面板。
   assert.match(widgets, /extensionPanel\.render\(\)\}<div class="w-studio/)
   assert.match(widgets, /T\('w\.section'\)/)
+  assert.match(widgets, /<div class="w-studio-more">/, '收起小工具卡片时，显示 / 在终端里用 / 自己写一个不应被一并收起')
 })
 
 test('规格 2/3/5：快捷开关四个的顺序、安静两条、网络代理手动 + 测试', () => {

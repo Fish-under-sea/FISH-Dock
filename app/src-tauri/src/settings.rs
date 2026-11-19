@@ -846,6 +846,9 @@ fn is_dock_look(v: &Value) -> bool {
         "accent" | "headingColor" | "textColor" | "mutedColor" => is_hex_or_empty(v),
         "wallpaper" => v.as_str().is_some_and(|s| s.is_empty() || (s.len() <= 128 && !s.contains(['/', '\\']) && !s.contains(".."))),
         "wallpaperDim" => v.as_u64().is_some_and(|n| n <= 100),
+        "wallpaperFit" => matches!(v.as_str(), Some("auto" | "custom")),
+        "wallpaperPosX" | "wallpaperPosY" => v.as_u64().is_some_and(|n| n <= 100),
+        "wallpaperZoom" => v.as_u64().is_some_and(|n| (100..=250).contains(&n)),
         "glass" => v.as_object().is_some_and(|g| {
             g.iter().all(|(gk, gv)| match gk.as_str() {
                 "preset" => matches!(gv.as_str(), Some("off" | "light" | "balanced" | "clear" | "custom")),
@@ -883,6 +886,10 @@ pub async fn settings_dock_wallpaper(app: AppHandle, action: String) -> Value {
             cur = json!({});
         }
         cur["wallpaper"] = json!("");
+        cur["wallpaperFit"] = json!("auto");
+        cur["wallpaperPosX"] = json!(50);
+        cur["wallpaperPosY"] = json!(50);
+        cur["wallpaperZoom"] = json!(100);
         sh.change(json!({ "dockLook": cur }));
         return snapshot(&sh);
     }
@@ -913,6 +920,10 @@ pub async fn settings_dock_wallpaper(app: AppHandle, action: String) -> Value {
                     cur = json!({});
                 }
                 cur["wallpaper"] = json!(filename);
+                cur["wallpaperFit"] = json!("auto");
+                cur["wallpaperPosX"] = json!(50);
+                cur["wallpaperPosY"] = json!(50);
+                cur["wallpaperZoom"] = json!(100);
                 sh.change(json!({ "dockLook": cur }));
             }
         }
@@ -1668,6 +1679,10 @@ mod layout_tests {
             "accent": "#5e9bff",
             "wallpaper": "dock-wallpaper.png",
             "wallpaperDim": 58,
+            "wallpaperFit": "custom",
+            "wallpaperPosX": 35,
+            "wallpaperPosY": 22,
+            "wallpaperZoom": 135,
             "glass": {
                 "preset": "balanced",
                 "surfaceOp": 38, "surfaceBlur": 18,
@@ -1686,6 +1701,11 @@ mod layout_tests {
             json!({ "mode": "neon" }),
             json!({ "wallpaper": "../secret.png" }),
             json!({ "wallpaperDim": 101 }),
+            json!({ "wallpaperFit": "stretch" }),
+            json!({ "wallpaperPosX": 101 }),
+            json!({ "wallpaperPosY": 120 }),
+            json!({ "wallpaperZoom": 99 }),
+            json!({ "wallpaperZoom": 251 }),
             json!({ "textColor": "red" }),
             json!({ "glass": { "surfaceBlur": 33 } }),
             json!({ "glass": { "cardOp": 105 } }),

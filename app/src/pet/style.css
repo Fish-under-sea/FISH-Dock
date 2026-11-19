@@ -5849,8 +5849,10 @@ body.dock-has-paper #island[data-view='expanded']::before {
   border-radius: inherit;
   background-image: var(--dock-wallpaper-url, none);
   background-size: cover;
-  background-position: center;
+  background-position: var(--dock-wallpaper-pos-x, 50%) var(--dock-wallpaper-pos-y, 50%);
   background-repeat: no-repeat;
+  transform: scale(var(--dock-wallpaper-scale, 1));
+  transform-origin: var(--dock-wallpaper-pos-x, 50%) var(--dock-wallpaper-pos-y, 50%);
   box-shadow: none;
   opacity: 1;
   z-index: 0;

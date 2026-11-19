@@ -793,6 +793,10 @@
     accent: '#0078d4',
     wallpaper: '',
     wallpaperDim: 58,
+    wallpaperFit: 'auto',
+    wallpaperPosX: 50,
+    wallpaperPosY: 50,
+    wallpaperZoom: 100,
     glass: {
       preset: 'balanced',
       surfaceOp: 38,
@@ -833,6 +837,297 @@
       <div class="cp-hex-wrap"><i class="cp-hex-dot"></i><input type="text" class="cp-hex-in mono" data-cp-hex maxlength="7" placeholder="#ffffff" spellcheck="false" autocomplete="off"></div>
     </div>`
   layer.appendChild(colorPop)
+
+  const wpMetaCache = new Map()
+  let wpWheelSaveTimer = 0
+  function resolveWallpaperFrame(dl, url) {
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))
+    if (dl.wallpaperFit === 'custom') {
+      return {
+        fit: 'custom',
+        x: clamp(dl.wallpaperPosX ?? 50, 0, 100),
+        y: clamp(dl.wallpaperPosY ?? 50, 0, 100),
+        zoom: clamp(dl.wallpaperZoom ?? 100, 100, 250),
+      }
+    }
+    const meta = url ? wpMetaCache.get(url) : null
+    if (meta && meta.w > 0 && meta.h > 0) {
+      const ratio = meta.h / meta.w
+      if (ratio > 1.08) {
+        const smartY = Math.round(Math.max(16, Math.min(30, 34 - (ratio - 1.08) * 22)))
+        return { fit: 'auto', x: 50, y: smartY, zoom: 100 }
+      }
+    }
+    return { fit: 'auto', x: 50, y: 50, zoom: 100 }
+  }
+  function probeWallpaperMeta(url) {
+    if (!url || wpMetaCache.has(url)) return
+    wpMetaCache.set(url, null)
+    const img = new Image()
+    img.onload = () => {
+      wpMetaCache.set(url, { w: img.naturalWidth || 0, h: img.naturalHeight || 0 })
+      applyDockThemeVars()
+      syncDockLookDOM()
+      if (!wpModal.hidden) syncWpModalUI()
+    }
+    img.onerror = () => {
+      wpMetaCache.delete(url)
+    }
+    img.src = url
+  }
+
+  const wpModal = document.createElement('div')
+  wpModal.className = 'wp-modal-backdrop'
+  wpModal.hidden = true
+  wpModal.innerHTML = `
+    <div class="wp-modal" role="dialog" aria-modal="true" aria-label="预览与调整背景位置">
+      <div class="wp-head">
+        <div class="wp-head-left">
+          <span class="wp-title" data-wp-title></span>
+          <span class="wp-mode-pill" data-wp-mode-pill></span>
+        </div>
+        <button type="button" class="cp-close" data-wp-close aria-label="关闭">✕</button>
+      </div>
+      <div class="wp-stage-wrap">
+        <div class="wp-stage" data-wp-stage>
+          <div class="wp-stage-img" data-wp-img></div>
+          <div class="wp-stage-dim" data-wp-dim></div>
+          <div class="wp-stage-grid" aria-hidden="true"><i></i><i></i><b></b><b></b></div>
+          <div class="wp-stage-mock" aria-hidden="true">
+            <span class="wp-mock-head"></span>
+            <span class="wp-mock-card"></span>
+            <span class="wp-mock-card sm"></span>
+          </div>
+          <span class="wp-stage-tip" data-wp-tip></span>
+        </div>
+      </div>
+      <div class="wp-presets">
+        <button type="button" class="wp-chip" data-wp-preset="auto"></button>
+        <button type="button" class="wp-chip" data-wp-preset="top"></button>
+        <button type="button" class="wp-chip" data-wp-preset="center"></button>
+        <button type="button" class="wp-chip" data-wp-preset="bottom"></button>
+        <button type="button" class="wp-chip" data-wp-preset="left"></button>
+        <button type="button" class="wp-chip" data-wp-preset="right"></button>
+      </div>
+      <div class="wp-sliders">
+        <div class="ilook-slider-row"><span class="ilook-slider-lbl" data-wp-lbl="x"></span><span class="ilook-rng"><input type="range" class="rng" data-wp-range="x" min="0" max="100" step="1" value="50"><span class="rv" data-wp-val="x">50%</span></span></div>
+        <div class="ilook-slider-row"><span class="ilook-slider-lbl" data-wp-lbl="y"></span><span class="ilook-rng"><input type="range" class="rng" data-wp-range="y" min="0" max="100" step="1" value="50"><span class="rv" data-wp-val="y">50%</span></span></div>
+        <div class="ilook-slider-row"><span class="ilook-slider-lbl" data-wp-lbl="zoom"></span><span class="ilook-rng"><input type="range" class="rng" data-wp-range="zoom" min="100" max="250" step="1" value="100"><span class="rv" data-wp-val="zoom">100%</span></span></div>
+      </div>
+      <div class="wp-foot">
+        <div class="wp-foot-left">
+          <button type="button" class="pbtn sm" data-dock-paper="pick" data-wp-pick></button>
+          <button type="button" class="pbtn sm" data-wp-preset="auto" data-wp-reset></button>
+        </div>
+        <button type="button" class="pbtn sm al" data-wp-close data-wp-done></button>
+      </div>
+    </div>`
+  layer.appendChild(wpModal)
+
+  function closeWpModal() {
+    if (wpModal.hidden) return
+    clearTimeout(wpWheelSaveTimer)
+    wpModal.hidden = true
+  }
+  function syncWpModalUI(dragging = false) {
+    if (!snap?.dockPaperUrl) {
+      closeWpModal()
+      return
+    }
+    const dl = dockLookOf()
+    const frame = resolveWallpaperFrame(dl, snap.dockPaperUrl)
+    const stage = wpModal.querySelector('[data-wp-stage]')
+    const imgEl = wpModal.querySelector('[data-wp-img]')
+    const dimEl = wpModal.querySelector('[data-wp-dim]')
+    const pill = wpModal.querySelector('[data-wp-mode-pill]')
+    const tip = wpModal.querySelector('[data-wp-tip]')
+    if (imgEl) {
+      imgEl.style.backgroundImage = `url("${snap.dockPaperUrl}")`
+      imgEl.style.backgroundPosition = `${frame.x}% ${frame.y}%`
+      imgEl.style.transform = `scale(${(frame.zoom / 100).toFixed(3)})`
+      imgEl.style.transformOrigin = `${frame.x}% ${frame.y}%`
+    }
+    if (dimEl) {
+      const alpha = ((dl.wallpaperDim ?? 58) / 100) * 0.72
+      dimEl.style.background = dl.mode === 'light'
+        ? `rgba(245, 245, 247, ${alpha.toFixed(3)})`
+        : `rgba(14, 16, 22, ${alpha.toFixed(3)})`
+    }
+    if (pill) {
+      pill.textContent = frame.fit === 'auto'
+        ? T('s.dockPaperAuto')
+        : `${T('s.dockPaperCustom')} · ${frame.zoom}%`
+      pill.classList.toggle('is-auto', frame.fit === 'auto')
+    }
+    if (tip) {
+      tip.textContent = dragging
+        ? `X ${frame.x}% · Y ${frame.y}% · ${frame.zoom}%`
+        : T('s.dockPaperDragTip')
+    }
+    const presets = {
+      auto: frame.fit === 'auto',
+      top: frame.fit === 'custom' && frame.y <= 22 && Math.abs(frame.x - 50) <= 15,
+      center: frame.fit === 'custom' && Math.abs(frame.x - 50) <= 6 && Math.abs(frame.y - 50) <= 6,
+      bottom: frame.fit === 'custom' && frame.y >= 78 && Math.abs(frame.x - 50) <= 15,
+      left: frame.fit === 'custom' && frame.x <= 22,
+      right: frame.fit === 'custom' && frame.x >= 78,
+    }
+    wpModal.querySelectorAll('.wp-chip[data-wp-preset]').forEach(btn => {
+      btn.classList.toggle('on', !!presets[btn.dataset.wpPreset])
+    })
+    const resetBtn = wpModal.querySelector('[data-wp-reset]')
+    if (resetBtn) resetBtn.disabled = frame.fit === 'auto'
+    const map = { x: [frame.x, '%'], y: [frame.y, '%'], zoom: [frame.zoom, '%'] }
+    for (const [k, [val, unit]] of Object.entries(map)) {
+      const inp = wpModal.querySelector(`[data-wp-range="${k}"]`)
+      if (inp && Number(inp.value) !== val) inp.value = String(val)
+      const rv = wpModal.querySelector(`[data-wp-val="${k}"]`)
+      if (rv) rv.textContent = `${val}${unit}`
+    }
+    if (stage) stage.classList.toggle('is-dragging', dragging)
+  }
+  function openWpModal() {
+    if (!snap?.dockPaperUrl) return
+    closeColorPop()
+    probeWallpaperMeta(snap.dockPaperUrl)
+    const set = (sel, text) => {
+      const el = wpModal.querySelector(sel)
+      if (el) el.textContent = text
+    }
+    set('[data-wp-title]', T('s.dockPaperAdjust'))
+    set('.wp-chip[data-wp-preset="auto"]', T('s.dockPaperAuto'))
+    set('.wp-chip[data-wp-preset="top"]', T('s.dockPaperPresetTop'))
+    set('.wp-chip[data-wp-preset="center"]', T('s.dockPaperPresetCenter'))
+    set('.wp-chip[data-wp-preset="bottom"]', T('s.dockPaperPresetBottom'))
+    set('.wp-chip[data-wp-preset="left"]', T('s.dockPaperPresetLeft'))
+    set('.wp-chip[data-wp-preset="right"]', T('s.dockPaperPresetRight'))
+    set('[data-wp-lbl="x"]', T('s.dockPaperPosX'))
+    set('[data-wp-lbl="y"]', T('s.dockPaperPosY'))
+    set('[data-wp-lbl="zoom"]', T('s.dockPaperZoom'))
+    set('[data-wp-pick]', T('s.dockPaperChange'))
+    set('[data-wp-reset]', T('s.dockPaperResetAuto'))
+    set('[data-wp-done]', T('s.dockPaperDone'))
+    const dlg = wpModal.querySelector('.wp-modal')
+    if (dlg) dlg.setAttribute('aria-label', T('s.dockPaperAdjust'))
+    const stage = wpModal.querySelector('[data-wp-stage]')
+    if (stage) {
+      const isl = document.getElementById('island')
+      const iw = isl?.clientWidth || 560
+      const ih = isl?.clientHeight || 620
+      const ratio = Math.max(0.68, Math.min(1.5, iw / Math.max(1, ih)))
+      const maxW = Math.max(220, Math.min(340, (layer.clientWidth || 520) - 96))
+      let h = 196
+      let w = Math.round(h * ratio)
+      if (w > maxW) {
+        w = maxW
+        h = Math.max(148, Math.round(w / ratio))
+      }
+      stage.style.width = `${w}px`
+      stage.style.height = `${h}px`
+    }
+    wpModal.hidden = false
+    syncWpModalUI(false)
+  }
+  function wpStageBind() {
+    const stage = wpModal.querySelector('[data-wp-stage]')
+    if (!stage) return
+    let drag = null
+    stage.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || !snap?.dockPaperUrl) return
+      e.preventDefault()
+      const dl = dockLookOf()
+      const frame = resolveWallpaperFrame(dl, snap.dockPaperUrl)
+      const rect = stage.getBoundingClientRect()
+      const meta = wpMetaCache.get(snap.dockPaperUrl)
+      const scale = frame.zoom / 100
+      let panX = 0, panY = 0
+      if (meta && meta.w > 0 && meta.h > 0) {
+        const cover = Math.max(rect.width / meta.w, rect.height / meta.h)
+        panX = Math.max(0, meta.w * cover * scale - rect.width)
+        panY = Math.max(0, meta.h * cover * scale - rect.height)
+      } else {
+        panX = rect.width * 0.65 * scale
+        panY = rect.height * 0.65 * scale
+      }
+      drag = {
+        id: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        baseX: frame.x,
+        baseY: frame.y,
+        zoom: frame.zoom,
+        panX,
+        panY,
+        x: frame.x,
+        y: frame.y,
+        moved: false,
+      }
+      try { stage.setPointerCapture(e.pointerId) } catch {}
+      syncWpModalUI(true)
+    })
+    stage.addEventListener('pointermove', e => {
+      if (!drag || drag.id !== e.pointerId) return
+      e.preventDefault()
+      const dx = e.clientX - drag.startX
+      const dy = e.clientY - drag.startY
+      if (!drag.moved && Math.hypot(dx, dy) > 2) drag.moved = true
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)))
+      const nx = drag.panX > 2 ? clamp(drag.baseX - (dx / drag.panX) * 100, 0, 100) : drag.baseX
+      const ny = drag.panY > 2 ? clamp(drag.baseY - (dy / drag.panY) * 100, 0, 100) : drag.baseY
+      drag.x = nx
+      drag.y = ny
+      const cur = dockLookOf()
+      dockLookSave({ ...cur, wallpaperFit: 'custom', wallpaperPosX: nx, wallpaperPosY: ny, wallpaperZoom: drag.zoom }, false)
+      syncWpModalUI(true)
+    })
+    const endDrag = e => {
+      if (!drag || drag.id !== e.pointerId) return
+      const done = drag
+      drag = null
+      try { if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId) } catch {}
+      if (done.moved) {
+        const cur = dockLookOf()
+        dockLookSave({ ...cur, wallpaperFit: 'custom', wallpaperPosX: done.x, wallpaperPosY: done.y, wallpaperZoom: done.zoom }, true)
+      }
+      syncWpModalUI(false)
+    }
+    stage.addEventListener('pointerup', endDrag)
+    stage.addEventListener('pointercancel', endDrag)
+    stage.addEventListener('wheel', e => {
+      if (!snap?.dockPaperUrl) return
+      e.preventDefault()
+      e.stopPropagation()
+      const cur = dockLookOf()
+      const frame = resolveWallpaperFrame(cur, snap.dockPaperUrl)
+      const step = e.deltaY < 0 ? 8 : -8
+      const nextZoom = Math.max(100, Math.min(250, frame.zoom + step))
+      if (nextZoom === frame.zoom) return
+      const next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: frame.x, wallpaperPosY: frame.y, wallpaperZoom: nextZoom }
+      dockLookSave(next, false)
+      syncWpModalUI(false)
+      clearTimeout(wpWheelSaveTimer)
+      wpWheelSaveTimer = setTimeout(() => {
+        dockLookSave(next, true)
+      }, 180)
+    }, { passive: false })
+  }
+  wpStageBind()
+  function wpRangeInput(target, keep) {
+    if (!snap?.dockPaperUrl) return
+    const cur = dockLookOf()
+    const frame = resolveWallpaperFrame(cur, snap.dockPaperUrl)
+    const key = target.dataset.wpRange
+    const raw = Number(target.value)
+    const next = {
+      ...cur,
+      wallpaperFit: 'custom',
+      wallpaperPosX: key === 'x' ? Math.max(0, Math.min(100, Math.round(raw))) : frame.x,
+      wallpaperPosY: key === 'y' ? Math.max(0, Math.min(100, Math.round(raw))) : frame.y,
+      wallpaperZoom: key === 'zoom' ? Math.max(100, Math.min(250, Math.round(raw))) : frame.zoom,
+    }
+    dockLookSave(next, keep)
+    syncWpModalUI(false)
+  }
 
   function hexToRgb(hex) {
     const h = String(hex || '').replace(/^#/, '')
@@ -1038,13 +1333,21 @@
       ? (/^#[0-9a-f]{6}$/i.test(dl.accent || '') ? dl.accent.toLowerCase() : (light ? '#005fb8' : '#5e9bff'))
       : (/^#[0-9a-f]{6}$/i.test(sysAccent) ? sysAccent : (light ? '#005fb8' : '#5e9bff'))
     const g = dl.glass || DOCK_LOOK_DEFAULT.glass
+    const wp = resolveWallpaperFrame(dl, snap.dockPaperUrl || '')
     return {
       mode,
       baseMode: light ? 'light' : 'dark',
       accent,
       glassTinted,
       glass: { enabled: mode === 'glass', ...g },
-      wallpaper: { url: snap.dockPaperUrl || '', dim: dl.wallpaperDim ?? 58 },
+      wallpaper: {
+        url: snap.dockPaperUrl || '',
+        dim: dl.wallpaperDim ?? 58,
+        fit: wp.fit,
+        posX: wp.x,
+        posY: wp.y,
+        zoom: wp.zoom,
+      },
       typography: {
         headingColor: dl.headingColor || '',
         textColor: dl.textColor || '',
@@ -1128,6 +1431,30 @@
         clearBtn.classList.toggle('is-ghost', !val)
       }
     }
+    const glassCard = body.querySelector('[data-glass-card]')
+    if (glassCard) {
+      const shouldHide = dl.mode !== 'glass'
+      if (glassCard.hidden !== shouldHide) {
+        glassCard.hidden = shouldHide
+        if (shouldHide && cpState?.key === 'accent') closeColorPop()
+        relayout()
+      }
+    }
+    const wp = resolveWallpaperFrame(dl, snap.dockPaperUrl || '')
+    const thumbImg = body.querySelector('.dock-paper-thumb')
+    if (thumbImg) {
+      thumbImg.style.objectPosition = `${wp.x}% ${wp.y}%`
+      thumbImg.style.transform = `scale(${(wp.zoom / 100).toFixed(3)})`
+      thumbImg.style.transformOrigin = `${wp.x}% ${wp.y}%`
+    }
+    const fitBadge = body.querySelector('[data-dock-paper-badge]')
+    if (fitBadge) {
+      fitBadge.textContent = wp.fit === 'auto'
+        ? T('s.dockPaperAuto')
+        : `${T('s.dockPaperCustom')}${wp.zoom > 100 ? ` · ${wp.zoom}%` : ''}`
+      fitBadge.classList.toggle('is-auto', wp.fit === 'auto')
+    }
+    if (!wpModal.hidden) syncWpModalUI(false)
     const summaryEl = body.querySelector('[data-ilook-summary]')
     if (summaryEl) {
       const modeLabel = T(`s.dockTheme.${dl.mode}`)
@@ -1248,9 +1575,16 @@
     root.setProperty('--dock-glass-control-op', String((g.controlOp ?? 28) / 100))
     root.setProperty('--dock-glass-control-blur', `${g.controlBlur ?? 8}px`)
     document.body.classList.toggle('dock-has-paper', !!info.wallpaper.url)
-    if (info.wallpaper.url) root.setProperty('--dock-wallpaper-url', `url("${info.wallpaper.url}")`)
-    else root.removeProperty('--dock-wallpaper-url')
+    if (info.wallpaper.url) {
+      root.setProperty('--dock-wallpaper-url', `url("${info.wallpaper.url}")`)
+      probeWallpaperMeta(info.wallpaper.url)
+    } else {
+      root.removeProperty('--dock-wallpaper-url')
+    }
     root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
+    root.setProperty('--dock-wallpaper-pos-x', `${info.wallpaper.posX ?? 50}%`)
+    root.setProperty('--dock-wallpaper-pos-y', `${info.wallpaper.posY ?? 50}%`)
+    root.setProperty('--dock-wallpaper-scale', ((info.wallpaper.zoom ?? 100) / 100).toFixed(3))
   }
 
   function themeHeroCard() {
@@ -1306,9 +1640,16 @@
       : String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
     const accentLabel = accentCleared ? (lang === 'zh' ? '默认' : 'Default') : curAccent
     const accentPaletteOpen = !colorPop.hidden && cpState?.key === 'accent'
+    const wp = resolveWallpaperFrame(dl, snap.dockPaperUrl || '')
+    const wpBadgeText = wp.fit === 'auto'
+      ? T('s.dockPaperAuto')
+      : `${T('s.dockPaperCustom')}${wp.zoom > 100 ? ` · ${wp.zoom}%` : ''}`
     const paperPreview = snap.dockPaperUrl
-      ? `<div class="dock-paper-row"><img class="dock-paper-thumb" src="${esc(snap.dockPaperUrl)}" alt=""><button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperChange'))}</button><button type="button" class="pbtn sm" data-dock-paper="remove">${esc(T('s.dockPaperRemove'))}</button></div>`
+      ? `<div class="dock-paper-row"><button type="button" class="dock-paper-thumb-btn" data-dock-paper-preview title="${esc(T('s.dockPaperPreviewHint'))}" aria-label="${esc(T('s.dockPaperPreviewHint'))}"><img class="dock-paper-thumb" src="${esc(snap.dockPaperUrl)}" style="object-position:${wp.x}% ${wp.y}%;transform:scale(${(wp.zoom / 100).toFixed(3)});transform-origin:${wp.x}% ${wp.y}%" alt=""><span class="dock-paper-thumb-ov" aria-hidden="true">⤢</span></button><button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperChange'))}</button><button type="button" class="pbtn sm" data-dock-paper="remove">${esc(T('s.dockPaperRemove'))}</button></div>`
       : `<button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperPick'))}</button>`
+    const paperFitChip = snap.dockPaperUrl
+      ? `<button type="button" class="dock-paper-fit-pill${wp.fit === 'auto' ? ' is-auto' : ''}" data-dock-paper-preview data-dock-paper-badge title="${esc(T('s.dockPaperPreviewHint'))}">${esc(wpBadgeText)}</button>`
+      : ''
     const glassPresets = ['off', 'light', 'balanced', 'clear', 'custom']
       .map(p => `<button type="button" class="${g.preset === p ? 'on' : ''}" data-glass-preset="${p}">${esc(T(`s.glass.${p}`))}</button>`)
       .join('')
@@ -1335,13 +1676,13 @@
     return `<div class="ilook-cards-stack">
         <div class="ilook-sec-card">
           <div class="ilook-paper-top">
-            <div class="ilook-paper-meta"><span class="ilook-box-title">${esc(T('s.dockPaper'))}</span><span class="ilook-box-note">${esc(T('s.dockPaperNote'))}</span></div>
+            <div class="ilook-paper-meta"><div class="ilook-paper-title-row"><span class="ilook-box-title">${esc(T('s.dockPaper'))}</span>${paperFitChip}</div><span class="ilook-box-note">${esc(T('s.dockPaperNote'))}</span></div>
             <div class="ilook-paper-bar">${paperPreview}</div>
           </div>
           <div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.dockPaperDim'))}</span>${dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58)}</div>
           <div class="ilook-hint">${esc(T('s.dockPaperDimNote'))}</div>
         </div>
-        <div class="ilook-sec-card">
+        <div class="ilook-sec-card" data-glass-card${dl.mode === 'glass' ? '' : ' hidden'}>
           <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.glass'))}</span><span class="ilook-box-note">${esc(T('s.glassNote'))}</span></div>
           <div class="seg dock-glass-seg">${glassPresets}</div>
           <div class="glass-accent-zone" data-typo-item="accent">
@@ -2307,7 +2648,7 @@
         </button>
         <div class="w-studio-body"${foldAttr}><div class="w-card-list">${rows}</div></div>
       </div>
-      <div class="w-studio-more"${foldAttr}>
+      <div class="w-studio-more">
         ${sec(T('w.show'))}<div class="grp">
           ${row(esc(T('w.spin')), '', seg('widgetSpin', spins, s.widgetSpin ?? 8))}
           ${row(esc(T('w.nudge')), esc(T('w.nudgeNote')), sw('widgetNudge', s.widgetNudge !== false))}
@@ -4623,6 +4964,7 @@
     // hidden again (#17).
     eyeShown.clear()
     if (typeof closeColorPop === 'function') closeColorPop()
+    if (typeof closeWpModal === 'function') closeWpModal()
     window.pet.settingsClosed()
     window.Island?.changed()
   }
@@ -4630,6 +4972,7 @@
   function setTab(next) {
     if (next === tab || !TABS.includes(next)) return
     if (typeof closeColorPop === 'function') closeColorPop()
+    if (typeof closeWpModal === 'function') closeWpModal()
     tab = next
     draw(true)
     if (tab === 'look') { loadGallery(false) }
@@ -4745,6 +5088,34 @@
       }
     }
     if (at('.extension-more-body')) return
+    if (e.target === wpModal || at('[data-wp-close]')) return closeWpModal()
+    const wpPreset = at('[data-wp-preset]')
+    if (wpPreset && snap?.dockPaperUrl) {
+      const p = wpPreset.dataset.wpPreset
+      const cur = dockLookOf()
+      const frame = resolveWallpaperFrame(cur, snap.dockPaperUrl)
+      let next
+      if (p === 'auto') {
+        next = { ...cur, wallpaperFit: 'auto', wallpaperPosX: 50, wallpaperPosY: 50, wallpaperZoom: 100 }
+      } else if (p === 'top') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: frame.x, wallpaperPosY: 16, wallpaperZoom: frame.zoom }
+      } else if (p === 'center') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: 50, wallpaperPosY: 50, wallpaperZoom: frame.zoom }
+      } else if (p === 'bottom') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: frame.x, wallpaperPosY: 84, wallpaperZoom: frame.zoom }
+      } else if (p === 'left') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: 15, wallpaperPosY: frame.y, wallpaperZoom: frame.zoom }
+      } else if (p === 'right') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: 85, wallpaperPosY: frame.y, wallpaperZoom: frame.zoom }
+      }
+      if (next) {
+        dockLookSave(next, true)
+        syncWpModalUI(false)
+      }
+      return
+    }
+    if (at('.wp-modal') && !at('[data-dock-paper]')) return
+    if (at('[data-dock-paper-preview]')) return openWpModal()
     if (at('[data-cp-close]')) return closeColorPop()
     if (at('[data-cp-clear]') && cpState) {
       const k = cpState.key
@@ -4985,6 +5356,11 @@
         snap = got
         applyDockThemeVars()
         extensionPage.refreshTheme?.()
+        if (action === 'remove' || !snap?.dockPaperUrl) closeWpModal()
+        else if (!wpModal.hidden) {
+          probeWallpaperMeta(snap.dockPaperUrl)
+          syncWpModalUI(false)
+        }
       }).finally(() => {
         pickingPaper = false
         body._html = ''
@@ -5671,6 +6047,7 @@
     }
     if (e.target.dataset.ilook) ilookInput(e.target, false)
     if (e.target.dataset.dockLook) dockLookInput(e.target, false)
+    if (e.target.dataset.wpRange) wpRangeInput(e.target, false)
     if (e.target.dataset.cpRgb) cpRgbInput(false)
     if (e.target.dataset.cpHex !== undefined) cpHexInput(e.target, false)
     if (e.target.id === 's-ref') {
@@ -5700,6 +6077,7 @@
     if (e.target.matches('[data-w-file]')) return addFiles(e.target)
     if (e.target.dataset.ilook) return ilookInput(e.target, true)
     if (e.target.dataset.dockLook) return dockLookInput(e.target, true)
+    if (e.target.dataset.wpRange) return wpRangeInput(e.target, true)
     if (e.target.dataset.cpRgb) return cpRgbInput(true)
     if (e.target.dataset.cpHex !== undefined) return cpHexInput(e.target, true)
     if (e.target.dataset.proxyAt !== undefined) return proxyAddress(e.target.dataset.proxyAt, e.target.value)
@@ -5815,6 +6193,7 @@
     }
     if (e.key === 'Escape') {
       e.preventDefault()
+      if (typeof wpModal !== 'undefined' && !wpModal.hidden) return closeWpModal()
       if (!menuEl.hidden) return closeMenu()
       if (typeof colorPop !== 'undefined' && !colorPop.hidden) return closeColorPop()
       return close('Esc')

@@ -4133,6 +4133,41 @@
     return { dl, mode, g }
   }
 
+  const dockPaperMetaCache = new Map()
+  function resolveDockPaperFrame(dl, url) {
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))
+    if (dl.wallpaperFit === 'custom') {
+      return {
+        fit: 'custom',
+        x: clamp(dl.wallpaperPosX ?? 50, 0, 100),
+        y: clamp(dl.wallpaperPosY ?? 50, 0, 100),
+        zoom: clamp(dl.wallpaperZoom ?? 100, 100, 250),
+      }
+    }
+    const meta = url ? dockPaperMetaCache.get(url) : null
+    if (meta && meta.w > 0 && meta.h > 0) {
+      const ratio = meta.h / meta.w
+      if (ratio > 1.08) {
+        const smartY = Math.round(Math.max(16, Math.min(30, 34 - (ratio - 1.08) * 22)))
+        return { fit: 'auto', x: 50, y: smartY, zoom: 100 }
+      }
+    }
+    return { fit: 'auto', x: 50, y: 50, zoom: 100 }
+  }
+  function probeDockPaperMeta(url) {
+    if (!url || dockPaperMetaCache.has(url)) return
+    dockPaperMetaCache.set(url, null)
+    const img = new Image()
+    img.onload = () => {
+      dockPaperMetaCache.set(url, { w: img.naturalWidth || 0, h: img.naturalHeight || 0 })
+      applyDockLook()
+    }
+    img.onerror = () => {
+      dockPaperMetaCache.delete(url)
+    }
+    img.src = url
+  }
+
   function applyDockLook() {
     const { dl, mode, g } = dockLookInfo()
     const light = mode === 'light'
@@ -4192,9 +4227,17 @@
     root.setProperty('--dock-glass-control-blur', `${g.controlBlur ?? 8}px`)
     const paperUrl = now.dockPaperUrl || ''
     body.classList.toggle('dock-has-paper', !!paperUrl)
-    if (paperUrl) root.setProperty('--dock-wallpaper-url', `url("${paperUrl}")`)
-    else root.removeProperty('--dock-wallpaper-url')
+    if (paperUrl) {
+      root.setProperty('--dock-wallpaper-url', `url("${paperUrl}")`)
+      probeDockPaperMeta(paperUrl)
+    } else {
+      root.removeProperty('--dock-wallpaper-url')
+    }
+    const wp = resolveDockPaperFrame(dl, paperUrl)
     root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
+    root.setProperty('--dock-wallpaper-pos-x', `${wp.x}%`)
+    root.setProperty('--dock-wallpaper-pos-y', `${wp.y}%`)
+    root.setProperty('--dock-wallpaper-scale', (wp.zoom / 100).toFixed(3))
   }
 
   function setInk() {

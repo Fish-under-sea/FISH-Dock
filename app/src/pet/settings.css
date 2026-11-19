@@ -3314,6 +3314,10 @@
   background: rgba(0, 0, 0, 0.025);
 }
 
+#island-settings .ilook-sec-card[hidden] {
+  display: none;
+}
+
 #island-settings .ilook-sec-card .r {
   min-height: 30px;
   padding: 2px 0;
@@ -3468,6 +3472,37 @@
   min-width: 0;
 }
 
+#island-settings .ilook-paper-title-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#island-settings .dock-paper-fit-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .dock-paper-fit-pill:hover {
+  border-color: var(--dock-accent, #5e9bff);
+}
+
+#island-settings .dock-paper-fit-pill:active {
+  transform: scale(0.95);
+}
+
 #island-settings .ilook-paper-bar {
   display: flex;
   align-items: center;
@@ -3480,12 +3515,65 @@
   gap: 8px;
 }
 
+#island-settings .dock-paper-thumb-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 62px;
+  height: 36px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--g2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.2s ease, transform 0.22s var(--spring);
+}
+
+.tb-light #island-settings .dock-paper-thumb-btn {
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+#island-settings .dock-paper-thumb-btn:hover {
+  border-color: var(--dock-accent, #5e9bff);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dock-accent, #5e9bff) 32%, transparent);
+  transform: translateY(-1px);
+}
+
+#island-settings .dock-paper-thumb-btn:active {
+  transform: scale(0.96);
+}
+
 #island-settings .dock-paper-thumb {
-  width: 58px;
-  height: 34px;
-  border-radius: 8px;
+  width: 100%;
+  height: 100%;
+  display: block;
   object-fit: cover;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  pointer-events: none;
+}
+
+#island-settings .dock-paper-thumb-ov {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: rgba(14, 16, 22, 0.76);
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.78;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .dock-paper-thumb-btn:hover .dock-paper-thumb-ov {
+  opacity: 1;
+  transform: scale(1.08);
 }
 
 /* 浅色 / 深色 / 玻璃全宽纤细三态 3D 光学拟物场景胶囊开关（34px 黄金比例，与上方显示方式视觉均衡） */
@@ -4731,6 +4819,297 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- 背景图片预览与位置调整浮窗（默认自动自适应 + 用户 DIY 拖动/缩放） ---- */
+#island-settings .wp-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(10, 12, 18, 0.54);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: wp-fade-in 0.18s ease both;
+}
+
+#island-settings .wp-modal-backdrop[hidden] {
+  display: none;
+}
+
+@keyframes wp-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+#island-settings .wp-modal {
+  width: min(410px, 100%);
+  max-height: calc(100% - 8px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(24, 27, 38, 0.94);
+  backdrop-filter: blur(24px) saturate(1.48);
+  -webkit-backdrop-filter: blur(24px) saturate(1.48);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 22px 48px rgba(0, 0, 0, 0.52);
+  animation: cp-pop-in 0.22s var(--spring) both;
+}
+
+.tb-light #island-settings .wp-modal {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(252, 252, 255, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 18px 42px rgba(0, 0, 0, 0.18);
+}
+
+#island-settings .wp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#island-settings .wp-head-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+#island-settings .wp-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+}
+
+#island-settings .wp-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .wp-stage-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.tb-light #island-settings .wp-stage-wrap {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+#island-settings .wp-stage {
+  position: relative;
+  width: 196px;
+  height: 196px;
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  background: #14161e;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.24),
+    0 10px 26px rgba(0, 0, 0, 0.38);
+}
+
+#island-settings .wp-stage.is-dragging {
+  cursor: grabbing;
+  box-shadow:
+    0 0 0 2px var(--dock-accent, #5e9bff),
+    0 12px 30px rgba(0, 0, 0, 0.46);
+}
+
+#island-settings .wp-stage-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: 50% 50%;
+  pointer-events: none;
+}
+
+#island-settings .wp-stage-dim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+#island-settings .wp-stage.is-dragging .wp-stage-dim {
+  opacity: 0.35;
+}
+
+/* 三分法辅助网格（拖动构图时淡入） */
+#island-settings .wp-stage-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+#island-settings .wp-stage.is-dragging .wp-stage-grid {
+  opacity: 1;
+}
+
+#island-settings .wp-stage-grid > i,
+#island-settings .wp-stage-grid > b {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+#island-settings .wp-stage-grid > i {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+#island-settings .wp-stage-grid > i:nth-child(1) { left: 33.33%; }
+#island-settings .wp-stage-grid > i:nth-child(2) { left: 66.66%; }
+
+#island-settings .wp-stage-grid > b {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+#island-settings .wp-stage-grid > b:nth-child(3) { top: 33.33%; }
+#island-settings .wp-stage-grid > b:nth-child(4) { top: 66.66%; }
+
+/* 极淡 Dock 面板参考轮廓，直观感知文字与卡片落位 */
+#island-settings .wp-stage-mock {
+  position: absolute;
+  inset: 10px 10px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+  opacity: 0.56;
+  transition: opacity 0.18s ease;
+}
+
+#island-settings .wp-stage.is-dragging .wp-stage-mock {
+  opacity: 0.18;
+}
+
+#island-settings .wp-mock-head {
+  height: 14px;
+  width: 64%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+#island-settings .wp-mock-card {
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+#island-settings .wp-mock-card.sm {
+  height: 24px;
+  width: 78%;
+}
+
+#island-settings .wp-stage-tip {
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  transform: translateX(-50%);
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(14, 16, 22, 0.78);
+  color: #ffffff;
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .wp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+#island-settings .wp-chip {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .wp-chip:hover {
+  border-color: var(--g4);
+}
+
+#island-settings .wp-chip:active {
+  transform: scale(0.95);
+}
+
+#island-settings .wp-chip.on {
+  border-color: #005fb8;
+  background: #005fb8;
+  color: #ffffff;
+}
+
+#island-settings .wp-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#island-settings .wp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tb-light #island-settings .wp-foot {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+#island-settings .wp-foot-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ---- 插件页：「小工具」可折叠卡片（视觉与结构严格对齐「运行依赖」折叠卡） ---- */
 #island-settings .w-studio {
   display: flex;
@@ -4806,8 +5185,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-#island-settings .w-studio-body[hidden],
-#island-settings .w-studio-more[hidden] {
+#island-settings .w-studio-body[hidden] {
   display: none;
 }
 
@@ -4968,6 +5346,7 @@ body.dock-glass #island-settings .ag-way {
 body.dock-glass #island-settings .s-confirm-dialog,
 body.dock-glass #island-settings .mmenu,
 body.dock-glass #island-settings .cp-popover,
+body.dock-glass #island-settings .wp-modal,
 body.dock-glass #island-settings .ext-progress {
   background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-overlay, 12%), rgba(24, 26, 36, var(--dock-glass-overlay-op, 0.45)));
   backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.42);
