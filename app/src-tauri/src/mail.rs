@@ -47,6 +47,7 @@ use crate::{i18n, now_ms, settings, shared, Shared};
 
 pub mod agent;
 mod backoff;
+pub mod codes;
 mod discover;
 mod imap;
 pub mod letters;

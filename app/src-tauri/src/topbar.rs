@@ -283,4 +283,11 @@ pub fn topbar_ready(app: tauri::AppHandle) {
     push_state(&sh);
 }
 
+// 顶栏右侧入口：打开设置抽屉。
+#[tauri::command]
+pub fn topbar_settings(app: tauri::AppHandle) {
+    let sh = crate::shared(&app);
+    crate::island::open_settings(&sh, None);
+}
+
 

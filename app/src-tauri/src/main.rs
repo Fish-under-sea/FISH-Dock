@@ -41,6 +41,7 @@
 #![recursion_limit = "256"]
 
 mod agent_hub;
+mod app_asks;
 mod appbar;
 // DEC-7：外部程序审批 POST /ask（仅 loopback、默认关闭、每请求确认、超时拒绝、审计）。
 mod askapi;
@@ -559,12 +560,25 @@ impl Shared {
         desk::push_widgets(self);
     }
 
+    // What the prompt panel shows: the agents' prompts, external program
+    // approvals (app_asks.rs), then codes and links come by mail (mail/codes.rs).
+    pub fn asks_views(&self) -> Value {
+        let mut views = self.asks.lock().unwrap().views();
+        if let Value::Array(list) = &mut views {
+            list.extend(app_asks::views());
+            list.extend(mail::codes::views());
+        }
+        views
+    }
+
     // The prompts waiting changed.
     pub fn push_asks(&self) {
-        let (views, none, handed) = {
+        let (none, handed) = {
             let mut asks = self.asks.lock().unwrap();
-            (asks.views(), asks.is_empty(), asks.take_handed())
+            (asks.is_empty(), asks.take_handed())
         };
+        let none = none && app_asks::is_empty() && mail::codes::is_empty();
+        let views = self.asks_views();
         // DeepSeek Harness's handed back to its own window: its session's
         // line says to answer there (asks.rs handed_back).
         for message in &handed {
@@ -861,6 +875,13 @@ impl Shared {
             let n = self.asks.lock().unwrap().dismiss_all();
             if n > 0 {
                 self.log(&format!("{n} prompt(s) handed to the terminal: out of sight"));
+            }
+            let apps = app_asks::clear("away");
+            if apps > 0 {
+                self.log(&format!("{apps} app ask(s) let go: out of sight"));
+            }
+            let codes = mail::codes::clear();
+            if n > 0 || apps > 0 || codes > 0 {
                 self.push_asks();
             }
         }
@@ -1047,8 +1068,7 @@ async fn pet_ready(app: AppHandle, window: WebviewWindow) {
         // 订阅为空时这里发的是 false，与页面默认值一致，不产生任何副作用。
         crate::plugin_dock::sync_island_watch();
     } else { pet::ready(&sh) }
-    let views = sh.asks.lock().unwrap().views();
-    let _ = app.emit_to(window.label(), "pet:asks", views);
+    let _ = app.emit_to(window.label(), "pet:asks", sh.asks_views());
 }
 
 #[tauri::command]
@@ -1121,6 +1141,21 @@ async fn pet_panel(app: AppHandle, window: WebviewWindow, measured: Value) {
 #[tauri::command]
 async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
     let sh = shared(&app);
+    if app_asks::holds(id) {
+        let action = choice["action"].as_str().unwrap_or("?");
+        let ok = app_asks::answer(id, action);
+        sh.log(&format!("app ask {id}: {action} -> {ok}"));
+        if ok {
+            sh.push_asks();
+        }
+        return ok;
+    }
+    if mail::codes::holds(id) {
+        let ok = mail::codes::answer(&sh, id, &choice);
+        sh.log(&format!("mail code {id}: {} -> {ok}", choice["action"].as_str().unwrap_or("?")));
+        sh.push_asks();
+        return ok;
+    }
     let lang = sh.lang();
     let agent = sh.asks.lock().unwrap().views().as_array().and_then(|rows| rows.iter().find(|row| row["id"] == json!(id))).and_then(|row| row["agent"].as_str()).unwrap_or("").to_string();
     let ok = sh.asks.lock().unwrap().answer(id, &choice, lang);
@@ -1138,6 +1173,15 @@ async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
 #[tauri::command]
 async fn pet_dismiss(app: AppHandle, id: u64) {
     let sh = shared(&app);
+    if app_asks::dismiss(id) {
+        sh.log(&format!("app ask {id} handed back: asked to on her"));
+        sh.push_asks();
+        return;
+    }
+    if mail::codes::dismiss(id) {
+        sh.push_asks();
+        return;
+    }
     if sh.asks.lock().unwrap().dismiss(id) {
         sh.log(&format!("prompt {id} handed to the terminal: asked to on her"));
         sh.push_asks();
@@ -2040,6 +2084,7 @@ fn main() {
             bars::barpop_thumbs,
             bars::barpop_hide,
             settings::settings_fetch,
+            settings::settings_delete_pet,
             settings::settings_gallery,
             settings::settings_open_site,
             settings::settings_update,
@@ -2054,6 +2099,7 @@ fn main() {
             mail::letters::mail_letters,
             mail::letters::mail_read_all,
             mail::letters::mail_letter,
+            mail::letters::mail_open_link,
             mail::agent::mail_hand,
             mail::agent::mail_say,
             mail::letters::mail_flag,
@@ -2070,6 +2116,7 @@ fn main() {
         taskbar::taskbar_task_view_icons,
         topbar::topbar_focus,
         topbar::topbar_ready,
+        topbar::topbar_settings,
             taskbar::taskbar_inputs,
             taskbar::taskbar_input,
             taskbar::taskbar_battery_font,
@@ -2414,10 +2461,10 @@ fn main() {
                         // is: a prompt let wait its whole time said nothing
                         // (the test session, 2026-10-13).
                         let gone = ticker.asks.lock().unwrap().expire(now);
-                        if !gone.is_empty() {
-                            for id in gone {
-                                ticker.log(&format!("prompt {id} handed to the terminal: its time is up"));
-                            }
+                        for id in &gone {
+                            ticker.log(&format!("prompt {id} handed to the terminal: its time is up"));
+                        }
+                        if app_asks::expire(now) > 0 || mail::codes::expire(now) || !gone.is_empty() {
                             ticker.push_asks();
                         }
                     }
@@ -2460,6 +2507,9 @@ fn main() {
                         }
                         pet::keep_on_screen(&ticker);
                         island::keep_on_screen(&ticker);
+                        if topbar::wanted(&ticker) {
+                            topbar::push_state(&ticker);
+                        }
                     }
                 }
             });

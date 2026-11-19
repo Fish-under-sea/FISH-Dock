@@ -29,7 +29,7 @@
   left: 0;
   width: 520px;
   box-sizing: border-box;
-  padding: 12px 14px;
+  padding: 12px 14px 14px;
   font-size: 13px;
   line-height: 1.45;
   color: var(--fg);
@@ -380,6 +380,8 @@
   overflow-y: auto;
   margin-right: -6px;
   padding-right: 6px;
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
 }
 
 /* 滚动锁（#69 S3，settings.js 的 lockScroll / unlockScroll）：
@@ -426,13 +428,15 @@
   }
 }
 
+.m-link {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  cursor: pointer;
+  word-break: break-all;
+}
+
 .s-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 6px 0;
-  color: var(--g4);
-  font-size: 11.5px;
+  display: none;
 }
 
 #island-settings .sec {

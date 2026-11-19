@@ -2730,6 +2730,16 @@ mod imp {
         }
     }
 
+    // An app bar's place asked of Explorer itself, ours set aside for it
+    // (systray::explorer_first) so SHAppBarMessage reaches Explorer's tray.
+    pub fn claim<R>(f: impl FnOnce() -> R) -> R {
+        let (r, aside) = systray::explorer_first(f);
+        if aside {
+            ask_soon();
+        }
+        r
+    }
+
     // Explorer's window came first for a moment: what programs handed the
     // tray then went to it. They are asked again once it settles: at most
     // every ten seconds, but right away (twice at most) when it came first
@@ -2818,8 +2828,18 @@ mod imp {
             LAST_TAKEN.store(ticks, Ordering::SeqCst);
             LOST_SINCE.store(0, Ordering::SeqCst);
             if let Some(side) = fix {
-                let (how, why) = if strip.is_some_and(|s| edge.reaches(xywh, s)) { ("reaches into", "") } else { ("stops short of", ", where she set it for one before") };
-                log(&format!("work area ({}, {}, {}, {}) {how} the strip ({strip:?}, {edge:?}){why}: its side set to {side}", work.left, work.top, work.right, work.bottom));
+                let reaches = strip.is_some_and(|s| edge.reaches(xywh, s));
+                let (how, why) = if reaches { ("reaches into", "") } else { ("stops short of", ", where she set it for one before") };
+                let told = if reaches { sh().and_then(|sh| crate::island::reclaim_bar(&sh)) } else { None };
+                let counted = match (told, strip) {
+                    (Some(_), Some(s)) => {
+                        let w = work_area();
+                        let w_xywh = (w.left, w.top, w.right - w.left, w.bottom - w.top);
+                        format!("; the bar's place told again, Explorer {}", if edge.reaches(w_xywh, s) { "still leaving it out" } else { "counting it now" })
+                    }
+                    _ => String::new(),
+                };
+                log(&format!("work area ({}, {}, {}, {}) {how} the strip ({strip:?}, {edge:?}){why}: its side set to {side}{counted}", work.left, work.top, work.right, work.bottom));
                 set_work_side(edge, side);
                 *WORK_SIDE.lock().unwrap() = Some((edge, side));
                 if let Some(strip) = strip {
@@ -3378,6 +3398,9 @@ mod imp {
         false
     }
     pub fn handing_back() {}
+    pub fn claim<R>(f: impl FnOnce() -> R) -> R {
+        f()
+    }
     pub fn set_edge(_edge: crate::appbar::Edge) {}
     pub fn take(_sh: &Shared, _strip: (i32, i32, i32, i32)) -> bool {
         true
@@ -3450,7 +3473,7 @@ mod imp {
     }
 }
 
-pub use imp::{end_task_on, explorer_room, give_back, handing_back, hold_still, is_up, set_edge, look_for_other, look_now, look_value, note, resend, strip_moved, strip_picture, task_view_on, take, waiting, wake, windows_now, work_area_bottom, work_area_rect};
+pub use imp::{claim, end_task_on, explorer_room, give_back, handing_back, hold_still, is_up, set_edge, look_for_other, look_now, look_value, note, resend, strip_moved, strip_picture, task_view_on, take, waiting, wake, windows_now, work_area_bottom, work_area_rect};
 
 // Windows' End task setting's number (end_task_on): on once set, but for 0.
 #[cfg_attr(not(windows), allow(dead_code))]

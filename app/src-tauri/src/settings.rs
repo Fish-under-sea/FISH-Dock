@@ -44,7 +44,7 @@ fn dsh_block(sh: &Shared) -> Value {
 pub fn snapshot(sh: &Shared) -> Value {
     let pets: Vec<Value> = data::pets(&sh.dir)
         .iter()
-        .map(|p| json!({ "id": p.id, "name": p.name, "author": p.author, "url": data::asset_url(&p.sheet), "version": p.version, "codex": p.from_codex }))
+        .map(|p| json!({ "id": p.id, "name": p.name, "author": p.author, "url": data::asset_url(&p.sheet), "version": p.version, "codex": p.from_codex, "deletable": data::pet_deletable(&sh.dir, p) }))
         .collect();
     let details = sh.details();
     let (now, sessions) = {
@@ -581,7 +581,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // Crash reports sent by themselves, never, or asked about (crash.rs).
         "crashReports" => matches!(v.as_str(), Some("auto" | "off" | "ask")),
         // The taskbar home stands in for Windows' own: elsewhere, only the island.
-        "display" => v.as_str() == Some("island") || (cfg!(windows) && v.as_str() == Some("taskbar")),
+        "display" => v.as_str() == Some("island") || (cfg!(windows) && matches!(v.as_str(), Some("taskbar" | "topbar"))),
         "islandWidth" => matches!(v.as_str(), Some("narrow" | "normal" | "wide")),
         // Where her island sits at the top of the screen (anchor.js, #59).
         "islandPos" => is_island_pos(v),
@@ -646,6 +646,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "mailPanes" => matches!(v.as_str(), Some("one" | "two")),
         // How much mail is kept whole offline (mail/store.rs Offline).
         "mailOffline" => matches!(v.as_str(), Some("90d" | "year" | "all" | "opened")),
+        "mailCodes" => is_bool,
+        "appAsks" => is_bool,
         "mailAgentConf" => mail::agent::is_conf_ok(v),
         // How mail reaches its servers (mail/proxy.rs): its own way, or the General page's.
         "mailProxy" => mail::proxy::is_page_way(v),
@@ -1034,6 +1036,40 @@ pub async fn settings_fetch(app: AppHandle, reference: String) -> Value {
         Ok(Err(e)) => json!({ "ok": false, "error": fetch::describe(lang, &e), "snapshot": snapshot(&sh) }),
         Err(e) => json!({ "ok": false, "error": e.to_string(), "snapshot": snapshot(&sh) }),
     }
+}
+
+/// Delete a downloaded pet from `<data>/pets/<id>`. Refuses invalid IDs,
+/// read-only Codex pets, or deleting the last remaining pet.
+#[tauri::command]
+pub async fn settings_delete_pet(app: AppHandle, id: String) -> Value {
+    let sh = shared(&app);
+    let zh = sh.lang() == "zh";
+    if id.is_empty() || id == "." || id == ".." || id.contains(['/', '\\']) {
+        return json!({ "ok": false, "error": if zh { "无效的宠物 ID" } else { "Invalid pet ID" }, "snapshot": snapshot(&sh) });
+    }
+    let found = data::pets(&sh.dir);
+    let Some(target_pet) = found.iter().find(|p| p.id == id) else {
+        return json!({ "ok": false, "error": if zh { "未找到该宠物" } else { "Pet not found" }, "snapshot": snapshot(&sh) });
+    };
+    if !data::pet_deletable(&sh.dir, target_pet) {
+        return json!({ "ok": false, "error": if zh { "该宠物为只读来源，无法删除" } else { "This pet is read-only and cannot be deleted" }, "snapshot": snapshot(&sh) });
+    }
+    if found.len() <= 1 {
+        return json!({ "ok": false, "error": if zh { "至少保留一只宠物" } else { "Keep at least one pet" }, "snapshot": snapshot(&sh) });
+    }
+    let dir = sh.dir.join("pets").join(&id);
+    if let Err(e) = std::fs::remove_dir_all(&dir) {
+        return json!({ "ok": false, "error": e.to_string(), "snapshot": snapshot(&sh) });
+    }
+    data::forget_pets();
+    let remaining = data::pets(&sh.dir);
+    if sh.setting("pet").as_str() == Some(id.as_str()) {
+        let next = remaining.first().map(|p| p.id.as_str()).unwrap_or("");
+        sh.change(json!({ "pet": next }));
+    } else {
+        sh.redraw();
+    }
+    json!({ "ok": true, "snapshot": snapshot(&sh) })
 }
 
 #[tauri::command]

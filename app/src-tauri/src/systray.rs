@@ -522,10 +522,11 @@ mod imp {
     }
 
     // Ours put ahead of Explorer's again; true if it had fallen behind.
-    // Not while it is set aside.
+    // Not while it is set aside, nor put behind for an app bar's place
+    // (explorer_first).
     pub fn keep_first() -> bool {
         let ours = OURS.load(Ordering::SeqCst);
-        if ours == 0 || ASIDE.load(Ordering::SeqCst) || first() {
+        if ours == 0 || held_back() || first() {
             return false;
         }
         // SAFETY: our own window.
@@ -924,7 +925,7 @@ mod imp {
         let ours = OURS.load(Ordering::SeqCst);
         if ours != 0 {
             // Set aside, it stays where it is among the windows.
-            let aside = if ASIDE.load(Ordering::SeqCst) { SWP_NOZORDER } else { 0 };
+            let aside = if held_back() { SWP_NOZORDER } else { 0 };
             // SAFETY: our own window.
             unsafe { SetWindowPos(ours as Hwnd, HWND_TOPMOST, rect.0, rect.1, rect.2, rect.3, SWP_NOACTIVATE | aside) };
         }
@@ -948,6 +949,35 @@ mod imp {
 
     pub fn aside() -> bool {
         ASIDE.load(Ordering::SeqCst)
+    }
+
+    static CLAIMING: AtomicU32 = AtomicU32::new(0);
+
+    fn held_back() -> bool {
+        ASIDE.load(Ordering::SeqCst) || CLAIMING.load(Ordering::SeqCst) > 0
+    }
+
+    /// Ask an app bar's place of Explorer itself with ours behind Explorer's for that moment.
+    pub fn explorer_first<R>(f: impl FnOnce() -> R) -> (R, bool) {
+        let ours = OURS.load(Ordering::SeqCst);
+        if ours == 0 || ASIDE.load(Ordering::SeqCst) {
+            return (f(), false);
+        }
+        if CLAIMING.fetch_add(1, Ordering::SeqCst) == 0 {
+            // SAFETY: our own window.
+            unsafe {
+                SetWindowPos(ours as Hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                SetWindowPos(ours as Hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            if first() {
+                note("tray: put behind for her app bar's place, ours still first: Explorer's would not hear it".to_string());
+            }
+        }
+        let r = f();
+        if CLAIMING.fetch_sub(1, Ordering::SeqCst) == 1 {
+            keep_first();
+        }
+        (r, true)
     }
 
     // Ours gone (on the thread that made it). Explorer's has had nearly
@@ -1502,6 +1532,9 @@ mod imp {
     pub fn aside() -> bool {
         false
     }
+    pub fn explorer_first<R>(f: impl FnOnce() -> R) -> (R, bool) {
+        (f(), false)
+    }
     pub fn ask_again() {}
     pub fn sweep() {}
     pub fn scan_held() {}
@@ -1524,7 +1557,7 @@ mod imp {
 }
 
 #[allow(unused_imports)]
-pub use imp::{aside, ask_again, describe, first, handed_back, keep_first, notes, place, scan_held, seen, set_aside, set_rects, shown, start, stop, sweep, tell};
+pub use imp::{aside, ask_again, describe, explorer_first, first, handed_back, keep_first, notes, place, scan_held, seen, set_aside, set_rects, shown, start, stop, sweep, tell};
 
 #[cfg(test)]
 mod tests {

@@ -23,8 +23,14 @@
 
   let state = { windows: [], clock: '' }
 
+  function clockNow(given) {
+    if (given) return given
+    const d = new Date()
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+
   function render() {
-    const model = UI.topbarModel(state.windows, state.clock)
+    const model = UI.topbarModel(state.windows, clockNow(state.clock))
     if (clockEl) clockEl.textContent = model.clock
     itemsEl.replaceChildren()
     for (const it of model.items) {
@@ -56,13 +62,23 @@
   function fallback(it) {
     const wrap = document.createElement('span')
     wrap.className = 'fb'
-    const ic = document.createElement('span')
-    ic.className = 'ic'
-    ic.textContent = it.icon || '\u{1F5D4}'
+    const icon = String(it.icon || '')
+    if (/^(data:|https?:|asset:)/i.test(icon)) {
+      const img = document.createElement('img')
+      img.className = 'ic-img'
+      img.src = icon
+      img.alt = ''
+      wrap.append(img)
+    } else {
+      const ic = document.createElement('span')
+      ic.className = 'ic'
+      ic.textContent = icon || '\u{1F5D4}'
+      wrap.append(ic)
+    }
     const ti = document.createElement('span')
     ti.className = 'ti'
     ti.textContent = it.title || it.app
-    wrap.append(ic, ti)
+    wrap.append(ti)
     return wrap
   }
 
@@ -70,6 +86,13 @@
     state = { windows: next?.windows || [], clock: next?.clock || '' }
     render()
   }
+
+  end?.querySelector('[data-open="quick"]')?.addEventListener('click', () => {
+    invoke?.('topbar_settings')?.catch?.(() => {})
+  })
+  setInterval(() => {
+    if (clockEl && !state.clock) clockEl.textContent = clockNow('')
+  }, 15000)
 
   listen?.('topbar:state', e => apply(e.payload)).catch?.(() => {})
   invoke?.('topbar_ready').catch?.(() => {})

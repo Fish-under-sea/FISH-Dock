@@ -45,6 +45,9 @@ body {
 body[data-mode='topbar'] #bar {
   height: var(--tb-h);
 }
+body[data-mode='dock'] #mica {
+  border-radius: 16px;
+}
 body[data-mode='dock'] #bar {
   justify-content: center;
   padding: 6px 10px;
@@ -106,6 +109,16 @@ body[data-mode='dock'] .item {
 .item .fb .ic {
   font-size: 16px;
   line-height: 1;
+}
+.item .fb .ic-img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex: none;
+}
+body[data-mode='dock'] .item .fb .ic-img {
+  width: 30px;
+  height: 30px;
 }
 .item .fb .ti {
   white-space: nowrap;

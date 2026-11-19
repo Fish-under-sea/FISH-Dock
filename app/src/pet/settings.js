@@ -580,13 +580,15 @@
       .join('')}</div>`
   }
 
+  let petDelConfirm = null
   function pagePets() {
     const current = snap.settings.pet
+    const canDeleteAny = snap.pets.length > 1
     const installed = snap.pets.length
       ? snap.pets
           .map(
             p => `<div class="r petrow">${thumb(52, p.url, p.version)}<div class="grow"><div>${esc(p.name)}</div><div class="d">${esc([p.author, p.codex ? T('s.fromCodex') : '', p.version === 1 ? T('home.v1') : ''].filter(Boolean).join(' · '))}</div></div>
-            ${p.id === current ? `<span class="d in-use">${esc(T('home.inUse'))}</span>` : `<button class="pbtn" data-use="${esc(p.id)}">${esc(T('home.use'))}</button>`}</div>`,
+            ${p.id === current ? `<span class="d in-use">${esc(T('home.inUse'))}</span>` : `<button class="pbtn" data-use="${esc(p.id)}">${esc(T('home.use'))}</button>`}${p.deletable && canDeleteAny ? `<button class="pbtn ${petDelConfirm === p.id ? 'no' : ''}" data-del-pet="${esc(p.id)}">${esc(T(petDelConfirm === p.id ? 'home.deleteConfirm' : 'home.delete'))}</button>` : ''}</div>`,
           )
           .join('')
       : `<div class="note">${esc(T('settings.petsEmpty'))}</div>`
@@ -1093,7 +1095,8 @@
   function pagePrompts() {
     const s = snap.settings
     const waits = WAITS.map(w => [w, w >= 60 ? T('settings.minutes', { n: Math.round(w / 60) }) : T('settings.seconds', { n: w })])
-    return `${sec(T('settings.prompts'))}<div class="grp">${row(esc(T('settings.promptWait')), esc(T('settings.promptWaitNote')), seg('promptWaitSec', waits, s.promptWaitSec))}</div>`
+    return `${sec(T('settings.prompts'))}<div class="grp">${row(esc(T('settings.promptWait')), esc(T('settings.promptWaitNote')), seg('promptWaitSec', waits, s.promptWaitSec))}
+      ${row(esc(T('settings.appAsks')), esc(T('settings.appAsksNote')), sw('appAsks', s.appAsks !== false))}</div>`
   }
 
   // 安静：勿扰与全屏时隐藏——留在通用页（#23）。
@@ -2228,8 +2231,47 @@
       ${l.to.length ? `<div class="d">${esc(T('mail.to'))}: ${esc(people(l.to))}</div>` : ''}
       ${l.cc.length ? `<div class="d">${esc(T('mail.cc'))}: ${esc(people(l.cc))}</div>` : ''}
       ${whose}${files}${talk ? talkHTML(talk, l) : ''}
-      <div class="m-text">${esc(l.text)}</div>${l.cut ? `<div class="d">${esc(T('mail.cut'))}</div>` : ''}
+      <div class="m-text">${textWithLinks(l.text, esc)}</div>${l.cut ? `<div class="d">${esc(T('mail.cut'))}</div>` : ''}
     </div>`
+  }
+
+  function linkWarning(url, text) {
+    let u
+    try { u = new URL(url) } catch { return null }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    const real = u.hostname.toLowerCase()
+    if (u.username || u.password) {
+      let shown = u.username
+      try { shown = decodeURIComponent(shown) } catch {}
+      return { why: 'differs', shown, real }
+    }
+    if (/^\d+(\.\d+){3}$/.test(real) || real.startsWith('[')) return { why: 'ip', real }
+    if (real.split('.').some(label => label.startsWith('xn--'))) return { why: 'idn', real }
+    const m = /(?:https?:\/\/)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i.exec(String(text || '').trim())
+    const shown = m?.[1]?.toLowerCase()
+    const sameSite = (a, b) => a === b || b.endsWith(`.${a}`)
+    return shown && !sameSite(shown, real) ? { why: 'differs', shown, real } : null
+  }
+
+  function textWithLinks(text, esc) {
+    const s = String(text ?? '')
+    const re = /\bhttps?:\/\/[^\s<>"'\[\]{}，。、；！？「」《》（）]+/gi
+    let out = '', at = 0
+    for (const m of s.matchAll(re)) {
+      let url = m[0]
+      for (;;) {
+        const last = url[url.length - 1]
+        if ('.,;:!?'.includes(last) || (last === ')' && url.split('(').length < url.split(')').length)) url = url.slice(0, -1)
+        else break
+      }
+      try {
+        const u = new URL(url)
+        if ((u.protocol !== 'http:' && u.protocol !== 'https:') || !u.hostname) continue
+      } catch { continue }
+      out += `${esc(s.slice(at, m.index))}<a class="m-link" data-mail-link="${esc(url)}">${esc(url)}</a>`
+      at = m.index + url.length
+    }
+    return out + esc(s.slice(at))
   }
 
   // Mail: each account with its switch and setting one up; the inbox
@@ -2264,11 +2306,15 @@
       .join('')
     const add = mailForm ? '' : `<div class="r"><button class="pbtn wide" data-mail-add>${esc(T('mail.add'))}</button></div>`
     return `${sec(T('mail.section'))}<div class="grp"><div class="note">${esc(T('mail.note'))}</div>${rows}${add}</div>
-      ${accounts.length ? offlineHTML() : ''}${proxyHTML()}${mailForm ? mailFormHTML() : ''}`
+      ${accounts.length ? offlineHTML() + codesHTML() : ''}${proxyHTML()}${mailForm ? mailFormHTML() : ''}`
   }
 
   // How much is kept whole on this computer (the setting mailOffline: the
   // last year unless set), and the room every account's takes now.
+  function codesHTML() {
+    return `<div class="grp">${row(esc(T('mail.codes')), esc(T('mail.codesNote')), sw('mailCodes', snap.settings.mailCodes !== false))}</div>`
+  }
+
   function offlineHTML() {
     const value = ['90d', 'year', 'all', 'opened'].includes(snap.settings.mailOffline) ? snap.settings.mailOffline : 'year'
     const used = (snap.mail || []).reduce((n, a) => n + (a.status?.offline?.bytes || 0), 0)
@@ -3560,9 +3606,9 @@
     drawHead()
     drawTabs()
     drawBody(reset)
-    // Locked (the button by ✕), a click outside closes them no more.
-    foot.querySelector('.foot-text').textContent = T(snap.settings.settingsPin ? 's.footLocked' : 's.foot')
-    foot.querySelector('.ver').textContent = `v${snap.version}`
+    // Bottom footer text and version hidden per UI layout spec.
+    foot.querySelector('.foot-text').textContent = ''
+    foot.querySelector('.ver').textContent = ''
     tick()
     // The same height on every page, however much it holds: the head and
     // the tabs stay where they are from one page to the next (on the
@@ -3876,6 +3922,8 @@
       if (key === 'ilookBare') return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bare: !ilookOf(ilookFor()).bare })
       if (key.startsWith('notify.')) return patch({ notify: { ...s.notify, [key.slice(7)]: !s.notify?.[key.slice(7)] } })
       if (key === 'widgetNudge') return patch({ widgetNudge: s.widgetNudge === false })
+      if (key === 'mailCodes') return patch({ mailCodes: s.mailCodes === false })
+      if (key === 'appAsks') return patch({ appAsks: s.appAsks === false })
       // One of the monitor's parts on or off.
       if (key.startsWith('mon:')) return patch({ monitor: { ...(s.monitor || {}), [key.slice(4)]: (s.monitor || {})[key.slice(4)] === false } })
       // One of the hardware's sensors picked or not, LibreHardwareMonitor's
@@ -4043,6 +4091,24 @@
     if (accent) return window.pet.settings.winLook({ accent: accent.dataset.accent }).then(got => ((snap = got), draw()))
     const use = at('[data-use]')
     if (use) return patch({ pet: use.dataset.use })
+    const delPet = at('[data-del-pet]')
+    if (delPet) {
+      const id = delPet.dataset.delPet
+      if (petDelConfirm !== id) {
+        petDelConfirm = id
+        return draw()
+      }
+      petDelConfirm = null
+      return window.pet.settings.deletePet(id).then(got => {
+        if (got?.snapshot) snap = got.snapshot
+        if (got && !got.ok && got.error) fetchNote = { text: got.error, isError: true }
+        draw()
+      })
+    }
+    if (petDelConfirm) {
+      petDelConfirm = null
+      draw()
+    }
     if (at('[data-fetch]')) {
       const text = typedRef.trim()
       if (!text) return document.getElementById('s-ref')?.focus()
@@ -4242,6 +4308,19 @@
       const key = twisty.dataset.twisty
       if (!expanded.delete(key)) expanded.add(key)
       redrawMail()
+      return true
+    }
+    const mailLink = at('[data-mail-link]')
+    if (mailLink) {
+      const url = mailLink.dataset.mailLink
+      const warn = linkWarning(url, mailLink.textContent)
+      if (warn) {
+        confirmInDock(T(`mail.link.${warn.why}`, warn)).then(ok => {
+          if (ok) window.pet.mail.openLink(url)
+        })
+      } else {
+        window.pet.mail.openLink(url)
+      }
       return true
     }
     const letter = at('.inbox [data-letter]')
@@ -4447,6 +4526,7 @@
   // when found, else the fields to fill.
   async function findServer() {
     const f = mailForm
+    if (!f) return
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.address.trim())) {
       f.result = { bad: true, text: T('mail.badAddress') }
       return redrawMail('[data-mf="address"]')
@@ -4487,6 +4567,7 @@
   // Re-test: both servers, the outgoing one where there is one.
   async function retest() {
     const f = mailForm
+    if (!f) return
     await probeServer()
     if (mailForm === f && String(f.smtpHost || '').trim()) await probeOut()
   }
@@ -4541,6 +4622,7 @@
   // detected is, first.
   async function saveAccount() {
     const f = mailForm
+    if (!f) return
     if (!f.id && !f.password) {
       f.result = { bad: true, text: T('mail.err.password') }
       return redrawMail('[data-mf="password"]')

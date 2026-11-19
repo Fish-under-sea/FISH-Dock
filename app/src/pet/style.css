@@ -166,6 +166,29 @@ body {
   font-family: inherit;
 }
 
+#panel .code.app-ask {
+  max-height: 140px;
+  font-family: inherit;
+}
+
+#panel .code.mail-code {
+  max-height: none;
+  padding: 8px 10px;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-align: center;
+  cursor: pointer;
+}
+
+#panel .code.mail-link {
+  max-height: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
 #panel .text {
   margin-bottom: 8px;
 }

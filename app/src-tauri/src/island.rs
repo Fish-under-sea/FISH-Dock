@@ -567,7 +567,7 @@ fn sync_bar_now(sh: &Shared, keep: bool) {
         sh.log("island: Windows would not take the bar");
         return;
     }
-    let granted = appbar::place(hwnd, area.mon, edge, height);
+    let granted = taskbar::claim(|| appbar::place(hwnd, area.mon, edge, height));
     {
         let mut isl = sh.island.lock().unwrap();
         isl.bar = Some(granted);
@@ -578,6 +578,28 @@ fn sync_bar_now(sh: &Shared, keep: bool) {
         taskbar::strip_moved(granted);
     }
     sh.log(&format!("island: {home} strip {granted:?}; work area's bottom {}", taskbar::work_area_bottom()));
+}
+
+/// Tell Explorer the island's app bar place again (from the taskbar thread)
+/// when Explorer resets the work area into her strip.
+pub fn reclaim_bar(sh: &Shared) -> Option<(i32, i32, i32, i32)> {
+    if SYNCING.load(Ordering::SeqCst) {
+        return None;
+    }
+    let (hwnd, held, own, was) = {
+        let isl = sh.island.lock().unwrap();
+        (isl.hwnd, isl.bar_for, isl.bar_own, isl.bar)
+    };
+    let (mon, height, _, edge) = held?;
+    if !own || hwnd == 0 {
+        return None;
+    }
+    let granted = taskbar::claim(|| appbar::place(hwnd, mon, edge, height));
+    sh.island.lock().unwrap().bar = Some(granted);
+    if Some(granted) != was {
+        sh.log(&format!("island: bar's place told again, granted {granted:?} where it was {was:?} (the window left where it is)"));
+    }
+    Some(granted)
 }
 
 // Quitting, or the window going: the strip back to the other windows (and

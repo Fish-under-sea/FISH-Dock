@@ -31,7 +31,8 @@
   // 也算（IN_APP 只管「去 XX 处理」那颗按钮的措辞）：它们的审批在岛上按允许、
   // 拒绝本来就能答，答案送到后它们自己的对话框会关掉，快捷键没有理由只能开岛
   // （上游 #97）。canAnswer === false 仍不替它按。
-  const canAnswerWithHotkey = ask => !!ask && (ask.kind === 'permission' || ask.kind === 'plan') && ask.canAnswer !== false
+  const isMail = ask => !!ask && (ask.kind === 'mailCode' || ask.kind === 'mailLink')
+  const canAnswerWithHotkey = ask => !!ask && (ask.kind === 'permission' || ask.kind === 'plan' || ask.kind === 'app' || (isMail(ask) && !ask.copied)) && ask.canAnswer !== false
   // 按钮上的组合键提示（Alt+Y…）：开着且这一个设置有值才有。
   const keyHintOf = (key, ask) => (canAnswerWithHotkey(ask) && config.shortcutsEnabled && config[key] ? config[key] : '')
   let shownId = null
@@ -153,6 +154,47 @@
     ].join('; ')
     const where = always.where.map(w => T(`where.${w}`)).join(', ')
     return el('div', { class: 'note' }, T('panel.alwaysNote', { rules, where }))
+  }
+
+  function appBody(ask) {
+    return [
+      el('div', { class: 'head' }, el('span', { class: 'title' }, T('panel.appAsk', { app: ask.app || '?' })), el('span', { class: 'chip' }, T('panel.appChip'))),
+      el('pre', { class: 'code app-ask' }, [ask.title, ask.text].filter(Boolean).join('\n\n')),
+      el(
+        'div',
+        { class: 'row' },
+        button(T('panel.allow'), 'allow', () => answer({ action: 'allow' }), 'primary', keyHintOf('shortcutApprove', ask)),
+        button(T('panel.deny'), 'deny', () => answer({ action: 'deny' }), 'danger', keyHintOf('shortcutDeny', ask)),
+      ),
+    ]
+  }
+
+  function mailBody(ask) {
+    const isCode = ask.kind === 'mailCode'
+    const copy = () => answer({ action: 'allow' })
+    const copyBtn = button(T(ask.copied ? 'panel.copied' : 'panel.copy'), 'allow', copy, 'primary', keyHintOf('shortcutApprove', ask))
+    return [
+      el('div', { class: 'head' }, el('span', { class: 'title' }, T(isCode ? 'panel.mailCode' : 'panel.mailLink')), ask.sender ? el('span', { class: 'chip' }, ask.sender) : null),
+      el(
+        'pre',
+        {
+          class: `code ${isCode ? 'mail-code' : 'mail-link'}`,
+          title: isCode ? '' : ask.url || '',
+          onclick: () => {
+            if (!copyBtn.disabled && !ask.copied) copy()
+          },
+        },
+        (isCode ? ask.code : ask.shown || ask.url) || '',
+      ),
+      el(
+        'div',
+        { class: 'row' },
+        copyBtn,
+        isCode ? null : button(T('panel.open'), 'open', () => answer({ action: 'open' }), 'always'),
+        ask.copied ? null : button(T('panel.ignore'), 'deny', () => answer({ action: 'deny' }), 'danger', keyHintOf('shortcutDeny', ask)),
+      ),
+      !isCode && ask.host ? el('div', { class: 'note' }, T('panel.mailLinkTo', { host: ask.host })) : null,
+    ]
   }
 
   // Why the app asks (DeepSeek Harness's: a sandbox to widen, and why), in
@@ -353,17 +395,34 @@
       letGoOfKeyboard()
     }
 
-    const body = ask.kind === 'question' ? questionBody(ask) : ask.kind === 'plan' ? planBody(ask) : permissionBody(ask)
+    const body = isMail(ask) ? mailBody(ask) : ask.kind === 'app' ? appBody(ask) : ask.kind === 'question' ? questionBody(ask) : ask.kind === 'plan' ? planBody(ask) : permissionBody(ask)
     const more = asks.length > 1 ? el('span', { class: 'more' }, T('panel.more', { n: asks.length - 1 })) : null
     panel.append(
       ...body.filter(Boolean),
-      el(
-        'div',
-        { class: 'foot' },
-        // An app's prompt (ZCode's, DSH's dialog stays open meanwhile) is handled there.
-        button(ask.kind === 'question' && !ask.canAnswer ? T('panel.gotIt') : IN_APP.has(ask.from) ? T('panel.toApp', { app: FROM[ask.from] }) : T('panel.toTerminal'), 'dismiss', dismiss, 'ghost'),
-        more,
-      ),
+      ...(isMail(ask)
+        ? more
+          ? [el('div', { class: 'foot' }, more)]
+          : []
+        : [
+            el(
+              'div',
+              { class: 'foot' },
+              // An app's prompt (ZCode's, DSH's dialog stays open meanwhile) is handled there.
+              button(
+                ask.kind === 'app'
+                  ? T('panel.backTo', { app: ask.app || '?' })
+                  : ask.kind === 'question' && !ask.canAnswer
+                    ? T('panel.gotIt')
+                    : IN_APP.has(ask.from)
+                      ? T('panel.toApp', { app: FROM[ask.from] })
+                      : T('panel.toTerminal'),
+                'dismiss',
+                dismiss,
+                'ghost',
+              ),
+              more,
+            ),
+          ]),
     )
     panel.hidden = false
     arm(armMs)

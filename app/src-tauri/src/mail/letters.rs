@@ -313,6 +313,37 @@ pub async fn mail_letter(app: AppHandle, id: String, uid: u32, folder: Option<St
     json!({ "ok": true, "letter": letter, "talk": agent::talk_view(&sh, &key) })
 }
 
+/// Open a link from a letter in the default browser (only http/https web URLs).
+#[tauri::command]
+pub async fn mail_open_link(app: AppHandle, url: String) -> bool {
+    let sh = shared(&app);
+    let Some(url) = web_address(&url) else {
+        sh.log("mail: a letter's link not to a web page was not opened");
+        return false;
+    };
+    crate::spawn_named("open link", move || {
+        if !crate::jump::open_url(&url) {
+            sh.log("mail: a letter's link would not open (ShellExecute failed)");
+        }
+    });
+    true
+}
+
+fn web_address(url: &str) -> Option<String> {
+    let url = url.trim();
+    if url.len() > 8192 || url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"') {
+        return None;
+    }
+    let rest = ["https://", "http://"].iter().find_map(|scheme| url.get(..scheme.len()).filter(|s| s.eq_ignore_ascii_case(scheme)).map(|_| &url[scheme.len()..]))?;
+    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or("");
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.split(':').next().unwrap_or(""),
+    };
+    (!host.is_empty()).then(|| url.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +361,37 @@ mod tests {
         let replied = parse(b"From: a@b.test\r\nReply-To: List <list@b.test>\r\nReferences: <r1@x> <r2@x>\r\nSubject: s\r\n\r\nhi\r\n").unwrap();
         assert_eq!((view(&replied)["replyTo"][0]["address"].as_str(), view(&replied)["references"].clone()), (Some("list@b.test"), json!(["r1@x", "r2@x"])));
         assert_eq!(v["date"], 1_791_512_100_000i64);
+    }
+
+    #[test]
+    fn only_a_web_address_is_opened() {
+        for url in [
+            "https://example.test/",
+            "http://example.test",
+            "HTTPS://Example.test/a?b=1&c=%22x%22#top",
+            "https://user@example.test:8443/x",
+            "http://[::1]:8080/",
+            " https://example.test/padded ",
+        ] {
+            assert_eq!(web_address(url).as_deref(), Some(url.trim()), "{url}");
+        }
+        for url in [
+            "",
+            "example.test",
+            "//example.test/x",
+            "file:///C:/Windows/System32/calc.exe",
+            "javascript:alert(1)",
+            "mailto:a@example.test",
+            "https://",
+            "https:///path",
+            "https://user@/x",
+            "http://[]/",
+            "https://example.test/a b",
+            "https://example.test/\" --new-window \"file:///c:/x",
+            "https://example.test/\nfile:///c:/x",
+        ] {
+            assert_eq!(web_address(url), None, "{url:?}");
+        }
+        assert_eq!(web_address(&format!("https://example.test/{}", "a".repeat(8200))), None, "too long");
     }
 }

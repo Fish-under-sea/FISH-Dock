@@ -186,6 +186,10 @@ fn defaults() -> Map<String, Value> {
         "plugins": {},
         // Mail accounts (mail.rs); their passwords are in the Credential Manager.
         "mail": [],
+        // A code or a link to sign in with, come by mail, on the island (mail/codes.rs).
+        "mailCodes": true,
+        // Other programs' approvals on her prompt panel (app_asks.rs).
+        "appAsks": true,
         "walk": true,
         "look": true,
         // Done, changed or failed: shown 8 s, or until seen ("seen"); 30 and
@@ -386,6 +390,12 @@ static PETS_PUT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 // under way as she puts it in is not kept either.
 pub fn forget_pets() {
     PETS_PUT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Only pets downloaded into `<dir>/pets/<id>` (not Codex's read-only store
+/// or bundled source-tree pets) can be deleted from the UI.
+pub fn pet_deletable(dir: &Path, pet: &PetInfo) -> bool {
+    !pet.from_codex && dir.join("pets").join(&pet.id).is_dir()
 }
 
 pub fn pets(dir: &Path) -> Vec<PetInfo> {

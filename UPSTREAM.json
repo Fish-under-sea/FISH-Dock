@@ -6,7 +6,7 @@
       "path": "app",
       "repository": "https://github.com/zhoupengjie/Wakuwaku",
       "baseCommit": "f1441cbbcf6801d18c27a1d241fd4e5475086e3b",
-      "selectedUpstreamThrough": "e143563e4363c6c16bd290499bde2ce778f64f80",
+      "selectedUpstreamThrough": "ccb840de083f3cfe64507ff0d033887113b6f0fd",
       "license": "LICENSE",
       "selectedChanges": [
         "Local port turns away web pages' requests (403), all but /v1 (upstream e143563e, v0.4.3)",
@@ -23,7 +23,12 @@
         "A titled window covering its display unmaximized, or exactly on it, is full screen (upstream #98, c019eb70 + 7e8af4a7)",
         "The island follows its slot as the taskbar runs grow or shrink (upstream #98, ba4c6cab)",
         "Console standard handles put back after looking for a session's console window (upstream #100, 9ca1c269)",
-        "Pets' gallery and download documented as going the way the Network proxy says (upstream #99, 513f9979)"
+        "Pets' gallery and download documented as going the way the Network proxy says (upstream #99, 513f9979)",
+        "Explorer counts her top bar via explorer_first / reclaim_bar and async window refit (upstream 4389b1e + 940c4ae)",
+        "Mail verification codes & sign-in links on the island (upstream #113, 45bbbb0)",
+        "Mail letter links open safely in default browser with mismatch/IP/IDN warning (upstream #150, 23c4dec)",
+        "Mail account form guards against clicks after delete (upstream d2572bc)",
+        "External program approvals UI & store alignment (upstream #149, c0c0926, retaining DEC-7 loopback auth on POST /ask)"
       ],
       "excludedChanges": [
         "Upstream web-file plugin store and auto-update protocol",
