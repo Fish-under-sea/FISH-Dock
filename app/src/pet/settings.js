@@ -814,12 +814,211 @@
     balanced: { surfaceOp: 38, surfaceBlur: 18, cardOp: 22, cardBlur: 12, overlayOp: 45, overlayBlur: 16, controlOp: 28, controlBlur: 8 },
     clear: { surfaceOp: 18, surfaceBlur: 24, cardOp: 12, cardBlur: 16, overlayOp: 25, overlayBlur: 20, controlOp: 16, controlBlur: 10 },
   }
-  const TYPO_SWATCHES = [
-    '#ffffff', '#f5f5f7', '#d1d5db', '#9ca3af', '#4b5563', '#1b1b1f', '#60a5fa', '#38bdf8',
-    '#34d399', '#a7f3d0', '#fbbf24', '#fb923c', '#f87171', '#f472b6', '#c084fc', '#818cf8',
-  ]
-  let typoOpen = ''
   let widgetsFoldOpen = true
+  let cpState = null
+  const colorPop = document.createElement('div')
+  colorPop.className = 'cp-popover'
+  colorPop.hidden = true
+  colorPop.innerHTML = `
+    <div class="cp-head"><span class="cp-title">选择颜色</span><button type="button" class="cp-close" data-cp-close aria-label="关闭">✕</button></div>
+    <div class="cp-sv" data-cp-sv><div class="cp-sv-white"></div><div class="cp-sv-black"></div><span class="cp-sv-thumb"></span></div>
+    <div class="cp-hue" data-cp-hue><span class="cp-hue-thumb"></span></div>
+    <div class="cp-rgb-row">
+      <label class="cp-rgb-field"><span>R</span><input type="text" class="cp-rgb-in mono" data-cp-rgb="r" inputmode="numeric" maxlength="3" autocomplete="off"></label>
+      <label class="cp-rgb-field"><span>G</span><input type="text" class="cp-rgb-in mono" data-cp-rgb="g" inputmode="numeric" maxlength="3" autocomplete="off"></label>
+      <label class="cp-rgb-field"><span>B</span><input type="text" class="cp-rgb-in mono" data-cp-rgb="b" inputmode="numeric" maxlength="3" autocomplete="off"></label>
+    </div>
+    <div class="cp-foot">
+      <button type="button" class="cp-clear" data-cp-clear>清空</button>
+      <div class="cp-hex-wrap"><i class="cp-hex-dot"></i><input type="text" class="cp-hex-in mono" data-cp-hex maxlength="7" placeholder="#ffffff" spellcheck="false" autocomplete="off"></div>
+    </div>`
+  layer.appendChild(colorPop)
+
+  function hexToRgb(hex) {
+    const h = String(hex || '').replace(/^#/, '')
+    if (!/^[0-9a-f]{6}$/i.test(h)) return { r: 255, g: 255, b: 255 }
+    return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) }
+  }
+  function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(v => Math.round(Math.min(255, Math.max(0, Number(v) || 0))).toString(16).padStart(2, '0')).join('')
+  }
+  function rgbToHsv(r, g, b) {
+    const rn = r / 255, gn = g / 255, bn = b / 255
+    const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn), d = max - min
+    const h = d === 0 ? 0 : max === rn ? (((gn - bn) / d + 6) % 6) * 60 : max === gn ? ((bn - rn) / d + 2) * 60 : ((rn - gn) / d + 4) * 60
+    const s = max === 0 ? 0 : d / max
+    return { h, s, v: max }
+  }
+  function hsvToRgb(h, s, v) {
+    const c = v * s
+    const hh = (((h % 360) + 360) % 360) / 60
+    const x = c * (1 - Math.abs((hh % 2) - 1))
+    const [r1, g1, b1] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(hh) % 6]
+    const m = v - c
+    return { r: Math.round((r1 + m) * 255), g: Math.round((g1 + m) * 255), b: Math.round((b1 + m) * 255) }
+  }
+  function closeColorPop() {
+    if (colorPop.hidden) return
+    colorPop.hidden = true
+    cpState = null
+    body.querySelectorAll('[data-typo-toggle].on').forEach(b => {
+      b.classList.remove('on')
+      b.setAttribute('aria-expanded', 'false')
+    })
+  }
+  function syncColorPopUI() {
+    if (!cpState) return
+    const { h, s, v, r, g, b, hex } = cpState
+    const pure = hsvToRgb(h, 1, 1)
+    const pureHex = rgbToHex(pure.r, pure.g, pure.b)
+    const svEl = colorPop.querySelector('[data-cp-sv]')
+    const svThumb = colorPop.querySelector('.cp-sv-thumb')
+    const hueThumb = colorPop.querySelector('.cp-hue-thumb')
+    const hexDot = colorPop.querySelector('.cp-hex-dot')
+    const hexIn = colorPop.querySelector('[data-cp-hex]')
+    const rIn = colorPop.querySelector('[data-cp-rgb="r"]')
+    const gIn = colorPop.querySelector('[data-cp-rgb="g"]')
+    const bIn = colorPop.querySelector('[data-cp-rgb="b"]')
+    if (svEl) svEl.style.backgroundColor = pureHex
+    if (svThumb) {
+      svThumb.style.left = `${(s * 100).toFixed(2)}%`
+      svThumb.style.top = `${((1 - v) * 100).toFixed(2)}%`
+      svThumb.style.background = hex
+    }
+    if (hueThumb) {
+      hueThumb.style.left = `${((h % 360) / 360 * 100).toFixed(2)}%`
+      hueThumb.style.background = pureHex
+    }
+    if (hexDot) hexDot.style.background = hex
+    if (hexIn && document.activeElement !== hexIn) hexIn.value = hex
+    if (rIn && document.activeElement !== rIn) rIn.value = String(r)
+    if (gIn && document.activeElement !== gIn) gIn.value = String(g)
+    if (bIn && document.activeElement !== bIn) bIn.value = String(b)
+  }
+  function openColorPop(key, anchorEl) {
+    if (!colorPop.hidden && cpState?.key === key) {
+      closeColorPop()
+      return
+    }
+    const dl = dockLookOf()
+    const fallbacks = {
+      accent: String(snap?.winLook?.accent || '#0078d4').toLowerCase(),
+      headingColor: dl.mode === 'light' ? '#111113' : '#ffffff',
+      textColor: dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7',
+      mutedColor: dl.mode === 'light' ? '#5d5d5d' : '#a1a1a6',
+    }
+    const raw = key === 'accent'
+      ? (dl.accentMode === 'custom' ? (dl.accent || fallbacks.accent) : fallbacks.accent)
+      : (dl[key] || fallbacks[key] || '#ffffff')
+    const hex = /^#[0-9a-f]{6}$/i.test(raw) ? raw.toLowerCase() : '#ffffff'
+    const rgb = hexToRgb(hex)
+    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b)
+    cpState = { key, ...hsv, ...rgb, hex }
+    const titleEl = colorPop.querySelector('.cp-title')
+    const clearBtn = colorPop.querySelector('[data-cp-clear]')
+    if (titleEl) titleEl.textContent = lang === 'zh' ? '选择颜色' : 'Pick colour'
+    if (clearBtn) clearBtn.textContent = lang === 'zh' ? '清空' : 'Clear'
+    colorPop.hidden = false
+    syncColorPopUI()
+    body.querySelectorAll('[data-typo-toggle]').forEach(btn => {
+      const on = btn.dataset.typoToggle === key
+      btn.classList.toggle('on', on)
+      btn.setAttribute('aria-expanded', String(on))
+    })
+    const lRect = layer.getBoundingClientRect()
+    const aRect = anchorEl.getBoundingClientRect()
+    const popW = colorPop.offsetWidth || 244
+    const popH = colorPop.offsetHeight || 286
+    let left = aRect.right - lRect.left - popW
+    left = Math.max(12, Math.min(left, lRect.width - popW - 12))
+    let top = aRect.bottom - lRect.top + 8
+    if (top + popH > lRect.height - 10) {
+      top = Math.max(12, aRect.top - lRect.top - popH - 8)
+    }
+    colorPop.style.left = `${Math.round(left)}px`
+    colorPop.style.top = `${Math.round(top)}px`
+  }
+  function cpBindDrag(el, onPoint) {
+    let dragging = false
+    const handle = (e, keep) => {
+      const rect = el.getBoundingClientRect()
+      const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / (rect.width || 1)))
+      const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / (rect.height || 1)))
+      onPoint(x, y, keep)
+    }
+    el.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || !cpState) return
+      e.preventDefault()
+      dragging = true
+      try { el.setPointerCapture(e.pointerId) } catch {}
+      handle(e, false)
+    })
+    el.addEventListener('pointermove', e => {
+      if (!dragging || !cpState) return
+      e.preventDefault()
+      handle(e, false)
+    })
+    const end = e => {
+      if (!dragging) return
+      dragging = false
+      try { if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId) } catch {}
+      if (cpState) handle(e, true)
+    }
+    el.addEventListener('pointerup', end)
+    el.addEventListener('pointercancel', end)
+  }
+  cpBindDrag(colorPop.querySelector('[data-cp-sv]'), (x, y, keep) => {
+    if (!cpState) return
+    cpState.s = x
+    cpState.v = 1 - y
+    const rgb = hsvToRgb(cpState.h, cpState.s, cpState.v)
+    Object.assign(cpState, rgb, { hex: rgbToHex(rgb.r, rgb.g, rgb.b) })
+    syncColorPopUI()
+    applyTypoColorLive(cpState.key, cpState.hex, keep)
+  })
+  cpBindDrag(colorPop.querySelector('[data-cp-hue]'), (x, _y, keep) => {
+    if (!cpState) return
+    cpState.h = Math.min(359.9, x * 360)
+    const rgb = hsvToRgb(cpState.h, cpState.s, cpState.v)
+    Object.assign(cpState, rgb, { hex: rgbToHex(rgb.r, rgb.g, rgb.b) })
+    syncColorPopUI()
+    applyTypoColorLive(cpState.key, cpState.hex, keep)
+  })
+  function cpRgbInput(keep) {
+    if (!cpState) return
+    const rEl = colorPop.querySelector('[data-cp-rgb="r"]')
+    const gEl = colorPop.querySelector('[data-cp-rgb="g"]')
+    const bEl = colorPop.querySelector('[data-cp-rgb="b"]')
+    const clampByte = el => Math.min(255, Math.max(0, parseInt(String(el?.value || '').replace(/[^\d]/g, ''), 10) || 0))
+    const r = clampByte(rEl), g = clampByte(gEl), b = clampByte(bEl)
+    const hex = rgbToHex(r, g, b)
+    const hsv = rgbToHsv(r, g, b)
+    Object.assign(cpState, { r, g, b, hex, s: hsv.s, v: hsv.v })
+    if (hsv.s > 0 && hsv.v > 0) cpState.h = hsv.h
+    syncColorPopUI()
+    applyTypoColorLive(cpState.key, hex, keep)
+  }
+  function cpHexInput(target, keep) {
+    if (!cpState) return
+    let raw = String(target.value || '').trim().toLowerCase()
+    if (/^#?[0-9a-f]{3}$/i.test(raw) && keep) {
+      const h3 = raw.replace(/^#/, '')
+      raw = '#' + h3.split('').map(c => c + c).join('')
+    } else if (/^[0-9a-f]{6}$/i.test(raw)) {
+      raw = `#${raw}`
+    }
+    if (!/^#[0-9a-f]{6}$/i.test(raw)) {
+      if (keep) syncColorPopUI()
+      return
+    }
+    const rgb = hexToRgb(raw)
+    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b)
+    Object.assign(cpState, { ...rgb, hex: raw, s: hsv.s, v: hsv.v })
+    if (hsv.s > 0 && hsv.v > 0) cpState.h = hsv.h
+    syncColorPopUI()
+    applyTypoColorLive(cpState.key, raw, keep)
+  }
+  body.addEventListener('scroll', closeColorPop)
   const dockLookOf = () => {
     const raw = snap?.settings?.dockLook || {}
     return {
@@ -834,14 +1033,16 @@
     const mode = ['light', 'dark', 'glass'].includes(dl.mode) ? dl.mode : 'dark'
     const light = mode === 'light'
     const sysAccent = String(snap?.winLook?.accent || '').toLowerCase()
-    const accent = dl.accentMode === 'custom' && /^#[0-9a-f]{6}$/i.test(dl.accent)
-      ? dl.accent.toLowerCase()
+    const glassTinted = dl.accentMode === 'system' || /^#[0-9a-f]{6}$/i.test(dl.accent || '')
+    const accent = dl.accentMode === 'custom'
+      ? (/^#[0-9a-f]{6}$/i.test(dl.accent || '') ? dl.accent.toLowerCase() : (light ? '#005fb8' : '#5e9bff'))
       : (/^#[0-9a-f]{6}$/i.test(sysAccent) ? sysAccent : (light ? '#005fb8' : '#5e9bff'))
     const g = dl.glass || DOCK_LOOK_DEFAULT.glass
     return {
       mode,
       baseMode: light ? 'light' : 'dark',
       accent,
+      glassTinted,
       glass: { enabled: mode === 'glass', ...g },
       wallpaper: { url: snap.dockPaperUrl || '', dim: dl.wallpaperDim ?? 58 },
       typography: {
@@ -851,14 +1052,116 @@
       },
     }
   }
+  function syncDockLookDOM() {
+    const ilook = body.querySelector('.ilook')
+    if (!ilook || !snap?.settings) return false
+    const dl = dockLookOf()
+    const g = dl.glass || DOCK_LOOK_DEFAULT.glass
+    const track = ilook.querySelector('.dtp-track')
+    if (track) {
+      if (track.dataset.mode !== dl.mode) track.dataset.mode = dl.mode
+      track._dtpSetMode?.(dl.mode)
+    }
+    ilook.querySelectorAll('.dtp-hit').forEach(btn => {
+      btn.setAttribute('aria-pressed', String(btn.dataset.dockTheme === dl.mode))
+    })
+    ilook.querySelectorAll('.dtp-label-btn').forEach(btn => {
+      const on = btn.dataset.dockTheme === dl.mode
+      btn.classList.toggle('on', on)
+      btn.setAttribute('aria-pressed', String(on))
+    })
+    ilook.querySelectorAll('[data-glass-preset]').forEach(btn => {
+      btn.classList.toggle('on', btn.dataset.glassPreset === g.preset)
+    })
+    const sliders = [
+      ['wallpaperDim', dl.wallpaperDim ?? 58, '%'],
+      ['glass.surfaceOp', g.surfaceOp, '%'],
+      ['glass.surfaceBlur', g.surfaceBlur, 'px'],
+      ['glass.cardOp', g.cardOp, '%'],
+      ['glass.cardBlur', g.cardBlur, 'px'],
+      ['glass.overlayOp', g.overlayOp, '%'],
+      ['glass.overlayBlur', g.overlayBlur, 'px'],
+      ['glass.controlOp', g.controlOp, '%'],
+      ['glass.controlBlur', g.controlBlur, 'px'],
+    ]
+    for (const [key, val, unit] of sliders) {
+      const inp = ilook.querySelector(`[data-dock-look="${key}"]`)
+      if (inp && Number(inp.value) !== Number(val)) inp.value = String(val)
+      const rv = inp?.parentElement?.querySelector('.rv')
+      if (rv) rv.textContent = `${val}${unit}`
+    }
+    const accentCleared = dl.accentMode === 'custom' && !dl.accent
+    const curAccent = accentCleared
+      ? (dl.mode === 'light' ? '#005fb8' : '#5e9bff')
+      : String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
+    const accentItem = ilook.querySelector('[data-typo-item="accent"]')
+    if (accentItem) {
+      const sysBtn = accentItem.querySelector('[data-dock-accent-mode="system"]')
+      const clearBtn = accentItem.querySelector('[data-dock-accent-clear]')
+      const dot = accentItem.querySelector('.typo-dot')
+      const hexEl = accentItem.querySelector('.typo-hex')
+      if (sysBtn) {
+        sysBtn.classList.toggle('al', dl.accentMode === 'system')
+        sysBtn.setAttribute('aria-pressed', String(dl.accentMode === 'system'))
+      }
+      if (clearBtn) {
+        clearBtn.disabled = accentCleared
+        clearBtn.classList.toggle('is-ghost', accentCleared)
+      }
+      if (dot) dot.style.background = curAccent
+      if (hexEl) hexEl.textContent = accentCleared ? (lang === 'zh' ? '默认' : 'Default') : curAccent
+    }
+    const typoFallbacks = {
+      headingColor: dl.mode === 'light' ? '#111113' : '#ffffff',
+      textColor: dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7',
+      mutedColor: dl.mode === 'light' ? '#5d5d5d' : '#a1a1a6',
+    }
+    for (const k of ['headingColor', 'textColor', 'mutedColor']) {
+      const item = ilook.querySelector(`[data-typo-item="${k}"]`)
+      if (!item) continue
+      const val = dl[k] || ''
+      const preview = /^#[0-9a-f]{6}$/i.test(val) ? val.toLowerCase() : typoFallbacks[k]
+      const dot = item.querySelector('.typo-dot')
+      const hexEl = item.querySelector('.typo-hex')
+      const clearBtn = item.querySelector(`[data-dock-typo-clear="${k}"]`)
+      if (dot) dot.style.background = preview
+      if (hexEl) hexEl.textContent = val ? val.toLowerCase() : (lang === 'zh' ? '默认' : 'Default')
+      if (clearBtn) {
+        clearBtn.disabled = !val
+        clearBtn.classList.toggle('is-ghost', !val)
+      }
+    }
+    const summaryEl = body.querySelector('[data-ilook-summary]')
+    if (summaryEl) {
+      const modeLabel = T(`s.dockTheme.${dl.mode}`)
+      const detail = dl.mode === 'glass'
+        ? T(`s.glass.${g.preset || 'balanced'}`)
+        : (dl.accentMode === 'custom' ? (dl.accent || (lang === 'zh' ? '默认' : 'Default')) : (lang === 'zh' ? '跟随系统' : 'System'))
+      summaryEl.textContent = `${modeLabel} · ${detail}`
+    }
+    if (tab === 'look') body._html = PAGES.look()
+    return true
+  }
+
   function dockLookSave(next, keep = true) {
     if (!snap?.settings) return
     snap.settings.dockLook = next
     applyDockThemeVars()
-    if (keep) patch({ dockLook: next })
-    else {
+    extensionPage.refreshTheme?.()
+    const synced = syncDockLookDOM()
+    if (keep) {
+      if (synced) {
+        window.pet.settings.set({ dockLook: next }).then(got => {
+          snap = got
+          applyDockThemeVars()
+          extensionPage.refreshTheme?.()
+          if (!syncDockLookDOM()) draw()
+        })
+      } else {
+        patch({ dockLook: next })
+      }
+    } else if (!synced) {
       draw()
-      extensionPage.refreshTheme?.()
     }
   }
   function dockLookInput(target, keep) {
@@ -889,109 +1192,7 @@
     const next = key === 'accent'
       ? { ...cur, accentMode: 'custom', accent: clean }
       : { ...cur, [key]: clean }
-    snap.settings.dockLook = next
-    applyDockThemeVars()
-    extensionPage.refreshTheme?.()
-    const item = body.querySelector(`[data-typo-item="${key}"]`)
-    if (item) {
-      const dot = item.querySelector('.typo-dot')
-      const hexSpan = item.querySelector('.typo-hex')
-      const clearBtn = item.querySelector('[data-dock-typo-clear]')
-      const preview = item.querySelector('.typo-hex-preview')
-      const hexIn = item.querySelector('[data-typo-hex]')
-      const sliders = item.querySelector('.typo-sliders')
-      if (dot) dot.style.background = clean
-      if (hexSpan) hexSpan.textContent = clean
-      if (clearBtn) {
-        clearBtn.disabled = false
-        clearBtn.classList.remove('is-ghost')
-      }
-      if (preview) preview.style.background = clean
-      if (hexIn && document.activeElement !== hexIn) hexIn.value = clean
-      if (sliders) {
-        const [h6] = toHsl(clean)
-        sliders.style.setProperty('--tp-hue', fromHsl(h6, 1, 0.5))
-        sliders.style.setProperty('--tp-hex', clean)
-      }
-      item.querySelectorAll('[data-typo-swatch]').forEach(btn => {
-        const swHex = btn.dataset.typoSwatch.split(':')[1] || ''
-        btn.classList.toggle('on', swHex.toLowerCase() === clean)
-      })
-    }
-    if (keep) patch({ dockLook: next })
-  }
-  function typoHslInput(target, keep) {
-    const [key] = String(target.dataset.typoHsl || '').split(':')
-    const palette = target.closest('[data-typo-palette]')
-    if (!key || !palette) return
-    const hEl = palette.querySelector(`[data-typo-hsl="${key}:h"]`)
-    const sEl = palette.querySelector(`[data-typo-hsl="${key}:s"]`)
-    const lEl = palette.querySelector(`[data-typo-hsl="${key}:l"]`)
-    const hDeg = Math.min(360, Math.max(0, Number(hEl?.value) || 0))
-    const sPct = Math.min(100, Math.max(0, Number(sEl?.value) || 0))
-    const lPct = Math.min(98, Math.max(5, Number(lEl?.value) || 50))
-    const hRv = palette.querySelector('[data-typo-rv="h"]')
-    const sRv = palette.querySelector('[data-typo-rv="s"]')
-    const lRv = palette.querySelector('[data-typo-rv="l"]')
-    if (hRv) hRv.textContent = `${hDeg}°`
-    if (sRv) sRv.textContent = `${sPct}%`
-    if (lRv) lRv.textContent = `${lPct}%`
-    const hex = fromHsl((hDeg % 360) / 60, sPct / 100, lPct / 100)
-    applyTypoColorLive(key, hex, keep)
-  }
-  function typoHexInput(target, keep) {
-    const key = target.dataset.typoHex
-    if (!key) return
-    let raw = String(target.value || '').trim().toLowerCase()
-    if (/^[0-9a-f]{6}$/i.test(raw)) raw = `#${raw}`
-    if (!/^#[0-9a-f]{6}$/i.test(raw)) {
-      if (keep) draw()
-      return
-    }
-    const palette = target.closest('[data-typo-palette]')
-    if (palette) {
-      const [h6, s1, l1] = toHsl(raw)
-      const hDeg = Math.round(h6 * 60) % 360
-      const sPct = Math.round(s1 * 100)
-      const lPct = Math.round(l1 * 100)
-      const hEl = palette.querySelector(`[data-typo-hsl="${key}:h"]`)
-      const sEl = palette.querySelector(`[data-typo-hsl="${key}:s"]`)
-      const lEl = palette.querySelector(`[data-typo-hsl="${key}:l"]`)
-      if (hEl) hEl.value = String(hDeg)
-      if (sEl) sEl.value = String(sPct)
-      if (lEl) lEl.value = String(lPct)
-      const hRv = palette.querySelector('[data-typo-rv="h"]')
-      const sRv = palette.querySelector('[data-typo-rv="s"]')
-      const lRv = palette.querySelector('[data-typo-rv="l"]')
-      if (hRv) hRv.textContent = `${hDeg}°`
-      if (sRv) sRv.textContent = `${sPct}%`
-      if (lRv) lRv.textContent = `${lPct}%`
-    }
-    applyTypoColorLive(key, raw, keep)
-  }
-  function renderTypoPalette(key, activeHex) {
-    const safeHex = /^#[0-9a-f]{6}$/i.test(activeHex) ? activeHex.toLowerCase() : '#f5f5f7'
-    const [h6, s1, l1] = toHsl(safeHex)
-    const hDeg = Math.round(h6 * 60) % 360
-    const sPct = Math.round(s1 * 100)
-    const lPct = Math.min(98, Math.max(5, Math.round(l1 * 100)))
-    const pureHue = fromHsl(h6, 1, 0.5)
-    const swatches = TYPO_SWATCHES
-      .map(c => `<button type="button" class="typo-sw${c.toLowerCase() === safeHex ? ' on' : ''}" data-typo-swatch="${esc(key)}:${c}" style="background:${c}" title="${c}" aria-label="${c}"></button>`)
-      .join('')
-    return `<div class="typo-palette" data-typo-palette="${esc(key)}">
-      <div class="typo-swatches">${swatches}</div>
-      <div class="typo-sliders" style="--tp-hue:${pureHue};--tp-hex:${esc(safeHex)}">
-        <div class="typo-hsl-row"><span class="typo-hsl-lbl">${esc(lang === 'zh' ? '色相' : 'Hue')}</span><input type="range" class="rng typo-rng rng-h" data-typo-hsl="${esc(key)}:h" min="0" max="360" step="1" value="${hDeg}"><span class="rv mono" data-typo-rv="h">${hDeg}°</span></div>
-        <div class="typo-hsl-row"><span class="typo-hsl-lbl">${esc(lang === 'zh' ? '饱和度' : 'Sat')}</span><input type="range" class="rng typo-rng rng-s" data-typo-hsl="${esc(key)}:s" min="0" max="100" step="1" value="${sPct}"><span class="rv mono" data-typo-rv="s">${sPct}%</span></div>
-        <div class="typo-hsl-row"><span class="typo-hsl-lbl">${esc(lang === 'zh' ? '明度' : 'Light')}</span><input type="range" class="rng typo-rng rng-l" data-typo-hsl="${esc(key)}:l" min="5" max="98" step="1" value="${lPct}"><span class="rv mono" data-typo-rv="l">${lPct}%</span></div>
-      </div>
-      <div class="typo-hex-bar">
-        <span class="typo-hex-preview" style="background:${esc(safeHex)}"></span>
-        <span class="typo-hex-tag mono">HEX</span>
-        <input type="text" class="in typo-hex-in mono" data-typo-hex="${esc(key)}" value="${esc(safeHex)}" maxlength="7" placeholder="#rrggbb" spellcheck="false" autocomplete="off">
-      </div>
-    </div>`
+    dockLookSave(next, keep)
   }
   function applyDockThemeVars() {
     const info = buildAppearancePayload()
@@ -1009,6 +1210,10 @@
     layer.style.setProperty('--sys-accent', info.accent)
     root.setProperty('--sys-accent', info.accent)
     root.setProperty('--dock-accent', info.accent)
+    root.setProperty('--dock-glass-tint-surface', info.glassTinted ? '14%' : '0%')
+    root.setProperty('--dock-glass-tint-card', info.glassTinted ? '10%' : '0%')
+    root.setProperty('--dock-glass-tint-overlay', info.glassTinted ? '12%' : '0%')
+    root.setProperty('--dock-glass-tint-rim', info.glassTinted ? '26%' : '0%')
     if (info.typography.headingColor && /^#[0-9a-f]{6}$/i.test(info.typography.headingColor)) {
       root.setProperty('--dock-heading', info.typography.headingColor)
       layer.style.setProperty('--dock-heading', info.typography.headingColor)
@@ -1056,19 +1261,42 @@
     const g = dl.glass
     const dockRange = (key, min, max, unit, val) => `<span class="ilook-rng"><input type="range" class="rng" data-dock-look="${key}" min="${min}" max="${max}" step="1" value="${val}"><span class="rv">${val}${unit}</span></span>`
 
-    const curAccent = String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
-    const colours = /^#[0-9a-f]{6}$/.test(curAccent) && !ACCENTS.includes(curAccent) ? [...ACCENTS, curAccent] : ACCENTS
-    const accentSwatches = colours.map(c => `<span class="acc${c === curAccent ? ' on' : ''}" data-dock-accent="${c}" style="background:${c}" title="${c}"></span>`).join('')
-    const accentPaletteOpen = typoOpen === 'accent'
+    const accentCleared = dl.accentMode === 'custom' && !dl.accent
+    const curAccent = accentCleared
+      ? (dl.mode === 'light' ? '#005fb8' : '#5e9bff')
+      : String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
+    const accentLabel = accentCleared ? (lang === 'zh' ? '默认' : 'Default') : curAccent
+    const accentPaletteOpen = !colorPop.hidden && cpState?.key === 'accent'
     const paperPreview = snap.dockPaperUrl
       ? `<div class="dock-paper-row"><img class="dock-paper-thumb" src="${esc(snap.dockPaperUrl)}" alt=""><button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperChange'))}</button><button type="button" class="pbtn sm" data-dock-paper="remove">${esc(T('s.dockPaperRemove'))}</button></div>`
       : `<button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperPick'))}</button>`
-    const themeCards = ['light', 'dark', 'glass']
-      .map(m => `<button type="button" class="dock-theme-card mode-${m}${dl.mode === m ? ' on' : ''}" data-dock-theme="${m}" aria-pressed="${dl.mode === m}">
-        <span class="theme-scene" aria-hidden="true"><i class="scene-orb"></i><i class="scene-deco"></i><i class="scene-ray"></i></span>
-        <span class="theme-foot"><i class="theme-dot"></i><span class="theme-label">${esc(T(`s.dockTheme.${m}`))}</span></span>
-      </button>`)
-      .join('')
+    const themePill = `<div class="dock-theme-pill" role="radiogroup" aria-label="${esc(T('s.dockTheme'))}">
+      <div class="dtp-track" data-mode="${esc(dl.mode)}">
+        <span class="dtp-sky dtp-sky-light" aria-hidden="true"></span>
+        <span class="dtp-sky dtp-sky-dark" aria-hidden="true"></span>
+        <span class="dtp-sky dtp-sky-glass" aria-hidden="true"></span>
+        <span class="dtp-rings" aria-hidden="true"><i></i></span>
+        <span class="dtp-clouds" aria-hidden="true"><i class="dtp-cloud-back"></i><i class="dtp-cloud-front"></i></span>
+        <span class="dtp-stars" aria-hidden="true"><i class="dtp-star-a"></i><i class="dtp-star-b"></i><i class="dtp-star-c"></i><i class="dtp-star-d"></i></span>
+        <span class="dtp-glass-fx" aria-hidden="true"><i class="dtp-glass-ribbon"></i><i class="dtp-gb b1"></i><i class="dtp-gb b2"></i><i class="dtp-gb b3"></i><i class="dtp-gb b4"></i><i class="dtp-gb b5"></i><i class="dtp-gb b6"></i></span>
+        <span class="dtp-wash" aria-hidden="true"><i></i></span>
+        <span class="dtp-led-wrap" aria-hidden="true"><i class="dtp-led-halo"></i><i class="dtp-led-core"></i></span>
+        <span class="dtp-orb" aria-hidden="true">
+          <i class="dtp-face dtp-face-sun"></i>
+          <i class="dtp-face dtp-face-moon"><b class="dtp-crater c1"></b><b class="dtp-crater c2"></b><b class="dtp-crater c3"></b></i>
+          <i class="dtp-face dtp-face-glass"><b class="dtp-glass-glint"></b><b class="dtp-glass-caustic"></b></i>
+          <i class="dtp-orb-tir"></i>
+          <i class="dtp-orb-rim"></i>
+        </span>
+        <span class="dtp-bevel" aria-hidden="true"></span>
+        <div class="dtp-hits">${['light', 'dark', 'glass']
+          .map(m => `<button type="button" class="dtp-hit" data-dock-theme="${m}" aria-label="${esc(T(`s.dockTheme.${m}`))}" aria-pressed="${dl.mode === m}" title="${esc(T(`s.dockTheme.${m}`))}"></button>`)
+          .join('')}</div>
+      </div>
+      <div class="dtp-labels">${['light', 'dark', 'glass']
+        .map(m => `<button type="button" class="dtp-label-btn${dl.mode === m ? ' on' : ''}" data-dock-theme="${m}" aria-pressed="${dl.mode === m}"><span>${esc(T(`s.dockTheme.${m}`))}</span></button>`)
+        .join('')}</div>
+    </div>`
     const glassPresets = ['off', 'light', 'balanced', 'clear', 'custom']
       .map(p => `<button type="button" class="${g.preset === p ? 'on' : ''}" data-glass-preset="${p}">${esc(T(`s.glass.${p}`))}</button>`)
       .join('')
@@ -1077,8 +1305,8 @@
     const typoRow = (key, label, fallbackHex) => {
       const val = dl[key] || ''
       const previewHex = /^#[0-9a-f]{6}$/i.test(val) ? val.toLowerCase() : fallbackHex
-      const open = typoOpen === key
-      return `<div class="ilook-typo-item${open ? ' open' : ''}" data-typo-item="${esc(key)}">
+      const open = !colorPop.hidden && cpState?.key === key
+      return `<div class="ilook-typo-item" data-typo-item="${esc(key)}">
         <div class="ilook-typo-row">
           <span class="ilook-typo-lbl">${esc(label)}</span>
           <div class="ilook-typo-actions">
@@ -1089,7 +1317,6 @@
             <button type="button" class="pbtn sm typo-clear-btn${val ? '' : ' is-ghost'}" data-dock-typo-clear="${esc(key)}" ${val ? '' : 'disabled'}>${esc(T('s.typo.clear'))}</button>
           </div>
         </div>
-        ${open ? renderTypoPalette(key, previewHex) : ''}
       </div>`
     }
 
@@ -1104,7 +1331,7 @@
             <div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.dockPaperDim'))}</span>${dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58)}</div>
             <div class="ilook-hint">${esc(T('s.dockPaperDimNote'))}</div>
           </div>
-          <div class="dock-theme-stage" role="radiogroup" aria-label="${esc(T('s.dockTheme'))}">${themeCards}</div>
+          ${themePill}
         </div>
         <div class="ilook-sec-card">
           <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.glass'))}</span><span class="ilook-box-note">${esc(T('s.glassNote'))}</span></div>
@@ -1113,17 +1340,14 @@
             <div class="r ilook-accent-row">
               <div class="grow"><div class="glass-reg-t">${esc(T('s.dockAccent'))}</div><div class="glass-reg-d">${esc(T('s.dockAccentNote'))}</div></div>
               <div class="winaccent-mode">
-                ${[['system', lang === 'zh' ? '跟随系统' : 'System'], ['custom', lang === 'zh' ? '自定义' : 'Custom']]
-                  .map(([k, label]) => `<button type="button" class="pbtn sm${dl.accentMode === k ? ' al' : ''}" data-dock-accent-mode="${k}" aria-pressed="${dl.accentMode === k}">${esc(label)}</button>`)
-                  .join('')}
-                <button type="button" class="typo-pill-btn${accentPaletteOpen ? ' on' : ''}" data-typo-toggle="accent" aria-expanded="${accentPaletteOpen}" title="${esc(lang === 'zh' ? '点击展开玻璃调色板' : 'Open glass color palette')}">
+                <button type="button" class="pbtn sm${dl.accentMode === 'system' ? ' al' : ''}" data-dock-accent-mode="system" aria-pressed="${dl.accentMode === 'system'}">${esc(lang === 'zh' ? '跟随系统' : 'System')}</button>
+                <button type="button" class="pbtn sm typo-clear-btn${accentCleared ? ' is-ghost' : ''}" data-dock-accent-clear ${accentCleared ? 'disabled' : ''}>${esc(T('s.typo.clear'))}</button>
+                <button type="button" class="typo-pill-btn${accentPaletteOpen ? ' on' : ''}" data-typo-toggle="accent" aria-expanded="${accentPaletteOpen}" title="${esc(lang === 'zh' ? '点击打开浮窗调色盘自定义玻璃色调' : 'Open floating color picker')}">
                   <i class="typo-dot" style="background:${esc(curAccent)}"></i>
-                  <span class="typo-hex mono">${esc(curAccent)}</span>
+                  <span class="typo-hex mono">${esc(accentLabel)}</span>
                 </button>
               </div>
             </div>
-            ${dl.accentMode === 'custom' ? `<div class="accents ilook-accents">${accentSwatches}</div>` : ''}
-            ${accentPaletteOpen ? renderTypoPalette('accent', curAccent) : ''}
           </div>
           ${glassRegion('s.glass.surface', 's.glass.surfaceNote', 'glass.surfaceOp', g.surfaceOp, 'glass.surfaceBlur', g.surfaceBlur)}
           ${glassRegion('s.glass.card', 's.glass.cardNote', 'glass.cardOp', g.cardOp, 'glass.cardBlur', g.cardBlur)}
@@ -1184,9 +1408,212 @@
   function ilookRow() {
     const dl = dockLookOf()
     const modeLabel = T(`s.dockTheme.${dl.mode}`)
-    const detail = dl.mode === 'glass' ? T(`s.glass.${dl.glass?.preset || 'balanced'}`) : (dl.accentMode === 'custom' ? dl.accent : (lang === 'zh' ? '跟随系统' : 'System'))
+    const detail = dl.mode === 'glass'
+      ? T(`s.glass.${dl.glass?.preset || 'balanced'}`)
+      : (dl.accentMode === 'custom' ? (dl.accent || (lang === 'zh' ? '默认' : 'Default')) : (lang === 'zh' ? '跟随系统' : 'System'))
     const now = `${modeLabel} · ${detail}`
-    return `${row(esc(T('s.ilook')), esc(now), `<button class="pbtn sm" data-ilook-fold>${esc(T(ilookOpen ? 's.ilookFold' : 's.ilookAdjust'))}</button>`)}${ilookOpen ? ilookPanel() : ''}`
+    return `${row(esc(T('s.ilook')), `<span data-ilook-summary>${esc(now)}</span>`, `<button class="pbtn sm" data-ilook-fold>${esc(T(ilookOpen ? 's.ilookFold' : 's.ilookAdjust'))}</button>`)}${ilookOpen ? ilookPanel() : ''}`
+  }
+
+  function mountThemePill() {
+    const track = body.querySelector('.dtp-track')
+    if (!track) return
+    if (track._dtpBound) {
+      track._dtpSetMode?.(dockLookOf().mode, false)
+      return
+    }
+    track._dtpBound = true
+    const STOPS = { light: 0, dark: 0.5, glass: 1 }
+    const LED_ANGLES = { light: 58, dark: 180, glass: 302 }
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+    const lerp = (a, b, t) => a + (b - a) * t
+    const modePos = m => (m in STOPS ? STOPS[m] : 0.5)
+    const ledColorFor = p => {
+      const c0 = [255, 174, 46]
+      const c1 = [111, 134, 255]
+      const c2 = [92, 212, 255]
+      const t = clamp(p, 0, 1)
+      const [a, b, f] = t <= 0.5 ? [c0, c1, t * 2] : [c1, c2, (t - 0.5) * 2]
+      return `rgb(${Math.round(lerp(a[0], b[0], f))}, ${Math.round(lerp(a[1], b[1], f))}, ${Math.round(lerp(a[2], b[2], f))})`
+    }
+    const ledTargetAngle = p => lerp(58, 302, clamp(p, 0, 1))
+    const nearestMode = p => (p < 0.25 ? 'light' : p < 0.75 ? 'dark' : 'glass')
+
+    let targetMode = dockLookOf().mode
+    let p = modePos(targetMode)
+    let v = 0
+    let ledDeg = LED_ANGLES[targetMode] ?? 180
+    let ledV = 0
+    let hover = 0, press = 0, kick = 0
+    let hovered = false, pressed = false
+    let dragging = false, moved = false
+    let startX = 0, dragOffset = 0, lastX = 0, lastT = 0, dragV = 0
+    let raf = 0, prevTs = 0
+
+    const paint = () => {
+      const cp = clamp(p, -0.06, 1.06)
+      const wL = clamp(1 - cp * 2, 0, 1)
+      const wD = clamp(1 - Math.abs(cp - 0.5) * 2, 0, 1)
+      const wG = clamp((cp - 0.5) * 2, 0, 1)
+      const over = p < 0 ? -p : p > 1 ? p - 1 : 0
+      const stretch = Math.min(Math.abs(v) * 0.085, 0.16)
+      const pScale = 1 - 0.035 * press
+      const sx = (1 + stretch - over * 0.55) * pScale
+      const sy = (1 - stretch * 0.44 + over * 0.28) * pScale
+      const lift = hover * (1 - press)
+      const boost = clamp(1 + hover * 0.08 + Math.min(Math.abs(v) * 0.14, 0.16) + kick, 1, 1.42)
+      const s = track.style
+      s.setProperty('--dtp-p', cp.toFixed(4))
+      s.setProperty('--dtp-w-light', wL.toFixed(4))
+      s.setProperty('--dtp-w-dark', wD.toFixed(4))
+      s.setProperty('--dtp-w-glass', wG.toFixed(4))
+      s.setProperty('--dtp-led-deg', `${ledDeg.toFixed(2)}deg`)
+      s.setProperty('--dtp-led-color', ledColorFor(cp))
+      s.setProperty('--dtp-sx', sx.toFixed(4))
+      s.setProperty('--dtp-sy', sy.toFixed(4))
+      s.setProperty('--dtp-lift', lift.toFixed(4))
+      s.setProperty('--dtp-boost', boost.toFixed(4))
+      s.setProperty('--dtp-spin-sun', `${((1 - wL) * -105).toFixed(2)}deg`)
+      s.setProperty('--dtp-spin-moon', `${((0.5 - cp) * 210).toFixed(2)}deg`)
+      s.setProperty('--dtp-spin-glass', `${((1 - wG) * 105).toFixed(2)}deg`)
+    }
+
+    const step = ts => {
+      raf = 0
+      if (!track.isConnected) return
+      const dt = prevTs ? Math.min(0.05, (ts - prevTs) / 1000) : 0.016
+      prevTs = ts
+      const targetP = modePos(targetMode)
+      const targetLed = dragging ? ledTargetAngle(p) : (LED_ANGLES[targetMode] ?? 180)
+      const k = 135, c = 2 * 0.62 * Math.sqrt(k)
+      const kLed = 75, cLed = 2 * Math.sqrt(kLed)
+      const sub = 4, sdt = dt / sub
+      for (let i = 0; i < sub; i++) {
+        if (!dragging) {
+          const a = -k * (p - targetP) - c * v
+          v += a * sdt
+          p += v * sdt
+        } else {
+          v += (dragV - v) * Math.min(1, sdt * 24)
+        }
+        const aLed = -kLed * (ledDeg - targetLed) - cLed * ledV
+        ledV += aLed * sdt
+        ledDeg += ledV * sdt
+      }
+      const rate = Math.min(1, dt * 16)
+      hover += ((hovered ? 1 : 0) - hover) * rate
+      press += ((pressed ? 1 : 0) - press) * rate
+      kick *= Math.pow(0.04, dt)
+      paint()
+      const settled = !dragging && !pressed &&
+        Math.abs(p - targetP) < 0.0005 && Math.abs(v) < 0.0005 &&
+        Math.abs(ledDeg - targetLed) < 0.1 && Math.abs(ledV) < 0.1 &&
+        Math.abs(hover - (hovered ? 1 : 0)) < 0.004 && press < 0.004 && kick < 0.004
+      if (settled) {
+        p = targetP; v = 0; ledDeg = targetLed; ledV = 0; press = 0; kick = 0; hover = hovered ? 1 : 0
+        paint()
+        track.classList.remove('is-physics')
+        prevTs = 0
+      } else {
+        raf = requestAnimationFrame(step)
+      }
+    }
+
+    const wake = () => {
+      track.classList.add('is-physics')
+      if (!raf) {
+        prevTs = 0
+        raf = requestAnimationFrame(step)
+      }
+    }
+
+    track._dtpSetMode = (mode, withKick = false) => {
+      if (!(mode in STOPS)) return
+      const changed = mode !== targetMode
+      targetMode = mode
+      if (track.dataset.mode !== mode) track.dataset.mode = mode
+      if (withKick || changed) {
+        kick = Math.max(kick, 0.22)
+        wake()
+      } else if (!raf && !dragging) {
+        p = modePos(mode)
+        ledDeg = LED_ANGLES[mode] ?? 180
+        paint()
+      }
+    }
+
+    const commitMode = mode => {
+      const cur = dockLookOf()
+      const glass = mode === 'glass' && cur.glass.preset === 'off' ? { ...GLASS_PRESETS.balanced, preset: 'balanced' } : cur.glass
+      track._dtpSetMode(mode, true)
+      if (cur.mode !== mode || glass !== cur.glass) {
+        dockLookSave({ ...cur, mode, glass }, true)
+      }
+    }
+
+    const spanOf = () => Math.max(1, track.clientWidth - 72)
+
+    track.addEventListener('pointerenter', () => { hovered = true; wake() })
+    track.addEventListener('pointerleave', () => { hovered = false; wake() })
+    track.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      const rect = track.getBoundingClientRect()
+      const span = spanOf()
+      const rel = (e.clientX - rect.left - 36) / span
+      pressed = true
+      dragging = true
+      moved = false
+      startX = e.clientX
+      lastX = e.clientX
+      lastT = performance.now()
+      dragV = 0
+      const orbDist = Math.abs(rel - p)
+      dragOffset = orbDist < 0.18 ? (rel - p) : 0
+      kick = Math.max(kick, 0.18)
+      try { track.setPointerCapture(e.pointerId) } catch {}
+      wake()
+    })
+    track.addEventListener('pointermove', e => {
+      if (!dragging) return
+      const dx = e.clientX - startX
+      if (!moved && Math.abs(dx) > 4) moved = true
+      if (!moved) return
+      const rect = track.getBoundingClientRect()
+      const span = spanOf()
+      const raw = (e.clientX - rect.left - 36) / span - dragOffset
+      const now = performance.now()
+      const dt = Math.max(0.004, (now - lastT) / 1000)
+      const prevP = p
+      if (raw < 0) p = raw * 0.22
+      else if (raw > 1) p = 1 + (raw - 1) * 0.22
+      else p = raw
+      dragV = clamp((p - prevP) / dt, -5.5, 5.5)
+      lastX = e.clientX
+      lastT = now
+      wake()
+    })
+    const release = e => {
+      if (!dragging) return
+      dragging = false
+      pressed = false
+      try { if (track.hasPointerCapture?.(e.pointerId)) track.releasePointerCapture(e.pointerId) } catch {}
+      track._dtpSuppressClick = Date.now() + 80
+      let chosen
+      if (moved) {
+        const projected = p + dragV * 0.14
+        chosen = nearestMode(projected)
+        v = dragV * 0.72
+      } else {
+        const rect = track.getBoundingClientRect()
+        const ratio = (e.clientX - rect.left) / (rect.width || 1)
+        chosen = ratio < 1 / 3 ? 'light' : ratio < 2 / 3 ? 'dark' : 'glass'
+      }
+      commitMode(chosen)
+    }
+    track.addEventListener('pointerup', release)
+    track.addEventListener('pointercancel', release)
+    paint()
   }
 
   let orderBusy = false, orderNote = '', orderError = '', tabDragging = false
@@ -3979,7 +4406,7 @@
     const changed = setHTML(body, PAGES[tab]())
     if (tab === 'widgets') extensionPanel.mount(body)
     if (tab === 'now') identityPanel.mount(body)
-    if (tab === 'look') { mountTabOrder() }
+    if (tab === 'look') { mountTabOrder(); mountThemePill() }
     if (reset) {
       body.scrollTop = 0
       // Two panes: what is on the right from its top; the list stays where it was.
@@ -4164,12 +4591,14 @@
     // Nothing of a password shown is remembered: the next opening has them
     // hidden again (#17).
     eyeShown.clear()
+    if (typeof closeColorPop === 'function') closeColorPop()
     window.pet.settingsClosed()
     window.Island?.changed()
   }
 
   function setTab(next) {
     if (next === tab || !TABS.includes(next)) return
+    if (typeof closeColorPop === 'function') closeColorPop()
     tab = next
     draw(true)
     if (tab === 'look') { loadGallery(false) }
@@ -4276,6 +4705,14 @@
     const at = selector => e.target.closest(selector)
     // A click anywhere but on it closes the letter menu.
     if (!menuEl.hidden && !at('.mmenu')) closeMenu()
+    if (!colorPop.hidden && !at('.cp-popover') && !at('[data-typo-toggle]')) closeColorPop()
+    if (at('[data-cp-close]')) return closeColorPop()
+    if (at('[data-cp-clear]') && cpState) {
+      const k = cpState.key
+      closeColorPop()
+      const cur = dockLookOf()
+      return dockLookSave(k === 'accent' ? { ...cur, accentMode: 'custom', accent: '' } : { ...cur, [k]: '' }, true)
+    }
     if (snap?.authFocusActive && (at('[data-lock]') || at('[data-top]'))) return deviceAction('release')
     if (at('[data-lock]')) return patch(snap.settings.settingsPin ? { settingsPin: false, settingsTop: false } : { settingsPin: true })
     if (at('[data-top]')) return patch(snap.settings.settingsPin && snap.settings.settingsTop ? { settingsTop: false } : { settingsPin: true, settingsTop: true })
@@ -4477,15 +4914,24 @@
     if (ilookBg) return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bg: ilookBg.dataset.ilookBg })
     const dockTheme = at('[data-dock-theme]')
     if (dockTheme) {
+      const track = body.querySelector('.dtp-track')
+      if (dockTheme.classList.contains('dtp-hit') && track?._dtpSuppressClick && Date.now() < track._dtpSuppressClick) return
       const cur = dockLookOf()
       const mode = dockTheme.dataset.dockTheme
       const glass = mode === 'glass' && cur.glass.preset === 'off' ? { ...GLASS_PRESETS.balanced, preset: 'balanced' } : cur.glass
+      track?._dtpSetMode?.(mode, true)
       return dockLookSave({ ...cur, mode, glass }, true)
     }
     const dockAccentMode = at('[data-dock-accent-mode]')
     if (dockAccentMode) {
       const cur = dockLookOf()
       return dockLookSave({ ...cur, accentMode: dockAccentMode.dataset.dockAccentMode }, true)
+    }
+    const dockAccentClear = at('[data-dock-accent-clear]')
+    if (dockAccentClear && !dockAccentClear.disabled) {
+      if (cpState?.key === 'accent') closeColorPop()
+      const cur = dockLookOf()
+      return dockLookSave({ ...cur, accentMode: 'custom', accent: '' }, true)
     }
     const dockAccent = at('[data-dock-accent]')
     if (dockAccent) {
@@ -4513,24 +4959,13 @@
     }
     const typoToggle = at('[data-typo-toggle]')
     if (typoToggle) {
-      const k = typoToggle.dataset.typoToggle
-      typoOpen = typoOpen === k ? '' : k
-      draw()
-      return relayout()
-    }
-    const typoSwatch = at('[data-typo-swatch]')
-    if (typoSwatch) {
-      const [k, hex] = typoSwatch.dataset.typoSwatch.split(':')
-      if (k && hex) {
-        const cur = dockLookOf()
-        const next = k === 'accent' ? { ...cur, accentMode: 'custom', accent: hex } : { ...cur, [k]: hex }
-        return dockLookSave(next, true)
-      }
+      openColorPop(typoToggle.dataset.typoToggle, typoToggle)
+      return
     }
     const typoClear = at('[data-dock-typo-clear]')
     if (typoClear && !typoClear.disabled) {
       const k = typoClear.dataset.dockTypoClear
-      if (typoOpen === k) typoOpen = ''
+      if (cpState?.key === k) closeColorPop()
       const cur = dockLookOf()
       return dockLookSave({ ...cur, [k]: '' }, true)
     }
@@ -5194,8 +5629,8 @@
     }
     if (e.target.dataset.ilook) ilookInput(e.target, false)
     if (e.target.dataset.dockLook) dockLookInput(e.target, false)
-    if (e.target.dataset.typoHsl) typoHslInput(e.target, false)
-    if (e.target.dataset.typoHex) typoHexInput(e.target, false)
+    if (e.target.dataset.cpRgb) cpRgbInput(false)
+    if (e.target.dataset.cpHex !== undefined) cpHexInput(e.target, false)
     if (e.target.id === 's-ref') {
       typedRef = e.target.value
       // Not mid-word in an input method: once the word is chosen.
@@ -5223,8 +5658,8 @@
     if (e.target.matches('[data-w-file]')) return addFiles(e.target)
     if (e.target.dataset.ilook) return ilookInput(e.target, true)
     if (e.target.dataset.dockLook) return dockLookInput(e.target, true)
-    if (e.target.dataset.typoHsl) return typoHslInput(e.target, true)
-    if (e.target.dataset.typoHex) return typoHexInput(e.target, true)
+    if (e.target.dataset.cpRgb) return cpRgbInput(true)
+    if (e.target.dataset.cpHex !== undefined) return cpHexInput(e.target, true)
     if (e.target.dataset.proxyAt !== undefined) return proxyAddress(e.target.dataset.proxyAt, e.target.value)
     if (e.target.dataset.mon) return monitorField(e.target.dataset.mon)
     if (e.target.dataset.hold) return holdTyped(e.target)
@@ -5339,6 +5774,7 @@
     if (e.key === 'Escape') {
       e.preventDefault()
       if (!menuEl.hidden) return closeMenu()
+      if (typeof colorPop !== 'undefined' && !colorPop.hidden) return closeColorPop()
       return close('Esc')
     }
     if (e.target.matches?.('input, textarea')) {

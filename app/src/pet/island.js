@@ -4144,11 +4144,16 @@
     body.dataset.dockMode = mode
     body.dataset.dockGlass = glassOn ? '1' : '0'
     const sysAccent = (look.mode === 'light' ? look.accent?.dark : look.accent?.light) || ''
-    const accent = dl.accentMode === 'custom' && /^#[0-9a-f]{6}$/i.test(dl.accent || '')
-      ? dl.accent.toLowerCase()
+    const glassTinted = dl.accentMode === 'system' || /^#[0-9a-f]{6}$/i.test(dl.accent || '')
+    const accent = dl.accentMode === 'custom'
+      ? (/^#[0-9a-f]{6}$/i.test(dl.accent || '') ? dl.accent.toLowerCase() : (light ? '#005fb8' : '#5e9bff'))
       : (/^#[0-9a-f]{6}$/i.test(sysAccent) ? sysAccent : (light ? '#005fb8' : '#5e9bff'))
     root.setProperty('--sys-accent', accent)
     root.setProperty('--dock-accent', accent)
+    root.setProperty('--dock-glass-tint-surface', glassTinted ? '14%' : '0%')
+    root.setProperty('--dock-glass-tint-card', glassTinted ? '10%' : '0%')
+    root.setProperty('--dock-glass-tint-overlay', glassTinted ? '12%' : '0%')
+    root.setProperty('--dock-glass-tint-rim', glassTinted ? '26%' : '0%')
     const settingsEl = document.getElementById('island-settings')
     if (dl.headingColor && /^#[0-9a-f]{6}$/i.test(dl.headingColor)) {
       root.setProperty('--dock-heading', dl.headingColor)

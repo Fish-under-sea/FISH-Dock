@@ -3333,311 +3333,787 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
-/* 底部浅色 / 深色 / 玻璃三大动效切换舞台（融合昼夜单标签场景动效 + 液态玻璃折射流光） */
-#island-settings .dock-theme-stage {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-.tb-light #island-settings .dock-theme-stage {
-  border-top-color: rgba(0, 0, 0, 0.07);
-}
-
-#island-settings .dock-theme-card {
-  position: relative;
+/* 底部浅色 / 深色 / 玻璃全宽三态 3D 光学拟物场景胶囊开关（欠阻尼弹簧物理 + 绕行白炽灯带弧 + 玻璃内全反射 + 4层同心光圈 + 云海/星群/水珠） */
+#island-settings .dock-theme-pill {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
-  padding: 6px;
-  border-radius: 14px;
-  border: 1.5px solid var(--g3);
-  background: var(--g1);
-  color: var(--dock-heading, var(--dock-fg, var(--fg)));
-  cursor: pointer;
-  user-select: none;
-  transition:
-    transform 0.34s var(--spring),
-    border-color 0.25s ease,
-    box-shadow 0.28s ease,
-    background-color 0.25s ease;
-}
-
-#island-settings .dock-theme-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--g4);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
-}
-
-#island-settings .dock-theme-card:active {
-  transform: translateY(1px) scale(0.97);
-}
-
-#island-settings .dock-theme-card.on {
-  border-color: var(--dock-accent, #5e9bff);
-  box-shadow:
-    0 0 0 1px var(--dock-accent, #5e9bff),
-    0 8px 22px color-mix(in srgb, var(--dock-accent, #5e9bff) 26%, rgba(0, 0, 0, 0.28));
-}
-
-#island-settings .dock-theme-card .theme-scene {
-  position: relative;
-  display: block;
+  gap: 8px;
   width: 100%;
-  height: 46px;
-  border-radius: 10px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .dock-theme-pill {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .dtp-track {
+  position: relative;
+  width: 100%;
+  height: 72px;
+  border-radius: 999px;
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  user-select: none;
+  touch-action: none;
+  cursor: grab;
+  background: #1a1f2b;
+  --dtp-p: 0.5;
+  --dtp-w-light: 0;
+  --dtp-w-dark: 1;
+  --dtp-w-glass: 0;
+  --dtp-led-deg: 180deg;
+  --dtp-led-color: #6f86ff;
+  --dtp-sx: 1;
+  --dtp-sy: 1;
+  --dtp-lift: 0;
+  --dtp-boost: 1;
+  --dtp-spin-sun: -105deg;
+  --dtp-spin-moon: 0deg;
+  --dtp-spin-glass: 105deg;
+  box-shadow:
+    0 2px 3px rgba(255, 255, 255, 0.2),
+    0 -1px 2px rgba(0, 0, 0, 0.44),
+    0 12px 26px rgba(0, 0, 0, 0.3),
+    0 3px 8px rgba(0, 0, 0, 0.24);
+  transition: box-shadow 0.45s ease;
 }
 
-#island-settings .dock-theme-card .scene-orb,
-#island-settings .dock-theme-card .scene-deco,
-#island-settings .dock-theme-card .scene-ray {
+#island-settings .dtp-track:active {
+  cursor: grabbing;
+}
+
+#island-settings .dtp-track[data-mode='light'] {
+  --dtp-p: 0;
+  --dtp-w-light: 1;
+  --dtp-w-dark: 0;
+  --dtp-w-glass: 0;
+  --dtp-led-deg: 58deg;
+  --dtp-led-color: #ffae2e;
+  --dtp-spin-sun: 0deg;
+  --dtp-spin-moon: 105deg;
+  --dtp-spin-glass: 105deg;
+}
+
+#island-settings .dtp-track[data-mode='dark'] {
+  --dtp-p: 0.5;
+  --dtp-w-light: 0;
+  --dtp-w-dark: 1;
+  --dtp-w-glass: 0;
+  --dtp-led-deg: 180deg;
+  --dtp-led-color: #6f86ff;
+  --dtp-spin-sun: -105deg;
+  --dtp-spin-moon: 0deg;
+  --dtp-spin-glass: 105deg;
+}
+
+#island-settings .dtp-track[data-mode='glass'] {
+  --dtp-p: 1;
+  --dtp-w-light: 0;
+  --dtp-w-dark: 0;
+  --dtp-w-glass: 1;
+  --dtp-led-deg: 302deg;
+  --dtp-led-color: #5cd4ff;
+  --dtp-spin-sun: -105deg;
+  --dtp-spin-moon: -105deg;
+  --dtp-spin-glass: 0deg;
+}
+
+.tb-light #island-settings .dtp-track {
+  box-shadow:
+    0 2px 4px rgba(255, 255, 255, 0.94),
+    0 -1px 2px rgba(0, 0, 0, 0.14),
+    0 10px 22px rgba(0, 0, 0, 0.15),
+    0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* 60fps 弹簧物理接管期间关闭子层 CSS transition，零延迟零冲突 */
+#island-settings .dtp-track.is-physics .dtp-sky,
+#island-settings .dtp-track.is-physics .dtp-rings > i,
+#island-settings .dtp-track.is-physics .dtp-clouds,
+#island-settings .dtp-track.is-physics .dtp-stars,
+#island-settings .dtp-track.is-physics .dtp-glass-fx,
+#island-settings .dtp-track.is-physics .dtp-glass-ribbon,
+#island-settings .dtp-track.is-physics .dtp-wash,
+#island-settings .dtp-track.is-physics .dtp-wash > i,
+#island-settings .dtp-track.is-physics .dtp-led-wrap,
+#island-settings .dtp-track.is-physics .dtp-led-halo,
+#island-settings .dtp-track.is-physics .dtp-led-core,
+#island-settings .dtp-track.is-physics .dtp-orb,
+#island-settings .dtp-track.is-physics .dtp-face,
+#island-settings .dtp-track.is-physics .dtp-orb-tir {
+  transition: none !important;
+}
+
+/* 三态背景天幕（随物理位置连续交融过渡） */
+#island-settings .dtp-sky {
   position: absolute;
-  display: block;
+  inset: 0;
   pointer-events: none;
-  transition:
-    transform 0.48s var(--spring),
-    box-shadow 0.38s ease,
-    opacity 0.32s ease;
+  transition: opacity 0.55s ease;
 }
 
-/* 1) 浅色（日间晴空：骄阳多阶光晕 + 单标签多重投影云朵漂浮） */
-#island-settings .dock-theme-card.mode-light .theme-scene {
-  background: linear-gradient(160deg, #28a8f8 0%, #67d4fc 56%, #fef08a 100%);
+#island-settings .dtp-sky-light {
+  opacity: var(--dtp-w-light, 0);
+  background:
+    radial-gradient(circle at 10% 48%, rgba(255, 244, 184, 0.44), transparent 36%),
+    linear-gradient(180deg, #1d72c6 0%, #449ee4 52%, #7ccaf8 100%);
 }
 
-#island-settings .dock-theme-card.mode-light .scene-orb {
-  top: 50%;
-  left: 34%;
-  width: 22px;
-  height: 22px;
+#island-settings .dtp-sky-dark {
+  opacity: var(--dtp-w-dark, 0);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(74, 88, 120, 0.24), transparent 58%),
+    linear-gradient(180deg, #161a24 0%, #202634 56%, #2c3345 100%);
+}
+
+#island-settings .dtp-sky-glass {
+  opacity: var(--dtp-w-glass, 0);
+  background:
+    radial-gradient(circle at 18% 24%, rgba(56, 189, 248, 0.72), transparent 46%),
+    radial-gradient(circle at 54% 82%, rgba(168, 85, 247, 0.56), transparent 52%),
+    radial-gradient(circle at 86% 32%, rgba(244, 114, 182, 0.58), transparent 48%),
+    linear-gradient(
+      125deg,
+      color-mix(in srgb, var(--dock-accent, #3b82f6) 56%, #13224a) 0%,
+      #3b1c7a 48%,
+      #0e6f68 100%
+    );
+}
+
+/* 跟随滚珠平滑弹跳的四层同心阶梯光环（完美铺满全宽胶囊） */
+#island-settings .dtp-rings {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#island-settings .dtp-rings > i {
+  position: absolute;
+  top: 7px;
+  left: calc(7px + (100% - 72px) * var(--dtp-p, 0));
+  width: 58px;
+  height: 58px;
   border-radius: 50%;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(circle at 35% 35%, #ffffff 0%, #fde047 45%, #f59e0b 100%);
-  box-shadow:
-    0 0 0 4px rgba(254, 240, 138, 0.34),
-    0 0 0 9px rgba(254, 240, 138, 0.16),
-    0 0 18px rgba(251, 191, 36, 0.9);
-}
-
-#island-settings .dock-theme-card.mode-light .scene-deco {
-  bottom: 6px;
-  left: 56%;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow:
-    -9px 2px 0 -1px rgba(255, 255, 255, 0.9),
-    9px 2px 0 -1.5px rgba(255, 255, 255, 0.88),
-    17px 3px 0 -3px rgba(255, 255, 255, 0.78),
-    -26px 4px 0 -3px rgba(255, 255, 255, 0.55);
-}
-
-#island-settings .dock-theme-card.mode-light .scene-ray {
-  inset: -30%;
-  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.22) 25deg, transparent 50deg, rgba(255, 255, 255, 0.18) 140deg, transparent 175deg, rgba(255, 255, 255, 0.22) 260deg, transparent 300deg);
-  opacity: 0.55;
-}
-
-#island-settings .dock-theme-card.mode-light:hover .scene-orb,
-#island-settings .dock-theme-card.mode-light.on .scene-orb {
-  transform: translate(-50%, -56%) scale(1.14);
-  box-shadow:
-    0 0 0 6px rgba(254, 240, 138, 0.42),
-    0 0 0 13px rgba(254, 240, 138, 0.2),
-    0 0 24px rgba(251, 191, 36, 1);
-}
-
-#island-settings .dock-theme-card.mode-light:hover .scene-deco,
-#island-settings .dock-theme-card.mode-light.on .scene-deco {
-  transform: translateX(6px) translateY(-1px);
-}
-
-#island-settings .dock-theme-card.mode-light:hover .scene-ray,
-#island-settings .dock-theme-card.mode-light.on .scene-ray {
-  transform: rotate(35deg) scale(1.08);
-  opacity: 0.85;
-}
-
-/* 2) 深色（静谧星夜：内阴影弯月 + 单标签星群闪烁 + 极光星云） */
-#island-settings .dock-theme-card.mode-dark .theme-scene {
-  background: linear-gradient(160deg, #060916 0%, #141c3c 55%, #2b2254 100%);
-}
-
-#island-settings .dock-theme-card.mode-dark .scene-orb {
-  top: 50%;
-  left: 36%;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%) rotate(-8deg);
   background: transparent;
   box-shadow:
-    inset -8px -3px 0 0 #fef08a,
-    0 0 14px rgba(254, 240, 138, 0.35);
+    0 0 0 30px rgba(255, 255, 255, 0.13),
+    0 0 0 70px rgba(255, 255, 255, 0.09),
+    0 0 0 116px rgba(255, 255, 255, 0.055),
+    0 0 0 166px rgba(255, 255, 255, 0.032);
+  transition:
+    left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1),
+    box-shadow 0.52s ease;
 }
 
-#island-settings .dock-theme-card.mode-dark .scene-deco {
-  top: 14px;
-  left: 64%;
-  width: 2.5px;
-  height: 2.5px;
+#island-settings .dtp-track[data-mode='light'] .dtp-rings > i {
+  box-shadow:
+    0 0 0 30px rgba(255, 255, 255, 0.17),
+    0 0 0 70px rgba(255, 255, 255, 0.12),
+    0 0 0 116px rgba(255, 255, 255, 0.08),
+    0 0 0 166px rgba(255, 255, 255, 0.045);
+}
+
+#island-settings .dtp-track[data-mode='glass'] .dtp-rings > i {
+  box-shadow:
+    0 0 0 30px color-mix(in srgb, var(--dock-accent, #7dd3fc) 22%, rgba(255, 255, 255, 0.15)),
+    0 0 0 70px color-mix(in srgb, var(--dock-accent, #c084fc) 14%, rgba(255, 255, 255, 0.1)),
+    0 0 0 116px rgba(255, 255, 255, 0.065),
+    0 0 0 166px rgba(255, 255, 255, 0.036);
+}
+
+/* 1) 日间绵延双层蓬松云海（随物理权重连续升降并带柔风漂浮） */
+#island-settings .dtp-clouds {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: var(--dtp-w-light, 0);
+  transform: translateY(calc((1 - var(--dtp-w-light, 0)) * 58px));
+  transition:
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.44s ease;
+}
+
+#island-settings .dtp-cloud-back {
+  position: absolute;
+  right: 26px;
+  bottom: -14px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(218, 240, 255, 0.66);
+  box-shadow:
+    34px -12px 0 6px rgba(218, 240, 255, 0.66),
+    -38px 5px 0 -2px rgba(218, 240, 255, 0.64),
+    -78px 12px 0 -3px rgba(218, 240, 255, 0.6),
+    -118px 9px 0 -1px rgba(218, 240, 255, 0.56),
+    -160px 16px 0 -5px rgba(218, 240, 255, 0.52),
+    -204px 19px 0 -6px rgba(218, 240, 255, 0.48),
+    -248px 23px 0 -8px rgba(218, 240, 255, 0.44),
+    -290px 26px 0 -10px rgba(218, 240, 255, 0.38);
+}
+
+#island-settings .dtp-cloud-front {
+  position: absolute;
+  right: 8px;
+  bottom: -20px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   background: #ffffff;
   box-shadow:
-    -34px -4px 0 0 rgba(255, 255, 255, 0.85),
-    -16px 14px 0 -0.5px rgba(255, 255, 255, 0.75),
-    12px -4px 0 0.5px #fef08a,
-    18px 10px 0 0 rgba(255, 255, 255, 0.9),
-    4px 18px 0 -0.5px rgba(192, 132, 252, 0.9),
-    -24px 18px 0 0 rgba(125, 211, 252, 0.85);
+    28px -14px 0 8px #ffffff,
+    -34px 4px 0 -1px #ffffff,
+    -72px 10px 0 -3px #ffffff,
+    -110px 14px 0 -4px #ffffff,
+    -148px 11px 0 -2px #ffffff,
+    -188px 17px 0 -5px #ffffff,
+    -228px 20px 0 -6px #ffffff,
+    -268px 24px 0 -8px rgba(255, 255, 255, 0.96),
+    -308px 28px 0 -11px rgba(255, 255, 255, 0.92),
+    0 -3px 12px rgba(255, 255, 255, 0.48);
 }
 
-#island-settings .dock-theme-card.mode-dark .scene-ray {
-  inset: 0;
-  background: radial-gradient(circle at 75% 25%, rgba(139, 92, 246, 0.32), transparent 60%);
-  opacity: 0.7;
+#island-settings .dtp-track[data-mode='light'] .dtp-cloud-back {
+  animation: dtp-cloud-drift 6.5s ease-in-out infinite alternate;
 }
 
-#island-settings .dock-theme-card.mode-dark:hover .scene-orb,
-#island-settings .dock-theme-card.mode-dark.on .scene-orb {
-  transform: translate(-50%, -55%) rotate(-22deg) scale(1.12);
-  box-shadow:
-    inset -8px -3px 0 0 #fde047,
-    0 0 20px rgba(254, 240, 138, 0.65);
+#island-settings .dtp-track[data-mode='light'] .dtp-cloud-front {
+  animation: dtp-cloud-drift 5.2s ease-in-out 0.6s infinite alternate-reverse;
 }
 
-#island-settings .dock-theme-card.mode-dark:hover .scene-deco,
-#island-settings .dock-theme-card.mode-dark.on .scene-deco {
-  animation: dock-stars-twinkle 1.6s ease-in-out infinite alternate;
-}
-
-@keyframes dock-stars-twinkle {
+@keyframes dtp-cloud-drift {
   0% {
-    opacity: 0.65;
-    transform: scale(0.95);
+    transform: translateX(0);
   }
   100% {
-    opacity: 1;
-    transform: scale(1.12);
+    transform: translateX(-8px);
   }
 }
 
-/* 3) 玻璃（液态玻璃棱镜：流光极光底 + 3D 悬浮液态水珠 + 焦散扫光） */
-#island-settings .dock-theme-card.mode-glass .theme-scene {
-  background:
-    radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.72), transparent 55%),
-    radial-gradient(circle at 82% 75%, rgba(244, 114, 182, 0.68), transparent 58%),
-    linear-gradient(135deg, #1e3a8a 0%, #5b21b6 50%, #0f766e 100%);
+/* 2) 夜间全幅星群与闪烁四角星（左右对称铺展，随物理权重连续升降） */
+#island-settings .dtp-stars {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: var(--dtp-w-dark, 0);
+  transform: translateY(calc((1 - var(--dtp-w-dark, 0)) * -50px));
+  transition:
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.44s ease;
 }
 
-#island-settings .dock-theme-card.mode-glass .scene-orb {
-  top: 50%;
-  left: 46%;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(
-    circle at 30% 28%,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(255, 255, 255, 0.34) 36%,
-    color-mix(in srgb, var(--dock-accent, #5e9bff) 45%, transparent) 72%,
-    rgba(255, 255, 255, 0.55) 100%
-  );
-  backdrop-filter: blur(6px) saturate(1.5);
-  -webkit-backdrop-filter: blur(6px) saturate(1.5);
-  box-shadow:
-    inset 0 2px 3px rgba(255, 255, 255, 0.95),
-    inset 0 -3px 5px rgba(56, 189, 248, 0.55),
-    0 5px 14px rgba(15, 23, 42, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.52);
-}
-
-#island-settings .dock-theme-card.mode-glass .scene-deco {
-  top: 10px;
-  left: 66%;
+/* 左侧大小圆点星群 */
+#island-settings .dtp-star-a {
+  position: absolute;
+  top: 17px;
+  left: 20%;
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: radial-gradient(circle at 32% 32%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.22));
+  background: #ffffff;
   box-shadow:
-    inset 0 1px 1.5px rgba(255, 255, 255, 0.9),
-    0 2px 6px rgba(0, 0, 0, 0.25),
-    -32px 17px 0 -1.5px rgba(255, 255, 255, 0.55);
+    -52px 8px 0 -3.2px rgba(255, 255, 255, 0.88),
+    -38px 18px 0 -3.5px rgba(255, 255, 255, 0.72),
+    -26px 34px 0 -1.8px #ffffff,
+    24px -5px 0 -2.2px #ffffff,
+    18px 24px 0 -3.2px rgba(255, 255, 255, 0.84),
+    42px 33px 0 -1.2px #ffffff,
+    56px 11px 0 -3.4px rgba(255, 255, 255, 0.78);
 }
 
-#island-settings .dock-theme-card.mode-glass .scene-ray {
-  inset: -40% -90%;
-  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.48) 50%, transparent 58%);
-  transform: translateX(-55%) rotate(15deg);
+/* 右侧大小圆点星群 */
+#island-settings .dtp-star-d {
+  position: absolute;
+  top: 20px;
+  right: 19%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    -54px -6px 0 -1.4px #ffffff,
+    -42px 20px 0 -3px rgba(255, 255, 255, 0.82),
+    -24px 33px 0 -2px rgba(255, 255, 255, 0.92),
+    26px -7px 0 -2.6px rgba(255, 255, 255, 0.88),
+    36px 14px 0 -3.2px rgba(255, 255, 255, 0.74),
+    22px 29px 0 -1.2px #ffffff,
+    52px 6px 0 -2.4px rgba(255, 255, 255, 0.86);
+}
+
+#island-settings .dtp-star-b,
+#island-settings .dtp-star-c,
+#island-settings .dtp-star-b::after,
+#island-settings .dtp-star-c::after {
+  position: absolute;
+  background: #ffffff;
+  clip-path: polygon(50% 0%, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0% 50%, 37% 37%);
+}
+
+#island-settings .dtp-star-b {
+  top: 26px;
+  left: 7%;
+  width: 13px;
+  height: 13px;
+}
+
+#island-settings .dtp-star-b::after {
+  content: '';
+  top: -12px;
+  left: 112px;
+  width: 8px;
+  height: 8px;
+  opacity: 0.85;
+}
+
+#island-settings .dtp-star-c {
+  top: 14px;
+  right: 8%;
+  width: 13px;
+  height: 13px;
+}
+
+#island-settings .dtp-star-c::after {
+  content: '';
+  top: 32px;
+  right: 108px;
+  width: 9px;
+  height: 9px;
+  opacity: 0.88;
+}
+
+#island-settings .dtp-track[data-mode='dark'] .dtp-star-b {
+  animation: dtp-twinkle 2.1s ease-in-out infinite alternate;
+}
+
+#island-settings .dtp-track[data-mode='dark'] .dtp-star-c {
+  animation: dtp-twinkle 2.6s ease-in-out 0.6s infinite alternate;
+}
+
+@keyframes dtp-twinkle {
+  0% {
+    opacity: 0.56;
+    transform: scale(0.84) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.16) rotate(12deg);
+  }
+}
+
+/* 3) 液态玻璃宽幅棱镜流光带 + 6 颗 3D 悬浮液态水珠 */
+#island-settings .dtp-glass-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: var(--dtp-w-glass, 0);
+  transform: translateY(calc((1 - var(--dtp-w-glass, 0)) * 36px)) scale(calc(0.94 + var(--dtp-w-glass, 0) * 0.06));
+  transition:
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.44s ease;
+}
+
+#island-settings .dtp-glass-ribbon {
+  position: absolute;
+  inset: -50% -50%;
+  background: linear-gradient(
+    112deg,
+    transparent 34%,
+    rgba(255, 255, 255, 0.14) 44%,
+    rgba(255, 255, 255, 0.44) 50%,
+    rgba(255, 255, 255, 0.14) 56%,
+    transparent 66%
+  );
+  transform: translateX(calc(-58% + var(--dtp-w-glass, 0) * 74%)) rotate(12deg);
+  transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#island-settings .dtp-gb {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.3) 48%, rgba(255, 255, 255, 0.56) 100%);
+  box-shadow:
+    inset 0 1.5px 2px rgba(255, 255, 255, 0.96),
+    inset 0 -1.5px 3px rgba(56, 189, 248, 0.48),
+    0 3px 8px rgba(0, 0, 0, 0.24),
+    0 0 0 0.75px rgba(255, 255, 255, 0.48);
+}
+
+#island-settings .dtp-gb.b1 { top: 14px; left: 7%; width: 18px; height: 18px; }
+#island-settings .dtp-gb.b2 { top: 41px; left: 18%; width: 12px; height: 12px; }
+#island-settings .dtp-gb.b3 { top: 15px; left: 31%; width: 14px; height: 14px; }
+#island-settings .dtp-gb.b4 { top: 44px; left: 45%; width: 16px; height: 16px; }
+#island-settings .dtp-gb.b5 { top: 14px; left: 58%; width: 11px; height: 11px; }
+#island-settings .dtp-gb.b6 { top: 38px; left: 71%; width: 15px; height: 15px; }
+
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b1 { animation: dtp-bubble-float 2.8s ease-in-out infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b2 { animation: dtp-bubble-float 3.2s ease-in-out 0.4s infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b3 { animation: dtp-bubble-float 2.5s ease-in-out 0.8s infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b4 { animation: dtp-bubble-float 3.4s ease-in-out 0.2s infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b5 { animation: dtp-bubble-float 2.9s ease-in-out 0.6s infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b6 { animation: dtp-bubble-float 3.1s ease-in-out 0.3s infinite alternate; }
+
+@keyframes dtp-bubble-float {
+  0% {
+    transform: translateY(2.5px);
+  }
+  100% {
+    transform: translateY(-3.5px);
+  }
+}
+
+/* 3.5) Glass Light Toggle 同款凹槽环境溢光洗墙（Track Wash） */
+#island-settings .dtp-wash {
+  position: absolute;
+  top: 7px;
+  left: calc(7px + (100% - 72px) * var(--dtp-p, 0));
+  width: 58px;
+  height: 58px;
+  z-index: 3;
+  pointer-events: none;
+  transition: left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1);
+}
+
+#island-settings .dtp-wash > i {
+  position: absolute;
+  left: -38px;
+  top: -38px;
+  width: 134px;
+  height: 134px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 24%,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 72%, transparent) 0%,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 24%, transparent) 42%,
+    transparent 70%
+  );
+  filter: blur(8px);
+  opacity: calc(0.66 * var(--dtp-boost, 1));
+  transform: rotate(var(--dtp-led-deg, 180deg));
+  transition: transform 0.68s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+}
+
+/* 3.8) Glass Light Toggle 同款绕行白炽灯带弧（Orbiting Light Strip） */
+#island-settings .dtp-led-wrap {
+  position: absolute;
+  top: 4px;
+  left: calc(4px + (100% - 72px) * var(--dtp-p, 0));
+  width: 64px;
+  height: 64px;
+  z-index: 5;
+  pointer-events: none;
+  transform: translateY(calc(var(--dtp-lift, 0) * -1.2px)) scale(var(--dtp-sx, 1), var(--dtp-sy, 1));
+  transition: left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1), transform 0.28s var(--spring);
+}
+
+#island-settings .dtp-led-halo,
+#island-settings .dtp-led-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transform: rotate(var(--dtp-led-deg, 180deg));
+  transition: transform 0.68s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+}
+
+#island-settings .dtp-led-halo {
+  inset: -4px;
+  background: conic-gradient(
+    from -50deg,
+    transparent 0deg,
+    var(--dtp-led-color, #6f86ff) 22deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 30%, #ffffff) 50deg,
+    var(--dtp-led-color, #6f86ff) 78deg,
+    transparent 100deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 4px), #000 100%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 4px), #000 100%);
+  filter: blur(5px);
+  mix-blend-mode: screen;
+  opacity: calc(0.95 * var(--dtp-boost, 1));
+}
+
+#island-settings .dtp-led-core {
+  inset: 0;
+  background: conic-gradient(
+    from -46deg,
+    transparent 0deg,
+    var(--dtp-led-color, #6f86ff) 14deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 22%, #ffffff) 34deg,
+    #ffffff 46deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 22%, #ffffff) 58deg,
+    var(--dtp-led-color, #6f86ff) 78deg,
+    transparent 92deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.6px), #000 100%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 1.6px), #000 100%);
+  filter: drop-shadow(0 0 3px var(--dtp-led-color, #6f86ff));
+  opacity: calc(1 * var(--dtp-boost, 1));
+}
+
+/* 三态 3D 物理滑动滚珠（太阳 → 陨石坑月球 → 液态玻璃折射晶球 + TIR 内折射） */
+#island-settings .dtp-orb {
+  position: absolute;
+  top: 7px;
+  left: calc(7px + (100% - 72px) * var(--dtp-p, 0));
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(calc(var(--dtp-lift, 0) * -1.2px)) scale(var(--dtp-sx, 1), var(--dtp-sy, 1));
+  box-shadow:
+    0 calc(5px + var(--dtp-lift, 0) * 3px) calc(15px + var(--dtp-lift, 0) * 6px) rgba(0, 0, 0, 0.44),
+    0 2px 5px rgba(0, 0, 0, 0.28),
+    0 0 calc(14px * var(--dtp-boost, 1)) color-mix(in srgb, var(--dtp-led-color, #6f86ff) 32%, transparent);
+  transition:
+    left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1),
+    box-shadow 0.42s ease,
+    transform 0.28s var(--spring);
+}
+
+#island-settings .dtp-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transition:
+    opacity 0.44s ease,
+    transform 0.66s cubic-bezier(0.34, 1.28, 0.44, 1);
+}
+
+/* 球面 A：3D 金色骄阳 */
+#island-settings .dtp-face-sun {
+  opacity: var(--dtp-w-light, 0);
+  background: radial-gradient(circle at 32% 28%, #fff8c4 0%, #facc15 48%, #e29d00 100%);
+  box-shadow:
+    inset 2px 3px 5px rgba(255, 255, 255, 0.84),
+    inset -3px -4px 7px rgba(176, 98, 0, 0.44);
+  transform: rotate(var(--dtp-spin-sun, -105deg)) scale(calc(0.86 + var(--dtp-w-light, 0) * 0.14));
+}
+
+/* 球面 B：3D 银白陨石坑月球（还原参考图三大立体凹坑） */
+#island-settings .dtp-face-moon {
+  opacity: var(--dtp-w-dark, 0);
+  background: radial-gradient(circle at 30% 26%, #f5f7fb 0%, #d1d7e2 58%, #aab3c4 100%);
+  box-shadow:
+    inset 2px 3px 5px rgba(255, 255, 255, 0.94),
+    inset -3px -4px 7px rgba(66, 74, 90, 0.46);
+  transform: rotate(var(--dtp-spin-moon, 0deg)) scale(calc(0.86 + var(--dtp-w-dark, 0) * 0.14));
+}
+
+#island-settings .dtp-crater {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  background: #9aa3b4;
+  box-shadow:
+    inset 1.5px 2px 3px rgba(62, 70, 86, 0.52),
+    0 1px 0 rgba(255, 255, 255, 0.58);
+}
+
+#island-settings .dtp-crater.c1 {
+  left: 11px;
+  bottom: 11px;
+  width: 18px;
+  height: 18px;
+}
+
+#island-settings .dtp-crater.c2 {
+  left: 25px;
+  top: 8px;
+  width: 12px;
+  height: 12px;
+}
+
+#island-settings .dtp-crater.c3 {
+  right: 8px;
+  bottom: 10px;
+  width: 13px;
+  height: 13px;
+}
+
+/* 球面 C：3D 液态玻璃折射晶球（高光弯月 + 底部焦散 + 边缘微色散） */
+#island-settings .dtp-face-glass {
+  opacity: var(--dtp-w-glass, 0);
+  background: radial-gradient(
+    circle at 28% 24%,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(255, 255, 255, 0.34) 34%,
+    color-mix(in srgb, var(--dock-accent, #5e9bff) 44%, rgba(139, 92, 246, 0.28)) 68%,
+    rgba(255, 255, 255, 0.74) 100%
+  );
+  backdrop-filter: blur(8px) saturate(1.65);
+  -webkit-backdrop-filter: blur(8px) saturate(1.65);
+  box-shadow:
+    inset 0 2.5px 5px rgba(255, 255, 255, 0.96),
+    inset 2px 0 4px rgba(56, 189, 248, 0.52),
+    inset -2px 0 4px rgba(244, 114, 182, 0.48),
+    inset 0 -5px 9px color-mix(in srgb, var(--dock-accent, #38bdf8) 68%, rgba(168, 85, 247, 0.45)),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.64);
+  transform: rotate(var(--dtp-spin-glass, 105deg)) scale(calc(0.86 + var(--dtp-w-glass, 0) * 0.14));
+}
+
+#island-settings .dtp-glass-glint {
+  position: absolute;
+  top: 8px;
+  left: 11px;
+  width: 21px;
+  height: 11px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.08));
+  transform: rotate(-28deg);
+}
+
+#island-settings .dtp-glass-caustic {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 17px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.8), transparent 72%);
+  transform: rotate(-22deg);
+}
+
+/* 滚珠内斜角全反射光晕（TIR Bevel Coupling — 与外圈灯带弧实时同角耦合） */
+#island-settings .dtp-orb-tir {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(
+    from -52deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 82%, transparent) 26deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 35%, #ffffff) 52deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 82%, transparent) 78deg,
+    transparent 104deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent 62%, rgba(0, 0, 0, 0.65) 86%, #000 100%);
+  mask: radial-gradient(farthest-side, transparent 62%, rgba(0, 0, 0, 0.65) 86%, #000 100%);
+  opacity: calc(0.76 * var(--dtp-boost, 1));
+  transform: rotate(var(--dtp-led-deg, 180deg));
+  mix-blend-mode: screen;
   transition: transform 0.68s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-#island-settings .dock-theme-card.mode-glass:hover .scene-orb,
-#island-settings .dock-theme-card.mode-glass.on .scene-orb {
-  animation: dock-glass-orb 2.6s ease-in-out infinite alternate;
+/* 精密 0.8px 左上主光斜角高光边（Specular Rim） */
+#island-settings .dtp-orb-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    inset 1px 1.5px 1.5px rgba(255, 255, 255, 0.78),
+    inset -1px -1.5px 2px rgba(0, 0, 0, 0.24);
 }
 
-#island-settings .dock-theme-card.mode-glass:hover .scene-deco,
-#island-settings .dock-theme-card.mode-glass.on .scene-deco {
-  transform: translate(3px, -2px) scale(1.12);
+/* 顶层内凹物理倒角阴影罩 + 底部 1.3px 反射内亮边（让整个场景真正沉在光学凹槽内） */
+#island-settings .dtp-bevel {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow:
+    inset 0 6px 14px rgba(0, 0, 0, 0.5),
+    inset 0 -1.5px 1.5px rgba(255, 255, 255, 0.3),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
-#island-settings .dock-theme-card.mode-glass:hover .scene-ray,
-#island-settings .dock-theme-card.mode-glass.on .scene-ray {
-  transform: translateX(55%) rotate(15deg);
+/* 胶囊左/中/右三段透明点击区 */
+#island-settings .dtp-hits {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  pointer-events: none;
 }
 
-@keyframes dock-glass-orb {
-  0% {
-    border-radius: 50%;
-    transform: translate(-50%, -50%) scale(1.04);
-  }
-  100% {
-    border-radius: 44% 56% 48% 52% / 54% 46% 54% 46%;
-    transform: translate(-50%, -56%) scale(1.14);
-  }
+#island-settings .dtp-hit {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: inherit;
+  pointer-events: auto;
 }
 
-#island-settings .dock-theme-card .theme-foot {
-  display: flex;
+#island-settings .dtp-hit:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: -3px;
+  border-radius: 999px;
+}
+
+/* 胶囊下方全宽对齐的三档文字指示按钮（首尾适度朝滚珠圆心靠拢，呼应物理停靠点） */
+#island-settings .dtp-labels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+}
+
+#island-settings .dtp-label-btn:first-child {
+  padding-right: 46px;
+}
+
+#island-settings .dtp-label-btn:last-child {
+  padding-left: 46px;
+}
+
+#island-settings .dtp-label-btn {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 20px;
-}
-
-#island-settings .dock-theme-card .theme-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1.5px solid var(--g4);
+  gap: 4px;
+  padding: 2px 0 4px;
+  border: 0;
   background: transparent;
-  transition:
-    transform 0.28s var(--spring),
-    background-color 0.2s ease,
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-#island-settings .dock-theme-card.on .theme-dot {
-  border-color: var(--dock-accent, #5e9bff);
-  background: var(--dock-accent, #5e9bff);
-  box-shadow: 0 0 8px var(--dock-accent, #5e9bff);
-  transform: scale(1.18);
-}
-
-#island-settings .dock-theme-card .theme-label {
+  color: var(--dock-muted, var(--g4));
   font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.22s var(--spring);
+}
+
+#island-settings .dtp-label-btn:active {
+  transform: scale(0.94);
+}
+
+#island-settings .dtp-label-btn::after {
+  content: '';
+  width: 20px;
+  height: 2.5px;
+  border-radius: 999px;
+  background: var(--dock-accent, #5e9bff);
+  opacity: 0;
+  transform: scaleX(0.3);
+  transition:
+    opacity 0.26s ease,
+    transform 0.36s var(--spring);
+}
+
+#island-settings .dtp-label-btn:hover {
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .dtp-label-btn.on {
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+  font-weight: 650;
+}
+
+#island-settings .dtp-label-btn.on::after {
+  opacity: 1;
+  transform: scaleX(1);
 }
 
 /* 液态玻璃卡片内的预设与玻璃色调调节区 */
@@ -3843,23 +4319,44 @@
   pointer-events: none;
 }
 
-/* 内嵌调色板抽屉（16 色精调预设 + H/S/L 实时渐变滑杆 + HEX 输入） */
-#island-settings .typo-palette {
+/* 紧凑液态玻璃浮窗调色盘（2D 色板 + 彩虹色相条 + RGB 0-255 + HEX #ffffff + 清空） */
+#island-settings .cp-popover {
+  position: absolute;
+  z-index: 80;
+  width: 244px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  margin: 2px 0 4px;
-  border-radius: 12px;
-  border: 1px solid var(--g3);
-  background: var(--g1);
-  animation: typo-drawer-in 0.24s var(--spring) both;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 18%, rgba(24, 27, 40, 0.88));
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 16px 40px rgba(0, 0, 0, 0.42);
+  animation: cp-pop-in 0.22s var(--spring) both;
 }
 
-@keyframes typo-drawer-in {
+.tb-light #island-settings .cp-popover {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(252, 252, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 14px 36px rgba(0, 0, 0, 0.16);
+}
+
+#island-settings .cp-popover[hidden] {
+  display: none;
+}
+
+@keyframes cp-pop-in {
   from {
     opacity: 0;
-    transform: translateY(-4px) scale(0.98);
+    transform: translateY(-6px) scale(0.95);
   }
   to {
     opacity: 1;
@@ -3867,112 +4364,216 @@
   }
 }
 
-#island-settings .typo-swatches {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 6px;
-}
-
-#island-settings .typo-sw {
-  width: 100%;
-  aspect-ratio: 1;
-  padding: 0;
-  border-radius: 7px;
-  border: 1px solid rgba(127, 127, 127, 0.38);
-  cursor: pointer;
-}
-
-#island-settings .typo-sw:hover {
-  transform: scale(1.12);
-}
-
-#island-settings .typo-sw.on {
-  box-shadow:
-    0 0 0 2px var(--g1),
-    0 0 0 3.5px var(--dock-accent, #5e9bff);
-}
-
-#island-settings .typo-sliders {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-#island-settings .typo-hsl-row {
+#island-settings .cp-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  min-height: 22px;
 }
 
-#island-settings .typo-hsl-lbl {
-  flex: 0 0 44px;
-  font-size: 11px;
-  color: var(--dock-muted, var(--g4));
+#island-settings .cp-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
 }
 
-#island-settings .typo-hsl-row .typo-rng {
-  flex: 1;
-  height: 8px;
-  border-radius: 999px;
-  appearance: none;
-  -webkit-appearance: none;
-  outline: none;
+#island-settings .cp-close {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dock-muted, var(--g5));
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.16s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .cp-close:hover {
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .cp-close:active {
+  transform: scale(0.9);
+}
+
+/* 2D 饱和度 × 明度色板 */
+#island-settings .cp-sv {
+  position: relative;
+  width: 100%;
+  height: 126px;
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
-#island-settings .typo-hsl-row .typo-rng.rng-h {
+#island-settings .cp-sv-white {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+}
+
+#island-settings .cp-sv-black {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, #000000 100%);
+  pointer-events: none;
+}
+
+#island-settings .cp-sv-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* 彩虹色相滑条 */
+#island-settings .cp-hue {
+  position: relative;
+  width: 100%;
+  height: 13px;
+  border-radius: 999px;
   background: linear-gradient(90deg, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+  cursor: ew-resize;
+  touch-action: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
-#island-settings .typo-hsl-row .typo-rng.rng-s {
-  background: linear-gradient(90deg, #808080 0%, var(--tp-hue, #5e9bff) 100%);
+#island-settings .cp-hue-thumb {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.48);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
-#island-settings .typo-hsl-row .typo-rng.rng-l {
-  background: linear-gradient(90deg, #0d0d11 0%, var(--tp-hue, #5e9bff) 50%, #ffffff 100%);
+/* RGB (0-255) 三通道精准输入行 */
+#island-settings .cp-rgb-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
 
-#island-settings .typo-hsl-row .rv {
-  flex: 0 0 36px;
-  font-size: 11px;
-  text-align: right;
+#island-settings .cp-rgb-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 8px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  box-sizing: border-box;
+}
+
+#island-settings .cp-rgb-field:focus-within {
+  border-color: var(--dock-accent, #5e9bff);
+}
+
+#island-settings .cp-rgb-field > span {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--dock-muted, var(--g5));
+  user-select: none;
+}
+
+#island-settings .cp-rgb-in {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  outline: none;
+  background: transparent;
+  color: var(--dock-fg, var(--fg));
+  font-size: 11.5px;
+  text-align: center;
   font-variant-numeric: tabular-nums;
-  color: var(--dock-muted, var(--g4));
 }
 
-#island-settings .typo-hex-bar {
+/* 底栏：清空/跟随系统 + HEX (#ffffff) 输入框 */
+#island-settings .cp-foot {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.tb-light #island-settings .typo-hex-bar {
-  border-top-color: rgba(0, 0, 0, 0.07);
-}
-
-#island-settings .typo-hex-preview {
+#island-settings .cp-clear {
   flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dock-fg, var(--fg));
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.16s ease, transform 0.2s var(--spring);
 }
 
-#island-settings .typo-hex-tag {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--dock-muted, var(--g4));
+#island-settings .cp-clear:hover {
+  background: var(--g2);
 }
 
-#island-settings .typo-hex-in {
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 999px;
+#island-settings .cp-clear:active {
+  transform: scale(0.95);
+}
+
+#island-settings .cp-hex-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 9px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  box-sizing: border-box;
+}
+
+#island-settings .cp-hex-wrap:focus-within {
+  border-color: var(--dock-accent, #5e9bff);
+}
+
+#island-settings .cp-hex-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+#island-settings .cp-hex-in {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  outline: none;
+  background: transparent;
+  color: var(--dock-fg, var(--fg));
   font-size: 12px;
   letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- 插件页：「插件和小工具」可折叠与重构卡片式界面 ---- */
@@ -4181,13 +4782,12 @@
   padding: 8px 12px 10px;
 }
 
-/* 液态玻璃模式全设定页半透明 + 模糊 + 玻璃色调染色 + 360° 玻璃高光边 */
+/* 液态玻璃模式全设定页半透明 + 模糊 + 玻璃色调染色 + 360° 玻璃高光边（清除颜色时 --dock-glass-tint-* 归零，呈现纯粹水晶玻璃） */
 body.dock-glass #island-settings .grp,
 body.dock-glass #island-settings .mode,
 body.dock-glass #island-settings .tile,
 body.dock-glass #island-settings .ilook-card,
 body.dock-glass #island-settings .ilook-sec-card,
-body.dock-glass #island-settings .typo-palette,
 body.dock-glass #island-settings .w-item-card,
 body.dock-glass #island-settings .tab-order,
 body.dock-glass #island-settings .card,
@@ -4204,24 +4804,26 @@ body.dock-glass #island-settings .extension-down,
 body.dock-glass #island-settings .notes-skeleton .sk,
 body.dock-glass #island-settings .adv-b,
 body.dock-glass #island-settings .ag-way {
-  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 10%, rgba(24, 26, 36, var(--dock-glass-card-op, 0.22)));
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-card, 10%), rgba(24, 26, 36, var(--dock-glass-card-op, 0.22)));
   backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.38);
   -webkit-backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.38);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) 26%, rgba(255, 255, 255, 0.18)),
-    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) 18%, rgba(255, 255, 255, 0.12));
+    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 26%), rgba(255, 255, 255, 0.18)),
+    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-card, 10%), rgba(255, 255, 255, 0.12));
+  transition: background 0.34s ease, box-shadow 0.34s ease, border-color 0.28s ease;
 }
 
 body.dock-glass #island-settings .s-confirm-dialog,
 body.dock-glass #island-settings .mmenu,
+body.dock-glass #island-settings .cp-popover,
 body.dock-glass #island-settings .extension-more-body,
 body.dock-glass #island-settings .ext-progress {
-  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 12%, rgba(24, 26, 36, var(--dock-glass-overlay-op, 0.45)));
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-overlay, 12%), rgba(24, 26, 36, var(--dock-glass-overlay-op, 0.45)));
   backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.42);
   -webkit-backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.42);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) 28%, rgba(255, 255, 255, 0.22)),
-    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) 20%, rgba(255, 255, 255, 0.14)),
+    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 26%), rgba(255, 255, 255, 0.22)),
+    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-overlay, 12%), rgba(255, 255, 255, 0.14)),
     0 18px 40px rgba(0, 0, 0, 0.4);
 }
 
@@ -4239,8 +4841,9 @@ body.dock-glass #island-settings .tile .c,
 body.dock-glass #island-settings .pick,
 body.dock-glass #island-settings .kbadge,
 body.dock-glass #island-settings .wc-tool,
-body.dock-glass #island-settings .dock-theme-card,
 body.dock-glass #island-settings .typo-pill-btn,
+body.dock-glass #island-settings .cp-rgb-field,
+body.dock-glass #island-settings .cp-hex-wrap,
 body.dock-glass #island-settings .w-reading,
 body.dock-glass #island-settings .w-studio-badge,
 body.dock-glass #island-settings .w-item-actions .pl-at,
@@ -4253,10 +4856,10 @@ body.dock-glass #island-settings .extension-node,
 body.dock-glass #island-settings .extension-build,
 body.dock-glass #island-settings .extension-build-source,
 body.dock-glass #island-settings .s-tabs button.on {
-  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 10%, rgba(42, 46, 62, var(--dock-glass-control-op, 0.28)));
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-card, 10%), rgba(42, 46, 62, var(--dock-glass-control-op, 0.28)));
   backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.28);
   -webkit-backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.28);
-  border-color: color-mix(in srgb, var(--dock-accent, #ffffff) 22%, rgba(255, 255, 255, 0.14));
+  border-color: color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 22%), rgba(255, 255, 255, 0.14));
 }
 
 body.dock-glass #island-settings .pbtn.al {
@@ -4268,7 +4871,7 @@ body.dock-glass #island-settings .pbtn.al {
 
 body.dock-glass #island-settings .seg > :is(span, button).on,
 body.dock-glass #island-settings .extension-view[aria-selected='true'] {
-  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 22%, rgba(58, 64, 86, 0.78));
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-rim, 22%), rgba(58, 64, 86, 0.78));
   color: var(--dock-fg, var(--fg));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
