@@ -49,9 +49,7 @@
 /* In the settings the island is a panel, not a button. */
 #island[data-view='settings'] {
   cursor: default;
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 /* Light, on the taskbar in Windows' light mode (style.css tb-light), as
@@ -62,9 +60,7 @@
    stay as they are: they show the dark island. */
 .tb-light #island[data-view='settings'] {
   background: #f3f3f3;
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.2),
-    0 0 0 1px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
 
 .tb-light #island-settings {
@@ -3143,15 +3139,90 @@
   border-top: 1px solid #262628;
 }
 
-/* ---- Dock 灵动岛外观（主题三选一 / 强调色 / 背景图 / 液态玻璃 / 字体颜色） ---- */
+/* ---- Dock 灵动岛外观（主题与背景合并卡 / 液态玻璃与玻璃色调 / 细分字体调色板 / 小工具工作室 / 全岛动效） ---- */
 #island-settings {
   color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .s-head .t,
+#island-settings .ilook-box-title,
+#island-settings .ilook-sub-title,
+#island-settings .glass-reg-t,
+#island-settings .r > .grow > div:first-child:not(.d),
+#island-settings .r.col > .t,
+#island-settings .ag-name,
+#island-settings .w-studio-title,
+#island-settings .w-item-title,
+#island-settings .wc-title,
+#island-settings .m-subj,
+#island-settings .slogan .t,
+#island-settings .identity-panel h3,
+#island-settings .s-confirm-dialog h2 {
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
 }
 
 #island-settings .d,
 #island-settings .note,
 #island-settings .sec {
   color: var(--dock-muted, var(--g4));
+}
+
+/* 全 Dock 控件与按钮平滑弹性过渡动效 */
+#island-settings .pbtn,
+#island-settings .s-head .x,
+#island-settings .s-tabs button,
+#island-settings .seg > :is(span, button),
+#island-settings .sw,
+#island-settings .tile,
+#island-settings .mode,
+#island-settings .acc,
+#island-settings .pick,
+#island-settings .kbadge,
+#island-settings .kclear,
+#island-settings .typo-pill-btn,
+#island-settings .typo-sw,
+#island-settings .w-studio-head,
+#island-settings .w-item-card {
+  transition:
+    transform 0.24s var(--spring),
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.22s ease,
+    filter 0.18s ease;
+}
+
+#island-settings .pbtn:hover:not(:disabled),
+#island-settings .pick:hover:not(:disabled),
+#island-settings .kbadge:hover:not(:disabled),
+#island-settings .typo-pill-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+#island-settings .pbtn:not(:disabled):active,
+#island-settings .s-head .x:not(:disabled):active,
+#island-settings .s-tabs button:not(:disabled):active,
+#island-settings .seg > :is(span, button):not(.off):active,
+#island-settings .sw:not(:disabled):active,
+#island-settings .pick:not(:disabled):active,
+#island-settings .kbadge:not(:disabled):active,
+#island-settings .typo-pill-btn:not(:disabled):active {
+  transform: translateY(1px) scale(0.96);
+}
+
+#island-settings .tile:hover {
+  transform: translateY(-1.5px);
+}
+
+#island-settings .mode:hover {
+  transform: translateY(-1.5px);
+}
+
+#island-settings .acc:hover {
+  transform: scale(1.14);
+}
+
+#island-settings .acc:active {
+  transform: scale(0.92);
 }
 
 #island-settings .ilook {
@@ -3165,7 +3236,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 9px 12px;
+  padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
@@ -3190,14 +3261,6 @@
   border-top-color: rgba(0, 0, 0, 0.07);
 }
 
-#island-settings .ilook-accent-row .winaccent-mode {
-  margin-top: 0;
-}
-
-#island-settings .ilook-accents {
-  margin-top: 4px;
-}
-
 #island-settings .ilook-box-head {
   display: flex;
   align-items: baseline;
@@ -3208,7 +3271,11 @@
 #island-settings .ilook-box-title {
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .ilook-sub-title {
+  font-size: 12px;
+  font-weight: 600;
 }
 
 #island-settings .ilook-box-note {
@@ -3217,10 +3284,39 @@
   color: var(--dock-muted, var(--g4));
 }
 
+/* 主题与背景合并卡：上方壁纸与遮挡调节，底部三大场景切换按钮 */
+#island-settings .ilook-paper-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .ilook-paper-zone {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .ilook-paper-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+#island-settings .ilook-paper-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
 #island-settings .ilook-paper-bar {
   display: flex;
   align-items: center;
-  padding: 2px 0;
+  flex: none;
 }
 
 #island-settings .dock-paper-row {
@@ -3230,13 +3326,321 @@
 }
 
 #island-settings .dock-paper-thumb {
-  width: 68px;
-  height: 40px;
+  width: 58px;
+  height: 34px;
   border-radius: 8px;
   object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
+/* 底部浅色 / 深色 / 玻璃三大动效切换舞台（融合昼夜单标签场景动效 + 液态玻璃折射流光） */
+#island-settings .dock-theme-stage {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .dock-theme-stage {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .dock-theme-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1.5px solid var(--g3);
+  background: var(--g1);
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 0.34s var(--spring),
+    border-color 0.25s ease,
+    box-shadow 0.28s ease,
+    background-color 0.25s ease;
+}
+
+#island-settings .dock-theme-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--g4);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+}
+
+#island-settings .dock-theme-card:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+#island-settings .dock-theme-card.on {
+  border-color: var(--dock-accent, #5e9bff);
+  box-shadow:
+    0 0 0 1px var(--dock-accent, #5e9bff),
+    0 8px 22px color-mix(in srgb, var(--dock-accent, #5e9bff) 26%, rgba(0, 0, 0, 0.28));
+}
+
+#island-settings .dock-theme-card .theme-scene {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 46px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+#island-settings .dock-theme-card .scene-orb,
+#island-settings .dock-theme-card .scene-deco,
+#island-settings .dock-theme-card .scene-ray {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  transition:
+    transform 0.48s var(--spring),
+    box-shadow 0.38s ease,
+    opacity 0.32s ease;
+}
+
+/* 1) 浅色（日间晴空：骄阳多阶光晕 + 单标签多重投影云朵漂浮） */
+#island-settings .dock-theme-card.mode-light .theme-scene {
+  background: linear-gradient(160deg, #28a8f8 0%, #67d4fc 56%, #fef08a 100%);
+}
+
+#island-settings .dock-theme-card.mode-light .scene-orb {
+  top: 50%;
+  left: 34%;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 35% 35%, #ffffff 0%, #fde047 45%, #f59e0b 100%);
+  box-shadow:
+    0 0 0 4px rgba(254, 240, 138, 0.34),
+    0 0 0 9px rgba(254, 240, 138, 0.16),
+    0 0 18px rgba(251, 191, 36, 0.9);
+}
+
+#island-settings .dock-theme-card.mode-light .scene-deco {
+  bottom: 6px;
+  left: 56%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    -9px 2px 0 -1px rgba(255, 255, 255, 0.9),
+    9px 2px 0 -1.5px rgba(255, 255, 255, 0.88),
+    17px 3px 0 -3px rgba(255, 255, 255, 0.78),
+    -26px 4px 0 -3px rgba(255, 255, 255, 0.55);
+}
+
+#island-settings .dock-theme-card.mode-light .scene-ray {
+  inset: -30%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.22) 25deg, transparent 50deg, rgba(255, 255, 255, 0.18) 140deg, transparent 175deg, rgba(255, 255, 255, 0.22) 260deg, transparent 300deg);
+  opacity: 0.55;
+}
+
+#island-settings .dock-theme-card.mode-light:hover .scene-orb,
+#island-settings .dock-theme-card.mode-light.on .scene-orb {
+  transform: translate(-50%, -56%) scale(1.14);
+  box-shadow:
+    0 0 0 6px rgba(254, 240, 138, 0.42),
+    0 0 0 13px rgba(254, 240, 138, 0.2),
+    0 0 24px rgba(251, 191, 36, 1);
+}
+
+#island-settings .dock-theme-card.mode-light:hover .scene-deco,
+#island-settings .dock-theme-card.mode-light.on .scene-deco {
+  transform: translateX(6px) translateY(-1px);
+}
+
+#island-settings .dock-theme-card.mode-light:hover .scene-ray,
+#island-settings .dock-theme-card.mode-light.on .scene-ray {
+  transform: rotate(35deg) scale(1.08);
+  opacity: 0.85;
+}
+
+/* 2) 深色（静谧星夜：内阴影弯月 + 单标签星群闪烁 + 极光星云） */
+#island-settings .dock-theme-card.mode-dark .theme-scene {
+  background: linear-gradient(160deg, #060916 0%, #141c3c 55%, #2b2254 100%);
+}
+
+#island-settings .dock-theme-card.mode-dark .scene-orb {
+  top: 50%;
+  left: 36%;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) rotate(-8deg);
+  background: transparent;
+  box-shadow:
+    inset -8px -3px 0 0 #fef08a,
+    0 0 14px rgba(254, 240, 138, 0.35);
+}
+
+#island-settings .dock-theme-card.mode-dark .scene-deco {
+  top: 14px;
+  left: 64%;
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    -34px -4px 0 0 rgba(255, 255, 255, 0.85),
+    -16px 14px 0 -0.5px rgba(255, 255, 255, 0.75),
+    12px -4px 0 0.5px #fef08a,
+    18px 10px 0 0 rgba(255, 255, 255, 0.9),
+    4px 18px 0 -0.5px rgba(192, 132, 252, 0.9),
+    -24px 18px 0 0 rgba(125, 211, 252, 0.85);
+}
+
+#island-settings .dock-theme-card.mode-dark .scene-ray {
+  inset: 0;
+  background: radial-gradient(circle at 75% 25%, rgba(139, 92, 246, 0.32), transparent 60%);
+  opacity: 0.7;
+}
+
+#island-settings .dock-theme-card.mode-dark:hover .scene-orb,
+#island-settings .dock-theme-card.mode-dark.on .scene-orb {
+  transform: translate(-50%, -55%) rotate(-22deg) scale(1.12);
+  box-shadow:
+    inset -8px -3px 0 0 #fde047,
+    0 0 20px rgba(254, 240, 138, 0.65);
+}
+
+#island-settings .dock-theme-card.mode-dark:hover .scene-deco,
+#island-settings .dock-theme-card.mode-dark.on .scene-deco {
+  animation: dock-stars-twinkle 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes dock-stars-twinkle {
+  0% {
+    opacity: 0.65;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+/* 3) 玻璃（液态玻璃棱镜：流光极光底 + 3D 悬浮液态水珠 + 焦散扫光） */
+#island-settings .dock-theme-card.mode-glass .theme-scene {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.72), transparent 55%),
+    radial-gradient(circle at 82% 75%, rgba(244, 114, 182, 0.68), transparent 58%),
+    linear-gradient(135deg, #1e3a8a 0%, #5b21b6 50%, #0f766e 100%);
+}
+
+#island-settings .dock-theme-card.mode-glass .scene-orb {
+  top: 50%;
+  left: 46%;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    circle at 30% 28%,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(255, 255, 255, 0.34) 36%,
+    color-mix(in srgb, var(--dock-accent, #5e9bff) 45%, transparent) 72%,
+    rgba(255, 255, 255, 0.55) 100%
+  );
+  backdrop-filter: blur(6px) saturate(1.5);
+  -webkit-backdrop-filter: blur(6px) saturate(1.5);
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, 0.95),
+    inset 0 -3px 5px rgba(56, 189, 248, 0.55),
+    0 5px 14px rgba(15, 23, 42, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.52);
+}
+
+#island-settings .dock-theme-card.mode-glass .scene-deco {
+  top: 10px;
+  left: 66%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 32%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.22));
+  box-shadow:
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.9),
+    0 2px 6px rgba(0, 0, 0, 0.25),
+    -32px 17px 0 -1.5px rgba(255, 255, 255, 0.55);
+}
+
+#island-settings .dock-theme-card.mode-glass .scene-ray {
+  inset: -40% -90%;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.48) 50%, transparent 58%);
+  transform: translateX(-55%) rotate(15deg);
+  transition: transform 0.68s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#island-settings .dock-theme-card.mode-glass:hover .scene-orb,
+#island-settings .dock-theme-card.mode-glass.on .scene-orb {
+  animation: dock-glass-orb 2.6s ease-in-out infinite alternate;
+}
+
+#island-settings .dock-theme-card.mode-glass:hover .scene-deco,
+#island-settings .dock-theme-card.mode-glass.on .scene-deco {
+  transform: translate(3px, -2px) scale(1.12);
+}
+
+#island-settings .dock-theme-card.mode-glass:hover .scene-ray,
+#island-settings .dock-theme-card.mode-glass.on .scene-ray {
+  transform: translateX(55%) rotate(15deg);
+}
+
+@keyframes dock-glass-orb {
+  0% {
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(1.04);
+  }
+  100% {
+    border-radius: 44% 56% 48% 52% / 54% 46% 54% 46%;
+    transform: translate(-50%, -56%) scale(1.14);
+  }
+}
+
+#island-settings .dock-theme-card .theme-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 20px;
+}
+
+#island-settings .dock-theme-card .theme-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--g4);
+  background: transparent;
+  transition:
+    transform 0.28s var(--spring),
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+#island-settings .dock-theme-card.on .theme-dot {
+  border-color: var(--dock-accent, #5e9bff);
+  background: var(--dock-accent, #5e9bff);
+  box-shadow: 0 0 8px var(--dock-accent, #5e9bff);
+  transform: scale(1.18);
+}
+
+#island-settings .dock-theme-card .theme-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* 液态玻璃卡片内的预设与玻璃色调调节区 */
 #island-settings .dock-glass-seg {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3253,6 +3657,37 @@
   border-radius: 999px;
   text-align: center;
   font-size: 11.5px;
+}
+
+#island-settings .glass-accent-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .glass-accent-zone {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .ilook-accent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+#island-settings .ilook-accent-row .winaccent-mode {
+  margin-top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#island-settings .ilook-accents {
+  margin-top: 2px;
 }
 
 #island-settings .glass-reg {
@@ -3277,7 +3712,6 @@
 #island-settings .glass-reg-t {
   font-size: 12px;
   font-weight: 600;
-  color: var(--dock-fg, var(--fg));
 }
 
 #island-settings .glass-reg-d {
@@ -3318,20 +3752,443 @@
   color: var(--dock-muted, var(--g4));
 }
 
+/* 字体颜色与内嵌玻璃调色板（色圆 + 等宽 HEX 序号严格同一水平中轴线对齐） */
+#island-settings .ilook-typo-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .ilook-typo-item {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
 #island-settings .ilook-typo-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 28px;
-  padding: 2px 0;
+  gap: 10px;
+  min-height: 30px;
 }
 
-/* 液态玻璃模式全设定页半透明 + 模糊 + 360° 玻璃高光边 */
+#island-settings .ilook-typo-lbl {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .ilook-typo-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+#island-settings .typo-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  cursor: pointer;
+}
+
+#island-settings .typo-pill-btn:hover {
+  border-color: var(--g4);
+}
+
+#island-settings .typo-pill-btn.on {
+  border-color: var(--dock-accent, #5e9bff);
+  box-shadow: 0 0 0 1px var(--dock-accent, #5e9bff);
+}
+
+#island-settings .typo-dot {
+  flex: none;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+#island-settings .typo-hex {
+  display: inline-flex;
+  align-items: center;
+  width: 7.2ch;
+  font-size: 12px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .typo-clear-btn {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#island-settings .typo-clear-btn.is-ghost {
+  opacity: 0.32;
+  pointer-events: none;
+}
+
+/* 内嵌调色板抽屉（16 色精调预设 + H/S/L 实时渐变滑杆 + HEX 输入） */
+#island-settings .typo-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 2px 0 4px;
+  border-radius: 12px;
+  border: 1px solid var(--g3);
+  background: var(--g1);
+  animation: typo-drawer-in 0.24s var(--spring) both;
+}
+
+@keyframes typo-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#island-settings .typo-swatches {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+}
+
+#island-settings .typo-sw {
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(127, 127, 127, 0.38);
+  cursor: pointer;
+}
+
+#island-settings .typo-sw:hover {
+  transform: scale(1.12);
+}
+
+#island-settings .typo-sw.on {
+  box-shadow:
+    0 0 0 2px var(--g1),
+    0 0 0 3.5px var(--dock-accent, #5e9bff);
+}
+
+#island-settings .typo-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#island-settings .typo-hsl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+#island-settings .typo-hsl-lbl {
+  flex: 0 0 44px;
+  font-size: 11px;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .typo-hsl-row .typo-rng {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+#island-settings .typo-hsl-row .typo-rng.rng-h {
+  background: linear-gradient(90deg, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+}
+
+#island-settings .typo-hsl-row .typo-rng.rng-s {
+  background: linear-gradient(90deg, #808080 0%, var(--tp-hue, #5e9bff) 100%);
+}
+
+#island-settings .typo-hsl-row .typo-rng.rng-l {
+  background: linear-gradient(90deg, #0d0d11 0%, var(--tp-hue, #5e9bff) 50%, #ffffff 100%);
+}
+
+#island-settings .typo-hsl-row .rv {
+  flex: 0 0 36px;
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .typo-hex-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .typo-hex-bar {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .typo-hex-preview {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+#island-settings .typo-hex-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .typo-hex-in {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+/* ---- 插件页：「插件和小工具」可折叠与重构卡片式界面 ---- */
+#island-settings .w-studio {
+  display: flex;
+  flex-direction: column;
+}
+
+#island-settings .w-studio-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+#island-settings .w-studio-head:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tb-light #island-settings .w-studio-head:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+#island-settings .w-studio-chev {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--g2);
+  color: var(--dock-muted, var(--g5));
+  font-size: 12px;
+}
+
+#island-settings .w-studio-lead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+#island-settings .w-studio-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#island-settings .w-studio-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#island-settings .w-studio-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-muted, var(--g5));
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .w-studio-note {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .w-studio-body[hidden],
+#island-settings .w-studio-more[hidden] {
+  display: none;
+}
+
+#island-settings .w-studio-body {
+  padding: 2px 10px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tb-light #island-settings .w-studio-body {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+#island-settings .w-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+#island-settings .w-item-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+}
+
+.tb-light #island-settings .w-item-card {
+  border-color: rgba(0, 0, 0, 0.07);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+#island-settings .w-item-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.tb-light #island-settings .w-item-card:hover {
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+#island-settings .w-item-card.is-placed {
+  border-color: color-mix(in srgb, var(--dock-accent, #5e9bff) 28%, rgba(255, 255, 255, 0.08));
+}
+
+#island-settings .w-item-row {
+  padding: 8px 10px;
+  min-height: 48px;
+  gap: 10px;
+}
+
+#island-settings .w-icon-box {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--w-tint, #5e9bff) 15%, rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--w-tint, #5e9bff) 28%, rgba(255, 255, 255, 0.08));
+}
+
+#island-settings .w-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+#island-settings .w-item-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#island-settings .w-item-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#island-settings .w-reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .w-desc {
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+#island-settings .w-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+#island-settings .w-item-actions .pl-at {
+  min-width: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  font-size: 11px;
+}
+
+#island-settings .w-item-drawer {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.tb-light #island-settings .w-item-drawer {
+  border-top-color: rgba(0, 0, 0, 0.07);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+#island-settings .w-item-drawer .pf {
+  padding: 8px 12px 10px;
+}
+
+/* 液态玻璃模式全设定页半透明 + 模糊 + 玻璃色调染色 + 360° 玻璃高光边 */
 body.dock-glass #island-settings .grp,
 body.dock-glass #island-settings .mode,
 body.dock-glass #island-settings .tile,
 body.dock-glass #island-settings .ilook-card,
 body.dock-glass #island-settings .ilook-sec-card,
+body.dock-glass #island-settings .typo-palette,
+body.dock-glass #island-settings .w-item-card,
 body.dock-glass #island-settings .tab-order,
 body.dock-glass #island-settings .card,
 body.dock-glass #island-settings .wcard,
@@ -3347,24 +4204,24 @@ body.dock-glass #island-settings .extension-down,
 body.dock-glass #island-settings .notes-skeleton .sk,
 body.dock-glass #island-settings .adv-b,
 body.dock-glass #island-settings .ag-way {
-  background: rgba(24, 26, 36, var(--dock-glass-card-op, 0.22));
-  backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.35);
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 10%, rgba(24, 26, 36, var(--dock-glass-card-op, 0.22)));
+  backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.38);
+  -webkit-backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.38);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) 26%, rgba(255, 255, 255, 0.18)),
+    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) 18%, rgba(255, 255, 255, 0.12));
 }
 
 body.dock-glass #island-settings .s-confirm-dialog,
 body.dock-glass #island-settings .mmenu,
 body.dock-glass #island-settings .extension-more-body,
 body.dock-glass #island-settings .ext-progress {
-  background: rgba(24, 26, 36, var(--dock-glass-overlay-op, 0.45));
-  backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.4);
-  -webkit-backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.4);
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 12%, rgba(24, 26, 36, var(--dock-glass-overlay-op, 0.45)));
+  backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.42);
+  -webkit-backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.42);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) 28%, rgba(255, 255, 255, 0.22)),
+    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) 20%, rgba(255, 255, 255, 0.14)),
     0 18px 40px rgba(0, 0, 0, 0.4);
 }
 
@@ -3382,6 +4239,11 @@ body.dock-glass #island-settings .tile .c,
 body.dock-glass #island-settings .pick,
 body.dock-glass #island-settings .kbadge,
 body.dock-glass #island-settings .wc-tool,
+body.dock-glass #island-settings .dock-theme-card,
+body.dock-glass #island-settings .typo-pill-btn,
+body.dock-glass #island-settings .w-reading,
+body.dock-glass #island-settings .w-studio-badge,
+body.dock-glass #island-settings .w-item-actions .pl-at,
 body.dock-glass #island-settings .tab-order li,
 body.dock-glass #island-settings .extension-views,
 body.dock-glass #island-settings .extension-search,
@@ -3391,10 +4253,10 @@ body.dock-glass #island-settings .extension-node,
 body.dock-glass #island-settings .extension-build,
 body.dock-glass #island-settings .extension-build-source,
 body.dock-glass #island-settings .s-tabs button.on {
-  background: rgba(42, 46, 62, var(--dock-glass-control-op, 0.28));
-  backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.25);
-  -webkit-backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.25);
-  border-color: rgba(255, 255, 255, 0.14);
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 10%, rgba(42, 46, 62, var(--dock-glass-control-op, 0.28)));
+  backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.28);
+  -webkit-backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.28);
+  border-color: color-mix(in srgb, var(--dock-accent, #ffffff) 22%, rgba(255, 255, 255, 0.14));
 }
 
 body.dock-glass #island-settings .pbtn.al {
@@ -3406,8 +4268,8 @@ body.dock-glass #island-settings .pbtn.al {
 
 body.dock-glass #island-settings .seg > :is(span, button).on,
 body.dock-glass #island-settings .extension-view[aria-selected='true'] {
-  background: rgba(58, 64, 86, 0.78);
-  color: var(--dock-fg, #ffffff);
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 22%, rgba(58, 64, 86, 0.78));
+  color: var(--dock-fg, var(--fg));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 

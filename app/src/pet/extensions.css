@@ -67,14 +67,14 @@
       本仓库没有可用的浏览器时（沙盒禁命名管道），这些数值只有静态算式与 CSS 断言，
       必须在真机上补量一次，别把注释当实测。 */
 #island-settings .extension-panel { margin-block: 12px 20px; overflow-wrap: anywhere; }
-#island-settings .extension-panel h3 { margin-block: 0 10px; font-size: 14px; }
+#island-settings .extension-panel h3 { margin-block: 0 10px; font-size: 14px; color: var(--dock-heading, var(--dock-fg, var(--fg))); }
 #island-settings .extension-panel :is(button, input, summary) { touch-action: manipulation; }
 #island-settings .extension-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-block-end: 10px; }
 
 /* —— 视图栏：三个视图是真 tablist，检查更新退到同一行右端（不再与切换器同权重）—— */
 #island-settings .extension-viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block-end: 10px; }
 #island-settings .extension-views { display: flex; flex: 1 1 auto; min-width: 0; gap: 4px; padding: 2px; border: 1px solid var(--g3); border-radius: 12px; background: var(--g1); }
-#island-settings .extension-view { flex: none; height: 26px; padding: 0 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--g4); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+#island-settings .extension-view { flex: none; height: 26px; padding: 0 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--g4); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: transform 0.22s var(--spring), background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease; }
 #island-settings .extension-view:hover:not(:disabled) { color: var(--fg); }
 #island-settings .extension-view[aria-selected='true'] { border-color: var(--g3); background: var(--g2); color: var(--fg); }
 #island-settings .extension-view:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
@@ -84,12 +84,12 @@
 /* —— 服务卡 —— */
 /* 标题行上下内衬各 10px（规范 ②）：卡自身只留上 10px，下沿 12px 给卡片收口；
    行高由字号决定，按钮高度仍归 .pbtn.sm 的 min-height —— 内衬不许把行撑高。 */
-#island-settings .extension-card { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; padding: 10px 14px 10px; border: 1px solid transparent; border-radius: 14px; background: var(--g1); }
+#island-settings .extension-card { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; padding: 10px 14px 10px; border: 1px solid transparent; border-radius: 14px; background: var(--g1); transition: border-color 0.2s ease, transform 0.22s var(--spring), box-shadow 0.2s ease; }
 #island-settings .extension-card:hover { border-color: var(--g3); }
 #island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; min-width: 0; padding-block: 0; }
 /* 名字与状态信号同一基线（规范 ②）：17px 的名字不再和 12px 的信号各浮一半。 */
 #island-settings .extension-card-title { display: flex; flex: 1 1 140px; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
-#island-settings .extension-card-title strong { color: var(--fg); font-size: 13px; font-weight: 600; }
+#island-settings .extension-card-title strong { color: var(--dock-heading, var(--dock-fg, var(--fg))); font-size: 13px; font-weight: 600; }
 /* 已安装卡的插件名是这一页的主语（S2 / #69）：17px/600、行高 1.3。
    目录卡与第三方卡是「列表里的条目」，保持 13px —— 一屏十几张卡时不靠字号抢读。 */
 #island-settings .extension-card[data-kind='installed'] .extension-card-title strong { font-size: 15.5px; font-weight: 600; line-height: 1.3; }
@@ -227,14 +227,15 @@
 #island-settings .extension-third-count { margin: 0; font-size: 12px; color: var(--g4); }
 #island-settings .extension-third-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 #island-settings .extension-third-actions .pbtn { min-height: 32px; }
-/* 外观标签顺序支持鼠标拖动与键盘按钮。 */
+/* 外观标签顺序支持鼠标拖动与键盘按钮（带指针跟随与 FLIP 弹簧换位动效）。 */
 .tab-order { padding: 10px 12px; border-radius: 14px; }
 .tab-order-note { margin: 0 2px 8px; padding: 0; font-size: 11.5px; line-height: 1.4; color: var(--g4); }
-.tab-order ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-.tab-order li { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 10px; margin: 0; background: var(--g2); border: 1px solid var(--g3); border-radius: 10px; cursor: grab; user-select: none; touch-action: none; transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease; }
+.tab-order ol { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.tab-order li { position: relative; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 10px; margin: 0; background: var(--g2); border: 1px solid var(--g3); border-radius: 10px; cursor: grab; user-select: none; touch-action: none; will-change: transform; transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.2s ease, transform 0.22s var(--spring); }
 .tab-order li:hover { border-color: var(--g4); }
-.tab-order li.is-dragging { cursor: grabbing; background: var(--g3); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32); transform: scale(1.01); z-index: 2; }
-.tab-order-grip { flex: none; color: var(--g4); font-size: 12px; letter-spacing: -1px; opacity: 0.75; cursor: grab; }
+.tab-order li.is-dragging { cursor: grabbing; background: var(--g3); border-color: var(--dock-accent, #5e9bff); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.38), 0 0 0 1px var(--dock-accent, #5e9bff); z-index: 5; transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.18s ease; }
+.tab-order li.is-dragging .tab-order-grip { color: var(--accent-ink); opacity: 1; }
+.tab-order-grip { flex: none; color: var(--g4); font-size: 12px; letter-spacing: -1px; opacity: 0.75; cursor: grab; transition: color 0.16s ease, opacity 0.16s ease; }
 .tab-order-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
 .tab-order-status { font-size: 11.5px; color: var(--g4); }
 .tab-order :is(button,li):focus-visible { outline: 2px solid #80b6ff; outline-offset: 3px; }

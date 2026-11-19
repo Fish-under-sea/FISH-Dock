@@ -843,7 +843,7 @@ fn is_dock_look(v: &Value) -> bool {
     m.iter().all(|(k, v)| match k.as_str() {
         "mode" => matches!(v.as_str(), Some("light" | "dark" | "glass")),
         "accentMode" => matches!(v.as_str(), Some("system" | "custom")),
-        "accent" | "textColor" | "mutedColor" => is_hex_or_empty(v),
+        "accent" | "headingColor" | "textColor" | "mutedColor" => is_hex_or_empty(v),
         "wallpaper" => v.as_str().is_some_and(|s| s.is_empty() || (s.len() <= 128 && !s.contains(['/', '\\']) && !s.contains(".."))),
         "wallpaperDim" => v.as_u64().is_some_and(|n| n <= 100),
         "glass" => v.as_object().is_some_and(|g| {

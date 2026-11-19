@@ -804,6 +804,7 @@
       controlOp: 28,
       controlBlur: 8,
     },
+    headingColor: '',
     textColor: '',
     mutedColor: '',
   }
@@ -813,6 +814,12 @@
     balanced: { surfaceOp: 38, surfaceBlur: 18, cardOp: 22, cardBlur: 12, overlayOp: 45, overlayBlur: 16, controlOp: 28, controlBlur: 8 },
     clear: { surfaceOp: 18, surfaceBlur: 24, cardOp: 12, cardBlur: 16, overlayOp: 25, overlayBlur: 20, controlOp: 16, controlBlur: 10 },
   }
+  const TYPO_SWATCHES = [
+    '#ffffff', '#f5f5f7', '#d1d5db', '#9ca3af', '#4b5563', '#1b1b1f', '#60a5fa', '#38bdf8',
+    '#34d399', '#a7f3d0', '#fbbf24', '#fb923c', '#f87171', '#f472b6', '#c084fc', '#818cf8',
+  ]
+  let typoOpen = ''
+  let widgetsFoldOpen = true
   const dockLookOf = () => {
     const raw = snap?.settings?.dockLook || {}
     return {
@@ -837,7 +844,11 @@
       accent,
       glass: { enabled: mode === 'glass', ...g },
       wallpaper: { url: snap.dockPaperUrl || '', dim: dl.wallpaperDim ?? 58 },
-      typography: { textColor: dl.textColor || '', mutedColor: dl.mutedColor || '' },
+      typography: {
+        headingColor: dl.headingColor || '',
+        textColor: dl.textColor || '',
+        mutedColor: dl.mutedColor || '',
+      },
     }
   }
   function dockLookSave(next, keep = true) {
@@ -859,7 +870,7 @@
       if (rv) rv.textContent = `${val}%`
       return dockLookSave({ ...cur, wallpaperDim: val }, keep)
     }
-    if (key === 'textColor' || key === 'mutedColor') {
+    if (key === 'headingColor' || key === 'textColor' || key === 'mutedColor') {
       return dockLookSave({ ...cur, [key]: String(target.value || '').toLowerCase() }, keep)
     }
     if (key.startsWith('glass.')) {
@@ -870,6 +881,117 @@
       if (rv) rv.textContent = `${val}${gk.endsWith('Blur') ? 'px' : '%'}`
       return dockLookSave({ ...cur, glass }, keep)
     }
+  }
+  function applyTypoColorLive(key, hex, keep) {
+    const cur = dockLookOf()
+    const clean = /^#[0-9a-f]{6}$/i.test(hex) ? hex.toLowerCase() : ''
+    if (!clean) return
+    const next = key === 'accent'
+      ? { ...cur, accentMode: 'custom', accent: clean }
+      : { ...cur, [key]: clean }
+    snap.settings.dockLook = next
+    applyDockThemeVars()
+    extensionPage.refreshTheme?.()
+    const item = body.querySelector(`[data-typo-item="${key}"]`)
+    if (item) {
+      const dot = item.querySelector('.typo-dot')
+      const hexSpan = item.querySelector('.typo-hex')
+      const clearBtn = item.querySelector('[data-dock-typo-clear]')
+      const preview = item.querySelector('.typo-hex-preview')
+      const hexIn = item.querySelector('[data-typo-hex]')
+      const sliders = item.querySelector('.typo-sliders')
+      if (dot) dot.style.background = clean
+      if (hexSpan) hexSpan.textContent = clean
+      if (clearBtn) {
+        clearBtn.disabled = false
+        clearBtn.classList.remove('is-ghost')
+      }
+      if (preview) preview.style.background = clean
+      if (hexIn && document.activeElement !== hexIn) hexIn.value = clean
+      if (sliders) {
+        const [h6] = toHsl(clean)
+        sliders.style.setProperty('--tp-hue', fromHsl(h6, 1, 0.5))
+        sliders.style.setProperty('--tp-hex', clean)
+      }
+      item.querySelectorAll('[data-typo-swatch]').forEach(btn => {
+        const swHex = btn.dataset.typoSwatch.split(':')[1] || ''
+        btn.classList.toggle('on', swHex.toLowerCase() === clean)
+      })
+    }
+    if (keep) patch({ dockLook: next })
+  }
+  function typoHslInput(target, keep) {
+    const [key] = String(target.dataset.typoHsl || '').split(':')
+    const palette = target.closest('[data-typo-palette]')
+    if (!key || !palette) return
+    const hEl = palette.querySelector(`[data-typo-hsl="${key}:h"]`)
+    const sEl = palette.querySelector(`[data-typo-hsl="${key}:s"]`)
+    const lEl = palette.querySelector(`[data-typo-hsl="${key}:l"]`)
+    const hDeg = Math.min(360, Math.max(0, Number(hEl?.value) || 0))
+    const sPct = Math.min(100, Math.max(0, Number(sEl?.value) || 0))
+    const lPct = Math.min(98, Math.max(5, Number(lEl?.value) || 50))
+    const hRv = palette.querySelector('[data-typo-rv="h"]')
+    const sRv = palette.querySelector('[data-typo-rv="s"]')
+    const lRv = palette.querySelector('[data-typo-rv="l"]')
+    if (hRv) hRv.textContent = `${hDeg}°`
+    if (sRv) sRv.textContent = `${sPct}%`
+    if (lRv) lRv.textContent = `${lPct}%`
+    const hex = fromHsl((hDeg % 360) / 60, sPct / 100, lPct / 100)
+    applyTypoColorLive(key, hex, keep)
+  }
+  function typoHexInput(target, keep) {
+    const key = target.dataset.typoHex
+    if (!key) return
+    let raw = String(target.value || '').trim().toLowerCase()
+    if (/^[0-9a-f]{6}$/i.test(raw)) raw = `#${raw}`
+    if (!/^#[0-9a-f]{6}$/i.test(raw)) {
+      if (keep) draw()
+      return
+    }
+    const palette = target.closest('[data-typo-palette]')
+    if (palette) {
+      const [h6, s1, l1] = toHsl(raw)
+      const hDeg = Math.round(h6 * 60) % 360
+      const sPct = Math.round(s1 * 100)
+      const lPct = Math.round(l1 * 100)
+      const hEl = palette.querySelector(`[data-typo-hsl="${key}:h"]`)
+      const sEl = palette.querySelector(`[data-typo-hsl="${key}:s"]`)
+      const lEl = palette.querySelector(`[data-typo-hsl="${key}:l"]`)
+      if (hEl) hEl.value = String(hDeg)
+      if (sEl) sEl.value = String(sPct)
+      if (lEl) lEl.value = String(lPct)
+      const hRv = palette.querySelector('[data-typo-rv="h"]')
+      const sRv = palette.querySelector('[data-typo-rv="s"]')
+      const lRv = palette.querySelector('[data-typo-rv="l"]')
+      if (hRv) hRv.textContent = `${hDeg}°`
+      if (sRv) sRv.textContent = `${sPct}%`
+      if (lRv) lRv.textContent = `${lPct}%`
+    }
+    applyTypoColorLive(key, raw, keep)
+  }
+  function renderTypoPalette(key, activeHex) {
+    const safeHex = /^#[0-9a-f]{6}$/i.test(activeHex) ? activeHex.toLowerCase() : '#f5f5f7'
+    const [h6, s1, l1] = toHsl(safeHex)
+    const hDeg = Math.round(h6 * 60) % 360
+    const sPct = Math.round(s1 * 100)
+    const lPct = Math.min(98, Math.max(5, Math.round(l1 * 100)))
+    const pureHue = fromHsl(h6, 1, 0.5)
+    const swatches = TYPO_SWATCHES
+      .map(c => `<button type="button" class="typo-sw${c.toLowerCase() === safeHex ? ' on' : ''}" data-typo-swatch="${esc(key)}:${c}" style="background:${c}" title="${c}" aria-label="${c}"></button>`)
+      .join('')
+    return `<div class="typo-palette" data-typo-palette="${esc(key)}">
+      <div class="typo-swatches">${swatches}</div>
+      <div class="typo-sliders" style="--tp-hue:${pureHue};--tp-hex:${esc(safeHex)}">
+        <div class="typo-hsl-row"><span class="typo-hsl-lbl">${esc(lang === 'zh' ? '色相' : 'Hue')}</span><input type="range" class="rng typo-rng rng-h" data-typo-hsl="${esc(key)}:h" min="0" max="360" step="1" value="${hDeg}"><span class="rv mono" data-typo-rv="h">${hDeg}°</span></div>
+        <div class="typo-hsl-row"><span class="typo-hsl-lbl">${esc(lang === 'zh' ? '饱和度' : 'Sat')}</span><input type="range" class="rng typo-rng rng-s" data-typo-hsl="${esc(key)}:s" min="0" max="100" step="1" value="${sPct}"><span class="rv mono" data-typo-rv="s">${sPct}%</span></div>
+        <div class="typo-hsl-row"><span class="typo-hsl-lbl">${esc(lang === 'zh' ? '明度' : 'Light')}</span><input type="range" class="rng typo-rng rng-l" data-typo-hsl="${esc(key)}:l" min="5" max="98" step="1" value="${lPct}"><span class="rv mono" data-typo-rv="l">${lPct}%</span></div>
+      </div>
+      <div class="typo-hex-bar">
+        <span class="typo-hex-preview" style="background:${esc(safeHex)}"></span>
+        <span class="typo-hex-tag mono">HEX</span>
+        <input type="text" class="in typo-hex-in mono" data-typo-hex="${esc(key)}" value="${esc(safeHex)}" maxlength="7" placeholder="#rrggbb" spellcheck="false" autocomplete="off">
+      </div>
+    </div>`
   }
   function applyDockThemeVars() {
     const info = buildAppearancePayload()
@@ -887,10 +1009,33 @@
     layer.style.setProperty('--sys-accent', info.accent)
     root.setProperty('--sys-accent', info.accent)
     root.setProperty('--dock-accent', info.accent)
-    if (info.typography.textColor && /^#[0-9a-f]{6}$/i.test(info.typography.textColor)) root.setProperty('--dock-fg', info.typography.textColor)
-    else root.removeProperty('--dock-fg')
-    if (info.typography.mutedColor && /^#[0-9a-f]{6}$/i.test(info.typography.mutedColor)) root.setProperty('--dock-muted', info.typography.mutedColor)
-    else root.removeProperty('--dock-muted')
+    if (info.typography.headingColor && /^#[0-9a-f]{6}$/i.test(info.typography.headingColor)) {
+      root.setProperty('--dock-heading', info.typography.headingColor)
+      layer.style.setProperty('--dock-heading', info.typography.headingColor)
+    } else {
+      root.removeProperty('--dock-heading')
+      layer.style.removeProperty('--dock-heading')
+    }
+    if (info.typography.textColor && /^#[0-9a-f]{6}$/i.test(info.typography.textColor)) {
+      root.setProperty('--dock-fg', info.typography.textColor)
+      layer.style.setProperty('--dock-fg', info.typography.textColor)
+      layer.style.setProperty('--fg', info.typography.textColor)
+    } else {
+      root.removeProperty('--dock-fg')
+      layer.style.removeProperty('--dock-fg')
+      layer.style.removeProperty('--fg')
+    }
+    if (info.typography.mutedColor && /^#[0-9a-f]{6}$/i.test(info.typography.mutedColor)) {
+      root.setProperty('--dock-muted', info.typography.mutedColor)
+      layer.style.setProperty('--dock-muted', info.typography.mutedColor)
+      layer.style.setProperty('--g4', info.typography.mutedColor)
+      layer.style.setProperty('--g5', info.typography.mutedColor)
+    } else {
+      root.removeProperty('--dock-muted')
+      layer.style.removeProperty('--dock-muted')
+      layer.style.removeProperty('--g4')
+      layer.style.removeProperty('--g5')
+    }
     const g = info.glass
     root.setProperty('--dock-glass-surface-op', String((g.surfaceOp ?? 38) / 100))
     root.setProperty('--dock-glass-surface-blur', `${g.surfaceBlur ?? 18}px`)
@@ -900,6 +1045,7 @@
     root.setProperty('--dock-glass-overlay-blur', `${g.overlayBlur ?? 16}px`)
     root.setProperty('--dock-glass-control-op', String((g.controlOp ?? 28) / 100))
     root.setProperty('--dock-glass-control-blur', `${g.controlBlur ?? 8}px`)
+    document.body.classList.toggle('dock-has-paper', !!info.wallpaper.url)
     if (info.wallpaper.url) root.setProperty('--dock-wallpaper-url', `url("${info.wallpaper.url}")`)
     else root.removeProperty('--dock-wallpaper-url')
     root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
@@ -913,36 +1059,72 @@
     const curAccent = String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
     const colours = /^#[0-9a-f]{6}$/.test(curAccent) && !ACCENTS.includes(curAccent) ? [...ACCENTS, curAccent] : ACCENTS
     const accentSwatches = colours.map(c => `<span class="acc${c === curAccent ? ' on' : ''}" data-dock-accent="${c}" style="background:${c}" title="${c}"></span>`).join('')
+    const accentPaletteOpen = typoOpen === 'accent'
     const paperPreview = snap.dockPaperUrl
       ? `<div class="dock-paper-row"><img class="dock-paper-thumb" src="${esc(snap.dockPaperUrl)}" alt=""><button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperChange'))}</button><button type="button" class="pbtn sm" data-dock-paper="remove">${esc(T('s.dockPaperRemove'))}</button></div>`
       : `<button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperPick'))}</button>`
+    const themeCards = ['light', 'dark', 'glass']
+      .map(m => `<button type="button" class="dock-theme-card mode-${m}${dl.mode === m ? ' on' : ''}" data-dock-theme="${m}" aria-pressed="${dl.mode === m}">
+        <span class="theme-scene" aria-hidden="true"><i class="scene-orb"></i><i class="scene-deco"></i><i class="scene-ray"></i></span>
+        <span class="theme-foot"><i class="theme-dot"></i><span class="theme-label">${esc(T(`s.dockTheme.${m}`))}</span></span>
+      </button>`)
+      .join('')
     const glassPresets = ['off', 'light', 'balanced', 'clear', 'custom']
       .map(p => `<button type="button" class="${g.preset === p ? 'on' : ''}" data-glass-preset="${p}">${esc(T(`s.glass.${p}`))}</button>`)
       .join('')
     const glassRegion = (titleKey, noteKey, opKey, opVal, blurKey, blurVal) =>
       `<div class="glass-reg"><div class="glass-reg-head"><span class="glass-reg-t">${esc(T(titleKey))}</span><span class="glass-reg-d">${esc(T(noteKey))}</span></div><div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.glass.op'))}</span>${dockRange(opKey, 0, 100, '%', opVal)}</div><div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.glass.blur'))}</span>${dockRange(blurKey, 0, 32, 'px', blurVal)}</div></div>`
-    const typoRow = (key, label) => {
+    const typoRow = (key, label, fallbackHex) => {
       const val = dl[key] || ''
-      return `<div class="ilook-typo-row"><span class="ilook-slider-lbl">${esc(label)}</span><span class="btns"><input type="color" class="swc-in" data-dock-look="${key}" value="${esc(val || (dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7'))}"><span class="d mono">${esc(val || (lang === 'zh' ? '默认' : 'Default'))}</span>${val ? `<button type="button" class="pbtn sm" data-dock-typo-clear="${key}">${esc(T('s.typo.clear'))}</button>` : ''}</span></div>`
+      const previewHex = /^#[0-9a-f]{6}$/i.test(val) ? val.toLowerCase() : fallbackHex
+      const open = typoOpen === key
+      return `<div class="ilook-typo-item${open ? ' open' : ''}" data-typo-item="${esc(key)}">
+        <div class="ilook-typo-row">
+          <span class="ilook-typo-lbl">${esc(label)}</span>
+          <div class="ilook-typo-actions">
+            <button type="button" class="typo-pill-btn${open ? ' on' : ''}" data-typo-toggle="${esc(key)}" aria-expanded="${open}">
+              <i class="typo-dot" style="background:${esc(previewHex)}"></i>
+              <span class="typo-hex mono">${esc(val ? val.toLowerCase() : (lang === 'zh' ? '默认' : 'Default'))}</span>
+            </button>
+            <button type="button" class="pbtn sm typo-clear-btn${val ? '' : ' is-ghost'}" data-dock-typo-clear="${esc(key)}" ${val ? '' : 'disabled'}>${esc(T('s.typo.clear'))}</button>
+          </div>
+        </div>
+        ${open ? renderTypoPalette(key, previewHex) : ''}
+      </div>`
     }
 
     return `<div class="ilook">
-        <div class="ilook-sec-card">
-          ${row(esc(T('s.dockTheme')), esc(T('s.dockThemeNote')), `<span class="seg">${['light', 'dark', 'glass'].map(m => `<button type="button" class="${dl.mode === m ? 'on' : ''}" data-dock-theme="${m}">${esc(T(`s.dockTheme.${m}`))}</button>`).join('')}</span>`)}
-          <div class="r ilook-accent-row"><div class="grow"><div>${esc(T('s.dockAccent'))}</div></div><div class="winaccent-mode">${[['system', lang === 'zh' ? '跟随系统' : 'Follow system'], ['custom', lang === 'zh' ? '自定义' : 'Custom']]
-            .map(([k, label]) => `<button type="button" class="pbtn sm${dl.accentMode === k ? ' al' : ''}" data-dock-accent-mode="${k}" aria-pressed="${dl.accentMode === k}">${esc(label)}</button>`)
-            .join('')}<span class="acc on" style="background:${esc(curAccent)}" title="${esc(curAccent)}"></span><span class="d mono">${esc(curAccent)}</span></div></div>
-          ${dl.accentMode === 'custom' ? `<div class="accents ilook-accents">${accentSwatches}</div>` : ''}
-        </div>
-        <div class="ilook-sec-card">
-          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.dockPaper'))}</span><span class="ilook-box-note">${esc(T('s.dockPaperNote'))}</span></div>
-          <div class="ilook-paper-bar">${paperPreview}</div>
-          <div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.dockPaperDim'))}</span>${dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58)}</div>
-          <div class="ilook-hint">${esc(T('s.dockPaperDimNote'))}</div>
+        <div class="ilook-sec-card ilook-theme-merged">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.dockTheme'))}</span><span class="ilook-box-note">${esc(T('s.dockThemeNote'))}</span></div>
+          <div class="ilook-paper-zone">
+            <div class="ilook-paper-top">
+              <div class="ilook-paper-meta"><span class="ilook-sub-title">${esc(T('s.dockPaper'))}</span><span class="ilook-box-note">${esc(T('s.dockPaperNote'))}</span></div>
+              <div class="ilook-paper-bar">${paperPreview}</div>
+            </div>
+            <div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.dockPaperDim'))}</span>${dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58)}</div>
+            <div class="ilook-hint">${esc(T('s.dockPaperDimNote'))}</div>
+          </div>
+          <div class="dock-theme-stage" role="radiogroup" aria-label="${esc(T('s.dockTheme'))}">${themeCards}</div>
         </div>
         <div class="ilook-sec-card">
           <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.glass'))}</span><span class="ilook-box-note">${esc(T('s.glassNote'))}</span></div>
           <div class="seg dock-glass-seg">${glassPresets}</div>
+          <div class="glass-accent-zone" data-typo-item="accent">
+            <div class="r ilook-accent-row">
+              <div class="grow"><div class="glass-reg-t">${esc(T('s.dockAccent'))}</div><div class="glass-reg-d">${esc(T('s.dockAccentNote'))}</div></div>
+              <div class="winaccent-mode">
+                ${[['system', lang === 'zh' ? '跟随系统' : 'System'], ['custom', lang === 'zh' ? '自定义' : 'Custom']]
+                  .map(([k, label]) => `<button type="button" class="pbtn sm${dl.accentMode === k ? ' al' : ''}" data-dock-accent-mode="${k}" aria-pressed="${dl.accentMode === k}">${esc(label)}</button>`)
+                  .join('')}
+                <button type="button" class="typo-pill-btn${accentPaletteOpen ? ' on' : ''}" data-typo-toggle="accent" aria-expanded="${accentPaletteOpen}" title="${esc(lang === 'zh' ? '点击展开玻璃调色板' : 'Open glass color palette')}">
+                  <i class="typo-dot" style="background:${esc(curAccent)}"></i>
+                  <span class="typo-hex mono">${esc(curAccent)}</span>
+                </button>
+              </div>
+            </div>
+            ${dl.accentMode === 'custom' ? `<div class="accents ilook-accents">${accentSwatches}</div>` : ''}
+            ${accentPaletteOpen ? renderTypoPalette('accent', curAccent) : ''}
+          </div>
           ${glassRegion('s.glass.surface', 's.glass.surfaceNote', 'glass.surfaceOp', g.surfaceOp, 'glass.surfaceBlur', g.surfaceBlur)}
           ${glassRegion('s.glass.card', 's.glass.cardNote', 'glass.cardOp', g.cardOp, 'glass.cardBlur', g.cardBlur)}
           ${glassRegion('s.glass.overlay', 's.glass.overlayNote', 'glass.overlayOp', g.overlayOp, 'glass.overlayBlur', g.overlayBlur)}
@@ -950,8 +1132,9 @@
         </div>
         <div class="ilook-sec-card">
           <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.typo'))}</span><span class="ilook-box-note">${esc(T('s.typoNote'))}</span></div>
-          ${typoRow('textColor', T('s.typo.text'))}
-          ${typoRow('mutedColor', T('s.typo.muted'))}
+          ${typoRow('headingColor', T('s.typo.heading'), dl.mode === 'light' ? '#111113' : '#ffffff')}
+          ${typoRow('textColor', T('s.typo.text'), dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7')}
+          ${typoRow('mutedColor', T('s.typo.muted'), dl.mode === 'light' ? '#5d5d5d' : '#a1a1a6')}
         </div>
       </div>`
   }
@@ -1053,7 +1236,7 @@
       const row = event.target.closest('[data-order-key]')
       if (!row || !list.contains(row)) return
       event.preventDefault()
-      ptr = { id: event.pointerId, startY: event.clientY, row, key: row.dataset.orderKey, from: TABS.indexOf(row.dataset.orderKey), active: false }
+      ptr = { id: event.pointerId, startY: event.clientY, anchorY: event.clientY, row, key: row.dataset.orderKey, from: TABS.indexOf(row.dataset.orderKey), active: false }
       try { list.setPointerCapture(event.pointerId) } catch {}
     }
     list.onpointermove = event => {
@@ -1062,7 +1245,9 @@
       if (!ptr.active) {
         if (Math.abs(event.clientY - ptr.startY) < 3) return
         ptr.active = true
+        ptr.anchorY = event.clientY
         tabDragging = true
+        list.classList.add('is-sorting')
         row.classList.add('is-dragging')
       }
       event.preventDefault()
@@ -1072,22 +1257,54 @@
         const box = sib.getBoundingClientRect()
         const mid = box.top + box.height / 2
         const rowIdx = siblings.indexOf(row), sibIdx = siblings.indexOf(sib)
-        if (rowIdx < sibIdx && event.clientY > mid) { sib.after(row); break }
-        if (rowIdx > sibIdx && event.clientY < mid) { sib.before(row); break }
+        if ((rowIdx < sibIdx && event.clientY > mid) || (rowIdx > sibIdx && event.clientY < mid)) {
+          const prevRowTop = row.getBoundingClientRect().top
+          const prevSibTop = box.top
+          if (rowIdx < sibIdx) sib.after(row)
+          else sib.before(row)
+          const newRowTop = row.getBoundingClientRect().top
+          const newSibTop = sib.getBoundingClientRect().top
+          ptr.anchorY += (newRowTop - prevRowTop)
+          const sibDelta = prevSibTop - newSibTop
+          sib.style.transition = 'none'
+          sib.style.transform = `translate3d(0, ${sibDelta}px, 0)`
+          void sib.offsetHeight
+          sib.style.transition = 'transform 0.26s cubic-bezier(0.22, 1, 0.36, 1)'
+          sib.style.transform = ''
+          break
+        }
       }
+      const dy = event.clientY - ptr.anchorY
+      row.style.transform = `translate3d(0, ${dy}px, 0) scale(1.018)`
     }
     const finishPtr = event => {
       if (!ptr || ptr.id !== event.pointerId) return
       const state = ptr; ptr = null
-      tabDragging = false
-      state.row.classList.remove('is-dragging')
       try { if (list.hasPointerCapture?.(event.pointerId)) list.releasePointerCapture(event.pointerId) } catch {}
-      if (!state.active) return
-      body._html = ''
-      const currentOrder = [...list.querySelectorAll('[data-order-key]')].map(el => el.dataset.orderKey)
-      const to = currentOrder.indexOf(state.key)
-      if (to < 0 || to === state.from) { draw(); return }
-      commitTabMove(state.key, state.from, to)
+      list.classList.remove('is-sorting')
+      if (!state.active) {
+        tabDragging = false
+        state.row.classList.remove('is-dragging')
+        return
+      }
+      const finalize = () => {
+        tabDragging = false
+        state.row.classList.remove('is-dragging')
+        state.row.style.transition = ''
+        state.row.style.transform = ''
+        list.querySelectorAll('[data-order-key]').forEach(el => {
+          el.style.transition = ''
+          el.style.transform = ''
+        })
+        body._html = ''
+        const currentOrder = [...list.querySelectorAll('[data-order-key]')].map(el => el.dataset.orderKey)
+        const to = currentOrder.indexOf(state.key)
+        if (to < 0 || to === state.from) { draw(); return }
+        commitTabMove(state.key, state.from, to)
+      }
+      state.row.style.transition = 'transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease'
+      state.row.style.transform = 'translate3d(0, 0, 0) scale(1)'
+      setTimeout(finalize, 170)
     }
     list.onpointerup = finishPtr
     list.onpointercancel = finishPtr
@@ -1581,45 +1798,68 @@
   function pageWidgets() {
     const s = snap.settings
     const left = ms => (ms >= 60000 ? T('settings.minutes', { n: Math.round(ms / 60000) }) : T('settings.seconds', { n: Math.max(1, Math.round(ms / 1000)) }))
-    const rows = widgetRows()
+    const list = widgetRows()
+    let placedCount = 0
+    const rows = list
       .map(r => {
         if (r.plugin) {
           const p = r.plugin
           const place = placeOf({ plugin: p.id }, p.on)
+          if (place.at) placedCount++
           const says = r.mine.map(w => Widgets.words(lang, w, s.details !== false)).map(({ label, value }) => [label, value].filter(Boolean).join(' ')).join(' · ')
           const note = pluginNote(p, r.mine, !!place.at)
           const color = (r.mine[0] && r.mine[0].color) || (p.on ? '#5e9bff' : COLOR.idle)
           const isOpen = openPlugin === p.id
           const more = p.params.length ? `<button class="pbtn sm" data-pexp="${esc(p.id)}">${esc(T(isOpen ? 'pl.fold' : 'pl.settings'))}</button>` : ''
-          return `<div class="r" data-part="widgets:${esc(r.key)}"><span class="wi" style="color:${esc(color)}">${Widgets.icon(p.icon)}</span><div class="grow"><div class="ellip">${esc(T(`w.ex.${p.id}`))}<span class="d"> ${esc(says)}</span></div><div class="d${note.bad ? ' bad' : ''}">${esc(note.text)}</div></div>${more}${placeHTML(place)}</div>${isOpen ? pluginFields(p) : ''}`
+          const readingHTML = says ? `<span class="w-reading mono">${esc(says)}</span>` : ''
+          return `<div class="w-item-card${place.at ? ' is-placed' : ''}${isOpen ? ' is-open' : ''}" data-part="widgets:${esc(r.key)}"><div class="r w-item-row"><span class="wi w-icon-box" style="--w-tint:${esc(color)};color:${esc(color)}">${Widgets.icon(p.icon)}</span><div class="grow w-item-main"><div class="w-item-head ellip"><span class="w-item-title">${esc(T(`w.ex.${p.id}`))}</span>${readingHTML}</div><div class="d w-desc${note.bad ? ' bad' : ''}">${esc(note.text)}</div></div><div class="w-item-actions">${more}${placeHTML(place)}</div></div>${isOpen ? `<div class="w-item-drawer">${pluginFields(p)}</div>` : ''}</div>`
         }
         const w = r.widget
         const place = placeOf({ id: w.id }, w.on)
+        if (place.at) placedCount++
         const { label, value } = Widgets.words(lang, w, s.details !== false)
         // A built-in one says what it shows; on, with nothing read, says so.
         const builtIn = w.builtIn && [T('w.builtIn'), T(`w.about.${w.id}`), w.on && w.value == null ? T('w.unread') : ''].filter(Boolean).join(' · ')
         const from = builtIn || (w.from === 'mail' ? T('w.fromMail') : [T('w.script', { time: left(w.leftMs || 0) }), w.private ? T('w.private') : ''].filter(Boolean).join(' · '))
         const state = place.at ? `${T('pl.running')} · ${from}` : T('pl.unplaced')
         // The monitor: its readings as icon and number, its settings folded under it.
-        const says = Widgets.partsOf(w) ? ` ${Widgets.partsHTML(w)}` : `<span class="d"> ${esc(value)}</span>`
+        const says = Widgets.partsOf(w)
+          ? `<span class="w-reading">${Widgets.partsHTML(w)}</span>`
+          : (value ? `<span class="w-reading mono">${esc(value)}</span>` : '')
         const isMonitor = w.id === 'monitor'
-        const more = isMonitor ? `<button class="pbtn sm" data-pexp="monitor">${esc(T(openPlugin === 'monitor' ? 'pl.fold' : 'pl.settings'))}</button>` : ''
-        return `<div class="r" data-part="widgets:${esc(r.key)}"><span class="wi" style="color:${esc(w.color || COLOR.idle)}">${Widgets.iconHTML(w, lang)}</span><div class="grow"><div class="ellip">${esc(label)}${says}</div><div class="d">${esc(state)}</div></div>${more}${placeHTML(place)}</div>${isMonitor && openPlugin === 'monitor' ? monitorFields() : ''}`
+        const isOpen = isMonitor && openPlugin === 'monitor'
+        const more = isMonitor ? `<button class="pbtn sm" data-pexp="monitor">${esc(T(isOpen ? 'pl.fold' : 'pl.settings'))}</button>` : ''
+        const color = w.color || COLOR.idle
+        return `<div class="w-item-card${place.at ? ' is-placed' : ''}${isOpen ? ' is-open' : ''}" data-part="widgets:${esc(r.key)}"><div class="r w-item-row"><span class="wi w-icon-box" style="--w-tint:${esc(color)};color:${esc(color)}">${Widgets.iconHTML(w, lang)}</span><div class="grow w-item-main"><div class="w-item-head ellip"><span class="w-item-title">${esc(label)}</span>${says}</div><div class="d w-desc">${esc(state)}</div></div><div class="w-item-actions">${more}${placeHTML(place)}</div></div>${isOpen ? `<div class="w-item-drawer">${monitorFields()}</div>` : ''}</div>`
       })
       .join('')
     const spins = SPINS.map(n => [n, n ? T('settings.seconds', { n }) : T('w.spinOff')])
     const waku = `powershell -ExecutionPolicy Bypass -File "${snap.waku}" npm run build`
     const example = `Invoke-RestMethod -Method Post http://127.0.0.1:${snap.port}/widget -ContentType application/json -Body '{"id":"hello","label":"Hello","value":"42","icon":"star"}'`
-    return `${extensionPanel.render()}${sec(T('w.section'))}<div class="grp"><div class="note">${esc(T('w.note'))}</div>${rows}</div>
-      ${sec(T('w.show'))}<div class="grp">
-        ${row(esc(T('w.spin')), '', seg('widgetSpin', spins, s.widgetSpin ?? 8))}
-        ${row(esc(T('w.nudge')), esc(T('w.nudgeNote')), sw('widgetNudge', s.widgetNudge !== false))}
+    const summaryBadge = lang === 'zh' ? `${placedCount} 在用 · 共 ${list.length} 项` : `${placedCount}/${list.length} active`
+    const foldAttr = widgetsFoldOpen ? '' : ' hidden'
+    return `${extensionPanel.render()}${sec(T('w.section'))}<div class="grp w-studio${widgetsFoldOpen ? ' open' : ''}">
+        <div class="w-studio-head" data-widgets-fold role="button" tabindex="0" aria-expanded="${widgetsFoldOpen}">
+          <span class="w-studio-chev">${widgetsFoldOpen ? '▾' : '▸'}</span>
+          <div class="grow w-studio-lead">
+            <div class="w-studio-title-row"><span class="w-studio-title">${esc(T('w.section'))}</span><span class="w-studio-badge">${esc(summaryBadge)}</span></div>
+            <div class="w-studio-note">${esc(T('w.note'))}</div>
+          </div>
+          <span class="pbtn sm w-studio-btn">${esc(widgetsFoldOpen ? T('s.ilookFold') : (lang === 'zh' ? '展开' : 'Expand'))}</span>
+        </div>
+        <div class="w-studio-body"${foldAttr}><div class="w-card-list">${rows}</div></div>
       </div>
-      ${sec(T('w.terminal'))}<div class="grp"><div class="note">${esc(T('w.ex.waku.note'))}</div>
-        <div class="r"><span class="cmd mono">${esc(waku)}</span><button class="pbtn" data-copy="${esc(waku)}">${esc(T('home.copy'))}</button></div>
-      </div>
-      ${sec(T('w.write'))}<div class="grp"><div class="note">${esc(T('w.writeNote'))}</div>
-        <div class="r"><span class="cmd mono">${esc(example)}</span><button class="pbtn" data-copy="${esc(example)}">${esc(T('home.copy'))}</button></div>
+      <div class="w-studio-more"${foldAttr}>
+        ${sec(T('w.show'))}<div class="grp">
+          ${row(esc(T('w.spin')), '', seg('widgetSpin', spins, s.widgetSpin ?? 8))}
+          ${row(esc(T('w.nudge')), esc(T('w.nudgeNote')), sw('widgetNudge', s.widgetNudge !== false))}
+        </div>
+        ${sec(T('w.terminal'))}<div class="grp"><div class="note">${esc(T('w.ex.waku.note'))}</div>
+          <div class="r"><span class="cmd mono">${esc(waku)}</span><button class="pbtn" data-copy="${esc(waku)}">${esc(T('home.copy'))}</button></div>
+        </div>
+        ${sec(T('w.write'))}<div class="grp"><div class="note">${esc(T('w.writeNote'))}</div>
+          <div class="r"><span class="cmd mono">${esc(example)}</span><button class="pbtn" data-copy="${esc(example)}">${esc(T('home.copy'))}</button></div>
+        </div>
       </div>`
   }
 
@@ -3734,7 +3974,7 @@
     const box = body.contains(document.activeElement) && document.activeElement.matches('input, textarea') ? document.activeElement : null
     const which =
       box &&
-      (box.id ? `#${box.id}` : box.dataset.field ? `[data-field="${box.dataset.field}"]` : box.dataset.mon ? `[data-mon="${box.dataset.mon}"]` : box.dataset.hold ? '[data-hold]' : box.dataset.mf ? `[data-mf="${box.dataset.mf}"]` : box.dataset.w ? `[data-w="${box.dataset.w}"]` : box.dataset.proxyAt !== undefined ? `[data-proxy-at="${box.dataset.proxyAt}"]` : null)
+      (box.id ? `#${box.id}` : box.dataset.field ? `[data-field="${box.dataset.field}"]` : box.dataset.mon ? `[data-mon="${box.dataset.mon}"]` : box.dataset.hold ? '[data-hold]' : box.dataset.mf ? `[data-mf="${box.dataset.mf}"]` : box.dataset.w ? `[data-w="${box.dataset.w}"]` : box.dataset.proxyAt !== undefined ? `[data-proxy-at="${box.dataset.proxyAt}"]` : box.dataset.typoHex ? `[data-typo-hex="${box.dataset.typoHex}"]` : null)
     const caret = which ? box.selectionStart : null
     const changed = setHTML(body, PAGES[tab]())
     if (tab === 'widgets') extensionPanel.mount(body)
@@ -3838,6 +4078,7 @@
     } else if (String(next).startsWith('widgets:')) {
       // A widget's row on the plugins page (a press on it in the open island).
       tab = 'widgets'
+      widgetsFoldOpen = true
       partToShow = next
     } else if (TABS.includes(next)) {
       tab = next
@@ -4270,10 +4511,33 @@
       const mode = p === 'off' && cur.mode === 'glass' ? 'dark' : p !== 'off' ? 'glass' : cur.mode
       return dockLookSave({ ...cur, mode, glass: { ...cur.glass, ...vals, preset: p } }, true)
     }
+    const typoToggle = at('[data-typo-toggle]')
+    if (typoToggle) {
+      const k = typoToggle.dataset.typoToggle
+      typoOpen = typoOpen === k ? '' : k
+      draw()
+      return relayout()
+    }
+    const typoSwatch = at('[data-typo-swatch]')
+    if (typoSwatch) {
+      const [k, hex] = typoSwatch.dataset.typoSwatch.split(':')
+      if (k && hex) {
+        const cur = dockLookOf()
+        const next = k === 'accent' ? { ...cur, accentMode: 'custom', accent: hex } : { ...cur, [k]: hex }
+        return dockLookSave(next, true)
+      }
+    }
     const typoClear = at('[data-dock-typo-clear]')
-    if (typoClear) {
+    if (typoClear && !typoClear.disabled) {
+      const k = typoClear.dataset.dockTypoClear
+      if (typoOpen === k) typoOpen = ''
       const cur = dockLookOf()
-      return dockLookSave({ ...cur, [typoClear.dataset.dockTypoClear]: '' }, true)
+      return dockLookSave({ ...cur, [k]: '' }, true)
+    }
+    if (at('[data-widgets-fold]')) {
+      widgetsFoldOpen = !widgetsFoldOpen
+      draw()
+      return relayout()
     }
     if (at('[data-ilook-reset]')) return ilookSave(ilookFor(), ilookDefault(ilookFor()))
     // Windows' colour dialog takes the focus: not a click outside.
@@ -4930,6 +5194,8 @@
     }
     if (e.target.dataset.ilook) ilookInput(e.target, false)
     if (e.target.dataset.dockLook) dockLookInput(e.target, false)
+    if (e.target.dataset.typoHsl) typoHslInput(e.target, false)
+    if (e.target.dataset.typoHex) typoHexInput(e.target, false)
     if (e.target.id === 's-ref') {
       typedRef = e.target.value
       // Not mid-word in an input method: once the word is chosen.
@@ -4957,6 +5223,8 @@
     if (e.target.matches('[data-w-file]')) return addFiles(e.target)
     if (e.target.dataset.ilook) return ilookInput(e.target, true)
     if (e.target.dataset.dockLook) return dockLookInput(e.target, true)
+    if (e.target.dataset.typoHsl) return typoHslInput(e.target, true)
+    if (e.target.dataset.typoHex) return typoHexInput(e.target, true)
     if (e.target.dataset.proxyAt !== undefined) return proxyAddress(e.target.dataset.proxyAt, e.target.value)
     if (e.target.dataset.mon) return monitorField(e.target.dataset.mon)
     if (e.target.dataset.hold) return holdTyped(e.target)

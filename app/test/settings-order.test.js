@@ -149,7 +149,7 @@ test('规格 16–24：外观页 显示方式 → 内置（任务栏 → 灵动�
   inOrder('灵动岛参数', look, ['islandPosRow()', 's.islandWidth', 'hideUnderRow()', 's.oledShift', 'ilookRow()'])
   inOrder('她', look, ['menu.size', 's.details', 's.walk', 's.look'])
   const panel = slice('  function ilookPanel()', '  // A slider moved')
-  inOrder('灵动岛外观面板', panel, ['s.dockTheme', 's.dockAccent', 's.dockPaper', 's.glass', 's.typo'])
+  inOrder('灵动岛外观面板', panel, ['s.dockTheme', 's.dockPaper', 's.glass', 's.dockAccent', 's.typo'])
   const pets = slice('  function pagePets()', '  // --- Her island')
   inOrder('宠物与图库', pets, ['home.installed', 's.download', '${more}'])
 })

@@ -208,6 +208,7 @@ fn defaults() -> Map<String, Value> {
                 "controlOp": 28,
                 "controlBlur": 8
             },
+            "headingColor": "",
             "textColor": "",
             "mutedColor": ""
         },

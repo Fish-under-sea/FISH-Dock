@@ -4149,10 +4149,34 @@
       : (/^#[0-9a-f]{6}$/i.test(sysAccent) ? sysAccent : (light ? '#005fb8' : '#5e9bff'))
     root.setProperty('--sys-accent', accent)
     root.setProperty('--dock-accent', accent)
-    if (dl.textColor && /^#[0-9a-f]{6}$/i.test(dl.textColor)) root.setProperty('--dock-fg', dl.textColor)
-    else root.removeProperty('--dock-fg')
-    if (dl.mutedColor && /^#[0-9a-f]{6}$/i.test(dl.mutedColor)) root.setProperty('--dock-muted', dl.mutedColor)
-    else root.removeProperty('--dock-muted')
+    const settingsEl = document.getElementById('island-settings')
+    if (dl.headingColor && /^#[0-9a-f]{6}$/i.test(dl.headingColor)) {
+      root.setProperty('--dock-heading', dl.headingColor)
+      settingsEl?.style.setProperty('--dock-heading', dl.headingColor)
+    } else {
+      root.removeProperty('--dock-heading')
+      settingsEl?.style.removeProperty('--dock-heading')
+    }
+    if (dl.textColor && /^#[0-9a-f]{6}$/i.test(dl.textColor)) {
+      root.setProperty('--dock-fg', dl.textColor)
+      settingsEl?.style.setProperty('--dock-fg', dl.textColor)
+      settingsEl?.style.setProperty('--fg', dl.textColor)
+    } else {
+      root.removeProperty('--dock-fg')
+      settingsEl?.style.removeProperty('--dock-fg')
+      settingsEl?.style.removeProperty('--fg')
+    }
+    if (dl.mutedColor && /^#[0-9a-f]{6}$/i.test(dl.mutedColor)) {
+      root.setProperty('--dock-muted', dl.mutedColor)
+      settingsEl?.style.setProperty('--dock-muted', dl.mutedColor)
+      settingsEl?.style.setProperty('--g4', dl.mutedColor)
+      settingsEl?.style.setProperty('--g5', dl.mutedColor)
+    } else {
+      root.removeProperty('--dock-muted')
+      settingsEl?.style.removeProperty('--dock-muted')
+      settingsEl?.style.removeProperty('--g4')
+      settingsEl?.style.removeProperty('--g5')
+    }
     root.setProperty('--dock-glass-surface-op', String((g.surfaceOp ?? 38) / 100))
     root.setProperty('--dock-glass-surface-blur', `${g.surfaceBlur ?? 18}px`)
     root.setProperty('--dock-glass-card-op', String((g.cardOp ?? 22) / 100))
@@ -4162,6 +4186,7 @@
     root.setProperty('--dock-glass-control-op', String((g.controlOp ?? 28) / 100))
     root.setProperty('--dock-glass-control-blur', `${g.controlBlur ?? 8}px`)
     const paperUrl = now.dockPaperUrl || ''
+    body.classList.toggle('dock-has-paper', !!paperUrl)
     if (paperUrl) root.setProperty('--dock-wallpaper-url', `url("${paperUrl}")`)
     else root.removeProperty('--dock-wallpaper-url')
     root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
