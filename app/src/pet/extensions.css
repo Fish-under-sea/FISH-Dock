@@ -188,13 +188,29 @@
    由内容决定（不再吃 `.pbtn.sm` 的固定 height:24px）。不改通用按钮规则，别的按钮
    仍是 28px。改这条时记得同步 extension-style.test.js 的级联断言。 */
 #island-settings .extension-panel .extension-more-row { height: auto; min-height: 32px; }
-.extension-panel :is(button,input,summary):focus-visible { outline: 2px solid #80b6ff; outline-offset: 3px; }
+.extension-panel :is(button,input,summary):focus-visible { outline: 2px solid #80b6ff; outline-offset: 2px; border-radius: 8px; }
 .extension-panel button:disabled { opacity: .5; cursor: default; }
 .extension-panel button:not(:disabled):active { transform: translateY(1px); }
 .extension-panel details { padding: 10px 0; }
 .extension-panel summary { cursor: pointer; min-height: 28px; }
 .extension-panel label { display: block; margin-block: 8px; }
-.extension-node { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid var(--g3); background: var(--g1); color: var(--fg); border-radius: 6px; margin-block-end: 8px; }
+/* 运行依赖折叠卡：圆角卡片容器，标题与构建/来源胶囊同行，展开区左对齐，输入框与保存按钮同行 */
+#island-settings .extension-runtime { margin-top: 8px; padding: 8px 14px; border: 1px solid var(--g3); border-radius: 14px; background: var(--g1); }
+#island-settings .extension-runtime-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; min-height: 26px; list-style: none; font-size: 12.5px; font-weight: 600; color: var(--fg); cursor: pointer; user-select: none; }
+#island-settings .extension-runtime-head::-webkit-details-marker { display: none; }
+#island-settings .extension-runtime-title::before { content: '▸'; display: inline-block; width: 14px; color: var(--g4); transition: transform 0.15s ease; }
+#island-settings .extension-runtime[open] .extension-runtime-title::before { transform: rotate(90deg); }
+#island-settings .extension-runtime-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 500; }
+#island-settings .extension-build, #island-settings .extension-build-source { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--g3); background: var(--g2); color: var(--g5); font-size: 11px; line-height: 1.3; }
+#island-settings .extension-runtime-body { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--g3); }
+#island-settings .extension-runtime-current { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; font-size: 11.5px; }
+#island-settings .extension-runtime-lbl { flex: none; color: var(--g4); }
+#island-settings .extension-runtime-current .extension-location { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--fg); font-size: 11.5px; }
+#island-settings .extension-runtime-label { margin: 0; font-size: 11.5px; font-weight: 600; color: var(--g5); }
+#island-settings .extension-runtime-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#island-settings .extension-node { flex: 1 1 auto; box-sizing: border-box; width: 100%; min-width: 0; height: 30px; margin: 0; padding: 0 12px; border: 1px solid var(--g3); border-radius: 15px; background: var(--g2); color: var(--fg); font: inherit; font-size: 12px; outline: none; }
+#island-settings .extension-node:focus { border-color: #5e9bff; }
+#island-settings .extension-runtime-note { margin: 0; padding: 0; font-size: 11.5px; line-height: 1.4; color: var(--g4); }
 /* 第三方插件：按 npm 包名检索，结果与官方条目同一套卡片。
    检索（T11）是一个字段：按钮缩进输入框里，「检索」不再与同排按钮同权重；
    输入框 32px 高（≥24px 目标尺寸），回车即搜（mount 绑定 Enter）。 */

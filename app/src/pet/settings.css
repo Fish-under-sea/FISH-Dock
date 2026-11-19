@@ -2819,7 +2819,7 @@
 /* 配置与备份块（2026-10-31 从插件页搬到通用页）：盒子几何与 .grp 一致（18px 圆角、
    无外边距），左右内衬与 .r 一致（14px），标题字号与行标题一致；块内按钮不再被抬到
    32px（站内 .pbtn 是 28px），输入框与 .in 同高（30px）同圆角（15px）。 */
-#island-settings .identity-panel { box-sizing: border-box; margin: 0; padding: 12px 14px; border-radius: 18px; background: var(--g1); }
+#island-settings .identity-panel { box-sizing: border-box; margin: 10px 0 0; padding: 12px 14px; border-radius: 14px; background: var(--g1); }
 #island-settings .identity-panel h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 #island-settings .identity-panel p { margin: 8px 0; overflow-wrap: anywhere; }
 #island-settings .identity-label { display: block; margin: 12px 0 6px; }
@@ -3337,8 +3337,11 @@ body.dock-glass #island-settings .card,
 body.dock-glass #island-settings .wcard,
 body.dock-glass #island-settings .s-ask,
 body.dock-glass #island-settings .welcome,
+body.dock-glass #island-settings .identity-panel,
+body.dock-glass #island-settings .note-row,
 body.dock-glass #island-settings .extension-card,
 body.dock-glass #island-settings .extension-auth,
+body.dock-glass #island-settings .extension-runtime,
 body.dock-glass #island-settings .extension-failure,
 body.dock-glass #island-settings .extension-down,
 body.dock-glass #island-settings .notes-skeleton .sk,
@@ -3369,6 +3372,13 @@ body.dock-glass #island-settings .s-tabs,
 body.dock-glass #island-settings .pbtn,
 body.dock-glass #island-settings .seg,
 body.dock-glass #island-settings .in,
+body.dock-glass #island-settings .identity-directory,
+body.dock-glass #island-settings .cmd,
+body.dock-glass #island-settings .wc-cmd,
+body.dock-glass #island-settings .s-device-code,
+body.dock-glass #island-settings .card .pv,
+body.dock-glass #island-settings .petrow .thumb,
+body.dock-glass #island-settings .tile .c,
 body.dock-glass #island-settings .pick,
 body.dock-glass #island-settings .kbadge,
 body.dock-glass #island-settings .wc-tool,
@@ -3378,6 +3388,8 @@ body.dock-glass #island-settings .extension-search,
 body.dock-glass #island-settings .extension-page-entry,
 body.dock-glass #island-settings .extension-more > summary,
 body.dock-glass #island-settings .extension-node,
+body.dock-glass #island-settings .extension-build,
+body.dock-glass #island-settings .extension-build-source,
 body.dock-glass #island-settings .s-tabs button.on {
   background: rgba(42, 46, 62, var(--dock-glass-control-op, 0.28));
   backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.25);

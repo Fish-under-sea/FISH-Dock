@@ -1006,14 +1006,14 @@
     return `${row(esc(T('s.ilook')), esc(now), `<button class="pbtn sm" data-ilook-fold>${esc(T(ilookOpen ? 's.ilookFold' : 's.ilookAdjust'))}</button>`)}${ilookOpen ? ilookPanel() : ''}`
   }
 
-  let orderBusy = false, orderNote = '', orderError = '', draggingTab = ''
+  let orderBusy = false, orderNote = '', orderError = '', tabDragging = false
   function pageTabOrder() {
-    const rows = TABS.map((key, index) => `<li draggable="${!orderBusy}" data-order-key="${esc(key)}"><span class="tab-order-grip" aria-hidden="true">⋮⋮</span><span class="grow">${esc(tabTitle(key))}</span><button type="button" class="pbtn sm" data-order-move="-1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '前移 ' : 'Move earlier: ') + tabTitle(key))}"${index === 0 || orderBusy ? ' disabled' : ''}>↑</button><button type="button" class="pbtn sm" data-order-move="1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '后移 ' : 'Move later: ') + tabTitle(key))}"${index === TABS.length - 1 || orderBusy ? ' disabled' : ''}>↓</button></li>`).join('')
+    const rows = TABS.map((key, index) => `<li data-order-key="${esc(key)}"><span class="tab-order-grip" aria-hidden="true">⋮⋮</span><span class="grow">${esc(tabTitle(key))}</span><button type="button" class="pbtn sm" data-order-move="-1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '前移 ' : 'Move earlier: ') + tabTitle(key))}"${index === 0 || orderBusy ? ' disabled' : ''}>↑</button><button type="button" class="pbtn sm" data-order-move="1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '后移 ' : 'Move later: ') + tabTitle(key))}"${index === TABS.length - 1 || orderBusy ? ' disabled' : ''}>↓</button></li>`).join('')
     return `${sec(lang === 'zh' ? '标签页排序' : 'Tab order')}<section class="grp tab-order"><p class="tab-order-note">${lang === 'zh' ? '拖动或使用前后移动按钮调整；停用的插件保留原位置。' : 'Drag or use the arrow buttons. Disabled extensions keep their positions.'}</p><ol>${rows}</ol><div class="tab-order-foot"><button type="button" class="pbtn sm" data-order-reset${orderBusy ? ' disabled' : ''}>${lang === 'zh' ? '恢复默认顺序' : 'Restore default order'}</button><span class="tab-order-status" role="status" aria-live="polite">${esc(orderNote)}</span>${orderError ? `<span class="bad" role="alert">${esc(orderError)}</span>` : ''}</div></section>`
   }
   async function saveTabOrder(order, key, direction) {
     if (orderBusy) return
-    orderBusy = true; orderError = ''; draw()
+    orderBusy = true; orderError = ''; body._html = ''; draw()
     try {
       const got = await window.pet.settings.set({ appearance: { tabOrder: order } })
       if (JSON.stringify(got.settings.appearance?.tabOrder) !== JSON.stringify(order)) throw new Error(lang === 'zh' ? '标签顺序未保存，请重试。' : 'Tab order was not saved. Please retry.')
@@ -1022,7 +1022,7 @@
       orderNote = key ? `${tabTitle(key)} · ${visible.indexOf(key) + 1}/${visible.length}` : lang === 'zh' ? '已恢复默认顺序' : 'Default order restored'
     } catch (error) { orderError = error.message || String(error) }
     finally {
-      orderBusy = false; draw()
+      orderBusy = false; body._html = ''; draw()
       if (key) {
         const buttons = [...body.querySelectorAll('[data-order-id]')].filter(button => button.dataset.orderId === key)
         const focus = buttons.find(button => !button.disabled && button.dataset.orderMove === String(direction)) || buttons.find(button => !button.disabled)
@@ -1046,51 +1046,51 @@
       void saveTabOrder(window.ExtensionTabs.move(snap.settings.appearance?.tabOrder, extensionPanel.pages().map(page => page.key), key, direction), key, direction)
     } })
     panel.querySelector('[data-order-reset]').onclick = () => saveTabOrder([], '', 0)
-    panel.querySelectorAll('[data-order-key]').forEach(row => {
-      row.ondragstart = event => { if (orderBusy) { event.preventDefault(); return }; draggingTab = row.dataset.orderKey; event.dataTransfer?.setData('text/plain', draggingTab); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move' }
-      row.ondragend = () => { draggingTab = '' }
-      row.ondragover = event => { if (draggingTab) event.preventDefault() }
-      row.ondrop = event => {
-        event.preventDefault(); const key = draggingTab; draggingTab = ''
-        commitTabMove(key, TABS.indexOf(key), TABS.indexOf(row.dataset.orderKey))
+    if (!list) return
+    let ptr = null
+    list.onpointerdown = event => {
+      if (orderBusy || event.button !== 0 || event.target.closest('button')) return
+      const row = event.target.closest('[data-order-key]')
+      if (!row || !list.contains(row)) return
+      event.preventDefault()
+      ptr = { id: event.pointerId, startY: event.clientY, row, key: row.dataset.orderKey, from: TABS.indexOf(row.dataset.orderKey), active: false }
+      try { list.setPointerCapture(event.pointerId) } catch {}
+    }
+    list.onpointermove = event => {
+      if (!ptr || ptr.id !== event.pointerId) return
+      const { row } = ptr
+      if (!ptr.active) {
+        if (Math.abs(event.clientY - ptr.startY) < 3) return
+        ptr.active = true
+        tabDragging = true
+        row.classList.add('is-dragging')
       }
-      let ptr = null
-      row.onpointerdown = event => {
-        if (orderBusy || event.button !== 0 || event.target.closest('button')) return
-        ptr = { id: event.pointerId, startY: event.clientY, key: row.dataset.orderKey, from: TABS.indexOf(row.dataset.orderKey), active: false }
+      event.preventDefault()
+      const siblings = [...list.querySelectorAll('[data-order-key]')]
+      for (const sib of siblings) {
+        if (sib === row) continue
+        const box = sib.getBoundingClientRect()
+        const mid = box.top + box.height / 2
+        const rowIdx = siblings.indexOf(row), sibIdx = siblings.indexOf(sib)
+        if (rowIdx < sibIdx && event.clientY > mid) { sib.after(row); break }
+        if (rowIdx > sibIdx && event.clientY < mid) { sib.before(row); break }
       }
-      row.onpointermove = event => {
-        if (!ptr || ptr.id !== event.pointerId || !list) return
-        if (!ptr.active) {
-          if (Math.abs(event.clientY - ptr.startY) < 4) return
-          ptr.active = true
-          try { row.setPointerCapture(event.pointerId) } catch {}
-          row.classList.add('is-dragging')
-        }
-        event.preventDefault()
-        const siblings = [...list.querySelectorAll('[data-order-key]')]
-        for (const sib of siblings) {
-          if (sib === row) continue
-          const box = sib.getBoundingClientRect()
-          const mid = box.top + box.height / 2
-          const rowIdx = siblings.indexOf(row), sibIdx = siblings.indexOf(sib)
-          if (rowIdx < sibIdx && event.clientY > mid) { sib.after(row); break }
-          if (rowIdx > sibIdx && event.clientY < mid) { sib.before(row); break }
-        }
-      }
-      const finishPtr = event => {
-        if (!ptr || ptr.id !== event.pointerId) return
-        const state = ptr; ptr = null
-        row.classList.remove('is-dragging')
-        try { if (row.hasPointerCapture?.(event.pointerId)) row.releasePointerCapture(event.pointerId) } catch {}
-        if (!state.active || !list) return
-        const currentOrder = [...list.querySelectorAll('[data-order-key]')].map(el => el.dataset.orderKey)
-        const to = currentOrder.indexOf(state.key)
-        commitTabMove(state.key, state.from, to)
-      }
-      row.onpointerup = finishPtr
-      row.onpointercancel = finishPtr
-    })
+    }
+    const finishPtr = event => {
+      if (!ptr || ptr.id !== event.pointerId) return
+      const state = ptr; ptr = null
+      tabDragging = false
+      state.row.classList.remove('is-dragging')
+      try { if (list.hasPointerCapture?.(event.pointerId)) list.releasePointerCapture(event.pointerId) } catch {}
+      if (!state.active) return
+      body._html = ''
+      const currentOrder = [...list.querySelectorAll('[data-order-key]')].map(el => el.dataset.orderKey)
+      const to = currentOrder.indexOf(state.key)
+      if (to < 0 || to === state.from) { draw(); return }
+      commitTabMove(state.key, state.from, to)
+    }
+    list.onpointerup = finishPtr
+    list.onpointercancel = finishPtr
   }
 
   // 外观（规格 17–24，逐条同序）：显示方式 → 内置（任务栏参数 → 灵动岛参数 →
@@ -3724,6 +3724,7 @@
   // typed in (the download box, a plugin's setting, the mail proxy's
   // address) gets the focus and the caret back.
   function drawBody(reset) {
+    if (tabDragging && !reset) return
     const extension = extensionPanel.pages().find(page => page.key === tab)
     // 插件没在跑 / 没启起来（#14-7 / T05）：标签页留着，这一页显示错误态与「启动」。
     // 以前标签页直接消失，用户以为插件被卸载；现在入口在，能当场拉起，也能一步看日志。
