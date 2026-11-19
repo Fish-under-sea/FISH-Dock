@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::{connection, data, fetch, fullscreen, i18n, island, mail, now_ms, pet, plugins, scripts, set_display, set_out, shared, Shared};
 
@@ -904,7 +904,10 @@ pub async fn settings_dock_wallpaper(app: AppHandle, action: String) -> Value {
             let _ = std::fs::create_dir_all(&config_dir);
             clear_old(&config_dir);
             let filename = format!("dock-wallpaper.{ext}");
-            if std::fs::copy(src_path, config_dir.join(&filename)).is_ok() {
+            let dest = config_dir.join(&filename);
+            if std::fs::copy(src_path, &dest).is_ok() {
+                let _ = app.asset_protocol_scope().allow_directory(&config_dir, false);
+                let _ = app.asset_protocol_scope().allow_file(&dest);
                 let mut cur = sh.setting("dockLook");
                 if !cur.is_object() {
                     cur = json!({});

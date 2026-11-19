@@ -2196,6 +2196,9 @@ fn main() {
                 }
                 let _ = app.asset_protocol_scope().allow_directory(&folder, true);
             }
+            let config_dir = dir.join("config");
+            let _ = std::fs::create_dir_all(&config_dir);
+            let _ = app.asset_protocol_scope().allow_directory(&config_dir, false);
             notify::register(&dir);
 
             // 每次启动（含更新到新版本之后）自己把 GitHub 会话续上、把身份与主仓

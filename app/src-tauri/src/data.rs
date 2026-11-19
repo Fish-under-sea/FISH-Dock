@@ -429,7 +429,16 @@ pub fn dock_paper_url(dir: &Path, dock_look: &Value) -> Option<String> {
         return None;
     }
     let path = dir.join("config").join(name);
-    path.is_file().then(|| asset_url(&path))
+    if !path.is_file() {
+        return None;
+    }
+    let stamp = fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    Some(format!("{}?v={stamp}", asset_url(&path)))
 }
 
 pub fn pets(dir: &Path) -> Vec<PetInfo> {

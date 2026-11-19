@@ -5850,6 +5850,9 @@ body.dock-has-paper #island[data-view='expanded']::before {
   background-image: var(--dock-wallpaper-url, none);
   background-size: cover;
   background-position: center;
+  background-repeat: no-repeat;
+  box-shadow: none;
+  opacity: 1;
   z-index: 0;
   pointer-events: none;
 }
@@ -5861,6 +5864,7 @@ body.dock-has-paper #island[data-view='expanded']::after {
   inset: 0;
   border-radius: inherit;
   background: rgba(14, 16, 22, var(--dock-wallpaper-dim, 0.58));
+  opacity: 1;
   z-index: 0;
   pointer-events: none;
 }
@@ -5868,6 +5872,34 @@ body.dock-has-paper #island[data-view='expanded']::after {
 body.dock-light.dock-has-paper #island[data-view='settings']::after,
 body.dock-light.dock-has-paper #island[data-view='expanded']::after {
   background: rgba(245, 245, 247, var(--dock-wallpaper-dim, 0.58));
+}
+
+body.dock-glass.dock-has-paper #island[data-view='settings']::after,
+body.dock-glass.dock-has-paper #island[data-view='expanded']::after {
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-surface, 14%), rgba(14, 16, 22, var(--dock-wallpaper-dim, 0.58)));
+}
+
+/* 选了背景图时，深色/浅色模式下的卡片也轻度半透明磨砂，让底图温柔透出且文字清晰 */
+body.dock-has-paper:not(.dock-glass) #island-settings .grp,
+body.dock-has-paper:not(.dock-glass) #island-settings .mode,
+body.dock-has-paper:not(.dock-glass) #island-settings .ilook-sec-card,
+body.dock-has-paper:not(.dock-glass) #island-settings .w-studio,
+body.dock-has-paper:not(.dock-glass) #island-settings .extension-card,
+body.dock-has-paper:not(.dock-glass) #island-settings .extension-runtime {
+  background: rgba(28, 28, 32, 0.74);
+  backdrop-filter: blur(10px) saturate(1.25);
+  -webkit-backdrop-filter: blur(10px) saturate(1.25);
+}
+
+body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .grp,
+body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .mode,
+body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .ilook-sec-card,
+body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .w-studio,
+body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .extension-card,
+body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .extension-runtime {
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(10px) saturate(1.25);
+  -webkit-backdrop-filter: blur(10px) saturate(1.25);
 }
 
 body.dock-glass #panel {

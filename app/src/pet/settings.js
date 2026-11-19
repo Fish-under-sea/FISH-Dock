@@ -1559,7 +1559,7 @@
       }
     }
 
-    const spanOf = () => Math.max(1, track.clientWidth - 48)
+    const spanOf = () => Math.max(1, track.clientWidth - 34)
 
     track.addEventListener('pointerenter', () => { hovered = true; wake() })
     track.addEventListener('pointerleave', () => { hovered = false; wake() })
@@ -1568,7 +1568,7 @@
       e.preventDefault()
       const rect = track.getBoundingClientRect()
       const span = spanOf()
-      const rel = (e.clientX - rect.left - 24) / span
+      const rel = (e.clientX - rect.left - 17) / span
       pressed = true
       dragging = true
       moved = false
@@ -1589,7 +1589,7 @@
       if (!moved) return
       const rect = track.getBoundingClientRect()
       const span = spanOf()
-      const raw = (e.clientX - rect.left - 24) / span - dragOffset
+      const raw = (e.clientX - rect.left - 17) / span - dragOffset
       const now = performance.now()
       const dt = Math.max(0.004, (now - lastT) / 1000)
       const prevP = p
@@ -4983,8 +4983,11 @@
       pickingPaper = action === 'pick'
       return window.pet.settings.dockWallpaper(action).then(got => {
         snap = got
+        applyDockThemeVars()
+        extensionPage.refreshTheme?.()
       }).finally(() => {
         pickingPaper = false
+        body._html = ''
         draw()
       })
     }
