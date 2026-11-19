@@ -52,6 +52,7 @@ pub fn run(sh: &Arc<Shared>, account: &Account, watch: &Watch) {
     let st = store::of(sh, account);
     // The newest unread letter seen: one newer is new mail.
     let mut newest_seen: Option<u32> = None;
+    let mut looked: HashSet<u32> = HashSet::new();
     // 退避与熔断的状态（backoff.rs）：跨重启从盘上接着来。
     let mut state = backoff::load(&sh.dir, &account.id);
     if state.paused {
@@ -115,6 +116,7 @@ pub fn run(sh: &Arc<Shared>, account: &Account, watch: &Watch) {
                     sh.log(&format!("mail {}: {gone} letters no longer kept offline", account.id));
                 }
                 save(&st);
+                super::codes::look(sh, &mut conn, &st, account, newest_seen, &mut looked);
                 tell(sh, account, watch, &st, "ok", &mut newest_seen);
                 // Whole letters, a while at a time; new mail between, and
                 // now and then the inbox's flags.
@@ -129,6 +131,9 @@ pub fn run(sh: &Arc<Shared>, account: &Account, watch: &Watch) {
                     } else {
                         look_new(sh, &mut conn, &st)?
                     };
+                    if came {
+                        super::codes::look(sh, &mut conn, &st, account, newest_seen, &mut looked);
+                    }
                     tell(sh, account, watch, &st, "ok", &mut newest_seen);
                     if left == 0 && !came {
                         break;

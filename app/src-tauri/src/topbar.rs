@@ -133,6 +133,13 @@ pub fn wanted(sh: &Shared) -> bool {
     sh.home() == "topbar"
 }
 
+/// dock 悬浮矩形：居中摆放在工作区底边之上（避开 Windows 原生任务栏），留 8px 呼吸缝隙。
+fn dock_floating_rect(work: (i32, i32, i32, i32), sf: f64, icons: usize) -> Rect {
+    let lift = (8.0 * sf).round() as i32;
+    let (x, y, w, h) = dock_rect(work, sf, icons);
+    (x, (y - lift).max(work.1), w, h)
+}
+
 /// 显示变更 / 家切换 / 启动后调：按当前的「家」创建或销毁顶栏与 dock 窗口，并按当前显示器
 /// 与缩放重摆。幂等。
 pub fn sync(sh: &Arc<Shared>) {
@@ -141,63 +148,65 @@ pub fn sync(sh: &Arc<Shared>) {
         close_one(sh, "dock");
         return;
     }
-    let Some((mon, sf)) = crate::island::home_display(sh) else { return };
-    let top = topbar_rect(mon, sf);
-    let icons = dock_icon_count(sh);
-    let dock = dock_rect(mon, sf, icons);
+    let Some(area) = crate::island::home_area(sh) else { return };
+    let sf = area.sf;
+    let top = topbar_rect(area.mon, sf);
+    let items = items_vec(sf);
+    let icons = items.len().max(1);
+    let work = (area.x, area.y, area.w, area.h);
+    let dock = dock_floating_rect(work, sf, icons);
     ensure(sh, "topbar", "pet/topbar.html?mode=topbar", top, sf);
     ensure(sh, "dock", "pet/topbar.html?mode=dock", dock, sf);
-    push_state(sh);
+    push_state_with(sh, items);
 }
 
-fn dock_icon_count(sh: &Shared) -> usize {
+/// 顶栏 / dock 要展示的窗口（运行中的窗口），直接走 tasks::list 实时获取，不依赖接管任务栏。
+fn items_vec(sf: f64) -> Vec<serde_json::Value> {
+    let live = crate::taskbar::topbar_windows(sf);
+    if !live.is_empty() {
+        return live;
+    }
     let w = crate::taskbar::windows_now();
-    flatten_windows(&w).len().max(1)
-}
-
-/// 把一个 app 分组列表摊平成单个窗口列表（每个窗口 {id,title,png,min}）。
-fn flatten_windows(list: &serde_json::Value) -> Vec<serde_json::Value> {
-    let mut out = Vec::new();
-    if let Some(groups) = list.as_array() {
+    let mut items = Vec::new();
+    if let Some(groups) = w.as_array() {
         for g in groups {
             if let Some(ws) = g.get("windows").and_then(|w| w.as_array()) {
-                for w in ws {
-                    out.push(w.clone());
+                for win in ws {
+                    let hwnd = win.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+                    if hwnd == 0 {
+                        continue;
+                    }
+                    items.push(serde_json::json!({
+                        "hwnd": hwnd,
+                        "title": win.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                        "minimized": win.get("min").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "icon": win.get("png").and_then(|v| v.as_str()).unwrap_or(""),
+                    }));
                 }
             }
         }
     }
-    out
+    items
 }
 
-/// 顶栏 / dock 要展示的窗口（运行中的窗口）。
-fn items_for(sh: &Shared) -> serde_json::Value {
-    let w = crate::taskbar::windows_now();
-    let mut items = Vec::new();
-    for win in flatten_windows(&w) {
-        let hwnd = win.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-        if hwnd == 0 {
-            continue;
-        }
-        items.push(serde_json::json!({
-            "hwnd": hwnd,
-            "title": win.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-            "minimized": win.get("min").and_then(|v| v.as_bool()).unwrap_or(false),
-            "icon": win.get("png").and_then(|v| v.as_str()).unwrap_or(""),
-        }));
+fn push_state_with(sh: &Arc<Shared>, items: Vec<serde_json::Value>) {
+    if let (Some(area), Some(dock_win)) = (crate::island::home_area(sh), sh.app.get_webview_window("dock")) {
+        let work = (area.x, area.y, area.w, area.h);
+        lay(&dock_win, dock_floating_rect(work, area.sf, items.len().max(1)));
     }
-    serde_json::json!(items)
-}
-
-/// 给顶栏/dock 两个窗口推当前状态（窗口列表 + 时钟）。时钟留空由页面按 i18n 格式化。
-pub fn push_state(sh: &Arc<Shared>) {
     let state = serde_json::json!({
-        "windows": items_for(sh),
+        "windows": items,
         "clock": "",
     });
     for label in ["topbar", "dock"] {
         let _ = sh.app.emit_to(label, "topbar:state", state.clone());
     }
+}
+
+/// 给顶栏/dock 两个窗口推当前状态（窗口列表 + 时钟）。时钟留空由页面按 i18n 格式化。
+pub fn push_state(sh: &Arc<Shared>) {
+    let sf = crate::island::home_area(sh).map(|a| a.sf).unwrap_or(1.0);
+    push_state_with(sh, items_vec(sf));
 }
 
 /// 创建一个窗口（不存在时），按 rect 摆放；存在则只重摆。
@@ -281,6 +290,13 @@ pub async fn topbar_focus(hwnd: i64, restore: bool) -> bool {
 pub fn topbar_ready(app: tauri::AppHandle) {
     let sh = crate::shared(&app);
     push_state(&sh);
+}
+
+// 顶栏右侧入口：打开设置抽屉。
+#[tauri::command]
+pub fn topbar_settings(app: tauri::AppHandle) {
+    let sh = crate::shared(&app);
+    crate::island::open_settings(&sh, None);
 }
 
 

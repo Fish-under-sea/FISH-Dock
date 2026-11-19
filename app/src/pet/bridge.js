@@ -31,6 +31,7 @@
   let queue = Promise.resolve()
   const send = (cmd, args) => {
     queue = queue.then(() => invoke(cmd, args)).catch(err => console.error(cmd, err))
+    return queue
   }
 
   window.pet = {
@@ -266,6 +267,7 @@
       winLook: ({ light, accent } = {}) => invoke('settings_win_look', { light: typeof light === 'boolean' ? light : null, accent: typeof accent === 'string' ? accent : null }),
       // The desktop's picture: picked (picture, folder), laid (position), its turns (every, shuffle), the next now.
       wallpaper: (what, value) => invoke('settings_wallpaper', { what: String(what), value: value == null ? null : String(value) }),
+      dockWallpaper: action => invoke('settings_dock_wallpaper', { action: String(action || '') }),
       hooks: action => invoke('settings_hooks', { action }),
       codexHooks: action => invoke('settings_codex_hooks', { action }),
       agyHooks: action => invoke('settings_agy_hooks', { action }),
@@ -283,6 +285,7 @@
       // 'installPawnIO' (download PawnIO first), 'remove'. Each shows one UAC.
       cpuSensors: action => invoke('settings_cpu_sensors', { action }),
       fetch: reference => invoke('settings_fetch', { reference: String(reference || '') }),
+      deletePet: id => invoke('settings_delete_pet', { id: String(id || '') }),
       gallery: (page, sort, query) => invoke('settings_gallery', { page, sort, query }),
       openSite: (place, account) => invoke('settings_open_site', { place, account: account || null }),
       // Her updates: 'check', 'page' (the release's), 'update' (updates.rs).
@@ -317,6 +320,7 @@
       flag: (id, uid, on, folder) => invoke('mail_flag', { id: String(id), uid: Number(uid), on: on === true, folder: String(folder || 'inbox') }),
       say: (key, text) => invoke('mail_say', { key: String(key), text: String(text || '') }),
       letter: (id, uid, folder) => invoke('mail_letter', { id: String(id), uid: Number(uid), folder: String(folder || 'inbox') }),
+      openLink: url => invoke('mail_open_link', { url: String(url || '') }),
       // An account's sync (or every one's, '*') to look at the server now.
       kick: id => invoke('mail_kick', { id: String(id) }),
       // The letter being written, as kept in the data folder (null: none).

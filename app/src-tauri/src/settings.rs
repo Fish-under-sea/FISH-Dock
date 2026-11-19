@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::{connection, data, fetch, fullscreen, i18n, island, mail, now_ms, pet, plugins, scripts, set_display, set_out, shared, Shared};
 
@@ -44,7 +44,7 @@ fn dsh_block(sh: &Shared) -> Value {
 pub fn snapshot(sh: &Shared) -> Value {
     let pets: Vec<Value> = data::pets(&sh.dir)
         .iter()
-        .map(|p| json!({ "id": p.id, "name": p.name, "author": p.author, "url": data::asset_url(&p.sheet), "version": p.version, "codex": p.from_codex }))
+        .map(|p| json!({ "id": p.id, "name": p.name, "author": p.author, "url": data::asset_url(&p.sheet), "version": p.version, "codex": p.from_codex, "deletable": data::pet_deletable(&sh.dir, p) }))
         .collect();
     let details = sh.details();
     let (now, sessions) = {
@@ -181,6 +181,7 @@ pub fn snapshot(sh: &Shared) -> Value {
         "winLook": win_look,
         // The desktop's picture as it is (paper.rs).
         "winPaper": crate::paper::now(),
+        "dockPaperUrl": data::dock_paper_url(&sh.dir, &sh.setting("dockLook")),
         "version": sh.app.package_info().version.to_string(),
         // Her updates: this version, the latest, an update under way (updates.rs).
         "update": crate::updates::view(&sh),
@@ -581,7 +582,7 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // Crash reports sent by themselves, never, or asked about (crash.rs).
         "crashReports" => matches!(v.as_str(), Some("auto" | "off" | "ask")),
         // The taskbar home stands in for Windows' own: elsewhere, only the island.
-        "display" => v.as_str() == Some("island") || (cfg!(windows) && v.as_str() == Some("taskbar")),
+        "display" => v.as_str() == Some("island") || (cfg!(windows) && matches!(v.as_str(), Some("taskbar" | "topbar"))),
         "islandWidth" => matches!(v.as_str(), Some("narrow" | "normal" | "wide")),
         // Where her island sits at the top of the screen (anchor.js, #59).
         "islandPos" => is_island_pos(v),
@@ -618,6 +619,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         // (island.js rowSize).
         "widgetSize" => v.as_object().is_some_and(|m| m.len() <= 64 && m.iter().all(|(id, s)| crate::widgets::is_id(id) && matches!(s.as_str(), Some("S" | "M")))),
         "appearance" => crate::tab_order::valid(v),
+        "dockLook" => is_dock_look(v),
+        "agyEfficiencyMode" => is_bool,
         "plugins" => plugins::is_ok(v),
         "monitor" => v.as_object().is_some_and(|m| {
             m.iter().all(|(k, v)| match k.as_str() {
@@ -646,6 +649,8 @@ fn is_ok(sh: &Shared, key: &str, v: &Value) -> bool {
         "mailPanes" => matches!(v.as_str(), Some("one" | "two")),
         // How much mail is kept whole offline (mail/store.rs Offline).
         "mailOffline" => matches!(v.as_str(), Some("90d" | "year" | "all" | "opened")),
+        "mailCodes" => is_bool,
+        "appAsks" => is_bool,
         "mailAgentConf" => mail::agent::is_conf_ok(v),
         // How mail reaches its servers (mail/proxy.rs): its own way, or the General page's.
         "mailProxy" => mail::proxy::is_page_way(v),
@@ -824,6 +829,103 @@ pub async fn settings_wallpaper(app: AppHandle, what: String, value: Option<Stri
                 std::thread::sleep(std::time::Duration::from_millis(600));
                 crate::taskbar::look_now();
             });
+        }
+    }
+    snapshot(&sh)
+}
+
+fn is_hex_or_empty(v: &Value) -> bool {
+    v.as_str().is_some_and(|s| s.is_empty() || (s.len() == 7 && s.starts_with('#') && s[1..].bytes().all(|b| b.is_ascii_hexdigit())))
+}
+
+fn is_dock_look(v: &Value) -> bool {
+    let Some(m) = v.as_object() else { return false };
+    m.iter().all(|(k, v)| match k.as_str() {
+        "mode" => matches!(v.as_str(), Some("light" | "dark" | "glass")),
+        "accentMode" => matches!(v.as_str(), Some("system" | "custom")),
+        "accent" | "headingColor" | "textColor" | "mutedColor" => is_hex_or_empty(v),
+        "wallpaper" => v.as_str().is_some_and(|s| s.is_empty() || (s.len() <= 128 && !s.contains(['/', '\\']) && !s.contains(".."))),
+        "wallpaperDim" => v.as_u64().is_some_and(|n| n <= 100),
+        "wallpaperFit" => matches!(v.as_str(), Some("auto" | "custom")),
+        "wallpaperPosX" | "wallpaperPosY" => v.as_u64().is_some_and(|n| n <= 100),
+        "wallpaperZoom" => v.as_u64().is_some_and(|n| (100..=250).contains(&n)),
+        "glass" => v.as_object().is_some_and(|g| {
+            g.iter().all(|(gk, gv)| match gk.as_str() {
+                "preset" => matches!(gv.as_str(), Some("off" | "light" | "balanced" | "clear" | "custom")),
+                "surfaceOp" | "cardOp" | "overlayOp" | "controlOp" => gv.as_u64().is_some_and(|n| n <= 100),
+                "surfaceBlur" | "cardBlur" | "overlayBlur" | "controlBlur" => gv.as_u64().is_some_and(|n| n <= 32),
+                _ => false,
+            })
+        }),
+        _ => false,
+    })
+}
+
+/// Pick or remove Dock's own background wallpaper stored under `<data>/config/`.
+#[tauri::command]
+pub async fn settings_dock_wallpaper(app: AppHandle, action: String) -> Value {
+    let sh = shared(&app);
+    let owner = crate::island::hwnd(&sh);
+    let lang = sh.lang();
+    let t = move |key: &str| crate::i18n::t(lang, key);
+    let config_dir = sh.dir.join("config");
+    let clear_old = |dir: &std::path::Path| {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with("dock-wallpaper.") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    };
+    if action == "remove" {
+        clear_old(&config_dir);
+        let mut cur = sh.setting("dockLook");
+        if !cur.is_object() {
+            cur = json!({});
+        }
+        cur["wallpaper"] = json!("");
+        cur["wallpaperFit"] = json!("auto");
+        cur["wallpaperPosX"] = json!(50);
+        cur["wallpaperPosY"] = json!(50);
+        cur["wallpaperZoom"] = json!(100);
+        sh.change(json!({ "dockLook": cur }));
+        return snapshot(&sh);
+    }
+    if action == "pick" {
+        let picked = tauri::async_runtime::spawn_blocking(move || {
+            crate::paper::pick(false, &t("wallpaper.pickPicture"), &t("wallpaper.pictures"), owner)
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(src) = picked {
+            let src_path = std::path::Path::new(&src);
+            let ext = src_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_ascii_lowercase())
+                .filter(|s| matches!(s.as_str(), "png" | "jpg" | "jpeg" | "webp" | "bmp" | "gif"))
+                .unwrap_or_else(|| "png".to_string());
+            let _ = std::fs::create_dir_all(&config_dir);
+            clear_old(&config_dir);
+            let filename = format!("dock-wallpaper.{ext}");
+            let dest = config_dir.join(&filename);
+            if std::fs::copy(src_path, &dest).is_ok() {
+                let _ = app.asset_protocol_scope().allow_directory(&config_dir, false);
+                let _ = app.asset_protocol_scope().allow_file(&dest);
+                let mut cur = sh.setting("dockLook");
+                if !cur.is_object() {
+                    cur = json!({});
+                }
+                cur["wallpaper"] = json!(filename);
+                cur["wallpaperFit"] = json!("auto");
+                cur["wallpaperPosX"] = json!(50);
+                cur["wallpaperPosY"] = json!(50);
+                cur["wallpaperZoom"] = json!(100);
+                sh.change(json!({ "dockLook": cur }));
+            }
         }
     }
     snapshot(&sh)
@@ -1034,6 +1136,40 @@ pub async fn settings_fetch(app: AppHandle, reference: String) -> Value {
         Ok(Err(e)) => json!({ "ok": false, "error": fetch::describe(lang, &e), "snapshot": snapshot(&sh) }),
         Err(e) => json!({ "ok": false, "error": e.to_string(), "snapshot": snapshot(&sh) }),
     }
+}
+
+/// Delete a downloaded pet from `<data>/pets/<id>`. Refuses invalid IDs,
+/// read-only Codex pets, or deleting the last remaining pet.
+#[tauri::command]
+pub async fn settings_delete_pet(app: AppHandle, id: String) -> Value {
+    let sh = shared(&app);
+    let zh = sh.lang() == "zh";
+    if id.is_empty() || id == "." || id == ".." || id.contains(['/', '\\']) {
+        return json!({ "ok": false, "error": if zh { "无效的宠物 ID" } else { "Invalid pet ID" }, "snapshot": snapshot(&sh) });
+    }
+    let found = data::pets(&sh.dir);
+    let Some(target_pet) = found.iter().find(|p| p.id == id) else {
+        return json!({ "ok": false, "error": if zh { "未找到该宠物" } else { "Pet not found" }, "snapshot": snapshot(&sh) });
+    };
+    if !data::pet_deletable(&sh.dir, target_pet) {
+        return json!({ "ok": false, "error": if zh { "该宠物为只读来源，无法删除" } else { "This pet is read-only and cannot be deleted" }, "snapshot": snapshot(&sh) });
+    }
+    if found.len() <= 1 {
+        return json!({ "ok": false, "error": if zh { "至少保留一只宠物" } else { "Keep at least one pet" }, "snapshot": snapshot(&sh) });
+    }
+    let dir = sh.dir.join("pets").join(&id);
+    if let Err(e) = std::fs::remove_dir_all(&dir) {
+        return json!({ "ok": false, "error": e.to_string(), "snapshot": snapshot(&sh) });
+    }
+    data::forget_pets();
+    let remaining = data::pets(&sh.dir);
+    if sh.setting("pet").as_str() == Some(id.as_str()) {
+        let next = remaining.first().map(|p| p.id.as_str()).unwrap_or("");
+        sh.change(json!({ "pet": next }));
+    } else {
+        sh.redraw();
+    }
+    json!({ "ok": true, "snapshot": snapshot(&sh) })
 }
 
 #[tauri::command]
@@ -1533,5 +1669,49 @@ mod layout_tests {
         // The taskbar not her home: its layout is not there to show it.
         assert!(!super::is_placed_out(&json!([]), &bar, false, "today"));
         assert!(!super::is_placed_out(&desk, &bar, true, "weather"));
+    }
+
+    #[test]
+    fn dock_look_validates_modes_glass_and_paths() {
+        let valid = json!({
+            "mode": "glass",
+            "accentMode": "custom",
+            "accent": "#5e9bff",
+            "wallpaper": "dock-wallpaper.png",
+            "wallpaperDim": 58,
+            "wallpaperFit": "custom",
+            "wallpaperPosX": 35,
+            "wallpaperPosY": 22,
+            "wallpaperZoom": 135,
+            "glass": {
+                "preset": "balanced",
+                "surfaceOp": 38, "surfaceBlur": 18,
+                "cardOp": 22, "cardBlur": 12,
+                "overlayOp": 45, "overlayBlur": 16,
+                "controlOp": 28, "controlBlur": 8
+            },
+            "textColor": "#ffffff",
+            "mutedColor": ""
+        });
+        assert!(super::is_dock_look(&valid));
+        for mode in ["light", "dark", "glass"] {
+            assert!(super::is_dock_look(&json!({ "mode": mode })), "{mode}");
+        }
+        for bad in [
+            json!({ "mode": "neon" }),
+            json!({ "wallpaper": "../secret.png" }),
+            json!({ "wallpaperDim": 101 }),
+            json!({ "wallpaperFit": "stretch" }),
+            json!({ "wallpaperPosX": 101 }),
+            json!({ "wallpaperPosY": 120 }),
+            json!({ "wallpaperZoom": 99 }),
+            json!({ "wallpaperZoom": 251 }),
+            json!({ "textColor": "red" }),
+            json!({ "glass": { "surfaceBlur": 33 } }),
+            json!({ "glass": { "cardOp": 105 } }),
+            json!({ "unknownField": true }),
+        ] {
+            assert!(!super::is_dock_look(&bad), "{bad}");
+        }
     }
 }

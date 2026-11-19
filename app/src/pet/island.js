@@ -250,6 +250,14 @@
   const panel = document.getElementById('panel')
   const stage = document.getElementById('stage')
 
+  function syncScreenH() {
+    const h = Math.max(480, (typeof screen !== 'undefined' ? screen?.availHeight || screen?.height : 0) || 900)
+    document.documentElement.style.setProperty('--screen-h', `${h}px`)
+  }
+  syncScreenH()
+
+  let growSeq = 0
+  let growTimer = 0
   let lang = 'en'
   let now = { mood: 'idle', detail: '', project: '', since: null, took: null, others: 0, sessions: 0, list: [] }
   let config = {}
@@ -1106,19 +1114,19 @@
     if (on && !was && isOn() && home() === 'taskbar') window.pet.raise()
   }
 
-  // Returns true when the window has to grow first.
+  // Returns { grows, ready } when the window has to grow first.
   function setRoom(next) {
     const size = r => r || baseRoom()
     clearTimeout(roomTimer)
-    if (JSON.stringify(next) === JSON.stringify(room)) return false
+    if (JSON.stringify(next) === JSON.stringify(room)) return { grows: false, ready: null }
     const grows = size(next).width > size(room).width || size(next).height > size(room).height
     const apply = () => {
       room = next
-      window.pet.panel(next)
+      return Promise.resolve(window.pet.panel(next))
     }
-    if (grows) apply()
-    else roomTimer = setTimeout(apply, SPRING_MS)
-    return grows
+    if (grows) return { grows: true, ready: apply() }
+    roomTimer = setTimeout(apply, SPRING_MS)
+    return { grows: false, ready: null }
   }
 
   // fn once the island's size spring is over: its width's or height's
@@ -1329,7 +1337,10 @@
   }
 
   // Resized for its room, the window moves the island in the page.
-  window.addEventListener('resize', () => plateSent && !plateMove && showPlate(0))
+  window.addEventListener('resize', () => {
+    syncScreenH()
+    if (plateSent && !plateMove) showPlate(0)
+  })
 
   // Over a maximized window (one on her display, taskbar.rs "max"), a
   // see-through ground the plate does not blur goes to DEEP_OP while open,
@@ -4026,9 +4037,12 @@
   let paper = null
 
   function drawMica() {
+    const { mode } = dockLookInfo()
+    const light = mode === 'light'
     const clearMica = isClear() && clearWhen() === 'mica'
     body.classList.toggle('tb-mica', isMica())
-    body.classList.toggle('tb-light', isLight())
+    body.classList.toggle('tb-light', light || (isLight() && view !== 'settings'))
+    applyDockLook()
     body.classList.toggle('tb-capsule', isCapsule())
     body.classList.toggle('tb-clear', isClear())
     body.classList.toggle('tb-clear-mica', clearMica)
@@ -4112,9 +4126,124 @@
   // ground: Windows' light mode's, or a light one of the settings' own
   // (groundLight; null: none given); in the settings, theirs, as Windows'
   // mode.
+  function dockLookInfo() {
+    const dl = config.dockLook || {}
+    const mode = ['light', 'dark', 'glass'].includes(dl.mode) ? dl.mode : 'dark'
+    const g = dl.glass || {}
+    return { dl, mode, g }
+  }
+
+  const dockPaperMetaCache = new Map()
+  function resolveDockPaperFrame(dl, url) {
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))
+    if (dl.wallpaperFit === 'custom') {
+      return {
+        fit: 'custom',
+        x: clamp(dl.wallpaperPosX ?? 50, 0, 100),
+        y: clamp(dl.wallpaperPosY ?? 50, 0, 100),
+        zoom: clamp(dl.wallpaperZoom ?? 100, 100, 250),
+      }
+    }
+    const meta = url ? dockPaperMetaCache.get(url) : null
+    if (meta && meta.w > 0 && meta.h > 0) {
+      const ratio = meta.h / meta.w
+      if (ratio > 1.08) {
+        const smartY = Math.round(Math.max(16, Math.min(30, 34 - (ratio - 1.08) * 22)))
+        return { fit: 'auto', x: 50, y: smartY, zoom: 100 }
+      }
+    }
+    return { fit: 'auto', x: 50, y: 50, zoom: 100 }
+  }
+  function probeDockPaperMeta(url) {
+    if (!url || dockPaperMetaCache.has(url)) return
+    dockPaperMetaCache.set(url, null)
+    const img = new Image()
+    img.onload = () => {
+      dockPaperMetaCache.set(url, { w: img.naturalWidth || 0, h: img.naturalHeight || 0 })
+      applyDockLook()
+    }
+    img.onerror = () => {
+      dockPaperMetaCache.delete(url)
+    }
+    img.src = url
+  }
+
+  function applyDockLook() {
+    const { dl, mode, g } = dockLookInfo()
+    const light = mode === 'light'
+    const glassOn = mode === 'glass'
+    const root = document.documentElement.style
+    body.classList.toggle('dock-light', light)
+    body.classList.toggle('dock-glass', glassOn)
+    body.classList.toggle('tb-light', light || (isLight() && view !== 'settings'))
+    body.dataset.dockMode = mode
+    body.dataset.dockGlass = glassOn ? '1' : '0'
+    const sysAccent = (look.mode === 'light' ? look.accent?.dark : look.accent?.light) || ''
+    const glassTinted = dl.accentMode === 'system' || /^#[0-9a-f]{6}$/i.test(dl.accent || '')
+    const accent = dl.accentMode === 'custom'
+      ? (/^#[0-9a-f]{6}$/i.test(dl.accent || '') ? dl.accent.toLowerCase() : (light ? '#005fb8' : '#5e9bff'))
+      : (/^#[0-9a-f]{6}$/i.test(sysAccent) ? sysAccent : (light ? '#005fb8' : '#5e9bff'))
+    root.setProperty('--sys-accent', accent)
+    root.setProperty('--dock-accent', accent)
+    root.setProperty('--dock-glass-tint-surface', glassTinted ? '14%' : '0%')
+    root.setProperty('--dock-glass-tint-card', glassTinted ? '10%' : '0%')
+    root.setProperty('--dock-glass-tint-overlay', glassTinted ? '12%' : '0%')
+    root.setProperty('--dock-glass-tint-rim', glassTinted ? '26%' : '0%')
+    const settingsEl = document.getElementById('island-settings')
+    if (dl.headingColor && /^#[0-9a-f]{6}$/i.test(dl.headingColor)) {
+      root.setProperty('--dock-heading', dl.headingColor)
+      settingsEl?.style.setProperty('--dock-heading', dl.headingColor)
+    } else {
+      root.removeProperty('--dock-heading')
+      settingsEl?.style.removeProperty('--dock-heading')
+    }
+    if (dl.textColor && /^#[0-9a-f]{6}$/i.test(dl.textColor)) {
+      root.setProperty('--dock-fg', dl.textColor)
+      settingsEl?.style.setProperty('--dock-fg', dl.textColor)
+      settingsEl?.style.setProperty('--fg', dl.textColor)
+    } else {
+      root.removeProperty('--dock-fg')
+      settingsEl?.style.removeProperty('--dock-fg')
+      settingsEl?.style.removeProperty('--fg')
+    }
+    if (dl.mutedColor && /^#[0-9a-f]{6}$/i.test(dl.mutedColor)) {
+      root.setProperty('--dock-muted', dl.mutedColor)
+      settingsEl?.style.setProperty('--dock-muted', dl.mutedColor)
+      settingsEl?.style.setProperty('--g4', dl.mutedColor)
+      settingsEl?.style.setProperty('--g5', dl.mutedColor)
+    } else {
+      root.removeProperty('--dock-muted')
+      settingsEl?.style.removeProperty('--dock-muted')
+      settingsEl?.style.removeProperty('--g4')
+      settingsEl?.style.removeProperty('--g5')
+    }
+    root.setProperty('--dock-glass-surface-op', String((g.surfaceOp ?? 38) / 100))
+    root.setProperty('--dock-glass-surface-blur', `${g.surfaceBlur ?? 18}px`)
+    root.setProperty('--dock-glass-card-op', String((g.cardOp ?? 22) / 100))
+    root.setProperty('--dock-glass-card-blur', `${g.cardBlur ?? 12}px`)
+    root.setProperty('--dock-glass-overlay-op', String((g.overlayOp ?? 45) / 100))
+    root.setProperty('--dock-glass-overlay-blur', `${g.overlayBlur ?? 16}px`)
+    root.setProperty('--dock-glass-control-op', String((g.controlOp ?? 28) / 100))
+    root.setProperty('--dock-glass-control-blur', `${g.controlBlur ?? 8}px`)
+    const paperUrl = now.dockPaperUrl || ''
+    body.classList.toggle('dock-has-paper', !!paperUrl)
+    if (paperUrl) {
+      root.setProperty('--dock-wallpaper-url', `url("${paperUrl}")`)
+      probeDockPaperMeta(paperUrl)
+    } else {
+      root.removeProperty('--dock-wallpaper-url')
+    }
+    const wp = resolveDockPaperFrame(dl, paperUrl)
+    root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
+    root.setProperty('--dock-wallpaper-pos-x', `${wp.x}%`)
+    root.setProperty('--dock-wallpaper-pos-y', `${wp.y}%`)
+    root.setProperty('--dock-wallpaper-scale', (wp.zoom / 100).toFixed(3))
+  }
+
   function setInk() {
+    const { mode } = dockLookInfo()
     const own = view === 'settings' ? null : groundLight
-    inkLight = own === null ? isLight() : own
+    inkLight = mode === 'light' ? true : mode === 'dark' || mode === 'glass' ? (own === null ? false : own) : (own === null ? isLight() : own)
     body.classList.toggle('isl-light', inkLight)
   }
 
@@ -5047,10 +5176,15 @@
     if (view === 'settings' && isSide()) placeSideSettings(want.height)
     // Reaching for her keeps the room to reach in; the picker and the
     // capsule's panel in the island's home want theirs (picker.js).
+    const seq = ++growSeq
+    clearTimeout(growTimer)
     const nextRoom = isReaching ? PULL_ROOM : window.Picker ? window.Picker.roomOver(roomFor(want), baseRoom()) : roomFor(want)
-    const grows = setRoom(nextRoom)
+    const { grows, ready } = setRoom(nextRoom)
     // The window has its room before the island (and she) grow into it.
     const grow = () => {
+      clearTimeout(growTimer)
+      growTimer = 0
+      island.classList.remove('ask-sizing')
       const resized = island.style.width !== `${want.width}px` || island.style.height !== `${want.height}px`
       // Where it is, for the plate under it to stay covered as it changes.
       const from = resized && plateSent ? island.getBoundingClientRect() : null
@@ -5068,11 +5202,28 @@
       placePlate(resized, from, fromRadius)
       placeNews()
       placeFlow()
+      sendSolid()
     }
-    if (grows) setTimeout(grow, 40)
-    else if (late) {
+    if (grows) {
+      if (view === 'ask' && was !== 'ask') island.classList.add('ask-sizing')
+      Promise.race([
+        ready || Promise.resolve(),
+        new Promise(r => {
+          growTimer = setTimeout(r, 80)
+        }),
+      ]).then(() =>
+        requestAnimationFrame(() => {
+          if (seq !== growSeq) return
+          grow()
+        }),
+      )
+    } else if (late) {
+      island.classList.remove('ask-sizing')
       hidePlate(PLATE_OUT_MS)
-      setTimeout(grow, late)
+      setTimeout(() => {
+        if (seq !== growSeq) return
+        grow()
+      }, late)
     } else grow()
 
     // 新-1（二次测量兜底，T-N / A16）：ask 的正文（diff 摘要）在长文换行/
@@ -5081,14 +5232,15 @@
     //   · 字体先就位：等 document.fonts.ready，最多 300ms，超时按正常测量走；
     //   · 差值 ≤2px 当取整/字体噪声忽略（原来 >1px 就 update()，几乎必然多画一轮）；
     //   · >2px 只 setRoom + setSize —— 不再调用 update()，避免再触发一轮分段生长。
-    // 40ms 那一步是否要合并，需要真机时间戳/录屏证据，这里先不动（见 handoff 待验项）。
     if (view === 'ask') {
       const remeasure = () => {
         if (view !== 'ask' || !isAsking()) return
         const again = sizeOf('ask')
-        if (Math.abs(again.height - want.height) <= 2) return
+        if (Math.abs(again.height - want.height) <= 2 && Math.abs(again.width - want.width) <= 2) return
         setRoom(roomFor(again))
         setSize(again)
+        placeHer(again)
+        sendSolid()
       }
       const later = () => requestAnimationFrame(() => setTimeout(remeasure, 0))
       const fonts = document.fonts
@@ -5892,6 +6044,7 @@
       oledOn = !!config.oledShift
       oledShift()
     }
+    applyDockLook()
     if (config.out !== true) isComingHome = false
     spriteUrl = data.sprite
     second = data.second || null

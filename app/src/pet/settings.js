@@ -92,7 +92,7 @@
   let extensionLayoutFrame = 0
   // remembered：首个 layout 之前先用这一页上次的高度（宿主侧记忆，不碰沙盒 iframe 的
   // localStorage）；没有记忆时由 extension-page.js 给固定占位高度。
-  const extensionPage = window.ExtensionPage.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, remembered: key => extensionLayouts.get(key), onLayout: (key, value) => {
+  const extensionPage = window.ExtensionPage.create({ invoke: (command, args) => window.__TAURI__.core.invoke(command, args), lang: () => lang, getAppearance: () => buildAppearancePayload(), remembered: key => extensionLayouts.get(key), onLayout: (key, value) => {
     if (JSON.stringify(extensionLayouts.get(key)) === JSON.stringify(value)) return
     extensionLayouts.set(key, value)
     cancelAnimationFrame(extensionLayoutFrame)
@@ -580,13 +580,15 @@
       .join('')}</div>`
   }
 
+  let petDelConfirm = null
   function pagePets() {
     const current = snap.settings.pet
+    const canDeleteAny = snap.pets.length > 1
     const installed = snap.pets.length
       ? snap.pets
           .map(
             p => `<div class="r petrow">${thumb(52, p.url, p.version)}<div class="grow"><div>${esc(p.name)}</div><div class="d">${esc([p.author, p.codex ? T('s.fromCodex') : '', p.version === 1 ? T('home.v1') : ''].filter(Boolean).join(' · '))}</div></div>
-            ${p.id === current ? `<span class="d in-use">${esc(T('home.inUse'))}</span>` : `<button class="pbtn" data-use="${esc(p.id)}">${esc(T('home.use'))}</button>`}</div>`,
+            ${p.id === current ? `<span class="d in-use">${esc(T('home.inUse'))}</span>` : `<button class="pbtn" data-use="${esc(p.id)}">${esc(T('home.use'))}</button>`}${p.deletable && canDeleteAny ? `<button class="pbtn ${petDelConfirm === p.id ? 'no' : ''}" data-del-pet="${esc(p.id)}">${esc(T(petDelConfirm === p.id ? 'home.deleteConfirm' : 'home.delete'))}</button>` : ''}</div>`,
           )
           .join('')
       : `<div class="note">${esc(T('settings.petsEmpty'))}</div>`
@@ -785,38 +787,928 @@
     return `<div class="ilook-pv ${mode}${inkDark ? ' ink-dark' : ''}${look.bare ? ' bare' : ''}${big ? ' big' : ''}${plate ? ' plate' : ''}${top ? ' top' : ''}" style="${style}"><span class="cap"><span class="top"><i class="face"></i><span class="w">${esc(T('s.ilookSample'))}</span><span class="t">1:42</span></span>${more}</span></div>`
   }
 
+  const DOCK_LOOK_DEFAULT = {
+    mode: 'dark',
+    accentMode: 'system',
+    accent: '#0078d4',
+    wallpaper: '',
+    wallpaperDim: 58,
+    wallpaperFit: 'auto',
+    wallpaperPosX: 50,
+    wallpaperPosY: 50,
+    wallpaperZoom: 100,
+    glass: {
+      preset: 'balanced',
+      surfaceOp: 38,
+      surfaceBlur: 18,
+      cardOp: 22,
+      cardBlur: 12,
+      overlayOp: 45,
+      overlayBlur: 16,
+      controlOp: 28,
+      controlBlur: 8,
+    },
+    headingColor: '',
+    textColor: '',
+    mutedColor: '',
+  }
+  const GLASS_PRESETS = {
+    off: { surfaceOp: 100, surfaceBlur: 0, cardOp: 100, cardBlur: 0, overlayOp: 100, overlayBlur: 0, controlOp: 100, controlBlur: 0 },
+    light: { surfaceOp: 62, surfaceBlur: 10, cardOp: 46, cardBlur: 8, overlayOp: 68, overlayBlur: 12, controlOp: 52, controlBlur: 6 },
+    balanced: { surfaceOp: 38, surfaceBlur: 18, cardOp: 22, cardBlur: 12, overlayOp: 45, overlayBlur: 16, controlOp: 28, controlBlur: 8 },
+    clear: { surfaceOp: 18, surfaceBlur: 24, cardOp: 12, cardBlur: 16, overlayOp: 25, overlayBlur: 20, controlOp: 16, controlBlur: 10 },
+  }
+  let widgetsFoldOpen = false
+  let cpState = null
+  const colorPop = document.createElement('div')
+  colorPop.className = 'cp-popover'
+  colorPop.hidden = true
+  colorPop.innerHTML = `
+    <div class="cp-head"><span class="cp-title">选择颜色</span><button type="button" class="cp-close" data-cp-close aria-label="关闭">✕</button></div>
+    <div class="cp-sv" data-cp-sv><div class="cp-sv-white"></div><div class="cp-sv-black"></div><span class="cp-sv-thumb"></span></div>
+    <div class="cp-hue" data-cp-hue><span class="cp-hue-thumb"></span></div>
+    <div class="cp-rgb-row">
+      <label class="cp-rgb-field"><span>R</span><input type="text" class="cp-rgb-in mono" data-cp-rgb="r" inputmode="numeric" maxlength="3" autocomplete="off"></label>
+      <label class="cp-rgb-field"><span>G</span><input type="text" class="cp-rgb-in mono" data-cp-rgb="g" inputmode="numeric" maxlength="3" autocomplete="off"></label>
+      <label class="cp-rgb-field"><span>B</span><input type="text" class="cp-rgb-in mono" data-cp-rgb="b" inputmode="numeric" maxlength="3" autocomplete="off"></label>
+    </div>
+    <div class="cp-foot">
+      <button type="button" class="cp-clear" data-cp-clear>清空</button>
+      <div class="cp-hex-wrap"><i class="cp-hex-dot"></i><input type="text" class="cp-hex-in mono" data-cp-hex maxlength="7" placeholder="#ffffff" spellcheck="false" autocomplete="off"></div>
+    </div>`
+  layer.appendChild(colorPop)
+
+  const wpMetaCache = new Map()
+  let wpWheelSaveTimer = 0
+  function resolveWallpaperFrame(dl, url) {
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))
+    if (dl.wallpaperFit === 'custom') {
+      return {
+        fit: 'custom',
+        x: clamp(dl.wallpaperPosX ?? 50, 0, 100),
+        y: clamp(dl.wallpaperPosY ?? 50, 0, 100),
+        zoom: clamp(dl.wallpaperZoom ?? 100, 100, 250),
+      }
+    }
+    const meta = url ? wpMetaCache.get(url) : null
+    if (meta && meta.w > 0 && meta.h > 0) {
+      const ratio = meta.h / meta.w
+      if (ratio > 1.08) {
+        const smartY = Math.round(Math.max(16, Math.min(30, 34 - (ratio - 1.08) * 22)))
+        return { fit: 'auto', x: 50, y: smartY, zoom: 100 }
+      }
+    }
+    return { fit: 'auto', x: 50, y: 50, zoom: 100 }
+  }
+  function probeWallpaperMeta(url) {
+    if (!url || wpMetaCache.has(url)) return
+    wpMetaCache.set(url, null)
+    const img = new Image()
+    img.onload = () => {
+      wpMetaCache.set(url, { w: img.naturalWidth || 0, h: img.naturalHeight || 0 })
+      applyDockThemeVars()
+      syncDockLookDOM()
+      if (!wpModal.hidden) syncWpModalUI()
+    }
+    img.onerror = () => {
+      wpMetaCache.delete(url)
+    }
+    img.src = url
+  }
+
+  const wpModal = document.createElement('div')
+  wpModal.className = 'wp-modal-backdrop'
+  wpModal.hidden = true
+  wpModal.innerHTML = `
+    <div class="wp-modal" role="dialog" aria-modal="true" aria-label="预览与调整背景位置">
+      <div class="wp-head">
+        <div class="wp-head-left">
+          <span class="wp-title" data-wp-title></span>
+          <span class="wp-mode-pill" data-wp-mode-pill></span>
+        </div>
+        <button type="button" class="cp-close" data-wp-close aria-label="关闭">✕</button>
+      </div>
+      <div class="wp-stage-wrap">
+        <div class="wp-stage" data-wp-stage>
+          <div class="wp-stage-img" data-wp-img></div>
+          <div class="wp-stage-dim" data-wp-dim></div>
+          <div class="wp-stage-grid" aria-hidden="true"><i></i><i></i><b></b><b></b></div>
+          <div class="wp-stage-mock" aria-hidden="true">
+            <span class="wp-mock-head"></span>
+            <span class="wp-mock-card"></span>
+            <span class="wp-mock-card sm"></span>
+          </div>
+          <span class="wp-stage-tip" data-wp-tip></span>
+        </div>
+      </div>
+      <div class="wp-presets">
+        <button type="button" class="wp-chip" data-wp-preset="auto"></button>
+        <button type="button" class="wp-chip" data-wp-preset="top"></button>
+        <button type="button" class="wp-chip" data-wp-preset="center"></button>
+        <button type="button" class="wp-chip" data-wp-preset="bottom"></button>
+        <button type="button" class="wp-chip" data-wp-preset="left"></button>
+        <button type="button" class="wp-chip" data-wp-preset="right"></button>
+      </div>
+      <div class="wp-sliders">
+        <div class="ilook-slider-row"><span class="ilook-slider-lbl" data-wp-lbl="x"></span><span class="ilook-rng"><input type="range" class="rng" data-wp-range="x" min="0" max="100" step="1" value="50"><span class="rv" data-wp-val="x">50%</span></span></div>
+        <div class="ilook-slider-row"><span class="ilook-slider-lbl" data-wp-lbl="y"></span><span class="ilook-rng"><input type="range" class="rng" data-wp-range="y" min="0" max="100" step="1" value="50"><span class="rv" data-wp-val="y">50%</span></span></div>
+        <div class="ilook-slider-row"><span class="ilook-slider-lbl" data-wp-lbl="zoom"></span><span class="ilook-rng"><input type="range" class="rng" data-wp-range="zoom" min="100" max="250" step="1" value="100"><span class="rv" data-wp-val="zoom">100%</span></span></div>
+      </div>
+      <div class="wp-foot">
+        <div class="wp-foot-left">
+          <button type="button" class="pbtn sm" data-dock-paper="pick" data-wp-pick></button>
+          <button type="button" class="pbtn sm" data-wp-preset="auto" data-wp-reset></button>
+        </div>
+        <button type="button" class="pbtn sm al" data-wp-close data-wp-done></button>
+      </div>
+    </div>`
+  layer.appendChild(wpModal)
+
+  function closeWpModal() {
+    if (wpModal.hidden) return
+    clearTimeout(wpWheelSaveTimer)
+    wpModal.hidden = true
+  }
+  function syncWpModalUI(dragging = false) {
+    if (!snap?.dockPaperUrl) {
+      closeWpModal()
+      return
+    }
+    const dl = dockLookOf()
+    const frame = resolveWallpaperFrame(dl, snap.dockPaperUrl)
+    const stage = wpModal.querySelector('[data-wp-stage]')
+    const imgEl = wpModal.querySelector('[data-wp-img]')
+    const dimEl = wpModal.querySelector('[data-wp-dim]')
+    const pill = wpModal.querySelector('[data-wp-mode-pill]')
+    const tip = wpModal.querySelector('[data-wp-tip]')
+    if (imgEl) {
+      imgEl.style.backgroundImage = `url("${snap.dockPaperUrl}")`
+      imgEl.style.backgroundPosition = `${frame.x}% ${frame.y}%`
+      imgEl.style.transform = `scale(${(frame.zoom / 100).toFixed(3)})`
+      imgEl.style.transformOrigin = `${frame.x}% ${frame.y}%`
+    }
+    if (dimEl) {
+      const alpha = ((dl.wallpaperDim ?? 58) / 100) * 0.72
+      dimEl.style.background = dl.mode === 'light'
+        ? `rgba(245, 245, 247, ${alpha.toFixed(3)})`
+        : `rgba(14, 16, 22, ${alpha.toFixed(3)})`
+    }
+    if (pill) {
+      pill.textContent = frame.fit === 'auto'
+        ? T('s.dockPaperAuto')
+        : `${T('s.dockPaperCustom')} · ${frame.zoom}%`
+      pill.classList.toggle('is-auto', frame.fit === 'auto')
+    }
+    if (tip) {
+      tip.textContent = dragging
+        ? `X ${frame.x}% · Y ${frame.y}% · ${frame.zoom}%`
+        : T('s.dockPaperDragTip')
+    }
+    const presets = {
+      auto: frame.fit === 'auto',
+      top: frame.fit === 'custom' && frame.y <= 22 && Math.abs(frame.x - 50) <= 15,
+      center: frame.fit === 'custom' && Math.abs(frame.x - 50) <= 6 && Math.abs(frame.y - 50) <= 6,
+      bottom: frame.fit === 'custom' && frame.y >= 78 && Math.abs(frame.x - 50) <= 15,
+      left: frame.fit === 'custom' && frame.x <= 22,
+      right: frame.fit === 'custom' && frame.x >= 78,
+    }
+    wpModal.querySelectorAll('.wp-chip[data-wp-preset]').forEach(btn => {
+      btn.classList.toggle('on', !!presets[btn.dataset.wpPreset])
+    })
+    const resetBtn = wpModal.querySelector('[data-wp-reset]')
+    if (resetBtn) resetBtn.disabled = frame.fit === 'auto'
+    const map = { x: [frame.x, '%'], y: [frame.y, '%'], zoom: [frame.zoom, '%'] }
+    for (const [k, [val, unit]] of Object.entries(map)) {
+      const inp = wpModal.querySelector(`[data-wp-range="${k}"]`)
+      if (inp && Number(inp.value) !== val) inp.value = String(val)
+      const rv = wpModal.querySelector(`[data-wp-val="${k}"]`)
+      if (rv) rv.textContent = `${val}${unit}`
+    }
+    if (stage) stage.classList.toggle('is-dragging', dragging)
+  }
+  function openWpModal() {
+    if (!snap?.dockPaperUrl) return
+    closeColorPop()
+    probeWallpaperMeta(snap.dockPaperUrl)
+    const set = (sel, text) => {
+      const el = wpModal.querySelector(sel)
+      if (el) el.textContent = text
+    }
+    set('[data-wp-title]', T('s.dockPaperAdjust'))
+    set('.wp-chip[data-wp-preset="auto"]', T('s.dockPaperAuto'))
+    set('.wp-chip[data-wp-preset="top"]', T('s.dockPaperPresetTop'))
+    set('.wp-chip[data-wp-preset="center"]', T('s.dockPaperPresetCenter'))
+    set('.wp-chip[data-wp-preset="bottom"]', T('s.dockPaperPresetBottom'))
+    set('.wp-chip[data-wp-preset="left"]', T('s.dockPaperPresetLeft'))
+    set('.wp-chip[data-wp-preset="right"]', T('s.dockPaperPresetRight'))
+    set('[data-wp-lbl="x"]', T('s.dockPaperPosX'))
+    set('[data-wp-lbl="y"]', T('s.dockPaperPosY'))
+    set('[data-wp-lbl="zoom"]', T('s.dockPaperZoom'))
+    set('[data-wp-pick]', T('s.dockPaperChange'))
+    set('[data-wp-reset]', T('s.dockPaperResetAuto'))
+    set('[data-wp-done]', T('s.dockPaperDone'))
+    const dlg = wpModal.querySelector('.wp-modal')
+    if (dlg) dlg.setAttribute('aria-label', T('s.dockPaperAdjust'))
+    const stage = wpModal.querySelector('[data-wp-stage]')
+    if (stage) {
+      const isl = document.getElementById('island')
+      const iw = isl?.clientWidth || 560
+      const ih = isl?.clientHeight || 620
+      const ratio = Math.max(0.68, Math.min(1.5, iw / Math.max(1, ih)))
+      const maxW = Math.max(220, Math.min(340, (layer.clientWidth || 520) - 96))
+      let h = 196
+      let w = Math.round(h * ratio)
+      if (w > maxW) {
+        w = maxW
+        h = Math.max(148, Math.round(w / ratio))
+      }
+      stage.style.width = `${w}px`
+      stage.style.height = `${h}px`
+    }
+    wpModal.hidden = false
+    syncWpModalUI(false)
+  }
+  function wpStageBind() {
+    const stage = wpModal.querySelector('[data-wp-stage]')
+    if (!stage) return
+    let drag = null
+    stage.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || !snap?.dockPaperUrl) return
+      e.preventDefault()
+      const dl = dockLookOf()
+      const frame = resolveWallpaperFrame(dl, snap.dockPaperUrl)
+      const rect = stage.getBoundingClientRect()
+      const meta = wpMetaCache.get(snap.dockPaperUrl)
+      const scale = frame.zoom / 100
+      let panX = 0, panY = 0
+      if (meta && meta.w > 0 && meta.h > 0) {
+        const cover = Math.max(rect.width / meta.w, rect.height / meta.h)
+        panX = Math.max(0, meta.w * cover * scale - rect.width)
+        panY = Math.max(0, meta.h * cover * scale - rect.height)
+      } else {
+        panX = rect.width * 0.65 * scale
+        panY = rect.height * 0.65 * scale
+      }
+      drag = {
+        id: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        baseX: frame.x,
+        baseY: frame.y,
+        zoom: frame.zoom,
+        panX,
+        panY,
+        x: frame.x,
+        y: frame.y,
+        moved: false,
+      }
+      try { stage.setPointerCapture(e.pointerId) } catch {}
+      syncWpModalUI(true)
+    })
+    stage.addEventListener('pointermove', e => {
+      if (!drag || drag.id !== e.pointerId) return
+      e.preventDefault()
+      const dx = e.clientX - drag.startX
+      const dy = e.clientY - drag.startY
+      if (!drag.moved && Math.hypot(dx, dy) > 2) drag.moved = true
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)))
+      const nx = drag.panX > 2 ? clamp(drag.baseX - (dx / drag.panX) * 100, 0, 100) : drag.baseX
+      const ny = drag.panY > 2 ? clamp(drag.baseY - (dy / drag.panY) * 100, 0, 100) : drag.baseY
+      drag.x = nx
+      drag.y = ny
+      const cur = dockLookOf()
+      dockLookSave({ ...cur, wallpaperFit: 'custom', wallpaperPosX: nx, wallpaperPosY: ny, wallpaperZoom: drag.zoom }, false)
+      syncWpModalUI(true)
+    })
+    const endDrag = e => {
+      if (!drag || drag.id !== e.pointerId) return
+      const done = drag
+      drag = null
+      try { if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId) } catch {}
+      if (done.moved) {
+        const cur = dockLookOf()
+        dockLookSave({ ...cur, wallpaperFit: 'custom', wallpaperPosX: done.x, wallpaperPosY: done.y, wallpaperZoom: done.zoom }, true)
+      }
+      syncWpModalUI(false)
+    }
+    stage.addEventListener('pointerup', endDrag)
+    stage.addEventListener('pointercancel', endDrag)
+    stage.addEventListener('wheel', e => {
+      if (!snap?.dockPaperUrl) return
+      e.preventDefault()
+      e.stopPropagation()
+      const cur = dockLookOf()
+      const frame = resolveWallpaperFrame(cur, snap.dockPaperUrl)
+      const step = e.deltaY < 0 ? 8 : -8
+      const nextZoom = Math.max(100, Math.min(250, frame.zoom + step))
+      if (nextZoom === frame.zoom) return
+      const next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: frame.x, wallpaperPosY: frame.y, wallpaperZoom: nextZoom }
+      dockLookSave(next, false)
+      syncWpModalUI(false)
+      clearTimeout(wpWheelSaveTimer)
+      wpWheelSaveTimer = setTimeout(() => {
+        dockLookSave(next, true)
+      }, 180)
+    }, { passive: false })
+  }
+  wpStageBind()
+  function wpRangeInput(target, keep) {
+    if (!snap?.dockPaperUrl) return
+    const cur = dockLookOf()
+    const frame = resolveWallpaperFrame(cur, snap.dockPaperUrl)
+    const key = target.dataset.wpRange
+    const raw = Number(target.value)
+    const next = {
+      ...cur,
+      wallpaperFit: 'custom',
+      wallpaperPosX: key === 'x' ? Math.max(0, Math.min(100, Math.round(raw))) : frame.x,
+      wallpaperPosY: key === 'y' ? Math.max(0, Math.min(100, Math.round(raw))) : frame.y,
+      wallpaperZoom: key === 'zoom' ? Math.max(100, Math.min(250, Math.round(raw))) : frame.zoom,
+    }
+    dockLookSave(next, keep)
+    syncWpModalUI(false)
+  }
+
+  function hexToRgb(hex) {
+    const h = String(hex || '').replace(/^#/, '')
+    if (!/^[0-9a-f]{6}$/i.test(h)) return { r: 255, g: 255, b: 255 }
+    return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) }
+  }
+  function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(v => Math.round(Math.min(255, Math.max(0, Number(v) || 0))).toString(16).padStart(2, '0')).join('')
+  }
+  function rgbToHsv(r, g, b) {
+    const rn = r / 255, gn = g / 255, bn = b / 255
+    const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn), d = max - min
+    const h = d === 0 ? 0 : max === rn ? (((gn - bn) / d + 6) % 6) * 60 : max === gn ? ((bn - rn) / d + 2) * 60 : ((rn - gn) / d + 4) * 60
+    const s = max === 0 ? 0 : d / max
+    return { h, s, v: max }
+  }
+  function hsvToRgb(h, s, v) {
+    const c = v * s
+    const hh = (((h % 360) + 360) % 360) / 60
+    const x = c * (1 - Math.abs((hh % 2) - 1))
+    const [r1, g1, b1] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(hh) % 6]
+    const m = v - c
+    return { r: Math.round((r1 + m) * 255), g: Math.round((g1 + m) * 255), b: Math.round((b1 + m) * 255) }
+  }
+  function closeColorPop() {
+    if (colorPop.hidden) return
+    colorPop.hidden = true
+    cpState = null
+    body.querySelectorAll('[data-typo-toggle].on').forEach(b => {
+      b.classList.remove('on')
+      b.setAttribute('aria-expanded', 'false')
+    })
+  }
+  function syncColorPopUI() {
+    if (!cpState) return
+    const { h, s, v, r, g, b, hex } = cpState
+    const pure = hsvToRgb(h, 1, 1)
+    const pureHex = rgbToHex(pure.r, pure.g, pure.b)
+    const svEl = colorPop.querySelector('[data-cp-sv]')
+    const svThumb = colorPop.querySelector('.cp-sv-thumb')
+    const hueThumb = colorPop.querySelector('.cp-hue-thumb')
+    const hexDot = colorPop.querySelector('.cp-hex-dot')
+    const hexIn = colorPop.querySelector('[data-cp-hex]')
+    const rIn = colorPop.querySelector('[data-cp-rgb="r"]')
+    const gIn = colorPop.querySelector('[data-cp-rgb="g"]')
+    const bIn = colorPop.querySelector('[data-cp-rgb="b"]')
+    if (svEl) svEl.style.backgroundColor = pureHex
+    if (svThumb) {
+      svThumb.style.left = `${(s * 100).toFixed(2)}%`
+      svThumb.style.top = `${((1 - v) * 100).toFixed(2)}%`
+      svThumb.style.background = hex
+    }
+    if (hueThumb) {
+      hueThumb.style.left = `${((h % 360) / 360 * 100).toFixed(2)}%`
+      hueThumb.style.background = pureHex
+    }
+    if (hexDot) hexDot.style.background = hex
+    if (hexIn && document.activeElement !== hexIn) hexIn.value = hex
+    if (rIn && document.activeElement !== rIn) rIn.value = String(r)
+    if (gIn && document.activeElement !== gIn) gIn.value = String(g)
+    if (bIn && document.activeElement !== bIn) bIn.value = String(b)
+  }
+  function openColorPop(key, anchorEl) {
+    if (!colorPop.hidden && cpState?.key === key) {
+      closeColorPop()
+      return
+    }
+    const dl = dockLookOf()
+    const fallbacks = {
+      accent: String(snap?.winLook?.accent || '#0078d4').toLowerCase(),
+      headingColor: dl.mode === 'light' ? '#111113' : '#ffffff',
+      textColor: dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7',
+      mutedColor: dl.mode === 'light' ? '#5d5d5d' : '#a1a1a6',
+    }
+    const raw = key === 'accent'
+      ? (dl.accentMode === 'custom' ? (dl.accent || fallbacks.accent) : fallbacks.accent)
+      : (dl[key] || fallbacks[key] || '#ffffff')
+    const hex = /^#[0-9a-f]{6}$/i.test(raw) ? raw.toLowerCase() : '#ffffff'
+    const rgb = hexToRgb(hex)
+    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b)
+    cpState = { key, ...hsv, ...rgb, hex }
+    const titleEl = colorPop.querySelector('.cp-title')
+    const clearBtn = colorPop.querySelector('[data-cp-clear]')
+    if (titleEl) titleEl.textContent = lang === 'zh' ? '选择颜色' : 'Pick colour'
+    if (clearBtn) clearBtn.textContent = lang === 'zh' ? '清空' : 'Clear'
+    colorPop.hidden = false
+    syncColorPopUI()
+    body.querySelectorAll('[data-typo-toggle]').forEach(btn => {
+      const on = btn.dataset.typoToggle === key
+      btn.classList.toggle('on', on)
+      btn.setAttribute('aria-expanded', String(on))
+    })
+    const lRect = layer.getBoundingClientRect()
+    const aRect = anchorEl.getBoundingClientRect()
+    const popW = colorPop.offsetWidth || 244
+    const popH = colorPop.offsetHeight || 286
+    let left = aRect.right - lRect.left - popW
+    left = Math.max(12, Math.min(left, lRect.width - popW - 12))
+    let top = aRect.bottom - lRect.top + 8
+    if (top + popH > lRect.height - 10) {
+      top = Math.max(12, aRect.top - lRect.top - popH - 8)
+    }
+    colorPop.style.left = `${Math.round(left)}px`
+    colorPop.style.top = `${Math.round(top)}px`
+  }
+  function cpBindDrag(el, onPoint) {
+    let dragging = false
+    const handle = (e, keep) => {
+      const rect = el.getBoundingClientRect()
+      const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / (rect.width || 1)))
+      const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / (rect.height || 1)))
+      onPoint(x, y, keep)
+    }
+    el.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || !cpState) return
+      e.preventDefault()
+      dragging = true
+      try { el.setPointerCapture(e.pointerId) } catch {}
+      handle(e, false)
+    })
+    el.addEventListener('pointermove', e => {
+      if (!dragging || !cpState) return
+      e.preventDefault()
+      handle(e, false)
+    })
+    const end = e => {
+      if (!dragging) return
+      dragging = false
+      try { if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId) } catch {}
+      if (cpState) handle(e, true)
+    }
+    el.addEventListener('pointerup', end)
+    el.addEventListener('pointercancel', end)
+  }
+  cpBindDrag(colorPop.querySelector('[data-cp-sv]'), (x, y, keep) => {
+    if (!cpState) return
+    cpState.s = x
+    cpState.v = 1 - y
+    const rgb = hsvToRgb(cpState.h, cpState.s, cpState.v)
+    Object.assign(cpState, rgb, { hex: rgbToHex(rgb.r, rgb.g, rgb.b) })
+    syncColorPopUI()
+    applyTypoColorLive(cpState.key, cpState.hex, keep)
+  })
+  cpBindDrag(colorPop.querySelector('[data-cp-hue]'), (x, _y, keep) => {
+    if (!cpState) return
+    cpState.h = Math.min(359.9, x * 360)
+    const rgb = hsvToRgb(cpState.h, cpState.s, cpState.v)
+    Object.assign(cpState, rgb, { hex: rgbToHex(rgb.r, rgb.g, rgb.b) })
+    syncColorPopUI()
+    applyTypoColorLive(cpState.key, cpState.hex, keep)
+  })
+  function cpRgbInput(keep) {
+    if (!cpState) return
+    const rEl = colorPop.querySelector('[data-cp-rgb="r"]')
+    const gEl = colorPop.querySelector('[data-cp-rgb="g"]')
+    const bEl = colorPop.querySelector('[data-cp-rgb="b"]')
+    const clampByte = el => Math.min(255, Math.max(0, parseInt(String(el?.value || '').replace(/[^\d]/g, ''), 10) || 0))
+    const r = clampByte(rEl), g = clampByte(gEl), b = clampByte(bEl)
+    const hex = rgbToHex(r, g, b)
+    const hsv = rgbToHsv(r, g, b)
+    Object.assign(cpState, { r, g, b, hex, s: hsv.s, v: hsv.v })
+    if (hsv.s > 0 && hsv.v > 0) cpState.h = hsv.h
+    syncColorPopUI()
+    applyTypoColorLive(cpState.key, hex, keep)
+  }
+  function cpHexInput(target, keep) {
+    if (!cpState) return
+    let raw = String(target.value || '').trim().toLowerCase()
+    if (/^#?[0-9a-f]{3}$/i.test(raw) && keep) {
+      const h3 = raw.replace(/^#/, '')
+      raw = '#' + h3.split('').map(c => c + c).join('')
+    } else if (/^[0-9a-f]{6}$/i.test(raw)) {
+      raw = `#${raw}`
+    }
+    if (!/^#[0-9a-f]{6}$/i.test(raw)) {
+      if (keep) syncColorPopUI()
+      return
+    }
+    const rgb = hexToRgb(raw)
+    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b)
+    Object.assign(cpState, { ...rgb, hex: raw, s: hsv.s, v: hsv.v })
+    if (hsv.s > 0 && hsv.v > 0) cpState.h = hsv.h
+    syncColorPopUI()
+    applyTypoColorLive(cpState.key, raw, keep)
+  }
+  body.addEventListener('scroll', closeColorPop)
+  const dockLookOf = () => {
+    const raw = snap?.settings?.dockLook || {}
+    return {
+      ...DOCK_LOOK_DEFAULT,
+      ...raw,
+      glass: { ...DOCK_LOOK_DEFAULT.glass, ...(raw.glass || {}) },
+    }
+  }
+  function buildAppearancePayload() {
+    if (!snap?.settings) return null
+    const dl = dockLookOf()
+    const mode = ['light', 'dark', 'glass'].includes(dl.mode) ? dl.mode : 'dark'
+    const light = mode === 'light'
+    const sysAccent = String(snap?.winLook?.accent || '').toLowerCase()
+    const glassTinted = dl.accentMode === 'system' || /^#[0-9a-f]{6}$/i.test(dl.accent || '')
+    const accent = dl.accentMode === 'custom'
+      ? (/^#[0-9a-f]{6}$/i.test(dl.accent || '') ? dl.accent.toLowerCase() : (light ? '#005fb8' : '#5e9bff'))
+      : (/^#[0-9a-f]{6}$/i.test(sysAccent) ? sysAccent : (light ? '#005fb8' : '#5e9bff'))
+    const g = dl.glass || DOCK_LOOK_DEFAULT.glass
+    const wp = resolveWallpaperFrame(dl, snap.dockPaperUrl || '')
+    return {
+      mode,
+      baseMode: light ? 'light' : 'dark',
+      accent,
+      glassTinted,
+      glass: { enabled: mode === 'glass', ...g },
+      wallpaper: {
+        url: snap.dockPaperUrl || '',
+        dim: dl.wallpaperDim ?? 58,
+        fit: wp.fit,
+        posX: wp.x,
+        posY: wp.y,
+        zoom: wp.zoom,
+      },
+      typography: {
+        headingColor: dl.headingColor || '',
+        textColor: dl.textColor || '',
+        mutedColor: dl.mutedColor || '',
+      },
+    }
+  }
+  function syncDockLookDOM() {
+    const track = body.querySelector('.dtp-track')
+    if (!track || !snap?.settings) return false
+    const dl = dockLookOf()
+    const g = dl.glass || DOCK_LOOK_DEFAULT.glass
+    if (track.dataset.mode !== dl.mode) track.dataset.mode = dl.mode
+    track._dtpSetMode?.(dl.mode)
+    body.querySelectorAll('.dtp-hit').forEach(btn => {
+      btn.setAttribute('aria-pressed', String(btn.dataset.dockTheme === dl.mode))
+    })
+    body.querySelectorAll('.dtp-label-btn').forEach(btn => {
+      const on = btn.dataset.dockTheme === dl.mode
+      btn.classList.toggle('on', on)
+      btn.setAttribute('aria-pressed', String(on))
+    })
+    body.querySelectorAll('[data-glass-preset]').forEach(btn => {
+      btn.classList.toggle('on', btn.dataset.glassPreset === g.preset)
+    })
+    const sliders = [
+      ['wallpaperDim', dl.wallpaperDim ?? 58, '%'],
+      ['glass.surfaceOp', g.surfaceOp, '%'],
+      ['glass.surfaceBlur', g.surfaceBlur, 'px'],
+      ['glass.cardOp', g.cardOp, '%'],
+      ['glass.cardBlur', g.cardBlur, 'px'],
+      ['glass.overlayOp', g.overlayOp, '%'],
+      ['glass.overlayBlur', g.overlayBlur, 'px'],
+      ['glass.controlOp', g.controlOp, '%'],
+      ['glass.controlBlur', g.controlBlur, 'px'],
+    ]
+    for (const [key, val, unit] of sliders) {
+      const inp = body.querySelector(`[data-dock-look="${key}"]`)
+      if (inp && Number(inp.value) !== Number(val)) inp.value = String(val)
+      const rv = inp?.parentElement?.querySelector('.rv')
+      if (rv) rv.textContent = `${val}${unit}`
+    }
+    const accentCleared = dl.accentMode === 'custom' && !dl.accent
+    const curAccent = accentCleared
+      ? (dl.mode === 'light' ? '#005fb8' : '#5e9bff')
+      : String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
+    const accentItem = body.querySelector('[data-typo-item="accent"]')
+    if (accentItem) {
+      const sysBtn = accentItem.querySelector('[data-dock-accent-mode="system"]')
+      const clearBtn = accentItem.querySelector('[data-dock-accent-clear]')
+      const dot = accentItem.querySelector('.typo-dot')
+      const hexEl = accentItem.querySelector('.typo-hex')
+      if (sysBtn) {
+        sysBtn.classList.toggle('al', dl.accentMode === 'system')
+        sysBtn.setAttribute('aria-pressed', String(dl.accentMode === 'system'))
+      }
+      if (clearBtn) {
+        clearBtn.disabled = accentCleared
+        clearBtn.classList.toggle('is-ghost', accentCleared)
+      }
+      if (dot) dot.style.background = curAccent
+      if (hexEl) hexEl.textContent = accentCleared ? (lang === 'zh' ? '默认' : 'Default') : curAccent
+    }
+    const typoFallbacks = {
+      headingColor: dl.mode === 'light' ? '#111113' : '#ffffff',
+      textColor: dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7',
+      mutedColor: dl.mode === 'light' ? '#5d5d5d' : '#a1a1a6',
+    }
+    for (const k of ['headingColor', 'textColor', 'mutedColor']) {
+      const item = body.querySelector(`[data-typo-item="${k}"]`)
+      if (!item) continue
+      const val = dl[k] || ''
+      const preview = /^#[0-9a-f]{6}$/i.test(val) ? val.toLowerCase() : typoFallbacks[k]
+      const dot = item.querySelector('.typo-dot')
+      const hexEl = item.querySelector('.typo-hex')
+      const clearBtn = item.querySelector(`[data-dock-typo-clear="${k}"]`)
+      if (dot) dot.style.background = preview
+      if (hexEl) hexEl.textContent = val ? val.toLowerCase() : (lang === 'zh' ? '默认' : 'Default')
+      if (clearBtn) {
+        clearBtn.disabled = !val
+        clearBtn.classList.toggle('is-ghost', !val)
+      }
+    }
+    const glassCard = body.querySelector('[data-glass-card]')
+    if (glassCard) {
+      const shouldHide = dl.mode !== 'glass'
+      if (glassCard.hidden !== shouldHide) {
+        glassCard.hidden = shouldHide
+        if (shouldHide && cpState?.key === 'accent') closeColorPop()
+        relayout()
+      }
+    }
+    const wp = resolveWallpaperFrame(dl, snap.dockPaperUrl || '')
+    const thumbImg = body.querySelector('.dock-paper-thumb')
+    if (thumbImg) {
+      thumbImg.style.objectPosition = `${wp.x}% ${wp.y}%`
+      thumbImg.style.transform = `scale(${(wp.zoom / 100).toFixed(3)})`
+      thumbImg.style.transformOrigin = `${wp.x}% ${wp.y}%`
+    }
+    const fitBadge = body.querySelector('[data-dock-paper-badge]')
+    if (fitBadge) {
+      fitBadge.textContent = wp.fit === 'auto'
+        ? T('s.dockPaperAuto')
+        : `${T('s.dockPaperCustom')}${wp.zoom > 100 ? ` · ${wp.zoom}%` : ''}`
+      fitBadge.classList.toggle('is-auto', wp.fit === 'auto')
+    }
+    if (!wpModal.hidden) syncWpModalUI(false)
+    const summaryEl = body.querySelector('[data-ilook-summary]')
+    if (summaryEl) {
+      const modeLabel = T(`s.dockTheme.${dl.mode}`)
+      const detail = dl.mode === 'glass'
+        ? T(`s.glass.${g.preset || 'balanced'}`)
+        : (dl.accentMode === 'custom' ? (dl.accent || (lang === 'zh' ? '默认' : 'Default')) : (lang === 'zh' ? '跟随系统' : 'System'))
+      summaryEl.textContent = `${modeLabel} · ${detail}`
+    }
+    if (tab === 'look') body._html = PAGES.look()
+    return true
+  }
+
+  function dockLookSave(next, keep = true) {
+    if (!snap?.settings) return
+    snap.settings.dockLook = next
+    applyDockThemeVars()
+    extensionPage.refreshTheme?.()
+    const synced = syncDockLookDOM()
+    if (keep) {
+      if (synced) {
+        window.pet.settings.set({ dockLook: next }).then(got => {
+          snap = got
+          applyDockThemeVars()
+          extensionPage.refreshTheme?.()
+          if (!syncDockLookDOM()) draw()
+        })
+      } else {
+        patch({ dockLook: next })
+      }
+    } else if (!synced) {
+      draw()
+    }
+  }
+  function dockLookInput(target, keep) {
+    const cur = dockLookOf()
+    const key = target.dataset.dockLook
+    if (key === 'wallpaperDim') {
+      const val = Math.min(100, Math.max(0, Number(target.value) || 0))
+      const rv = target.parentElement?.querySelector('.rv')
+      if (rv) rv.textContent = `${val}%`
+      return dockLookSave({ ...cur, wallpaperDim: val }, keep)
+    }
+    if (key === 'headingColor' || key === 'textColor' || key === 'mutedColor') {
+      return dockLookSave({ ...cur, [key]: String(target.value || '').toLowerCase() }, keep)
+    }
+    if (key.startsWith('glass.')) {
+      const gk = key.slice(6)
+      const val = Math.max(0, Number(target.value) || 0)
+      const glass = { ...cur.glass, preset: 'custom', [gk]: val }
+      const rv = target.parentElement?.querySelector('.rv')
+      if (rv) rv.textContent = `${val}${gk.endsWith('Blur') ? 'px' : '%'}`
+      return dockLookSave({ ...cur, glass }, keep)
+    }
+  }
+  function applyTypoColorLive(key, hex, keep) {
+    const cur = dockLookOf()
+    const clean = /^#[0-9a-f]{6}$/i.test(hex) ? hex.toLowerCase() : ''
+    if (!clean) return
+    const next = key === 'accent'
+      ? { ...cur, accentMode: 'custom', accent: clean }
+      : { ...cur, [key]: clean }
+    dockLookSave(next, keep)
+  }
+  function applyDockThemeVars() {
+    const info = buildAppearancePayload()
+    if (!info) return
+    const dl = dockLookOf()
+    const root = document.documentElement.style
+    const light = info.mode === 'light'
+    const glassOn = info.glass.enabled
+    document.body.classList.toggle('dock-light', light)
+    document.body.classList.toggle('dock-glass', glassOn)
+    if (light) document.body.classList.add('tb-light')
+    else document.body.classList.remove('tb-light')
+    document.body.dataset.dockMode = info.mode
+    document.body.dataset.dockGlass = glassOn ? '1' : '0'
+    layer.style.setProperty('--sys-accent', info.accent)
+    root.setProperty('--sys-accent', info.accent)
+    root.setProperty('--dock-accent', info.accent)
+    root.setProperty('--dock-glass-tint-surface', info.glassTinted ? '14%' : '0%')
+    root.setProperty('--dock-glass-tint-card', info.glassTinted ? '10%' : '0%')
+    root.setProperty('--dock-glass-tint-overlay', info.glassTinted ? '12%' : '0%')
+    root.setProperty('--dock-glass-tint-rim', info.glassTinted ? '26%' : '0%')
+    if (info.typography.headingColor && /^#[0-9a-f]{6}$/i.test(info.typography.headingColor)) {
+      root.setProperty('--dock-heading', info.typography.headingColor)
+      layer.style.setProperty('--dock-heading', info.typography.headingColor)
+    } else {
+      root.removeProperty('--dock-heading')
+      layer.style.removeProperty('--dock-heading')
+    }
+    if (info.typography.textColor && /^#[0-9a-f]{6}$/i.test(info.typography.textColor)) {
+      root.setProperty('--dock-fg', info.typography.textColor)
+      layer.style.setProperty('--dock-fg', info.typography.textColor)
+      layer.style.setProperty('--fg', info.typography.textColor)
+    } else {
+      root.removeProperty('--dock-fg')
+      layer.style.removeProperty('--dock-fg')
+      layer.style.removeProperty('--fg')
+    }
+    if (info.typography.mutedColor && /^#[0-9a-f]{6}$/i.test(info.typography.mutedColor)) {
+      root.setProperty('--dock-muted', info.typography.mutedColor)
+      layer.style.setProperty('--dock-muted', info.typography.mutedColor)
+      layer.style.setProperty('--g4', info.typography.mutedColor)
+      layer.style.setProperty('--g5', info.typography.mutedColor)
+    } else {
+      root.removeProperty('--dock-muted')
+      layer.style.removeProperty('--dock-muted')
+      layer.style.removeProperty('--g4')
+      layer.style.removeProperty('--g5')
+    }
+    const g = info.glass
+    root.setProperty('--dock-glass-surface-op', String((g.surfaceOp ?? 38) / 100))
+    root.setProperty('--dock-glass-surface-blur', `${g.surfaceBlur ?? 18}px`)
+    root.setProperty('--dock-glass-card-op', String((g.cardOp ?? 22) / 100))
+    root.setProperty('--dock-glass-card-blur', `${g.cardBlur ?? 12}px`)
+    root.setProperty('--dock-glass-overlay-op', String((g.overlayOp ?? 45) / 100))
+    root.setProperty('--dock-glass-overlay-blur', `${g.overlayBlur ?? 16}px`)
+    root.setProperty('--dock-glass-control-op', String((g.controlOp ?? 28) / 100))
+    root.setProperty('--dock-glass-control-blur', `${g.controlBlur ?? 8}px`)
+    document.body.classList.toggle('dock-has-paper', !!info.wallpaper.url)
+    if (info.wallpaper.url) {
+      root.setProperty('--dock-wallpaper-url', `url("${info.wallpaper.url}")`)
+      probeWallpaperMeta(info.wallpaper.url)
+    } else {
+      root.removeProperty('--dock-wallpaper-url')
+    }
+    root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
+    root.setProperty('--dock-wallpaper-pos-x', `${info.wallpaper.posX ?? 50}%`)
+    root.setProperty('--dock-wallpaper-pos-y', `${info.wallpaper.posY ?? 50}%`)
+    root.setProperty('--dock-wallpaper-scale', ((info.wallpaper.zoom ?? 100) / 100).toFixed(3))
+  }
+
+  function themeHeroCard() {
+    const dl = dockLookOf()
+    const g = dl.glass || DOCK_LOOK_DEFAULT.glass
+    const modeLabel = T(`s.dockTheme.${dl.mode}`)
+    const detail = dl.mode === 'glass'
+      ? T(`s.glass.${g.preset || 'balanced'}`)
+      : (dl.accentMode === 'custom' ? (dl.accent || (lang === 'zh' ? '默认' : 'Default')) : (lang === 'zh' ? '跟随系统' : 'System'))
+    return `<div class="ilook-sec-card ilook-hero-card">
+        <div class="ilook-hero-head">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.dockTheme'))}</span><span class="ilook-box-note">${esc(T('s.dockThemeNote'))}</span></div>
+          <span class="ilook-hero-badge" data-ilook-summary>${esc(`${modeLabel} · ${detail}`)}</span>
+        </div>
+        <div class="dock-theme-pill" role="radiogroup" aria-label="${esc(T('s.dockTheme'))}">
+          <div class="dtp-track" data-mode="${esc(dl.mode)}">
+            <span class="dtp-sky dtp-sky-light" aria-hidden="true"></span>
+            <span class="dtp-sky dtp-sky-dark" aria-hidden="true"></span>
+            <span class="dtp-sky dtp-sky-glass" aria-hidden="true"></span>
+            <span class="dtp-rings" aria-hidden="true"><i></i></span>
+            <span class="dtp-clouds" aria-hidden="true"><i class="dtp-cloud-back"></i><i class="dtp-cloud-front"></i></span>
+            <span class="dtp-stars" aria-hidden="true"><i class="dtp-star-a"></i><i class="dtp-star-b"></i><i class="dtp-star-c"></i><i class="dtp-star-d"></i></span>
+            <span class="dtp-glass-fx" aria-hidden="true"><i class="dtp-glass-ribbon"></i><i class="dtp-gb b1"></i><i class="dtp-gb b2"></i><i class="dtp-gb b3"></i><i class="dtp-gb b4"></i><i class="dtp-gb b5"></i><i class="dtp-gb b6"></i></span>
+            <span class="dtp-wash" aria-hidden="true"><i></i></span>
+            <span class="dtp-led-wrap" aria-hidden="true"><i class="dtp-led-halo"></i><i class="dtp-led-core"></i></span>
+            <span class="dtp-orb" aria-hidden="true">
+              <i class="dtp-face dtp-face-sun"></i>
+              <i class="dtp-face dtp-face-moon"><b class="dtp-crater c1"></b><b class="dtp-crater c2"></b><b class="dtp-crater c3"></b></i>
+              <i class="dtp-face dtp-face-glass"><b class="dtp-glass-glint"></b><b class="dtp-glass-caustic"></b></i>
+              <i class="dtp-orb-tir"></i>
+              <i class="dtp-orb-rim"></i>
+            </span>
+            <span class="dtp-bevel" aria-hidden="true"></span>
+            <div class="dtp-hits">${['light', 'dark', 'glass']
+              .map(m => `<button type="button" class="dtp-hit" data-dock-theme="${m}" aria-label="${esc(T(`s.dockTheme.${m}`))}" aria-pressed="${dl.mode === m}" title="${esc(T(`s.dockTheme.${m}`))}"></button>`)
+              .join('')}</div>
+          </div>
+          <div class="dtp-labels">${['light', 'dark', 'glass']
+            .map(m => `<button type="button" class="dtp-label-btn${dl.mode === m ? ' on' : ''}" data-dock-theme="${m}" aria-pressed="${dl.mode === m}"><span>${esc(T(`s.dockTheme.${m}`))}</span></button>`)
+            .join('')}</div>
+        </div>
+      </div>`
+  }
+
   function ilookPanel() {
-    const s = snap.settings
-    const mode = ilookFor()
-    const look = ilookOf(mode)
-    const active = ilookPreset(mode)
-    const top = isTop()
-    // On the black strip in the dark, she is part of it: none of this
-    // shows. At the top of the screen, its own look.
-    const isCapsule = (s.taskbarMaterial || 'clear') !== 'black' || winMode() === 'light'
-    const note = top ? T('s.ilookTop') : isCapsule ? '' : T('s.ilookBlack')
-    const cards = ilookPresets(mode)
-      .map(([id, p]) => `<button class="ilook-card${id === active ? ' on' : ''}" data-ilook-preset="${id}">${ilookPreview(mode, p)}<span>${esc(ilookName(mode, id))}</span></button>`)
+    const dl = dockLookOf()
+    const g = dl.glass
+    const dockRange = (key, min, max, unit, val) => `<span class="ilook-rng"><input type="range" class="rng" data-dock-look="${key}" min="${min}" max="${max}" step="1" value="${val}"><span class="rv">${val}${unit}</span></span>`
+
+    const accentCleared = dl.accentMode === 'custom' && !dl.accent
+    const curAccent = accentCleared
+      ? (dl.mode === 'light' ? '#005fb8' : '#5e9bff')
+      : String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
+    const accentLabel = accentCleared ? (lang === 'zh' ? '默认' : 'Default') : curAccent
+    const accentPaletteOpen = !colorPop.hidden && cpState?.key === 'accent'
+    const wp = resolveWallpaperFrame(dl, snap.dockPaperUrl || '')
+    const wpBadgeText = wp.fit === 'auto'
+      ? T('s.dockPaperAuto')
+      : `${T('s.dockPaperCustom')}${wp.zoom > 100 ? ` · ${wp.zoom}%` : ''}`
+    const paperPreview = snap.dockPaperUrl
+      ? `<div class="dock-paper-row"><button type="button" class="dock-paper-thumb-btn" data-dock-paper-preview title="${esc(T('s.dockPaperPreviewHint'))}" aria-label="${esc(T('s.dockPaperPreviewHint'))}"><img class="dock-paper-thumb" src="${esc(snap.dockPaperUrl)}" style="object-position:${wp.x}% ${wp.y}%;transform:scale(${(wp.zoom / 100).toFixed(3)});transform-origin:${wp.x}% ${wp.y}%" alt=""><span class="dock-paper-thumb-ov" aria-hidden="true">⤢</span></button><button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperChange'))}</button><button type="button" class="pbtn sm" data-dock-paper="remove">${esc(T('s.dockPaperRemove'))}</button></div>`
+      : `<button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperPick'))}</button>`
+    const paperFitChip = snap.dockPaperUrl
+      ? `<button type="button" class="dock-paper-fit-pill${wp.fit === 'auto' ? ' is-auto' : ''}" data-dock-paper-preview data-dock-paper-badge title="${esc(T('s.dockPaperPreviewHint'))}">${esc(wpBadgeText)}</button>`
+      : ''
+    const glassPresets = ['off', 'light', 'balanced', 'clear', 'custom']
+      .map(p => `<button type="button" class="${g.preset === p ? 'on' : ''}" data-glass-preset="${p}">${esc(T(`s.glass.${p}`))}</button>`)
       .join('')
-    const swatches = ILOOK_SWATCHES[mode]
-      .map(c => `<button class="swc${c === look.bg.toLowerCase() ? ' on' : ''}" data-ilook-bg="${c}" style="background:${c}" title="${c}"></button>`)
-      .join('')
-    const picker = `<span class="ilook-sw">${swatches}<input type="color" class="swc-in" data-ilook="bg" value="${esc(look.bg)}" title="${esc(T('s.ilookPick'))}"></span>`
-    const range = (key, min, max, unit) => `<span class="ilook-rng"><input type="range" class="rng" data-ilook="${key}" min="${min}" max="${max}" step="1" value="${look[key]}"><span class="rv">${look[key]}${unit}</span></span>`
-    // At the top no bare capsule, and a blur only where Windows' acrylic
-    // can go under the island.
-    const blurRow = top && snap.plate !== true ? '' : row(esc(T('s.ilookBlur')), esc(T(top ? 's.ilookBlurTopNote' : 's.ilookBlurNote')), range('blur', 0, 60, 'px'))
-    return `<div class="ilook">
-        ${note ? `<div class="note">${esc(note)}</div>` : ''}
-        <div class="ilook-top">${seg('ilookMode', [['dark', T('s.ilookDark')], ['light', T('s.ilookLight')]], mode)}<span class="grow"></span><button class="pbtn sm" data-ilook-reset ${sameLook(look, ilookDefault(mode)) ? 'disabled' : ''}>${esc(T('s.ilookReset'))}</button></div>
-        ${mode === winMode() ? '' : `<div class="note">${esc(T('s.ilookOther'))}</div>`}
-        ${ilookPreview(mode, look, true)}
-        <div class="ilook-cards">${cards}</div>
-        ${row(esc(T('s.ilookBg')), esc(T('s.ilookBgNote')), picker)}
-        ${row(esc(T('s.ilookOp')), '', range('op', 20, 100, '%'))}
-        ${blurRow}
-        ${row(esc(T('s.ilookEdge')), '', seg('ilookEdge', ['none', 'line', 'ring'].map(e => [e, T(`s.ilookEdge.${e}`)]), look.edge))}
-        ${top ? '' : row(esc(T('s.ilookBare')), esc(T('s.ilookBareNote')), sw('ilookBare', look.bare))}
+    const glassRegion = (titleKey, noteKey, opKey, opVal, blurKey, blurVal) =>
+      `<div class="glass-reg"><div class="glass-reg-head"><span class="glass-reg-t">${esc(T(titleKey))}</span><span class="glass-reg-d">${esc(T(noteKey))}</span></div><div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.glass.op'))}</span>${dockRange(opKey, 0, 100, '%', opVal)}</div><div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.glass.blur'))}</span>${dockRange(blurKey, 0, 32, 'px', blurVal)}</div></div>`
+    const typoRow = (key, label, fallbackHex) => {
+      const val = dl[key] || ''
+      const previewHex = /^#[0-9a-f]{6}$/i.test(val) ? val.toLowerCase() : fallbackHex
+      const open = !colorPop.hidden && cpState?.key === key
+      return `<div class="ilook-typo-item" data-typo-item="${esc(key)}">
+        <div class="ilook-typo-row">
+          <span class="ilook-typo-lbl">${esc(label)}</span>
+          <div class="ilook-typo-actions">
+            <button type="button" class="typo-pill-btn${open ? ' on' : ''}" data-typo-toggle="${esc(key)}" aria-expanded="${open}">
+              <i class="typo-dot" style="background:${esc(previewHex)}"></i>
+              <span class="typo-hex mono">${esc(val ? val.toLowerCase() : (lang === 'zh' ? '默认' : 'Default'))}</span>
+            </button>
+            <button type="button" class="pbtn sm typo-clear-btn${val ? '' : ' is-ghost'}" data-dock-typo-clear="${esc(key)}" ${val ? '' : 'disabled'}>${esc(T('s.typo.clear'))}</button>
+          </div>
+        </div>
+      </div>`
+    }
+
+    return `<div class="ilook-cards-stack">
+        <div class="ilook-sec-card">
+          <div class="ilook-paper-top">
+            <div class="ilook-paper-meta"><div class="ilook-paper-title-row"><span class="ilook-box-title">${esc(T('s.dockPaper'))}</span>${paperFitChip}</div><span class="ilook-box-note">${esc(T('s.dockPaperNote'))}</span></div>
+            <div class="ilook-paper-bar">${paperPreview}</div>
+          </div>
+          <div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.dockPaperDim'))}</span>${dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58)}</div>
+          <div class="ilook-hint">${esc(T('s.dockPaperDimNote'))}</div>
+        </div>
+        <div class="ilook-sec-card" data-glass-card${dl.mode === 'glass' ? '' : ' hidden'}>
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.glass'))}</span><span class="ilook-box-note">${esc(T('s.glassNote'))}</span></div>
+          <div class="seg dock-glass-seg">${glassPresets}</div>
+          <div class="glass-accent-zone" data-typo-item="accent">
+            <div class="r ilook-accent-row">
+              <div class="grow"><div class="glass-reg-t">${esc(T('s.dockAccent'))}</div><div class="glass-reg-d">${esc(T('s.dockAccentNote'))}</div></div>
+              <div class="winaccent-mode">
+                <button type="button" class="pbtn sm${dl.accentMode === 'system' ? ' al' : ''}" data-dock-accent-mode="system" aria-pressed="${dl.accentMode === 'system'}">${esc(lang === 'zh' ? '跟随系统' : 'System')}</button>
+                <button type="button" class="pbtn sm typo-clear-btn${accentCleared ? ' is-ghost' : ''}" data-dock-accent-clear ${accentCleared ? 'disabled' : ''}>${esc(T('s.typo.clear'))}</button>
+                <button type="button" class="typo-pill-btn${accentPaletteOpen ? ' on' : ''}" data-typo-toggle="accent" aria-expanded="${accentPaletteOpen}" title="${esc(lang === 'zh' ? '点击打开浮窗调色盘自定义玻璃色调' : 'Open floating color picker')}">
+                  <i class="typo-dot" style="background:${esc(curAccent)}"></i>
+                  <span class="typo-hex mono">${esc(accentLabel)}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          ${glassRegion('s.glass.surface', 's.glass.surfaceNote', 'glass.surfaceOp', g.surfaceOp, 'glass.surfaceBlur', g.surfaceBlur)}
+          ${glassRegion('s.glass.card', 's.glass.cardNote', 'glass.cardOp', g.cardOp, 'glass.cardBlur', g.cardBlur)}
+          ${glassRegion('s.glass.overlay', 's.glass.overlayNote', 'glass.overlayOp', g.overlayOp, 'glass.overlayBlur', g.overlayBlur)}
+          ${glassRegion('s.glass.control', 's.glass.controlNote', 'glass.controlOp', g.controlOp, 'glass.controlBlur', g.controlBlur)}
+        </div>
+        <div class="ilook-sec-card">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.typo'))}</span><span class="ilook-box-note">${esc(T('s.typoNote'))}</span></div>
+          ${typoRow('headingColor', T('s.typo.heading'), dl.mode === 'light' ? '#111113' : '#ffffff')}
+          ${typoRow('textColor', T('s.typo.text'), dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7')}
+          ${typoRow('mutedColor', T('s.typo.muted'), dl.mode === 'light' ? '#5d5d5d' : '#a1a1a6')}
+        </div>
       </div>`
   }
 
@@ -863,19 +1755,224 @@
 
   // The fold's own row: how the island looks in Windows' mode now.
   function ilookRow() {
-    const mode = winMode()
-    const now = T('s.ilookNow', { mode: T(mode === 'dark' ? 's.ilookDark' : 's.ilookLight'), name: ilookName(mode, ilookPreset(mode)) })
-    return `${row(esc(T('s.ilook')), esc(now), `<button class="pbtn sm" data-ilook-fold>${esc(T(ilookOpen ? 's.ilookFold' : 's.ilookAdjust'))}</button>`)}${ilookOpen ? ilookPanel() : ''}`
+    const dl = dockLookOf()
+    const modeLabel = T(`s.dockTheme.${dl.mode}`)
+    const detail = dl.mode === 'glass'
+      ? T(`s.glass.${dl.glass?.preset || 'balanced'}`)
+      : (dl.accentMode === 'custom' ? (dl.accent || (lang === 'zh' ? '默认' : 'Default')) : (lang === 'zh' ? '跟随系统' : 'System'))
+    const now = `${modeLabel} · ${detail}`
+    return `${row(esc(T('s.ilook')), `<span data-ilook-summary>${esc(now)}</span>`, `<button class="pbtn sm" data-ilook-fold>${esc(T(ilookOpen ? 's.ilookFold' : 's.ilookAdjust'))}</button>`)}${ilookOpen ? ilookPanel() : ''}`
   }
 
-  let orderBusy = false, orderNote = '', orderError = '', draggingTab = ''
+  function mountThemePill() {
+    const track = body.querySelector('.dtp-track')
+    if (!track) return
+    if (track._dtpBound) {
+      track._dtpSetMode?.(dockLookOf().mode, false)
+      return
+    }
+    track._dtpBound = true
+    const STOPS = { light: 0, dark: 0.5, glass: 1 }
+    const LED_ANGLES = { light: 58, dark: 180, glass: 302 }
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+    const lerp = (a, b, t) => a + (b - a) * t
+    const modePos = m => (m in STOPS ? STOPS[m] : 0.5)
+    const ledColorFor = p => {
+      const c0 = [255, 174, 46]
+      const c1 = [111, 134, 255]
+      const c2 = [92, 212, 255]
+      const t = clamp(p, 0, 1)
+      const [a, b, f] = t <= 0.5 ? [c0, c1, t * 2] : [c1, c2, (t - 0.5) * 2]
+      return `rgb(${Math.round(lerp(a[0], b[0], f))}, ${Math.round(lerp(a[1], b[1], f))}, ${Math.round(lerp(a[2], b[2], f))})`
+    }
+    const ledTargetAngle = p => lerp(58, 302, clamp(p, 0, 1))
+    const nearestMode = p => (p < 0.25 ? 'light' : p < 0.75 ? 'dark' : 'glass')
+
+    let targetMode = dockLookOf().mode
+    let p = modePos(targetMode)
+    let v = 0
+    let ledDeg = LED_ANGLES[targetMode] ?? 180
+    let ledV = 0
+    let hover = 0, press = 0, kick = 0
+    let hovered = false, pressed = false
+    let dragging = false, moved = false
+    let startX = 0, dragOffset = 0, lastX = 0, lastT = 0, dragV = 0
+    let raf = 0, prevTs = 0
+
+    const paint = () => {
+      const cp = clamp(p, -0.06, 1.06)
+      const wL = clamp(1 - cp * 2, 0, 1)
+      const wD = clamp(1 - Math.abs(cp - 0.5) * 2, 0, 1)
+      const wG = clamp((cp - 0.5) * 2, 0, 1)
+      const over = p < 0 ? -p : p > 1 ? p - 1 : 0
+      const stretch = Math.min(Math.abs(v) * 0.085, 0.16)
+      const pScale = 1 - 0.035 * press
+      const sx = (1 + stretch - over * 0.55) * pScale
+      const sy = (1 - stretch * 0.44 + over * 0.28) * pScale
+      const lift = hover * (1 - press)
+      const boost = clamp(1 + hover * 0.08 + Math.min(Math.abs(v) * 0.14, 0.16) + kick, 1, 1.42)
+      const s = track.style
+      s.setProperty('--dtp-p', cp.toFixed(4))
+      s.setProperty('--dtp-w-light', wL.toFixed(4))
+      s.setProperty('--dtp-w-dark', wD.toFixed(4))
+      s.setProperty('--dtp-w-glass', wG.toFixed(4))
+      s.setProperty('--dtp-led-deg', `${ledDeg.toFixed(2)}deg`)
+      s.setProperty('--dtp-led-color', ledColorFor(cp))
+      s.setProperty('--dtp-sx', sx.toFixed(4))
+      s.setProperty('--dtp-sy', sy.toFixed(4))
+      s.setProperty('--dtp-lift', lift.toFixed(4))
+      s.setProperty('--dtp-boost', boost.toFixed(4))
+      s.setProperty('--dtp-spin-sun', `${((1 - wL) * -105).toFixed(2)}deg`)
+      s.setProperty('--dtp-spin-moon', `${((0.5 - cp) * 210).toFixed(2)}deg`)
+      s.setProperty('--dtp-spin-glass', `${((1 - wG) * 105).toFixed(2)}deg`)
+    }
+
+    const step = ts => {
+      raf = 0
+      if (!track.isConnected) return
+      const dt = prevTs ? Math.min(0.05, (ts - prevTs) / 1000) : 0.016
+      prevTs = ts
+      const targetP = modePos(targetMode)
+      const targetLed = dragging ? ledTargetAngle(p) : (LED_ANGLES[targetMode] ?? 180)
+      const k = 135, c = 2 * 0.62 * Math.sqrt(k)
+      const kLed = 75, cLed = 2 * Math.sqrt(kLed)
+      const sub = 4, sdt = dt / sub
+      for (let i = 0; i < sub; i++) {
+        if (!dragging) {
+          const a = -k * (p - targetP) - c * v
+          v += a * sdt
+          p += v * sdt
+        } else {
+          v += (dragV - v) * Math.min(1, sdt * 24)
+        }
+        const aLed = -kLed * (ledDeg - targetLed) - cLed * ledV
+        ledV += aLed * sdt
+        ledDeg += ledV * sdt
+      }
+      const rate = Math.min(1, dt * 16)
+      hover += ((hovered ? 1 : 0) - hover) * rate
+      press += ((pressed ? 1 : 0) - press) * rate
+      kick *= Math.pow(0.04, dt)
+      paint()
+      const settled = !dragging && !pressed &&
+        Math.abs(p - targetP) < 0.0005 && Math.abs(v) < 0.0005 &&
+        Math.abs(ledDeg - targetLed) < 0.1 && Math.abs(ledV) < 0.1 &&
+        Math.abs(hover - (hovered ? 1 : 0)) < 0.004 && press < 0.004 && kick < 0.004
+      if (settled) {
+        p = targetP; v = 0; ledDeg = targetLed; ledV = 0; press = 0; kick = 0; hover = hovered ? 1 : 0
+        paint()
+        track.classList.remove('is-physics')
+        prevTs = 0
+      } else {
+        raf = requestAnimationFrame(step)
+      }
+    }
+
+    const wake = () => {
+      track.classList.add('is-physics')
+      if (!raf) {
+        prevTs = 0
+        raf = requestAnimationFrame(step)
+      }
+    }
+
+    track._dtpSetMode = (mode, withKick = false) => {
+      if (!(mode in STOPS)) return
+      const changed = mode !== targetMode
+      targetMode = mode
+      if (track.dataset.mode !== mode) track.dataset.mode = mode
+      if (withKick || changed) {
+        kick = Math.max(kick, 0.22)
+        wake()
+      } else if (!raf && !dragging) {
+        p = modePos(mode)
+        ledDeg = LED_ANGLES[mode] ?? 180
+        paint()
+      }
+    }
+
+    const commitMode = mode => {
+      const cur = dockLookOf()
+      const glass = mode === 'glass' && cur.glass.preset === 'off' ? { ...GLASS_PRESETS.balanced, preset: 'balanced' } : cur.glass
+      track._dtpSetMode(mode, true)
+      if (cur.mode !== mode || glass !== cur.glass) {
+        dockLookSave({ ...cur, mode, glass }, true)
+      }
+    }
+
+    const spanOf = () => Math.max(1, track.clientWidth - 34)
+
+    track.addEventListener('pointerenter', () => { hovered = true; wake() })
+    track.addEventListener('pointerleave', () => { hovered = false; wake() })
+    track.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      const rect = track.getBoundingClientRect()
+      const span = spanOf()
+      const rel = (e.clientX - rect.left - 17) / span
+      pressed = true
+      dragging = true
+      moved = false
+      startX = e.clientX
+      lastX = e.clientX
+      lastT = performance.now()
+      dragV = 0
+      const orbDist = Math.abs(rel - p)
+      dragOffset = orbDist < 0.18 ? (rel - p) : 0
+      kick = Math.max(kick, 0.18)
+      try { track.setPointerCapture(e.pointerId) } catch {}
+      wake()
+    })
+    track.addEventListener('pointermove', e => {
+      if (!dragging) return
+      const dx = e.clientX - startX
+      if (!moved && Math.abs(dx) > 4) moved = true
+      if (!moved) return
+      const rect = track.getBoundingClientRect()
+      const span = spanOf()
+      const raw = (e.clientX - rect.left - 17) / span - dragOffset
+      const now = performance.now()
+      const dt = Math.max(0.004, (now - lastT) / 1000)
+      const prevP = p
+      if (raw < 0) p = raw * 0.22
+      else if (raw > 1) p = 1 + (raw - 1) * 0.22
+      else p = raw
+      dragV = clamp((p - prevP) / dt, -5.5, 5.5)
+      lastX = e.clientX
+      lastT = now
+      wake()
+    })
+    const release = e => {
+      if (!dragging) return
+      dragging = false
+      pressed = false
+      try { if (track.hasPointerCapture?.(e.pointerId)) track.releasePointerCapture(e.pointerId) } catch {}
+      track._dtpSuppressClick = Date.now() + 80
+      let chosen
+      if (moved) {
+        const projected = p + dragV * 0.14
+        chosen = nearestMode(projected)
+        v = dragV * 0.72
+      } else {
+        const rect = track.getBoundingClientRect()
+        const ratio = (e.clientX - rect.left) / (rect.width || 1)
+        chosen = ratio < 1 / 3 ? 'light' : ratio < 2 / 3 ? 'dark' : 'glass'
+      }
+      commitMode(chosen)
+    }
+    track.addEventListener('pointerup', release)
+    track.addEventListener('pointercancel', release)
+    paint()
+  }
+
+  let orderBusy = false, orderNote = '', orderError = '', tabDragging = false
   function pageTabOrder() {
-    const rows = TABS.map((key, index) => `<li draggable="${!orderBusy}" data-order-key="${esc(key)}"><span class="grow">${esc(tabTitle(key))}</span><button type="button" class="pbtn sm" data-order-move="-1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '前移 ' : 'Move earlier: ') + tabTitle(key))}"${index === 0 || orderBusy ? ' disabled' : ''}>↑</button><button type="button" class="pbtn sm" data-order-move="1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '后移 ' : 'Move later: ') + tabTitle(key))}"${index === TABS.length - 1 || orderBusy ? ' disabled' : ''}>↓</button></li>`).join('')
-    return `<section class="tab-order"><h3>${lang === 'zh' ? '标签页排序' : 'Tab order'}</h3><p class="note">${lang === 'zh' ? '拖动或使用前后移动按钮调整；停用的插件保留原位置。' : 'Drag or use the arrow buttons. Disabled extensions keep their positions.'}</p><ol>${rows}</ol><button type="button" class="pbtn" data-order-reset${orderBusy ? ' disabled' : ''}>${lang === 'zh' ? '恢复默认顺序' : 'Restore default order'}</button><p role="status" aria-live="polite">${esc(orderNote)}</p>${orderError ? `<p class="bad" role="alert">${esc(orderError)}</p>` : ''}</section>`
+    const rows = TABS.map((key, index) => `<li data-order-key="${esc(key)}"><span class="tab-order-grip" aria-hidden="true">⋮⋮</span><span class="grow">${esc(tabTitle(key))}</span><button type="button" class="pbtn sm" data-order-move="-1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '前移 ' : 'Move earlier: ') + tabTitle(key))}"${index === 0 || orderBusy ? ' disabled' : ''}>↑</button><button type="button" class="pbtn sm" data-order-move="1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '后移 ' : 'Move later: ') + tabTitle(key))}"${index === TABS.length - 1 || orderBusy ? ' disabled' : ''}>↓</button></li>`).join('')
+    return `${sec(lang === 'zh' ? '标签页排序' : 'Tab order')}<section class="grp tab-order"><p class="tab-order-note">${lang === 'zh' ? '拖动或使用前后移动按钮调整；停用的插件保留原位置。' : 'Drag or use the arrow buttons. Disabled extensions keep their positions.'}</p><ol>${rows}</ol><div class="tab-order-foot"><button type="button" class="pbtn sm" data-order-reset${orderBusy ? ' disabled' : ''}>${lang === 'zh' ? '恢复默认顺序' : 'Restore default order'}</button><span class="tab-order-status" role="status" aria-live="polite">${esc(orderNote)}</span>${orderError ? `<span class="bad" role="alert">${esc(orderError)}</span>` : ''}</div></section>`
   }
   async function saveTabOrder(order, key, direction) {
     if (orderBusy) return
-    orderBusy = true; orderError = ''; draw()
+    orderBusy = true; orderError = ''; body._html = ''; draw()
     try {
       const got = await window.pet.settings.set({ appearance: { tabOrder: order } })
       if (JSON.stringify(got.settings.appearance?.tabOrder) !== JSON.stringify(order)) throw new Error(lang === 'zh' ? '标签顺序未保存，请重试。' : 'Tab order was not saved. Please retry.')
@@ -884,7 +1981,7 @@
       orderNote = key ? `${tabTitle(key)} · ${visible.indexOf(key) + 1}/${visible.length}` : lang === 'zh' ? '已恢复默认顺序' : 'Default order restored'
     } catch (error) { orderError = error.message || String(error) }
     finally {
-      orderBusy = false; draw()
+      orderBusy = false; body._html = ''; draw()
       if (key) {
         const buttons = [...body.querySelectorAll('[data-order-id]')].filter(button => button.dataset.orderId === key)
         const focus = buttons.find(button => !button.disabled && button.dataset.orderMove === String(direction)) || buttons.find(button => !button.disabled)
@@ -892,51 +1989,150 @@
       }
     }
   }
+  function commitTabMove(key, from, to) {
+    if (from < 0 || to < 0 || from === to) return
+    const direction = to > from ? 1 : -1
+    let order = snap.settings.appearance?.tabOrder || []
+    const pages = extensionPanel.pages().map(page => page.key)
+    for (let step = 0; step < Math.abs(to - from); step++) order = window.ExtensionTabs.move(order, pages, key, direction)
+    void saveTabOrder(order, key, direction)
+  }
   function mountTabOrder() {
     const panel = body.querySelector('.tab-order'); if (!panel) return
+    const list = panel.querySelector('ol')
     panel.querySelectorAll('[data-order-move]').forEach(button => { button.onclick = () => {
       const direction = Number(button.dataset.orderMove), key = button.dataset.orderId
       void saveTabOrder(window.ExtensionTabs.move(snap.settings.appearance?.tabOrder, extensionPanel.pages().map(page => page.key), key, direction), key, direction)
     } })
     panel.querySelector('[data-order-reset]').onclick = () => saveTabOrder([], '', 0)
-    panel.querySelectorAll('[data-order-key]').forEach(row => {
-      row.ondragstart = event => { if (orderBusy) { event.preventDefault(); return }; draggingTab = row.dataset.orderKey; event.dataTransfer.setData('text/plain', draggingTab); event.dataTransfer.effectAllowed = 'move' }
-      row.ondragend = () => { draggingTab = '' }
-      row.ondragover = event => { if (draggingTab) event.preventDefault() }
-      row.ondrop = event => {
-        event.preventDefault(); const key = draggingTab; draggingTab = ''
-        const to = TABS.indexOf(row.dataset.orderKey), from = TABS.indexOf(key)
-        if (from < 0 || to < 0 || from === to) return
-        const direction = to > from ? 1 : -1
-        let order = snap.settings.appearance?.tabOrder || []
-        for (let step = 0; step < Math.abs(to - from); step++) order = window.ExtensionTabs.move(order, extensionPanel.pages().map(page => page.key), key, direction)
-        void saveTabOrder(order, key, direction)
+    if (!list) return
+    let ptr = null
+    list.onpointerdown = event => {
+      if (orderBusy || event.button !== 0 || event.target.closest('button')) return
+      const row = event.target.closest('[data-order-key]')
+      if (!row || !list.contains(row)) return
+      event.preventDefault()
+      ptr = { id: event.pointerId, startY: event.clientY, anchorY: event.clientY, row, key: row.dataset.orderKey, from: TABS.indexOf(row.dataset.orderKey), active: false }
+      try { list.setPointerCapture(event.pointerId) } catch {}
+    }
+    list.onpointermove = event => {
+      if (!ptr || ptr.id !== event.pointerId) return
+      const { row } = ptr
+      if (!ptr.active) {
+        if (Math.abs(event.clientY - ptr.startY) < 3) return
+        ptr.active = true
+        ptr.anchorY = event.clientY
+        tabDragging = true
+        list.classList.add('is-sorting')
+        row.classList.add('is-dragging')
       }
-    })
+      event.preventDefault()
+      const siblings = [...list.querySelectorAll('[data-order-key]')]
+      for (const sib of siblings) {
+        if (sib === row) continue
+        const box = sib.getBoundingClientRect()
+        const mid = box.top + box.height / 2
+        const rowIdx = siblings.indexOf(row), sibIdx = siblings.indexOf(sib)
+        if ((rowIdx < sibIdx && event.clientY > mid) || (rowIdx > sibIdx && event.clientY < mid)) {
+          const prevRowTop = row.getBoundingClientRect().top
+          const prevSibTop = box.top
+          if (rowIdx < sibIdx) sib.after(row)
+          else sib.before(row)
+          const newRowTop = row.getBoundingClientRect().top
+          const newSibTop = sib.getBoundingClientRect().top
+          ptr.anchorY += (newRowTop - prevRowTop)
+          const sibDelta = prevSibTop - newSibTop
+          sib.style.transition = 'none'
+          sib.style.transform = `translate3d(0, ${sibDelta}px, 0)`
+          void sib.offsetHeight
+          sib.style.transition = 'transform 0.26s cubic-bezier(0.22, 1, 0.36, 1)'
+          sib.style.transform = ''
+          break
+        }
+      }
+      const dy = event.clientY - ptr.anchorY
+      row.style.transform = `translate3d(0, ${dy}px, 0) scale(1.018)`
+    }
+    const finishPtr = event => {
+      if (!ptr || ptr.id !== event.pointerId) return
+      const state = ptr; ptr = null
+      try { if (list.hasPointerCapture?.(event.pointerId)) list.releasePointerCapture(event.pointerId) } catch {}
+      list.classList.remove('is-sorting')
+      if (!state.active) {
+        tabDragging = false
+        state.row.classList.remove('is-dragging')
+        return
+      }
+      const finalize = () => {
+        tabDragging = false
+        state.row.classList.remove('is-dragging')
+        state.row.style.transition = ''
+        state.row.style.transform = ''
+        list.querySelectorAll('[data-order-key]').forEach(el => {
+          el.style.transition = ''
+          el.style.transform = ''
+        })
+        body._html = ''
+        const currentOrder = [...list.querySelectorAll('[data-order-key]')].map(el => el.dataset.orderKey)
+        const to = currentOrder.indexOf(state.key)
+        if (to < 0 || to === state.from) { draw(); return }
+        commitTabMove(state.key, state.from, to)
+      }
+      state.row.style.transition = 'transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease'
+      state.row.style.transform = 'translate3d(0, 0, 0) scale(1)'
+      setTimeout(finalize, 170)
+    }
+    list.onpointerup = finishPtr
+    list.onpointercancel = finishPtr
   }
 
-  // 外观（规格 17–24，逐条同序）：显示方式 → 内置（任务栏参数 → 灵动岛参数 →
-  // Windows）→ 标签页排序 → 她 → 宠物与图库。
+  // 外观：显示方式（一排三列）→ 主题模式（48px 全宽三态光学胶囊）→ 任务栏/灵动岛布局 →
+  // 背景图片 / 液态玻璃 / 字体颜色（全独立展开卡片）→ 标签页排序 → 她 → 宠物与图库。
   function pageLook() {
     const s = snap.settings
-    return `${sec(T('home.display'))}<div class="modes">
-        <div class="mode${s.display !== 'taskbar' && s.display !== 'topbar' ? ' on' : ''}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span>${esc(T('s.displayIsland'))}</div></div>
-        <div class="mode${s.display === 'taskbar' ? ' on' : ''}" data-mode="taskbar"><div class="pv"><s></s></div><div class="l"><span class="rd"></span>${esc(T('s.displayTaskbar'))}</div></div>
-        <div class="mode${s.display === 'topbar' ? ' on' : ''}" data-mode="topbar"><div class="pv"><t></t></div><div class="l"><span class="rd"></span>${esc(T('s.displayTopbar'))}</div></div>
+    const betaTag = `<span class="mode-beta">${esc(lang === 'zh' ? '测试版' : 'Beta')}</span>`
+    return `<div class="look-page">
+      ${sec(T('home.display'))}<div class="modes">
+        <div class="mode${s.display !== 'taskbar' && s.display !== 'topbar' ? ' on' : ''}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span><span class="mode-name">${esc(T('s.displayIsland'))}</span></div></div>
+        <div class="mode${s.display === 'taskbar' ? ' on' : ''}" data-mode="taskbar"><div class="pv"><s></s></div><div class="l"><span class="rd"></span><span class="mode-name">${esc(T('s.displayTaskbar'))}</span></div></div>
+        <div class="mode${s.display === 'topbar' ? ' on' : ''}" data-mode="topbar"><div class="pv"><t></t>${betaTag}</div><div class="l"><span class="rd"></span><span class="mode-name">${esc(T('s.displayTopbar'))}</span></div></div>
       </div>
-      ${s.display === 'topbar' ? `<div class="grp"><div class="note">${esc(T('s.topbarNote'))}</div></div>` : ''}
-      ${sec(T('s.builtin'))}
-      ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div>${row(esc(T('s.embedTaskbar')), esc(T('s.embedTaskbarNote')), sw('embedTaskbar', s.embedTaskbar))}</div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
-      ${part('place', '')}<div class="grp">${islandPosRow()}${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
-      ${pageWindows()}
+      ${s.display === 'topbar' ? `<div class="ilook-sec-card look-beta-banner"><span class="mode-beta">${esc(lang === 'zh' ? '测试版' : 'Beta')}</span><span class="look-beta-text">${esc(T('s.topbarNote'))}</span></div>` : ''}
+      ${themeHeroCard()}
+      ${s.display === 'taskbar' ? `<div class="ilook-sec-card look-opt-card">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.displayTaskbar'))}</span><span class="ilook-box-note">${esc(T('s.taskbarNote'))}</span></div>
+          <div class="look-opt-rows">
+            ${row(esc(T('s.embedTaskbar')), esc(T('s.embedTaskbarNote')), sw('embedTaskbar', s.embedTaskbar))}
+            ${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}
+            ${displaysRow()}
+            ${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}
+            ${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}
+            ${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}
+            ${layoutRow()}
+          </div>
+        </div>` : ''}
+      ${part('place', '')}<div class="ilook-sec-card look-opt-card">
+        <div class="ilook-box-head"><span class="ilook-box-title">${esc(lang === 'zh' ? '灵动岛布局与护眼' : 'Island layout & display')}</span><span class="ilook-box-note">${esc(lang === 'zh' ? '控制停靠位置、收起宽度、窗口避让与防烧屏' : 'Position, collapsed width, auto-stow and OLED protection')}</span></div>
+        <div class="look-opt-rows">
+          ${islandPosRow()}
+          ${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}
+          ${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}
+          ${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}
+        </div>
+      </div>
+      ${ilookPanel()}
       ${pageTabOrder()}
-      ${sec(T('s.her'))}<div class="grp">
-        ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
-        ${row(esc(T('s.details')), esc(T('s.detailsNote')), sw('details', s.details !== false))}
-        ${row(esc(T('s.walk')), esc(T('s.walkNote')), sw('walk', s.walk))}
-        ${row(esc(T('s.look')), '', sw('look', s.look))}
+      <div class="ilook-sec-card look-opt-card">
+        <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.her'))}</span><span class="ilook-box-note">${esc(lang === 'zh' ? '宠物缩放尺寸、详情展示与桌面互动行为' : 'Pet scale, status details and desktop behaviours')}</span></div>
+        <div class="look-opt-rows">
+          ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
+          ${row(esc(T('s.details')), esc(T('s.detailsNote')), sw('details', s.details !== false))}
+          ${row(esc(T('s.walk')), esc(T('s.walkNote')), sw('walk', s.walk))}
+          ${row(esc(T('s.look')), '', sw('look', s.look))}
+        </div>
       </div>
-      ${part('pets', pagePets())}`
+      ${part('pets', pagePets())}
+    </div>`
   }
 
   // Windows' own mode and accent colour, set as Settings → Personalization →
@@ -1093,7 +2289,8 @@
   function pagePrompts() {
     const s = snap.settings
     const waits = WAITS.map(w => [w, w >= 60 ? T('settings.minutes', { n: Math.round(w / 60) }) : T('settings.seconds', { n: w })])
-    return `${sec(T('settings.prompts'))}<div class="grp">${row(esc(T('settings.promptWait')), esc(T('settings.promptWaitNote')), seg('promptWaitSec', waits, s.promptWaitSec))}</div>`
+    return `${sec(T('settings.prompts'))}<div class="grp">${row(esc(T('settings.promptWait')), esc(T('settings.promptWaitNote')), seg('promptWaitSec', waits, s.promptWaitSec))}
+      ${row(esc(T('settings.appAsks')), esc(T('settings.appAsksNote')), sw('appAsks', s.appAsks !== false))}</div>`
   }
 
   // 安静：勿扰与全屏时隐藏——留在通用页（#23）。
@@ -1403,45 +2600,65 @@
   function pageWidgets() {
     const s = snap.settings
     const left = ms => (ms >= 60000 ? T('settings.minutes', { n: Math.round(ms / 60000) }) : T('settings.seconds', { n: Math.max(1, Math.round(ms / 1000)) }))
-    const rows = widgetRows()
+    const list = widgetRows()
+    let placedCount = 0
+    const rows = list
       .map(r => {
         if (r.plugin) {
           const p = r.plugin
           const place = placeOf({ plugin: p.id }, p.on)
+          if (place.at) placedCount++
           const says = r.mine.map(w => Widgets.words(lang, w, s.details !== false)).map(({ label, value }) => [label, value].filter(Boolean).join(' ')).join(' · ')
           const note = pluginNote(p, r.mine, !!place.at)
           const color = (r.mine[0] && r.mine[0].color) || (p.on ? '#5e9bff' : COLOR.idle)
           const isOpen = openPlugin === p.id
           const more = p.params.length ? `<button class="pbtn sm" data-pexp="${esc(p.id)}">${esc(T(isOpen ? 'pl.fold' : 'pl.settings'))}</button>` : ''
-          return `<div class="r" data-part="widgets:${esc(r.key)}"><span class="wi" style="color:${esc(color)}">${Widgets.icon(p.icon)}</span><div class="grow"><div class="ellip">${esc(T(`w.ex.${p.id}`))}<span class="d"> ${esc(says)}</span></div><div class="d${note.bad ? ' bad' : ''}">${esc(note.text)}</div></div>${more}${placeHTML(place)}</div>${isOpen ? pluginFields(p) : ''}`
+          const readingHTML = says ? `<span class="w-reading mono">${esc(says)}</span>` : ''
+          return `<div class="w-item-card${place.at ? ' is-placed' : ''}${isOpen ? ' is-open' : ''}" data-part="widgets:${esc(r.key)}"><div class="r w-item-row"><span class="wi w-icon-box" style="--w-tint:${esc(color)};color:${esc(color)}">${Widgets.icon(p.icon)}</span><div class="grow w-item-main"><div class="w-item-head ellip"><span class="w-item-title">${esc(T(`w.ex.${p.id}`))}</span>${readingHTML}</div><div class="d w-desc${note.bad ? ' bad' : ''}">${esc(note.text)}</div></div><div class="w-item-actions">${more}${placeHTML(place)}</div></div>${isOpen ? `<div class="w-item-drawer">${pluginFields(p)}</div>` : ''}</div>`
         }
         const w = r.widget
         const place = placeOf({ id: w.id }, w.on)
+        if (place.at) placedCount++
         const { label, value } = Widgets.words(lang, w, s.details !== false)
         // A built-in one says what it shows; on, with nothing read, says so.
         const builtIn = w.builtIn && [T('w.builtIn'), T(`w.about.${w.id}`), w.on && w.value == null ? T('w.unread') : ''].filter(Boolean).join(' · ')
         const from = builtIn || (w.from === 'mail' ? T('w.fromMail') : [T('w.script', { time: left(w.leftMs || 0) }), w.private ? T('w.private') : ''].filter(Boolean).join(' · '))
         const state = place.at ? `${T('pl.running')} · ${from}` : T('pl.unplaced')
         // The monitor: its readings as icon and number, its settings folded under it.
-        const says = Widgets.partsOf(w) ? ` ${Widgets.partsHTML(w)}` : `<span class="d"> ${esc(value)}</span>`
+        const says = Widgets.partsOf(w)
+          ? `<span class="w-reading">${Widgets.partsHTML(w)}</span>`
+          : (value ? `<span class="w-reading mono">${esc(value)}</span>` : '')
         const isMonitor = w.id === 'monitor'
-        const more = isMonitor ? `<button class="pbtn sm" data-pexp="monitor">${esc(T(openPlugin === 'monitor' ? 'pl.fold' : 'pl.settings'))}</button>` : ''
-        return `<div class="r" data-part="widgets:${esc(r.key)}"><span class="wi" style="color:${esc(w.color || COLOR.idle)}">${Widgets.iconHTML(w, lang)}</span><div class="grow"><div class="ellip">${esc(label)}${says}</div><div class="d">${esc(state)}</div></div>${more}${placeHTML(place)}</div>${isMonitor && openPlugin === 'monitor' ? monitorFields() : ''}`
+        const isOpen = isMonitor && openPlugin === 'monitor'
+        const more = isMonitor ? `<button class="pbtn sm" data-pexp="monitor">${esc(T(isOpen ? 'pl.fold' : 'pl.settings'))}</button>` : ''
+        const color = w.color || COLOR.idle
+        return `<div class="w-item-card${place.at ? ' is-placed' : ''}${isOpen ? ' is-open' : ''}" data-part="widgets:${esc(r.key)}"><div class="r w-item-row"><span class="wi w-icon-box" style="--w-tint:${esc(color)};color:${esc(color)}">${Widgets.iconHTML(w, lang)}</span><div class="grow w-item-main"><div class="w-item-head ellip"><span class="w-item-title">${esc(label)}</span>${says}</div><div class="d w-desc">${esc(state)}</div></div><div class="w-item-actions">${more}${placeHTML(place)}</div></div>${isOpen ? `<div class="w-item-drawer">${monitorFields()}</div>` : ''}</div>`
       })
       .join('')
     const spins = SPINS.map(n => [n, n ? T('settings.seconds', { n }) : T('w.spinOff')])
     const waku = `powershell -ExecutionPolicy Bypass -File "${snap.waku}" npm run build`
     const example = `Invoke-RestMethod -Method Post http://127.0.0.1:${snap.port}/widget -ContentType application/json -Body '{"id":"hello","label":"Hello","value":"42","icon":"star"}'`
-    return `${extensionPanel.render()}${sec(T('w.section'))}<div class="grp"><div class="note">${esc(T('w.note'))}</div>${rows}</div>
-      ${sec(T('w.show'))}<div class="grp">
-        ${row(esc(T('w.spin')), '', seg('widgetSpin', spins, s.widgetSpin ?? 8))}
-        ${row(esc(T('w.nudge')), esc(T('w.nudgeNote')), sw('widgetNudge', s.widgetNudge !== false))}
+    const activeBadge = lang === 'zh' ? `${placedCount} 在用` : `${placedCount} active`
+    const totalBadge = lang === 'zh' ? `共 ${list.length} 项` : `${list.length} total`
+    const foldAttr = widgetsFoldOpen ? '' : ' hidden'
+    return `${extensionPanel.render()}<div class="w-studio${widgetsFoldOpen ? ' open' : ''}">
+        <button type="button" class="w-studio-head" data-widgets-fold aria-expanded="${widgetsFoldOpen}">
+          <span class="w-studio-title">${esc(T('w.section'))}</span>
+          <span class="w-studio-badges"><span class="w-studio-badge">${esc(activeBadge)}</span><span class="w-studio-badge">${esc(totalBadge)}</span></span>
+        </button>
+        <div class="w-studio-body"${foldAttr}><div class="w-card-list">${rows}</div></div>
       </div>
-      ${sec(T('w.terminal'))}<div class="grp"><div class="note">${esc(T('w.ex.waku.note'))}</div>
-        <div class="r"><span class="cmd mono">${esc(waku)}</span><button class="pbtn" data-copy="${esc(waku)}">${esc(T('home.copy'))}</button></div>
-      </div>
-      ${sec(T('w.write'))}<div class="grp"><div class="note">${esc(T('w.writeNote'))}</div>
-        <div class="r"><span class="cmd mono">${esc(example)}</span><button class="pbtn" data-copy="${esc(example)}">${esc(T('home.copy'))}</button></div>
+      <div class="w-studio-more">
+        ${sec(T('w.show'))}<div class="grp">
+          ${row(esc(T('w.spin')), '', seg('widgetSpin', spins, s.widgetSpin ?? 8))}
+          ${row(esc(T('w.nudge')), esc(T('w.nudgeNote')), sw('widgetNudge', s.widgetNudge !== false))}
+        </div>
+        ${sec(T('w.terminal'))}<div class="grp"><div class="note">${esc(T('w.ex.waku.note'))}</div>
+          <div class="r"><span class="cmd mono">${esc(waku)}</span><button class="pbtn" data-copy="${esc(waku)}">${esc(T('home.copy'))}</button></div>
+        </div>
+        ${sec(T('w.write'))}<div class="grp"><div class="note">${esc(T('w.writeNote'))}</div>
+          <div class="r"><span class="cmd mono">${esc(example)}</span><button class="pbtn" data-copy="${esc(example)}">${esc(T('home.copy'))}</button></div>
+        </div>
       </div>`
   }
 
@@ -2228,8 +3445,47 @@
       ${l.to.length ? `<div class="d">${esc(T('mail.to'))}: ${esc(people(l.to))}</div>` : ''}
       ${l.cc.length ? `<div class="d">${esc(T('mail.cc'))}: ${esc(people(l.cc))}</div>` : ''}
       ${whose}${files}${talk ? talkHTML(talk, l) : ''}
-      <div class="m-text">${esc(l.text)}</div>${l.cut ? `<div class="d">${esc(T('mail.cut'))}</div>` : ''}
+      <div class="m-text">${textWithLinks(l.text, esc)}</div>${l.cut ? `<div class="d">${esc(T('mail.cut'))}</div>` : ''}
     </div>`
+  }
+
+  function linkWarning(url, text) {
+    let u
+    try { u = new URL(url) } catch { return null }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    const real = u.hostname.toLowerCase()
+    if (u.username || u.password) {
+      let shown = u.username
+      try { shown = decodeURIComponent(shown) } catch {}
+      return { why: 'differs', shown, real }
+    }
+    if (/^\d+(\.\d+){3}$/.test(real) || real.startsWith('[')) return { why: 'ip', real }
+    if (real.split('.').some(label => label.startsWith('xn--'))) return { why: 'idn', real }
+    const m = /(?:https?:\/\/)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i.exec(String(text || '').trim())
+    const shown = m?.[1]?.toLowerCase()
+    const sameSite = (a, b) => a === b || b.endsWith(`.${a}`)
+    return shown && !sameSite(shown, real) ? { why: 'differs', shown, real } : null
+  }
+
+  function textWithLinks(text, esc) {
+    const s = String(text ?? '')
+    const re = /\bhttps?:\/\/[^\s<>"'\[\]{}，。、；！？「」《》（）]+/gi
+    let out = '', at = 0
+    for (const m of s.matchAll(re)) {
+      let url = m[0]
+      for (;;) {
+        const last = url[url.length - 1]
+        if ('.,;:!?'.includes(last) || (last === ')' && url.split('(').length < url.split(')').length)) url = url.slice(0, -1)
+        else break
+      }
+      try {
+        const u = new URL(url)
+        if ((u.protocol !== 'http:' && u.protocol !== 'https:') || !u.hostname) continue
+      } catch { continue }
+      out += `${esc(s.slice(at, m.index))}<a class="m-link" data-mail-link="${esc(url)}">${esc(url)}</a>`
+      at = m.index + url.length
+    }
+    return out + esc(s.slice(at))
   }
 
   // Mail: each account with its switch and setting one up; the inbox
@@ -2264,11 +3520,15 @@
       .join('')
     const add = mailForm ? '' : `<div class="r"><button class="pbtn wide" data-mail-add>${esc(T('mail.add'))}</button></div>`
     return `${sec(T('mail.section'))}<div class="grp"><div class="note">${esc(T('mail.note'))}</div>${rows}${add}</div>
-      ${accounts.length ? offlineHTML() : ''}${proxyHTML()}${mailForm ? mailFormHTML() : ''}`
+      ${accounts.length ? offlineHTML() + codesHTML() : ''}${proxyHTML()}${mailForm ? mailFormHTML() : ''}`
   }
 
   // How much is kept whole on this computer (the setting mailOffline: the
   // last year unless set), and the room every account's takes now.
+  function codesHTML() {
+    return `<div class="grp">${row(esc(T('mail.codes')), esc(T('mail.codesNote')), sw('mailCodes', snap.settings.mailCodes !== false))}</div>`
+  }
+
   function offlineHTML() {
     const value = ['90d', 'year', 'all', 'opened'].includes(snap.settings.mailOffline) ? snap.settings.mailOffline : 'year'
     const used = (snap.mail || []).reduce((n, a) => n + (a.status?.offline?.bytes || 0), 0)
@@ -2891,9 +4151,13 @@
           : `<button class="pbtn sm al" data-agent="${id}:install" ${connecting ? 'disabled' : ''}>${busy ? `<span class="spin"></span>${esc(T('wc.busy'))}` : esc(T(state === 'failed' ? 'wc.toolRetry' : 'ag.do.install'))}</button>`
     // A version she does not connect to: no file of hers to show.
     const top = id === 'claude' ? claudeWays() : id === 'dsh' ? `${dshWay()}${agentFiles(id)}` : `${field('ag.via', esc(viaOf(id)))}${state === 'unsupported' ? '' : agentFiles(id)}`
+    const agyOption = id === 'agy'
+      ? `<div class="ag-way"><div class="ag-way-h"><b>${esc(T('s.agyEfficiency'))}</b><span class="grow"></span>${sw('agyEfficiencyMode', snap.settings.agyEfficiencyMode !== false)}</div><div class="d">${esc(T('s.agyEfficiencyNote'))}</div></div>`
+      : ''
     return `<div class="ag-det">${agentSteps(id, state)}${failed[id] ? failedHTML(id) : ''}${top}
         <div class="ag-what">${esc(T(Agents.whatOf(snap, id)))}</div>
         <div class="ag-caps">${caps}</div>
+        ${agyOption}
         ${agentNotes(id, state)}
         ${id === 'claude' ? '' : `<div class="ag-btns">${buttons}</div>`}
       </div>`
@@ -3499,6 +4763,7 @@
   // typed in (the download box, a plugin's setting, the mail proxy's
   // address) gets the focus and the caret back.
   function drawBody(reset) {
+    if (tabDragging && !reset) return
     const extension = extensionPanel.pages().find(page => page.key === tab)
     // 插件没在跑 / 没启起来（#14-7 / T05）：标签页留着，这一页显示错误态与「启动」。
     // 以前标签页直接消失，用户以为插件被卸载；现在入口在，能当场拉起，也能一步看日志。
@@ -3508,12 +4773,12 @@
     const box = body.contains(document.activeElement) && document.activeElement.matches('input, textarea') ? document.activeElement : null
     const which =
       box &&
-      (box.id ? `#${box.id}` : box.dataset.field ? `[data-field="${box.dataset.field}"]` : box.dataset.mon ? `[data-mon="${box.dataset.mon}"]` : box.dataset.hold ? '[data-hold]' : box.dataset.mf ? `[data-mf="${box.dataset.mf}"]` : box.dataset.w ? `[data-w="${box.dataset.w}"]` : box.dataset.proxyAt !== undefined ? `[data-proxy-at="${box.dataset.proxyAt}"]` : null)
+      (box.id ? `#${box.id}` : box.dataset.field ? `[data-field="${box.dataset.field}"]` : box.dataset.mon ? `[data-mon="${box.dataset.mon}"]` : box.dataset.hold ? '[data-hold]' : box.dataset.mf ? `[data-mf="${box.dataset.mf}"]` : box.dataset.w ? `[data-w="${box.dataset.w}"]` : box.dataset.proxyAt !== undefined ? `[data-proxy-at="${box.dataset.proxyAt}"]` : box.dataset.typoHex ? `[data-typo-hex="${box.dataset.typoHex}"]` : null)
     const caret = which ? box.selectionStart : null
     const changed = setHTML(body, PAGES[tab]())
     if (tab === 'widgets') extensionPanel.mount(body)
     if (tab === 'now') identityPanel.mount(body)
-    if (tab === 'look') { mountTabOrder() }
+    if (tab === 'look') { mountTabOrder(); mountThemePill() }
     if (reset) {
       body.scrollTop = 0
       // Two panes: what is on the right from its top; the list stays where it was.
@@ -3549,10 +4814,8 @@
     layer.style.width = width ? `${Math.min(width, screen.availWidth - 40)}px` : ''
     // 2026-11-01：把「跟随系统」的强调色发布成 CSS 变量，供插件进度弹窗的弹性动效取值
     // （用户要求动效配色跟随 Windows 主题色，而不是写死一套示例色）。
-    {
-      const want = String(snap?.winLook?.accent || '').toLowerCase()
-      layer.style.setProperty('--sys-accent', /^#[0-9a-f]{6}$/.test(want) ? want : '#5e9bff')
-    }
+    applyDockThemeVars()
+    extensionPage.refreshTheme?.()
     // 关于页的公告：还在读就排一次「八秒后改成超时」的重绘（见 aboutHTML）。
     noteNotesLoading(tab === 'now' ? snap.update?.notes?.state || 'loading' : 'ok')
     // 打开关于页且缓存超过 5 分钟：问一次宿主（#39；同一份缓存只问一次）。
@@ -3560,9 +4823,9 @@
     drawHead()
     drawTabs()
     drawBody(reset)
-    // Locked (the button by ✕), a click outside closes them no more.
-    foot.querySelector('.foot-text').textContent = T(snap.settings.settingsPin ? 's.footLocked' : 's.foot')
-    foot.querySelector('.ver').textContent = `v${snap.version}`
+    // Bottom footer text and version hidden per UI layout spec.
+    foot.querySelector('.foot-text').textContent = ''
+    foot.querySelector('.ver').textContent = ''
     tick()
     // The same height on every page, however much it holds: the head and
     // the tabs stay where they are from one page to the next (on the
@@ -3614,6 +4877,7 @@
     } else if (String(next).startsWith('widgets:')) {
       // A widget's row on the plugins page (a press on it in the open island).
       tab = 'widgets'
+      widgetsFoldOpen = true
       partToShow = next
     } else if (TABS.includes(next)) {
       tab = next
@@ -3699,12 +4963,16 @@
     // Nothing of a password shown is remembered: the next opening has them
     // hidden again (#17).
     eyeShown.clear()
+    if (typeof closeColorPop === 'function') closeColorPop()
+    if (typeof closeWpModal === 'function') closeWpModal()
     window.pet.settingsClosed()
     window.Island?.changed()
   }
 
   function setTab(next) {
     if (next === tab || !TABS.includes(next)) return
+    if (typeof closeColorPop === 'function') closeColorPop()
+    if (typeof closeWpModal === 'function') closeWpModal()
     tab = next
     draw(true)
     if (tab === 'look') { loadGallery(false) }
@@ -3811,6 +5079,50 @@
     const at = selector => e.target.closest(selector)
     // A click anywhere but on it closes the letter menu.
     if (!menuEl.hidden && !at('.mmenu')) closeMenu()
+    if (!colorPop.hidden && !at('.cp-popover') && !at('[data-typo-toggle]')) closeColorPop()
+    if (!at('.extension-more')) {
+      const openMores = body.querySelectorAll('.extension-more[open]')
+      if (openMores.length) {
+        openMores.forEach(d => { d.open = false })
+        body.querySelectorAll('.is-more-open').forEach(el => el.classList.remove('is-more-open'))
+      }
+    }
+    if (at('.extension-more-body')) return
+    if (e.target === wpModal || at('[data-wp-close]')) return closeWpModal()
+    const wpPreset = at('[data-wp-preset]')
+    if (wpPreset && snap?.dockPaperUrl) {
+      const p = wpPreset.dataset.wpPreset
+      const cur = dockLookOf()
+      const frame = resolveWallpaperFrame(cur, snap.dockPaperUrl)
+      let next
+      if (p === 'auto') {
+        next = { ...cur, wallpaperFit: 'auto', wallpaperPosX: 50, wallpaperPosY: 50, wallpaperZoom: 100 }
+      } else if (p === 'top') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: frame.x, wallpaperPosY: 16, wallpaperZoom: frame.zoom }
+      } else if (p === 'center') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: 50, wallpaperPosY: 50, wallpaperZoom: frame.zoom }
+      } else if (p === 'bottom') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: frame.x, wallpaperPosY: 84, wallpaperZoom: frame.zoom }
+      } else if (p === 'left') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: 15, wallpaperPosY: frame.y, wallpaperZoom: frame.zoom }
+      } else if (p === 'right') {
+        next = { ...cur, wallpaperFit: 'custom', wallpaperPosX: 85, wallpaperPosY: frame.y, wallpaperZoom: frame.zoom }
+      }
+      if (next) {
+        dockLookSave(next, true)
+        syncWpModalUI(false)
+      }
+      return
+    }
+    if (at('.wp-modal') && !at('[data-dock-paper]')) return
+    if (at('[data-dock-paper-preview]')) return openWpModal()
+    if (at('[data-cp-close]')) return closeColorPop()
+    if (at('[data-cp-clear]') && cpState) {
+      const k = cpState.key
+      closeColorPop()
+      const cur = dockLookOf()
+      return dockLookSave(k === 'accent' ? { ...cur, accentMode: 'custom', accent: '' } : { ...cur, [k]: '' }, true)
+    }
     if (snap?.authFocusActive && (at('[data-lock]') || at('[data-top]'))) return deviceAction('release')
     if (at('[data-lock]')) return patch(snap.settings.settingsPin ? { settingsPin: false, settingsTop: false } : { settingsPin: true })
     if (at('[data-top]')) return patch(snap.settings.settingsPin && snap.settings.settingsTop ? { settingsTop: false } : { settingsPin: true, settingsTop: true })
@@ -3876,6 +5188,9 @@
       if (key === 'ilookBare') return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bare: !ilookOf(ilookFor()).bare })
       if (key.startsWith('notify.')) return patch({ notify: { ...s.notify, [key.slice(7)]: !s.notify?.[key.slice(7)] } })
       if (key === 'widgetNudge') return patch({ widgetNudge: s.widgetNudge === false })
+      if (key === 'mailCodes') return patch({ mailCodes: s.mailCodes === false })
+      if (key === 'appAsks') return patch({ appAsks: s.appAsks === false })
+      if (key === 'agyEfficiencyMode') return patch({ agyEfficiencyMode: s.agyEfficiencyMode === false })
       // One of the monitor's parts on or off.
       if (key.startsWith('mon:')) return patch({ monitor: { ...(s.monitor || {}), [key.slice(4)]: (s.monitor || {})[key.slice(4)] === false } })
       // One of the hardware's sensors picked or not, LibreHardwareMonitor's
@@ -4007,6 +5322,76 @@
     }
     const ilookBg = at('[data-ilook-bg]')
     if (ilookBg) return ilookSave(ilookFor(), { ...ilookOf(ilookFor()), bg: ilookBg.dataset.ilookBg })
+    const dockTheme = at('[data-dock-theme]')
+    if (dockTheme) {
+      const track = body.querySelector('.dtp-track')
+      if (dockTheme.classList.contains('dtp-hit') && track?._dtpSuppressClick && Date.now() < track._dtpSuppressClick) return
+      const cur = dockLookOf()
+      const mode = dockTheme.dataset.dockTheme
+      const glass = mode === 'glass' && cur.glass.preset === 'off' ? { ...GLASS_PRESETS.balanced, preset: 'balanced' } : cur.glass
+      track?._dtpSetMode?.(mode, true)
+      return dockLookSave({ ...cur, mode, glass }, true)
+    }
+    const dockAccentMode = at('[data-dock-accent-mode]')
+    if (dockAccentMode) {
+      const cur = dockLookOf()
+      return dockLookSave({ ...cur, accentMode: dockAccentMode.dataset.dockAccentMode }, true)
+    }
+    const dockAccentClear = at('[data-dock-accent-clear]')
+    if (dockAccentClear && !dockAccentClear.disabled) {
+      if (cpState?.key === 'accent') closeColorPop()
+      const cur = dockLookOf()
+      return dockLookSave({ ...cur, accentMode: 'custom', accent: '' }, true)
+    }
+    const dockAccent = at('[data-dock-accent]')
+    if (dockAccent) {
+      const cur = dockLookOf()
+      return dockLookSave({ ...cur, accentMode: 'custom', accent: dockAccent.dataset.dockAccent }, true)
+    }
+    const dockPaper = at('[data-dock-paper]')
+    if (dockPaper) {
+      const action = dockPaper.dataset.dockPaper
+      pickingPaper = action === 'pick'
+      return window.pet.settings.dockWallpaper(action).then(got => {
+        snap = got
+        applyDockThemeVars()
+        extensionPage.refreshTheme?.()
+        if (action === 'remove' || !snap?.dockPaperUrl) closeWpModal()
+        else if (!wpModal.hidden) {
+          probeWallpaperMeta(snap.dockPaperUrl)
+          syncWpModalUI(false)
+        }
+      }).finally(() => {
+        pickingPaper = false
+        body._html = ''
+        draw()
+      })
+    }
+    const glassPreset = at('[data-glass-preset]')
+    if (glassPreset) {
+      const cur = dockLookOf()
+      const p = glassPreset.dataset.glassPreset
+      const vals = GLASS_PRESETS[p] || cur.glass
+      const mode = p === 'off' && cur.mode === 'glass' ? 'dark' : p !== 'off' ? 'glass' : cur.mode
+      return dockLookSave({ ...cur, mode, glass: { ...cur.glass, ...vals, preset: p } }, true)
+    }
+    const typoToggle = at('[data-typo-toggle]')
+    if (typoToggle) {
+      openColorPop(typoToggle.dataset.typoToggle, typoToggle)
+      return
+    }
+    const typoClear = at('[data-dock-typo-clear]')
+    if (typoClear && !typoClear.disabled) {
+      const k = typoClear.dataset.dockTypoClear
+      if (cpState?.key === k) closeColorPop()
+      const cur = dockLookOf()
+      return dockLookSave({ ...cur, [k]: '' }, true)
+    }
+    if (at('[data-widgets-fold]')) {
+      widgetsFoldOpen = !widgetsFoldOpen
+      draw()
+      return relayout()
+    }
     if (at('[data-ilook-reset]')) return ilookSave(ilookFor(), ilookDefault(ilookFor()))
     // Windows' colour dialog takes the focus: not a click outside.
     if (e.target.matches('input[type="color"]')) picking = true
@@ -4043,6 +5428,24 @@
     if (accent) return window.pet.settings.winLook({ accent: accent.dataset.accent }).then(got => ((snap = got), draw()))
     const use = at('[data-use]')
     if (use) return patch({ pet: use.dataset.use })
+    const delPet = at('[data-del-pet]')
+    if (delPet) {
+      const id = delPet.dataset.delPet
+      if (petDelConfirm !== id) {
+        petDelConfirm = id
+        return draw()
+      }
+      petDelConfirm = null
+      return window.pet.settings.deletePet(id).then(got => {
+        if (got?.snapshot) snap = got.snapshot
+        if (got && !got.ok && got.error) fetchNote = { text: got.error, isError: true }
+        draw()
+      })
+    }
+    if (petDelConfirm) {
+      petDelConfirm = null
+      draw()
+    }
     if (at('[data-fetch]')) {
       const text = typedRef.trim()
       if (!text) return document.getElementById('s-ref')?.focus()
@@ -4242,6 +5645,19 @@
       const key = twisty.dataset.twisty
       if (!expanded.delete(key)) expanded.add(key)
       redrawMail()
+      return true
+    }
+    const mailLink = at('[data-mail-link]')
+    if (mailLink) {
+      const url = mailLink.dataset.mailLink
+      const warn = linkWarning(url, mailLink.textContent)
+      if (warn) {
+        confirmInDock(T(`mail.link.${warn.why}`, warn)).then(ok => {
+          if (ok) window.pet.mail.openLink(url)
+        })
+      } else {
+        window.pet.mail.openLink(url)
+      }
       return true
     }
     const letter = at('.inbox [data-letter]')
@@ -4447,6 +5863,7 @@
   // when found, else the fields to fill.
   async function findServer() {
     const f = mailForm
+    if (!f) return
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.address.trim())) {
       f.result = { bad: true, text: T('mail.badAddress') }
       return redrawMail('[data-mf="address"]')
@@ -4487,6 +5904,7 @@
   // Re-test: both servers, the outgoing one where there is one.
   async function retest() {
     const f = mailForm
+    if (!f) return
     await probeServer()
     if (mailForm === f && String(f.smtpHost || '').trim()) await probeOut()
   }
@@ -4541,6 +5959,7 @@
   // detected is, first.
   async function saveAccount() {
     const f = mailForm
+    if (!f) return
     if (!f.id && !f.password) {
       f.result = { bad: true, text: T('mail.err.password') }
       return redrawMail('[data-mf="password"]')
@@ -4627,6 +6046,10 @@
       keepDraft()
     }
     if (e.target.dataset.ilook) ilookInput(e.target, false)
+    if (e.target.dataset.dockLook) dockLookInput(e.target, false)
+    if (e.target.dataset.wpRange) wpRangeInput(e.target, false)
+    if (e.target.dataset.cpRgb) cpRgbInput(false)
+    if (e.target.dataset.cpHex !== undefined) cpHexInput(e.target, false)
     if (e.target.id === 's-ref') {
       typedRef = e.target.value
       // Not mid-word in an input method: once the word is chosen.
@@ -4653,6 +6076,10 @@
   layer.addEventListener('change', e => {
     if (e.target.matches('[data-w-file]')) return addFiles(e.target)
     if (e.target.dataset.ilook) return ilookInput(e.target, true)
+    if (e.target.dataset.dockLook) return dockLookInput(e.target, true)
+    if (e.target.dataset.wpRange) return wpRangeInput(e.target, true)
+    if (e.target.dataset.cpRgb) return cpRgbInput(true)
+    if (e.target.dataset.cpHex !== undefined) return cpHexInput(e.target, true)
     if (e.target.dataset.proxyAt !== undefined) return proxyAddress(e.target.dataset.proxyAt, e.target.value)
     if (e.target.dataset.mon) return monitorField(e.target.dataset.mon)
     if (e.target.dataset.hold) return holdTyped(e.target)
@@ -4766,7 +6193,9 @@
     }
     if (e.key === 'Escape') {
       e.preventDefault()
+      if (typeof wpModal !== 'undefined' && !wpModal.hidden) return closeWpModal()
       if (!menuEl.hidden) return closeMenu()
+      if (typeof colorPop !== 'undefined' && !colorPop.hidden) return closeColorPop()
       return close('Esc')
     }
     if (e.target.matches?.('input, textarea')) {

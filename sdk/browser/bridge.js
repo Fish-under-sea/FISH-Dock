@@ -3,13 +3,86 @@
   const ticket = location.pathname.split('/')[1]
   let sequence = 0
   const pending = new Map()
+  const themeListeners = new Set()
+  let lastTheme = null
+  let followStyleEl = null
+  function applyFollowStyles(enabled) {
+    if (!enabled) {
+      followStyleEl?.remove?.()
+      followStyleEl = null
+      return
+    }
+    if (followStyleEl || !document.head || typeof document.createElement !== 'function') return
+    const style = document.createElement('style')
+    style.setAttribute('data-fish-dock-follow', '1')
+    style.textContent = [
+      ':root[data-dock-glass="1"] body { background: transparent !important; color: var(--dock-text, inherit); }',
+      ':root[data-dock-glass="1"] .card, :root[data-dock-glass="1"] .panel, :root[data-dock-glass="1"] .grp { background: var(--dock-glass-card, rgba(28, 30, 42, 0.22)) !important; backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.35); border-color: var(--dock-glass-border, rgba(255, 255, 255, 0.16)); }',
+      ':root[data-dock-glass="1"] button, :root[data-dock-glass="1"] input, :root[data-dock-glass="1"] select { background: var(--dock-glass-control, rgba(42, 46, 62, 0.28)); color: var(--dock-text, inherit); border-color: var(--dock-glass-border, rgba(255, 255, 255, 0.16)); }',
+    ].join('\n')
+    document.head.appendChild(style)
+    followStyleEl = style
+  }
+  const theme = Object.freeze({
+    current: () => (lastTheme ? { ...lastTheme } : null),
+    onChange(listener) {
+      if (typeof listener !== 'function') throw new TypeError('主题监听器必须是函数')
+      themeListeners.add(listener)
+      if (lastTheme) {
+        try { listener({ ...lastTheme }) } catch (error) { console.error('FishDock theme listener', error) }
+      }
+      return () => themeListeners.delete(listener)
+    },
+    follow(enabled = true) {
+      applyFollowStyles(enabled !== false)
+    },
+  })
   window.addEventListener('message', event => {
     const row = event.data
     if (event.source !== parent || !row || row.ticket !== ticket) return
     if (row.type === 'fish:theme') {
+      const rootStyle = document.documentElement.style
       const palette = row.colors || {}
-      for (const [name, value] of Object.entries(palette)) if (/^--dock-[a-z-]+$/.test(name) && typeof value === 'string' && /^(#[a-f\d]{3,8}|rgba?\([\d.,%\s]+\))$/i.test(value)) document.documentElement.style.setProperty(name, value)
+      for (const [name, value] of Object.entries(palette)) {
+        if (/^--dock-[a-z-]+$/.test(name) && typeof value === 'string' && /^(#[a-f\d]{3,8}|rgba?\([\d.,%\s]+\)|0|1|\d+(?:px|%)?)$/i.test(value)) {
+          rootStyle.setProperty(name, value)
+        }
+      }
+      const app = row.appearance && typeof row.appearance === 'object' ? row.appearance : null
+      const dockMode = typeof row.dockMode === 'string' ? row.dockMode : (row.mode === 'light' ? 'light' : 'dark')
+      const glassOn = !!(app?.glass?.enabled || dockMode === 'glass')
       document.documentElement.dataset.dockTheme = row.mode === 'light' ? 'light' : 'dark'
+      document.documentElement.dataset.dockMode = dockMode
+      document.documentElement.dataset.dockGlass = glassOn ? '1' : '0'
+      if (app?.glass) {
+        const g = app.glass
+        for (const [k, unit] of [['surfaceOp', '%'], ['surfaceBlur', 'px'], ['cardOp', '%'], ['cardBlur', 'px'], ['overlayOp', '%'], ['overlayBlur', 'px'], ['controlOp', '%'], ['controlBlur', 'px']]) {
+          const n = Number(g[k])
+          if (Number.isFinite(n) && n >= 0 && n <= 100) {
+            const cssKey = `--dock-glass-${k.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}`
+            rootStyle.setProperty(cssKey, unit === '%' ? String(n / 100) : `${n}px`)
+          }
+        }
+      }
+      if (app?.wallpaper) {
+        const dim = Number(app.wallpaper.dim)
+        if (Number.isFinite(dim) && dim >= 0 && dim <= 100) rootStyle.setProperty('--dock-wallpaper-dim', String(dim / 100))
+        const url = typeof app.wallpaper.url === 'string' ? app.wallpaper.url.trim() : ''
+        if (/^(https?:\/\/asset\.localhost\/|asset:\/\/)/i.test(url) && !/["'()\\\r\n]/.test(url)) {
+          rootStyle.setProperty('--dock-wallpaper-url', `url("${url}")`)
+        } else {
+          rootStyle.setProperty('--dock-wallpaper-url', 'none')
+        }
+      }
+      lastTheme = {
+        mode: row.mode === 'light' ? 'light' : 'dark',
+        dockMode,
+        colors: { ...palette },
+        appearance: app ? { ...app } : null,
+      }
+      for (const listener of [...themeListeners]) {
+        try { listener({ ...lastTheme }) } catch (error) { console.error('FishDock theme listener', error) }
+      }
       const title = document.getElementById('title')
       if (title && typeof row.title === 'string') title.textContent = row.title
       return
@@ -276,5 +349,5 @@
     deliver(href).catch(() => {})                            // 宿主拒绝时静默：外链失败不该炸页面
   }
   document.addEventListener('click', onClick, true)
-  Object.defineProperty(window, 'FishDock', { value: Object.freeze({ call, setLayout, openExternal, windows, fileDrop, dock }), writable: false, configurable: false })
+  Object.defineProperty(window, 'FishDock', { value: Object.freeze({ call, setLayout, openExternal, windows, fileDrop, dock, theme }), writable: false, configurable: false })
 })()

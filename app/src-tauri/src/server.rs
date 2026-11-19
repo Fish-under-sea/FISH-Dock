@@ -283,9 +283,21 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
             // reasonix_hook), so she only waits with it
             // (zhoupengjie/Wakuwaku#60, phase 1); nor is one of DSH's her
             // plugin cannot take an answer to.
+            let agy_cid = event["conversationId"].as_str().unwrap_or("");
+            let agy_session_turbo = agent == Some("agy")
+                && event["hook_event_name"] == "PreToolUse"
+                && !agy_cid.is_empty()
+                && sh.agy_turbo_sessions.lock().unwrap().contains(agy_cid);
+            let agy_eff = sh.setting("agyEfficiencyMode").as_bool().unwrap_or(true);
+            let is_agy_q = events_agy::is_question(&event);
             let is_agy_prompt = agent == Some("agy")
                 && event["hook_event_name"] == "PreToolUse"
-                && (events_agy::is_question(&event) || events_agy::needs_approval(&event));
+                && (is_agy_q
+                    || (!agy_session_turbo
+                        && events_agy::evaluate_pre_tool_use(&event, agy_eff) == events_agy::PreToolDecision::AskDock));
+            if agy_session_turbo && !is_agy_q {
+                sh.log(&format!("agy prompt skipped: session {agy_cid} marked turbo"));
+            }
             let is_prompt = is_agy_prompt || (event["hook_event_name"] == "PermissionRequest" && !answers_none(agent, &event));
             let holds = is_prompt && sh.asks_seen();
             let msg = match agent {

@@ -276,3 +276,61 @@ test('openExternal 只接受 http/https；FishDock 仍冻结且保留原接口',
   assert.equal(typeof bridge.win.FishDock.call, 'function')
   assert.equal(typeof bridge.win.FishDock.setLayout, 'function')
 })
+
+test('FishDock.theme 接收玻璃模式与自定义颜色、支持订阅与 follow 跟随样式', () => {
+  const styles = []
+  const docStyles = {}
+  const posted = []
+  const listeners = new Map()
+  const doc = {
+    readyState: 'loading',
+    documentElement: { dataset: {}, style: { setProperty: (k, v) => { docStyles[k] = v } } },
+    body: null,
+    head: { appendChild: el => styles.push(el) },
+    createElement: tag => ({ tag, attrs: {}, setAttribute(k, v) { this.attrs[k] = v }, remove() { const i = styles.indexOf(this); if (i >= 0) styles.splice(i, 1) } }),
+    querySelector: () => null,
+    getElementById: () => null,
+    addEventListener() {},
+  }
+  const win = {
+    addEventListener(type, fn) { const set = listeners.get(type) || new Set(); set.add(fn); listeners.set(type, set) },
+    removeEventListener(type, fn) { listeners.get(type)?.delete(fn) },
+    dispatchEvent(ev) { for (const fn of [...(listeners.get(ev.type) || [])]) fn(ev) },
+  }
+  const parent = { postMessage: row => posted.push(row) }
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../sdk/browser/bridge.js'), 'utf8'), {
+    window: win, document: doc, parent, location: { pathname: `/${TICKET}/ui/index.html` },
+    navigator: {}, Date, URL, setTimeout: () => ({}), clearTimeout: () => {},
+  })
+  const seen = []
+  const unsub = win.FishDock.theme.onChange(t => seen.push(t.dockMode))
+  win.dispatchEvent({
+    type: 'message',
+    source: parent,
+    data: {
+      type: 'fish:theme',
+      ticket: TICKET,
+      title: 'Test',
+      mode: 'dark',
+      dockMode: 'glass',
+      colors: { '--dock-bg': '#000', '--dock-accent': '#5e9bff', '--dock-glass-card': 'rgba(28, 30, 42, 0.22)' },
+      appearance: {
+        mode: 'glass',
+        glass: { enabled: true, preset: 'balanced', cardOp: 22, cardBlur: 12 },
+        wallpaper: { url: 'http://asset.localhost/C:/dock-wallpaper.png', dim: 58 },
+      },
+    },
+  })
+  assert.equal(doc.documentElement.dataset.dockMode, 'glass')
+  assert.equal(doc.documentElement.dataset.dockGlass, '1')
+  assert.equal(docStyles['--dock-glass-card-op'], '0.22')
+  assert.equal(docStyles['--dock-glass-card-blur'], '12px')
+  assert.equal(docStyles['--dock-wallpaper-dim'], '0.58')
+  assert.equal(win.FishDock.theme.current().dockMode, 'glass')
+  assert.deepEqual(seen, ['glass'])
+  win.FishDock.theme.follow(true)
+  assert.equal(styles.length, 1, 'follow(true) 注入跟随玻璃样式')
+  win.FishDock.theme.follow(false)
+  assert.equal(styles.length, 0, 'follow(false) 移除跟随样式')
+  unsub()
+})

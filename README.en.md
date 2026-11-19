@@ -1,28 +1,28 @@
 <div align="center">
 <p>
-<a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark-v238.png"><img src="assets/readme/key-zh-zh-light-v238.png" width="74" alt="中文"></picture></a>
-<a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark-v238.png"><img src="assets/readme/key-en-zh-light-v238.png" width="108" alt="English"></picture></a>
-<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-en-dark-v238.png"><img src="assets/readme/key-start-en-light-v238.png" width="126" alt="Get started"></picture></a>
+<a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark-v239.png"><img src="assets/readme/key-zh-zh-light-v239.png" width="74" alt="中文"></picture></a>
+<a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark-v239.png"><img src="assets/readme/key-en-zh-light-v239.png" width="108" alt="English"></picture></a>
+<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-en-dark-v239.png"><img src="assets/readme/key-start-en-light-v239.png" width="126" alt="Get started"></picture></a>
 </p>
-<h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark-v238.png"><img src="assets/readme/hero-en-light-v238.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
+<h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark-v239.png"><img src="assets/readme/hero-en-light-v239.png" width="1440" alt="FISH Dock: a dock for AI sessions and a home for model APIs. Original icon and user-provided hanging mascot."></picture></h1>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.8"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark-v238.png"><img src="assets/readme/stat-version-en-light-v238.png" width="23%" alt="Current version v2.3.8"></picture></a>
-<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark-v238.png"><img src="assets/readme/stat-desktop-en-light-v238.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
-<a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark-v238.png"><img src="assets/readme/stat-mail-en-light-v238.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
-<a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v238.png"><img src="assets/readme/stat-channels-en-light-v238.png" width="23%" alt="Three independent official plugins"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.9"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-en-dark-v239.png"><img src="assets/readme/stat-version-en-light-v239.png" width="23%" alt="Current version v2.3.9"></picture></a>
+<a href="#install"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-en-dark-v239.png"><img src="assets/readme/stat-desktop-en-light-v239.png" width="23%" alt="Two docking modes: taskbar and island"></picture></a>
+<a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-en-dark-v239.png"><img src="assets/readme/stat-mail-en-light-v239.png" width="23%" alt="Mail management: combined inbox and mark all as read"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-en-dark-v239.png"><img src="assets/readme/stat-channels-en-light-v239.png" width="23%" alt="Three independent official plugins"></picture></a>
 </p>
 <p>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.8"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark-v238.png"><img src="assets/readme/key-download-en-light-v238.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
-<a href="docs/releases/release-2.3.8.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark-v238.png"><img src="assets/readme/key-release-en-light-v238.png" width="112" alt="Changelog"></picture></a>
-<a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark-v238.png"><img src="assets/readme/key-issues-en-light-v238.png" width="120" alt="Report an issue"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.9"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-en-dark-v239.png"><img src="assets/readme/key-download-en-light-v239.png" width="168" alt="Downloads and Releases; installer assets require a published release"></picture></a>
+<a href="docs/releases/release-2.3.9.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-en-dark-v239.png"><img src="assets/readme/key-release-en-light-v239.png" width="112" alt="Changelog"></picture></a>
+<a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-en-dark-v239.png"><img src="assets/readme/key-issues-en-light-v239.png" width="120" alt="Report an issue"></picture></a>
 </p>
 </div>
 
 <table>
 <tr>
 <td>
-<p><strong>2.3.8 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
-<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.8">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="docs/releases/release-2.3.8.md">Release notes</a></p>
+<p><strong>2.3.9 · Windows 10/11 x64</strong> — a desktop workspace for Agent sessions, notifications, mail and independent plugins.</p>
+<p><a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.9">Download</a> · <a href="README.md">中文</a> · <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins">Official plugins</a> · <a href="docs/releases/release-2.3.9.md">Release notes</a></p>
 </td>
 <td width="232" align="center" valign="middle">
 <picture>
@@ -64,6 +64,7 @@ This section is only about entry points and operations; capability detail is abo
 
 Business code, plugin packages and the store catalog are maintained in [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins); this repository owns the desktop host, SDK, installer, plugin management and Windhawk.
 
+- **2.3.9**: a full rework of the island look — a Light / Dark / Glass theme capsule, glass tint and accent, a background image you can preview and reframe, liquid glass and font colours; plus pet deletion, a beta Top bar + Dock mode, fixes to the widgets fold and the extension More menu, and the upstream v0.4.3 sync. [Full notes](docs/releases/release-2.3.9.md).
 - **2.3.8**: supports spaced install paths on non-OS drives without 8.3 short names (via `call "<exe>"`), fixes Antigravity `PermissionRequest` waiting mood, percent-encoded space decoding in `file://` workspace URIs, command-verb boundary matching in `is_risky_command`, and the 290s wait cap for `agy`. **The main island look is unchanged.** [Full notes](docs/releases/release-2.3.8.md).
 - **2.3.7**: adds island approvals (allow / deny only, triggered for risky, out-of-workspace, or review-mode actions) and `ask_question` choice interception for pure Antigravity 2.0 desktop, fixes `agy_hook` skipping active sessions due to legacy `quit-by-choice` files, and fixes #96 by probing `agy.exe models` only when Settings are open with an `agy` mail account configured. **The main island look is unchanged.** [Full notes](docs/releases/release-2.3.7.md).
 
@@ -82,11 +83,11 @@ See [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases) for earlier
 
 ## Install
 
-**2.3.8 provides Setup only; 2.2.0 was the final release that also shipped an Update package.** Download from the [v2.3.8 release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.8) and verify it with `SHA256SUMS.txt` from that same release.
+**2.3.9 provides Setup only; 2.2.0 was the final release that also shipped an Update package.** Download from the [v2.3.9 release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.9) and verify it with `SHA256SUMS.txt` from that same release.
 
 | Package | When to use it |
 | --- | --- |
-| `FISH-Dock-Setup-2.3.8.exe` | First installation, repair, the in-app update from 2.2.0, and upgrades over older versions; includes Node.js. **Requires the system Evergreen WebView2 Runtime.** If missing, Setup offers the official download page and exits without installing dependencies. |
+| `FISH-Dock-Setup-2.3.9.exe` | First installation, repair, the in-app update from 2.2.0, and upgrades over older versions; includes Node.js. **Requires the system Evergreen WebView2 Runtime.** If missing, Setup offers the official download page and exits without installing dependencies. |
 
  Exit the previous version from the tray before upgrading. The installer bundles Node.js 24.14.0 but no longer bundles Fixed Version WebView2 or its license as of 2.1.9. It uses the system Evergreen runtime. Upgrades remove installer-owned old runtime files and preserve `%LOCALAPPDATA%/FISH Dock/webview`. Update does not check system dependencies; ensure Evergreen is available before upgrading. If Update fails, use the same-version Setup manually; the installer no longer downloads a different package. Since 2.1.2 it no longer bundles the Windhawk engine or its LLVM-MinGW compiler (originally 557.8 MB / 8413 files); 2.1.6 removes the leftover Windhawk section from the Appearance page. The installer is currently unsigned.
 

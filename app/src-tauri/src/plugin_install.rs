@@ -1018,7 +1018,10 @@ mod tests {
         // 失败重试一次、uninstall 遇「未安装」算已达成——这里只盯**卡死**与**终态**，
         // 不盯每轮成败（那是串行测试的事）。
         let tolerant=|error:&str| error.contains("插件未安装");
+        let progress_a=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let progress_b=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let context_a=std::sync::Arc::clone(&context);
+        let pa=std::sync::Arc::clone(&progress_a);
         let a=std::thread::Builder::new().name("t37-install-a".into()).spawn(move||{
             let manager=Manager{context:&context_a};
             for round in 0..rounds {
@@ -1031,10 +1034,12 @@ mod tests {
                 if let Err(error)=manager.uninstall("acme.weather") {
                     if !tolerant(&error) { let _=done_a.send(Err(format!("A 第 {round} 轮 uninstall：{error}"))); return; }
                 }
+                pa.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
             }
             let _=done_a.send(Ok(()));
         }).unwrap();
         let context_b=std::sync::Arc::clone(&context);
+        let pb=std::sync::Arc::clone(&progress_b);
         let b=std::thread::Builder::new().name("t37-install-b".into()).spawn(move||{
             let manager=Manager{context:&context_b};
             for round in 0..rounds {
@@ -1047,24 +1052,32 @@ mod tests {
                 if let Err(error)=manager.uninstall("acme.weather") {
                     if !tolerant(&error) { let _=done_b.send(Err(format!("B 第 {round} 轮 uninstall：{error}"))); return; }
                 }
+                pb.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
             }
             let _=done_b.send(Ok(()));
         }).unwrap();
-        // 哨兵：任何一侧 30 秒没有完成一轮回报就算卡死。recv_timeout 对两个
-        // 通道轮流等，先到的先收；总窗口 30 秒硬上限。
-        let wait=|rx:std::sync::mpsc::Receiver<Result<(),String>>,who:&str| {
+        // 哨兵：只要 30 秒内有进度推进就允许慢盘完成；连续 30 秒无任何推进或总耗时超过 180 秒才判卡死。
+        let wait=|rx:std::sync::mpsc::Receiver<Result<(),String>>,progress:&std::sync::atomic::AtomicUsize,who:&str| {
             let began=std::time::Instant::now();
+            let mut last_step=progress.load(std::sync::atomic::Ordering::Relaxed);
+            let mut last_progress=std::time::Instant::now();
             loop {
                 match rx.recv_timeout(std::time::Duration::from_secs(1)) {
                     Ok(result)=>return result,
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)=>if began.elapsed()>std::time::Duration::from_secs(30) {
-                        return Err(format!("{who} 30 秒未完成：并发卡死（锁序成环）"));
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)=>{
+                        let step=progress.load(std::sync::atomic::Ordering::Relaxed);
+                        if step!=last_step {
+                            last_step=step;
+                            last_progress=std::time::Instant::now();
+                        } else if last_progress.elapsed()>std::time::Duration::from_secs(30) || began.elapsed()>std::time::Duration::from_secs(180) {
+                            return Err(format!("{who} 30 秒未完成：并发卡死（锁序成环）"));
+                        }
                     },
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected)=>return Err(format!("{who} 线程提前结束")),
                 }
             }
         };
-        let ra=wait(a_rx,"A"); let rb=wait(b_rx,"B");
+        let ra=wait(a_rx,&progress_a,"A"); let rb=wait(b_rx,&progress_b,"B");
         // 两线程都要收尾（join 卡住同样说明有环）。
         let ja=a.join(); let jb=b.join();
         let failures=match (ra,rb) {

@@ -324,6 +324,11 @@ pub fn home_display(sh: &Shared) -> Option<((i32, i32, i32, i32), f64)> {
     area(sh).map(|a| (a.mon, a.sf))
 }
 
+// 顶栏/dock 所在显示器的完整几何（含排除 Windows 任务栏后的工作区）。
+pub fn home_area(sh: &Shared) -> Option<crate::screen::Area> {
+    area(sh)
+}
+
 // Where the window goes, by home. Returns the physical rect if it moved.
 fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
     let home = sh.home();
@@ -567,7 +572,7 @@ fn sync_bar_now(sh: &Shared, keep: bool) {
         sh.log("island: Windows would not take the bar");
         return;
     }
-    let granted = appbar::place(hwnd, area.mon, edge, height);
+    let granted = taskbar::claim(|| appbar::place(hwnd, area.mon, edge, height));
     {
         let mut isl = sh.island.lock().unwrap();
         isl.bar = Some(granted);
@@ -578,6 +583,28 @@ fn sync_bar_now(sh: &Shared, keep: bool) {
         taskbar::strip_moved(granted);
     }
     sh.log(&format!("island: {home} strip {granted:?}; work area's bottom {}", taskbar::work_area_bottom()));
+}
+
+/// Tell Explorer the island's app bar place again (from the taskbar thread)
+/// when Explorer resets the work area into her strip.
+pub fn reclaim_bar(sh: &Shared) -> Option<(i32, i32, i32, i32)> {
+    if SYNCING.load(Ordering::SeqCst) {
+        return None;
+    }
+    let (hwnd, held, own, was) = {
+        let isl = sh.island.lock().unwrap();
+        (isl.hwnd, isl.bar_for, isl.bar_own, isl.bar)
+    };
+    let (mon, height, _, edge) = held?;
+    if !own || hwnd == 0 {
+        return None;
+    }
+    let granted = taskbar::claim(|| appbar::place(hwnd, mon, edge, height));
+    sh.island.lock().unwrap().bar = Some(granted);
+    if Some(granted) != was {
+        sh.log(&format!("island: bar's place told again, granted {granted:?} where it was {was:?} (the window left where it is)"));
+    }
+    Some(granted)
 }
 
 // Quitting, or the window going: the strip back to the other windows (and
@@ -616,6 +643,10 @@ pub fn take_strip_again(sh: &Shared) {
 // out 1830 x 615 for 2560 x 860, the strip floating up the screen and short
 // of its end, until she was restarted (zhoupengjie/Wakuwaku#37).
 fn lay(win: &WebviewWindow, (x, y): (i32, i32), (w, h): (i32, i32)) {
+    if win.outer_position().ok().map(|p| (p.x, p.y)) == Some((x, y)) {
+        let _ = win.set_size(PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
+        return;
+    }
     let _ = win.set_position(PhysicalPosition::new(x, y));
     let _ = win.set_size(PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
     let _ = win.set_position(PhysicalPosition::new(x, y));
@@ -1574,7 +1605,17 @@ pub fn set_room(sh: &Shared, measured: &Value) {
         _ => None,
     };
     sh.island.lock().unwrap().room = room;
-    place(sh);
+    if sh.home() == "taskbar" {
+        place(sh);
+        return;
+    }
+    let fitted = fit(sh);
+    fit_zoom(sh);
+    tell_strip(sh, false);
+    if let (Some((pos, size)), Some(win)) = (fitted, window(sh)) {
+        lay(&win, pos, size);
+    }
+    crate::notch::settle(sh);
 }
 
 // A page's devicePixelRatio as it told it, if it is one.

@@ -435,26 +435,75 @@ fn load_project_config(dir: &std::path::Path, e: &Value) -> Value {
     Value::Null
 }
 
-pub fn needs_approval(e: &Value) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreToolDecision {
+    /// 交还 Antigravity 原生权限机制处理（极速模式下不拦截、遵循 AGY 全放行）。
+    Passthrough,
+    /// 效率模式自动放行：输出 auto_approve 跳过客户端与 Dock 弹窗。
+    AutoApprove,
+    /// 需要上 FISH Dock 人工批准。
+    AskDock,
+}
+
+pub fn pre_tool_stdout(decision: PreToolDecision) -> Option<&'static str> {
+    match decision {
+        PreToolDecision::Passthrough => Some(r#"{"decision":"allow"}"#),
+        PreToolDecision::AutoApprove => Some(r#"{"decision":"auto_approve"}"#),
+        PreToolDecision::AskDock => None,
+    }
+}
+
+pub fn read_host_efficiency_mode() -> bool {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(home) = crate::config::unified_root_env() {
+        candidates.push(home.join("host").join("config").join("config.json"));
+    }
+    if let Some(ud) = crate::config::user_data_override() {
+        candidates.push(ud.join("config.json"));
+    }
+    if let Ok(profile) = crate::storage::profile_directory() {
+        candidates.push(profile.join(".fish-dock").join("host").join("config").join("config.json"));
+    } else if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).filter(|v| !v.is_empty()) {
+        candidates.push(std::path::PathBuf::from(home).join(".fish-dock").join("host").join("config").join("config.json"));
+    }
+    for path in candidates {
+        let val = read_json_file(&path);
+        if let Some(enabled) = val.get("agyEfficiencyMode").and_then(Value::as_bool) {
+            return enabled;
+        }
+        if val.is_object() {
+            return true;
+        }
+    }
+    true
+}
+
+pub fn evaluate_pre_tool_use(e: &Value, efficiency_mode: bool) -> PreToolDecision {
     let dir = config_dir();
     let cfg = read_json_file(&dir.join("config.json"));
     let proj = load_project_config(&dir, e);
-    needs_approval_with(e, &cfg, &proj)
+    evaluate_pre_tool_use_with(e, &cfg, &proj, efficiency_mode)
 }
 
-pub fn needs_approval_with(e: &Value, config: &Value, project: &Value) -> bool {
+pub fn evaluate_pre_tool_use_with(e: &Value, config: &Value, project: &Value, efficiency_mode: bool) -> PreToolDecision {
     if is_question(e) {
-        return false;
+        return PreToolDecision::AskDock;
     }
     let call = e.get("toolCall").unwrap_or(&Value::Null);
     let (_, _, Some((action, target))) = classify_tool(s(call, "name"), call.get("args").unwrap_or(&Value::Null)) else {
-        return false;
+        return PreToolDecision::Passthrough;
     };
     let global_settings = config.get("userSettings").unwrap_or(&Value::Null);
     let proj_settings = project.get("settings").unwrap_or(&Value::Null);
     let preset = proj_settings.get("permissionPreset").or_else(|| global_settings.get("permissionPreset")).and_then(Value::as_str).unwrap_or("");
-    if preset == "AGENT_PERMISSION_PRESET_TURBO" {
-        return false;
+    let policy = proj_settings
+        .get("autoExecutionPolicy")
+        .or_else(|| global_settings.get("autoExecutionPolicy"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    // 极速模式（TURBO / EAGER / always-proceed）最高优先级：hook 不拦截，全部透传交由 AGY 全放行。
+    if preset == "AGENT_PERMISSION_PRESET_TURBO" || matches!(policy, "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER" | "always-proceed") {
+        return PreToolDecision::Passthrough;
     }
     let global_grants = global_settings.get("globalPermissionGrants").unwrap_or(&Value::Null);
     let proj_grants = project.get("permissionGrants").and_then(|g| g.get("permissionGrants").or(Some(g))).unwrap_or(&Value::Null);
@@ -465,34 +514,55 @@ pub fn needs_approval_with(e: &Value, config: &Value, project: &Value) -> bool {
             .any(|g| grant_matches(g, action, &target))
     };
     if has_rule("deny") {
-        return false;
+        return PreToolDecision::Passthrough;
     }
     if has_rule("ask") {
-        return true;
+        return PreToolDecision::AskDock;
     }
     if has_rule("allow") {
-        return false;
+        return PreToolDecision::Passthrough;
     }
     match action {
-        "read_file" | "write_file" => !is_inside_ws_or_artifacts(e, &target),
-        "read_url" | "mcp" => true,
-        "command" => {
-            let policy = proj_settings
-                .get("autoExecutionPolicy")
-                .or_else(|| global_settings.get("autoExecutionPolicy"))
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            match policy {
-                "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER" | "always-proceed" => false,
-                "CASCADE_COMMANDS_AUTO_EXECUTION_OFF"
-                | "CASCADE_COMMANDS_AUTO_EXECUTION_REQUEST_REVIEW"
-                | "request-review"
-                | "strict" => true,
-                _ => is_risky_command(&target),
+        "read_file" | "write_file" => {
+            if !is_inside_ws_or_artifacts(e, &target) {
+                PreToolDecision::AskDock
+            } else if efficiency_mode {
+                PreToolDecision::AutoApprove
+            } else {
+                PreToolDecision::Passthrough
             }
         }
-        _ => false,
+        "read_url" | "mcp" => PreToolDecision::AskDock,
+        "command" => {
+            if efficiency_mode {
+                if is_risky_command(&target) {
+                    PreToolDecision::AskDock
+                } else {
+                    PreToolDecision::AutoApprove
+                }
+            } else if matches!(
+                policy,
+                "CASCADE_COMMANDS_AUTO_EXECUTION_OFF"
+                    | "CASCADE_COMMANDS_AUTO_EXECUTION_REQUEST_REVIEW"
+                    | "request-review"
+                    | "strict"
+            ) || is_risky_command(&target)
+            {
+                PreToolDecision::AskDock
+            } else {
+                PreToolDecision::Passthrough
+            }
+        }
+        _ => PreToolDecision::Passthrough,
     }
+}
+
+pub fn needs_approval(e: &Value) -> bool {
+    !is_question(e) && evaluate_pre_tool_use(e, read_host_efficiency_mode()) == PreToolDecision::AskDock
+}
+
+pub fn needs_approval_with(e: &Value, config: &Value, project: &Value) -> bool {
+    !is_question(e) && evaluate_pre_tool_use_with(e, config, project, false) == PreToolDecision::AskDock
 }
 
 // Convert an Antigravity PreToolUse event into Claude Code's PermissionRequest
@@ -819,5 +889,60 @@ mod tests {
         assert_eq!(msg["mood"], "waiting");
         assert_eq!(msg["agent"], "agy");
         assert_eq!(norm_path("file:///h%3A/FISH%20Dock"), norm_path(r"H:\FISH Dock"));
+    }
+
+    #[test]
+    fn efficiency_mode_auto_approves_safe_tools_and_turbo_always_passes_through() {
+        let ws = ["Z:/nowhere/agyws"];
+        let pre = |tool: &str, args: Value| json!({
+            "hook_event_name": "PreToolUse",
+            "conversationId": "5064aa2e",
+            "workspacePaths": ws,
+            "cwd": "Z:\\nowhere\\agyws",
+            "artifactDirectoryPath": "Z:/nowhere/brain/5064aa2e",
+            "stepIdx": 5,
+            "toolCall": { "name": tool, "args": args }
+        });
+        let empty = Value::Null;
+        let review_cfg = json!({ "userSettings": { "autoExecutionPolicy": "CASCADE_COMMANDS_AUTO_EXECUTION_REQUEST_REVIEW" } });
+        let turbo_cfg = json!({ "userSettings": { "permissionPreset": "AGENT_PERMISSION_PRESET_TURBO" } });
+        let eager_cfg = json!({ "userSettings": { "autoExecutionPolicy": "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER" } });
+
+        // 效率模式开启：请求人工审查 / 默认模式下非高危命令与工作区内读写自动 auto_approve。
+        for cfg in [&empty, &review_cfg] {
+            let dec_cmd = evaluate_pre_tool_use_with(&pre("run_command", json!({ "CommandLine": "git commit -m test" })), cfg, &empty, true);
+            assert_eq!(dec_cmd, PreToolDecision::AutoApprove);
+            assert_eq!(pre_tool_stdout(dec_cmd), Some(r#"{"decision":"auto_approve"}"#));
+            assert_eq!(evaluate_pre_tool_use_with(&pre("read_file", json!({ "Path": r"Z:\nowhere\agyws\a.txt" })), cfg, &empty, true), PreToolDecision::AutoApprove);
+            assert_eq!(evaluate_pre_tool_use_with(&pre("write_file", json!({ "Path": r"Z:\nowhere\agyws\b.txt" })), cfg, &empty, true), PreToolDecision::AutoApprove);
+            // 高危命令、跨工作区、网络、MCP 仍走 Dock 批准。
+            assert_eq!(evaluate_pre_tool_use_with(&pre("run_command", json!({ "CommandLine": "rm -rf foo" })), cfg, &empty, true), PreToolDecision::AskDock);
+            assert_eq!(evaluate_pre_tool_use_with(&pre("run_command", json!({ "CommandLine": "icacls foo" })), cfg, &empty, true), PreToolDecision::AskDock);
+            assert_eq!(evaluate_pre_tool_use_with(&pre("read_file", json!({ "Path": r"D:\outside\secret.txt" })), cfg, &empty, true), PreToolDecision::AskDock);
+            assert_eq!(evaluate_pre_tool_use_with(&pre("read_url_content", json!({ "Url": "https://example.com" })), cfg, &empty, true), PreToolDecision::AskDock);
+            assert_eq!(evaluate_pre_tool_use_with(&pre("mcp_github_get_issue", json!({ "issue_number": 1 })), cfg, &empty, true), PreToolDecision::AskDock);
+        }
+
+        // 极速模式（TURBO / EAGER）：无论效率模式是否开启，一律透传放行，交由 AGY 全放行。
+        for cfg in [&turbo_cfg, &eager_cfg] {
+            for eff in [true, false] {
+                for call in [
+                    pre("run_command", json!({ "CommandLine": "rm -rf foo" })),
+                    pre("run_command", json!({ "CommandLine": "icacls C:\\secret" })),
+                    pre("read_file", json!({ "Path": r"D:\outside\secret.txt" })),
+                    pre("write_file", json!({ "Path": r"D:\outside\evil.txt" })),
+                    pre("read_url_content", json!({ "Url": "https://example.com" })),
+                    pre("mcp_github_get_issue", json!({ "issue_number": 1 })),
+                ] {
+                    let dec = evaluate_pre_tool_use_with(&call, cfg, &empty, eff);
+                    assert_eq!(dec, PreToolDecision::Passthrough);
+                    assert_eq!(pre_tool_stdout(dec), Some(r#"{"decision":"allow"}"#));
+                }
+            }
+        }
+
+        // 关闭效率模式：REQUEST_REVIEW 下普通命令交由 Dock 询问，空配置则退回 Passthrough。
+        assert_eq!(evaluate_pre_tool_use_with(&pre("run_command", json!({ "CommandLine": "git status" })), &review_cfg, &empty, false), PreToolDecision::AskDock);
+        assert_eq!(evaluate_pre_tool_use_with(&pre("run_command", json!({ "CommandLine": "git status" })), &empty, &empty, false), PreToolDecision::Passthrough);
     }
 }

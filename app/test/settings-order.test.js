@@ -132,28 +132,28 @@ test('规格 11/13/34：闲置分钟、等你回答秒数、轮流显示秒数�
   assert.match(source, /const SPINS = \[0, 5, 8, 15\]/, '规格 34：关（0）/ 5 / 8 / 15')
 })
 
-test('规格 16–24：外观页 显示方式 → 内置（任务栏 → 灵动岛 → Windows）→ 标签页排序 → 她 → 宠物与图库', () => {
-  const look = slice('  function pageLook()', '  function pageWindows()')
+test('规格 16–24：外观页 显示方式 → 主题模式胶囊 → 任务栏/灵动岛布局 → 独立展开外观卡片 → 标签页排序 → 她 → 宠物与图库', () => {
+  const look = slice('  function pageLook()', '  // Windows\' own mode and accent colour')
   inOrder('外观页', look, [
-    'home.display', // 17 显示方式（灵动岛 / 任务栏二选一卡片）
-    's.builtin', // 18 内置（分组）
+    'home.display', // 17 显示方式（一排三列）
+    'themeHeroCard()', // 三态光学主题胶囊
     's.taskbarEdge', // 19 任务栏参数
-    'islandPosRow()', // 20 灵动岛参数
-    'pageWindows()', // 21 Windows（壁纸）
+    'islandPosRow()', // 20 灵动岛布局与护眼
+    'ilookPanel()', // 默认展开的独立外观卡片（背景图片 / 液态玻璃与玻璃色调 / 字体颜色）
     'pageTabOrder()', // 22 标签页排序
     's.her', // 23 她
     'pagePets()', // 24 宠物与图库
   ])
-  // 19 的五样、20 的四样、23 的四样、24 的三样，逐个在各自片段里对序。
+  assert.doesNotMatch(look, /pageWindows\(/, '外观页不再渲染独立的 Windows / 系统壁纸分节')
   inOrder('任务栏参数', look, ['s.taskbarEdge', 'displaysRow()', 's.taskbarMaterial', 's.clearWhen', 's.taskbarButtons'])
-  inOrder('灵动岛参数', look, ['islandPosRow()', 's.islandWidth', 'hideUnderRow()', 's.oledShift'])
+  inOrder('灵动岛参数', look, ['islandPosRow()', 's.islandWidth', 'hideUnderRow()', 's.oledShift', 'ilookPanel()'])
   inOrder('她', look, ['menu.size', 's.details', 's.walk', 's.look'])
+  const panel = slice('  function ilookPanel()', '  // A slider moved')
+  inOrder('灵动岛外观独立卡片', panel, ['s.dockPaper', 's.glass', 's.dockAccent', 's.typo'])
+  assert.match(panel, /data-glass-card\$\{dl\.mode === 'glass' \? '' : ' hidden'\}/, '非玻璃模式下应隐藏液态玻璃卡片')
+  assert.match(panel, /data-dock-paper-preview/, '背景图片缩略图应提供预览与调位入口')
   const pets = slice('  function pagePets()', '  // --- Her island')
   inOrder('宠物与图库', pets, ['home.installed', 's.download', '${more}'])
-  const windows = slice('  function pageWindows()', '  let pickingPaper = false')
-  inOrder('Windows', windows, ['s.winMode', 's.winAccent', 'pagePaper()'])
-  // 2.1.6：Windhawk 设置面整体移除（后端能力保留，界面上不再有这张卡）。
-  assert.doesNotMatch(windows, /windhawk/i, '外观页的 Windows 分节不得再出现 Windhawk 面板')
 })
 
 test('规格 25–29：邮件页 邮箱 → 本地保留 → 邮件代理 → 收件箱', () => {
@@ -172,8 +172,10 @@ test('规格 30–36：插件页 身份 → 插件扩展页签 → 插件和小�
     'w.terminal', // 35 在终端里用
     'w.write', // 36 自己写一个
   ])
-  // 32 插件扩展页签也在这块卡里：render() 之后紧跟 w.section，中间不再插备份面板。
-  assert.match(widgets, /extensionPanel\.render\(\)\}\$\{sec\(T\('w\.section'\)/)
+  // 32 插件扩展页签也在这块卡里：render() 之后紧跟小工具折叠卡（w.section），中间不再插备份面板。
+  assert.match(widgets, /extensionPanel\.render\(\)\}<div class="w-studio/)
+  assert.match(widgets, /T\('w\.section'\)/)
+  assert.match(widgets, /<div class="w-studio-more">/, '收起小工具卡片时，显示 / 在终端里用 / 自己写一个不应被一并收起')
 })
 
 test('规格 2/3/5：快捷开关四个的顺序、安静两条、网络代理手动 + 测试', () => {
@@ -192,4 +194,14 @@ test('规格 6/7：软件更新一节给四样，关于只给版本行与说明'
   // 关于一节：品牌图 → 版本行（版本号 + 现在检查 + 项目主页）→ 说明文案，没有别的更新控件。
   inOrder('关于', about, ['about-mark', 's.version', 'data-update="check"', 'data-site="repo"', 'class="slogan"'])
   assert.doesNotMatch(about, /data-update="update"/, '关于里不许再有「应用内更新」（与软件更新一节重叠）')
+})
+
+test('Antigravity 详情含效率模式开关（默认开）且面板仅对 AGY 批准提供极速放行', () => {
+  const details = slice('  function agentDetails(id, state)', '  function pageAgents()')
+  assert.match(details, /id === 'agy'/)
+  assert.match(details, /s\.agyEfficiency/)
+  assert.match(details, /sw\('agyEfficiencyMode'/)
+  const panelSrc = fs.readFileSync(path.join(__dirname, '../src/pet/panel.js'), 'utf8')
+  assert.match(panelSrc, /ask\.from === 'agy' && ask\.kind === 'permission'/)
+  assert.match(panelSrc, /'turbo_session'/)
 })

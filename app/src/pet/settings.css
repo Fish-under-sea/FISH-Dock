@@ -29,7 +29,7 @@
   left: 0;
   width: 520px;
   box-sizing: border-box;
-  padding: 12px 14px;
+  padding: 12px 14px 14px;
   font-size: 13px;
   line-height: 1.45;
   color: var(--fg);
@@ -49,9 +49,7 @@
 /* In the settings the island is a panel, not a button. */
 #island[data-view='settings'] {
   cursor: default;
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 /* Light, on the taskbar in Windows' light mode (style.css tb-light), as
@@ -62,9 +60,7 @@
    stay as they are: they show the dark island. */
 .tb-light #island[data-view='settings'] {
   background: #f3f3f3;
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.2),
-    0 0 0 1px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
 
 .tb-light #island-settings {
@@ -378,8 +374,9 @@
 .s-body {
   overflow-x: hidden;
   overflow-y: auto;
-  margin-right: -6px;
-  padding-right: 6px;
+  padding: 2px 2px 6px 0;
+  border-radius: 14px;
+  clip-path: inset(0 round 14px);
 }
 
 /* 滚动锁（#69 S3，settings.js 的 lockScroll / unlockScroll）：
@@ -426,13 +423,15 @@
   }
 }
 
+.m-link {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  cursor: pointer;
+  word-break: break-all;
+}
+
 .s-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 6px 0;
-  color: var(--g4);
-  font-size: 11.5px;
+  display: none;
 }
 
 #island-settings .sec {
@@ -453,17 +452,21 @@
 
 #island-settings .grp {
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 14px;
   background: var(--g1);
+}
+
+#island-settings .grp + .grp {
+  margin-top: 8px;
 }
 
 #island-settings .r {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 46px;
+  gap: 10px;
+  min-height: 40px;
   box-sizing: border-box;
-  padding: 10px 14px;
+  padding: 8px 14px;
 }
 
 /* A row whose control goes under its title: Windows' accent colours, the
@@ -594,7 +597,8 @@
 
 #island-settings .d {
   color: var(--g4);
-  font-size: 12px;
+  font-size: 11.5px;
+  line-height: 1.35;
 }
 
 #island-settings .in-use {
@@ -694,10 +698,13 @@
   font-size: 12px;
 }
 
-#island-settings .seg span {
+#island-settings .seg > :is(span, button) {
   padding: 3px 11px;
+  border: 0;
   border-radius: 12px;
+  background: transparent;
   color: var(--g5);
+  font: inherit;
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -705,14 +712,14 @@
     color 0.25s;
 }
 
-#island-settings .seg span.on {
+#island-settings .seg > :is(span, button).on {
   background: var(--g3);
   color: var(--fg);
   font-weight: 600;
 }
 
 /* One choice there but not to be picked yet (Antigravity without agy). */
-#island-settings .seg span.off {
+#island-settings .seg > :is(span, button).off {
   opacity: 0.45;
   cursor: default;
 }
@@ -1695,20 +1702,25 @@
   color: #fff;
 }
 
-/* Her home: two pictures to pick from. */
+/* Her home: three modes displayed cleanly in one row. */
 #island-settings .modes {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
 #island-settings .mode {
-  padding: 8px;
-  border-radius: 18px;
+  padding: 7px;
+  border-radius: 16px;
   background: var(--g1);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset 0 0 0 1.5px transparent;
   cursor: pointer;
-  transition: box-shadow 0.25s;
+  transition: box-shadow 0.25s ease, border-color 0.2s ease, transform 0.22s var(--spring);
+}
+
+.tb-light #island-settings .mode {
+  border-color: rgba(0, 0, 0, 0.06);
 }
 
 #island-settings .mode.on {
@@ -1718,21 +1730,21 @@
 #island-settings .mode .pv {
   position: relative;
   overflow: hidden;
-  height: 58px;
+  height: 50px;
   margin-bottom: 6px;
-  border-radius: 12px;
+  border-radius: 10px;
   background: linear-gradient(140deg, #3b4a66, #6f5b70 60%, #8a6a58);
 }
 
 #island-settings .mode .pv i {
   position: absolute;
-  top: 6px;
+  top: 5px;
   left: 50%;
-  width: 60px;
-  height: 14px;
-  border-radius: 7px;
+  width: 48px;
+  height: 12px;
+  border-radius: 6px;
   background: #000;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
   transform: translateX(-50%);
 }
 
@@ -1740,7 +1752,7 @@
 #island-settings .mode .pv s {
   position: absolute;
   inset: auto 0 0;
-  height: 13px;
+  height: 12px;
   background: #000;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
@@ -1749,31 +1761,93 @@
   content: '';
   position: absolute;
   left: 4px;
-  top: 3px;
+  top: 2.5px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   box-shadow: 0 0 0 1.5px #5e9bff;
 }
 
+/* Top bar + floating Dock preview */
+#island-settings .mode .pv t {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+#island-settings .mode .pv t::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 9px;
+  background: rgba(12, 14, 20, 0.88);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+}
+
+#island-settings .mode .pv t::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 58px;
+  height: 11px;
+  border-radius: 6px;
+  background: rgba(12, 14, 20, 0.84);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  transform: translateX(-50%);
+}
+
+#island-settings .mode .pv .mode-beta {
+  position: absolute;
+  top: 12px;
+  right: 5px;
+  z-index: 2;
+  background: rgba(16, 18, 26, 0.78);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #f5f5f7;
+}
+
 #island-settings .mode .pv .thumb {
   position: absolute;
-  right: 10px;
+  right: 8px;
   bottom: -4px;
 }
 
 #island-settings .mode .l {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 4px;
-  font-size: 12.5px;
+  gap: 5px;
+  padding: 0 2px;
+  font-size: 11.5px;
   font-weight: 600;
+  min-width: 0;
+}
+
+#island-settings .mode .mode-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#island-settings .mode-beta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-muted, var(--g5));
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 #island-settings .mode .rd {
-  width: 14px;
-  height: 14px;
+  flex: none;
+  width: 13px;
+  height: 13px;
   box-sizing: border-box;
   border: 1.5px solid var(--g3);
   border-radius: 50%;
@@ -1781,7 +1855,7 @@
 }
 
 #island-settings .mode.on .rd {
-  border: 4px solid var(--fg);
+  border: 3.5px solid var(--fg);
 }
 
 /* A pet, playing her idle row. */
@@ -2808,7 +2882,7 @@
 /* 配置与备份块（2026-10-31 从插件页搬到通用页）：盒子几何与 .grp 一致（18px 圆角、
    无外边距），左右内衬与 .r 一致（14px），标题字号与行标题一致；块内按钮不再被抬到
    32px（站内 .pbtn 是 28px），输入框与 .in 同高（30px）同圆角（15px）。 */
-#island-settings .identity-panel { box-sizing: border-box; margin: 0; padding: 12px 14px; border-radius: 18px; background: var(--g1); }
+#island-settings .identity-panel { box-sizing: border-box; margin: 10px 0 0; padding: 12px 14px; border-radius: 14px; background: var(--g1); }
 #island-settings .identity-panel h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 #island-settings .identity-panel p { margin: 8px 0; overflow-wrap: anywhere; }
 #island-settings .identity-label { display: block; margin: 12px 0 6px; }
@@ -3130,4 +3204,2223 @@
 #island-settings .sess-detail .st.bad .mk { color: var(--bad-ink); }/* 会话行被 .sess-item 包起来以后，行与行之间的发丝线照旧（等价于 .r + .r）。 */
 #island-settings .sess-item + .sess-item > .r {
   border-top: 1px solid #262628;
+}
+
+/* ---- Dock 灵动岛外观（主题与背景合并卡 / 液态玻璃与玻璃色调 / 细分字体调色板 / 小工具工作室 / 全岛动效） ---- */
+#island-settings {
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .s-head .t,
+#island-settings .ilook-box-title,
+#island-settings .ilook-sub-title,
+#island-settings .glass-reg-t,
+#island-settings .r > .grow > div:first-child:not(.d),
+#island-settings .r.col > .t,
+#island-settings .ag-name,
+#island-settings .w-studio-title,
+#island-settings .w-item-title,
+#island-settings .wc-title,
+#island-settings .m-subj,
+#island-settings .slogan .t,
+#island-settings .identity-panel h3,
+#island-settings .s-confirm-dialog h2 {
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+}
+
+#island-settings .d,
+#island-settings .note,
+#island-settings .sec {
+  color: var(--dock-muted, var(--g4));
+}
+
+/* 全 Dock 控件与按钮平滑弹性过渡动效 */
+#island-settings .pbtn,
+#island-settings .s-head .x,
+#island-settings .s-tabs button,
+#island-settings .seg > :is(span, button),
+#island-settings .sw,
+#island-settings .tile,
+#island-settings .mode,
+#island-settings .acc,
+#island-settings .pick,
+#island-settings .kbadge,
+#island-settings .kclear,
+#island-settings .typo-pill-btn,
+#island-settings .typo-sw,
+#island-settings .w-studio-head,
+#island-settings .w-item-card {
+  transition:
+    transform 0.24s var(--spring),
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.22s ease,
+    filter 0.18s ease;
+}
+
+#island-settings .pbtn:hover:not(:disabled),
+#island-settings .pick:hover:not(:disabled),
+#island-settings .kbadge:hover:not(:disabled),
+#island-settings .typo-pill-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+#island-settings .pbtn:not(:disabled):active,
+#island-settings .s-head .x:not(:disabled):active,
+#island-settings .s-tabs button:not(:disabled):active,
+#island-settings .seg > :is(span, button):not(.off):active,
+#island-settings .sw:not(:disabled):active,
+#island-settings .pick:not(:disabled):active,
+#island-settings .kbadge:not(:disabled):active,
+#island-settings .typo-pill-btn:not(:disabled):active {
+  transform: translateY(1px) scale(0.96);
+}
+
+#island-settings .tile:hover {
+  transform: translateY(-1.5px);
+}
+
+#island-settings .mode:hover {
+  transform: translateY(-1.5px);
+}
+
+#island-settings .acc:hover {
+  transform: scale(1.14);
+}
+
+#island-settings .acc:active {
+  transform: scale(0.92);
+}
+
+#island-settings .ilook {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 10px 10px;
+}
+
+#island-settings .ilook-sec-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tb-light #island-settings .ilook-sec-card {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.025);
+}
+
+#island-settings .ilook-sec-card[hidden] {
+  display: none;
+}
+
+#island-settings .ilook-sec-card .r {
+  min-height: 30px;
+  padding: 2px 0;
+}
+
+#island-settings .ilook-sec-card .r + .r {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 6px;
+}
+
+.tb-light #island-settings .ilook-sec-card .r + .r {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+/* 外观页平级独立卡片流（头部三态主题胶囊 + 三列显示方式 + 各功能独立展开卡） */
+#island-settings .look-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 6px;
+}
+
+#island-settings .look-page > .sec {
+  margin: 2px 0 -4px;
+}
+
+#island-settings .ilook-cards-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#island-settings .ilook-hero-card {
+  gap: 6px;
+  padding: 9px 12px 7px;
+}
+
+#island-settings .ilook-hero-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#island-settings .ilook-hero-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-muted, var(--g5));
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+#island-settings .ilook-hero-card .dock-theme-pill {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+#island-settings .look-beta-banner {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+#island-settings .look-beta-text {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .look-opt-card {
+  gap: 6px;
+}
+
+#island-settings .look-opt-rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 4px;
+}
+
+.tb-light #island-settings .look-opt-rows {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .look-opt-rows .r {
+  min-height: 36px;
+  padding: 6px 0;
+}
+
+#island-settings .look-opt-rows .r + .r {
+  padding-top: 8px;
+}
+
+#island-settings .ilook-box-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+}
+
+#island-settings .ilook-box-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+#island-settings .ilook-sub-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#island-settings .ilook-box-note {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--dock-muted, var(--g4));
+}
+
+/* 主题与背景合并卡：上方壁纸与遮挡调节，底部三大场景切换按钮 */
+#island-settings .ilook-paper-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .ilook-paper-zone {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .ilook-paper-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+#island-settings .ilook-paper-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+#island-settings .ilook-paper-title-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#island-settings .dock-paper-fit-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .dock-paper-fit-pill:hover {
+  border-color: var(--dock-accent, #5e9bff);
+}
+
+#island-settings .dock-paper-fit-pill:active {
+  transform: scale(0.95);
+}
+
+#island-settings .ilook-paper-bar {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+#island-settings .dock-paper-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#island-settings .dock-paper-thumb-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 62px;
+  height: 36px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--g2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.2s ease, transform 0.22s var(--spring);
+}
+
+.tb-light #island-settings .dock-paper-thumb-btn {
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+#island-settings .dock-paper-thumb-btn:hover {
+  border-color: var(--dock-accent, #5e9bff);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dock-accent, #5e9bff) 32%, transparent);
+  transform: translateY(-1px);
+}
+
+#island-settings .dock-paper-thumb-btn:active {
+  transform: scale(0.96);
+}
+
+#island-settings .dock-paper-thumb {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+#island-settings .dock-paper-thumb-ov {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: rgba(14, 16, 22, 0.76);
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.78;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .dock-paper-thumb-btn:hover .dock-paper-thumb-ov {
+  opacity: 1;
+  transform: scale(1.08);
+}
+
+/* 浅色 / 深色 / 玻璃全宽纤细三态 3D 光学拟物场景胶囊开关（34px 黄金比例，与上方显示方式视觉均衡） */
+#island-settings .dock-theme-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .dock-theme-pill {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .dtp-track {
+  position: relative;
+  width: 100%;
+  height: 34px;
+  border-radius: 999px;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+  cursor: grab;
+  background: #1a1f2b;
+  --dtp-p: 0.5;
+  --dtp-w-light: 0;
+  --dtp-w-dark: 1;
+  --dtp-w-glass: 0;
+  --dtp-led-deg: 180deg;
+  --dtp-led-color: #6f86ff;
+  --dtp-sx: 1;
+  --dtp-sy: 1;
+  --dtp-lift: 0;
+  --dtp-boost: 1;
+  --dtp-spin-sun: -105deg;
+  --dtp-spin-moon: 0deg;
+  --dtp-spin-glass: 105deg;
+  box-shadow:
+    0 1px 2px rgba(255, 255, 255, 0.18),
+    0 -1px 2px rgba(0, 0, 0, 0.4),
+    0 6px 14px rgba(0, 0, 0, 0.24),
+    0 1.5px 4px rgba(0, 0, 0, 0.2);
+  transition: box-shadow 0.45s ease;
+}
+
+#island-settings .dtp-track:active {
+  cursor: grabbing;
+}
+
+#island-settings .dtp-track[data-mode='light'] {
+  --dtp-p: 0;
+  --dtp-w-light: 1;
+  --dtp-w-dark: 0;
+  --dtp-w-glass: 0;
+  --dtp-led-deg: 58deg;
+  --dtp-led-color: #ffae2e;
+  --dtp-spin-sun: 0deg;
+  --dtp-spin-moon: 105deg;
+  --dtp-spin-glass: 105deg;
+}
+
+#island-settings .dtp-track[data-mode='dark'] {
+  --dtp-p: 0.5;
+  --dtp-w-light: 0;
+  --dtp-w-dark: 1;
+  --dtp-w-glass: 0;
+  --dtp-led-deg: 180deg;
+  --dtp-led-color: #6f86ff;
+  --dtp-spin-sun: -105deg;
+  --dtp-spin-moon: 0deg;
+  --dtp-spin-glass: 105deg;
+}
+
+#island-settings .dtp-track[data-mode='glass'] {
+  --dtp-p: 1;
+  --dtp-w-light: 0;
+  --dtp-w-dark: 0;
+  --dtp-w-glass: 1;
+  --dtp-led-deg: 302deg;
+  --dtp-led-color: #5cd4ff;
+  --dtp-spin-sun: -105deg;
+  --dtp-spin-moon: -105deg;
+  --dtp-spin-glass: 0deg;
+}
+
+.tb-light #island-settings .dtp-track {
+  box-shadow:
+    0 2px 4px rgba(255, 255, 255, 0.94),
+    0 -1px 2px rgba(0, 0, 0, 0.14),
+    0 10px 22px rgba(0, 0, 0, 0.15),
+    0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* 60fps 弹簧物理接管期间关闭子层 CSS transition，零延迟零冲突 */
+#island-settings .dtp-track.is-physics .dtp-sky,
+#island-settings .dtp-track.is-physics .dtp-rings > i,
+#island-settings .dtp-track.is-physics .dtp-clouds,
+#island-settings .dtp-track.is-physics .dtp-stars,
+#island-settings .dtp-track.is-physics .dtp-glass-fx,
+#island-settings .dtp-track.is-physics .dtp-glass-ribbon,
+#island-settings .dtp-track.is-physics .dtp-wash,
+#island-settings .dtp-track.is-physics .dtp-wash > i,
+#island-settings .dtp-track.is-physics .dtp-led-wrap,
+#island-settings .dtp-track.is-physics .dtp-led-halo,
+#island-settings .dtp-track.is-physics .dtp-led-core,
+#island-settings .dtp-track.is-physics .dtp-orb,
+#island-settings .dtp-track.is-physics .dtp-face,
+#island-settings .dtp-track.is-physics .dtp-orb-tir {
+  transition: none !important;
+}
+
+/* 三态背景天幕（随物理位置连续交融过渡） */
+#island-settings .dtp-sky {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.55s ease;
+}
+
+#island-settings .dtp-sky-light {
+  opacity: var(--dtp-w-light, 0);
+  background:
+    radial-gradient(circle at 10% 48%, rgba(255, 244, 184, 0.44), transparent 36%),
+    linear-gradient(180deg, #1d72c6 0%, #449ee4 52%, #7ccaf8 100%);
+}
+
+#island-settings .dtp-sky-dark {
+  opacity: var(--dtp-w-dark, 0);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(74, 88, 120, 0.24), transparent 58%),
+    linear-gradient(180deg, #161a24 0%, #202634 56%, #2c3345 100%);
+}
+
+#island-settings .dtp-sky-glass {
+  opacity: var(--dtp-w-glass, 0);
+  background:
+    radial-gradient(circle at 18% 24%, rgba(56, 189, 248, 0.72), transparent 46%),
+    radial-gradient(circle at 54% 82%, rgba(168, 85, 247, 0.56), transparent 52%),
+    radial-gradient(circle at 86% 32%, rgba(244, 114, 182, 0.58), transparent 48%),
+    linear-gradient(
+      125deg,
+      color-mix(in srgb, var(--dock-accent, #3b82f6) 56%, #13224a) 0%,
+      #3b1c7a 48%,
+      #0e6f68 100%
+    );
+}
+
+/* 跟随滚珠平滑弹跳的四层同心阶梯光环（适配 34px 纤细全宽胶囊） */
+#island-settings .dtp-rings {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#island-settings .dtp-rings > i {
+  position: absolute;
+  top: 4px;
+  left: calc(4px + (100% - 34px) * var(--dtp-p, 0));
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow:
+    0 0 0 16px rgba(255, 255, 255, 0.13),
+    0 0 0 42px rgba(255, 255, 255, 0.09),
+    0 0 0 76px rgba(255, 255, 255, 0.055),
+    0 0 0 116px rgba(255, 255, 255, 0.032);
+  transition:
+    left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1),
+    box-shadow 0.52s ease;
+}
+
+#island-settings .dtp-track[data-mode='light'] .dtp-rings > i {
+  box-shadow:
+    0 0 0 16px rgba(255, 255, 255, 0.17),
+    0 0 0 42px rgba(255, 255, 255, 0.12),
+    0 0 0 76px rgba(255, 255, 255, 0.08),
+    0 0 0 116px rgba(255, 255, 255, 0.045);
+}
+
+#island-settings .dtp-track[data-mode='glass'] .dtp-rings > i {
+  box-shadow:
+    0 0 0 16px color-mix(in srgb, var(--dock-accent, #7dd3fc) 22%, rgba(255, 255, 255, 0.15)),
+    0 0 0 42px color-mix(in srgb, var(--dock-accent, #c084fc) 14%, rgba(255, 255, 255, 0.1)),
+    0 0 0 76px rgba(255, 255, 255, 0.065),
+    0 0 0 116px rgba(255, 255, 255, 0.036);
+}
+
+/* 1) 日间绵延双层蓬松云海（适配 34px 纤细胶囊） */
+#island-settings .dtp-clouds {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: var(--dtp-w-light, 0);
+  transform: translateY(calc((1 - var(--dtp-w-light, 0)) * 30px));
+  transition:
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.44s ease;
+}
+
+#island-settings .dtp-cloud-back {
+  position: absolute;
+  right: 18px;
+  bottom: -10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(218, 240, 255, 0.66);
+  box-shadow:
+    18px -6px 0 3px rgba(218, 240, 255, 0.66),
+    -24px 3px 0 -1.5px rgba(218, 240, 255, 0.64),
+    -52px 7px 0 -2px rgba(218, 240, 255, 0.6),
+    -82px 5px 0 -1px rgba(218, 240, 255, 0.56),
+    -116px 9px 0 -3px rgba(218, 240, 255, 0.52),
+    -152px 10px 0 -3.5px rgba(218, 240, 255, 0.48),
+    -190px 12px 0 -4.5px rgba(218, 240, 255, 0.44),
+    -230px 13px 0 -5.5px rgba(218, 240, 255, 0.38);
+}
+
+#island-settings .dtp-cloud-front {
+  position: absolute;
+  right: 4px;
+  bottom: -13px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    15px -7px 0 4px #ffffff,
+    -22px 2.5px 0 -1px #ffffff,
+    -48px 5px 0 -1.5px #ffffff,
+    -76px 7px 0 -2px #ffffff,
+    -108px 6px 0 -1px #ffffff,
+    -140px 9px 0 -2.5px #ffffff,
+    -176px 10px 0 -3.5px #ffffff,
+    -212px 12px 0 -4.5px rgba(255, 255, 255, 0.96),
+    -248px 13px 0 -5.5px rgba(255, 255, 255, 0.92),
+    0 -2px 8px rgba(255, 255, 255, 0.48);
+}
+
+#island-settings .dtp-track[data-mode='light'] .dtp-cloud-back {
+  animation: dtp-cloud-drift 6.5s ease-in-out infinite alternate;
+}
+
+#island-settings .dtp-track[data-mode='light'] .dtp-cloud-front {
+  animation: dtp-cloud-drift 5.2s ease-in-out 0.6s infinite alternate-reverse;
+}
+
+@keyframes dtp-cloud-drift {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-6px);
+  }
+}
+
+/* 2) 夜间全幅星群与闪烁四角星（适配 34px 高度安全区） */
+#island-settings .dtp-stars {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: var(--dtp-w-dark, 0);
+  transform: translateY(calc((1 - var(--dtp-w-dark, 0)) * -28px));
+  transition:
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.44s ease;
+}
+
+/* 左侧大小圆点星群 */
+#island-settings .dtp-star-a {
+  position: absolute;
+  top: 8px;
+  left: 20%;
+  width: 5.5px;
+  height: 5.5px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    -44px 4px 0 -1.8px rgba(255, 255, 255, 0.88),
+    -30px 10px 0 -2px rgba(255, 255, 255, 0.72),
+    -20px 16px 0 -1px #ffffff,
+    22px -2px 0 -1.4px #ffffff,
+    18px 11px 0 -1.8px rgba(255, 255, 255, 0.84),
+    38px 15px 0 -0.8px #ffffff,
+    54px 5px 0 -2px rgba(255, 255, 255, 0.78);
+}
+
+/* 右侧大小圆点星群 */
+#island-settings .dtp-star-d {
+  position: absolute;
+  top: 9px;
+  right: 19%;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    -50px -3px 0 -0.8px #ffffff,
+    -36px 10px 0 -1.6px rgba(255, 255, 255, 0.82),
+    -20px 15px 0 -1.2px rgba(255, 255, 255, 0.92),
+    24px -3px 0 -1.5px rgba(255, 255, 255, 0.88),
+    34px 7px 0 -1.8px rgba(255, 255, 255, 0.74),
+    20px 14px 0 -0.8px #ffffff,
+    48px 3px 0 -1.4px rgba(255, 255, 255, 0.86);
+}
+
+#island-settings .dtp-star-b,
+#island-settings .dtp-star-c,
+#island-settings .dtp-star-b::after,
+#island-settings .dtp-star-c::after {
+  position: absolute;
+  background: #ffffff;
+  clip-path: polygon(50% 0%, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0% 50%, 37% 37%);
+}
+
+#island-settings .dtp-star-b {
+  top: 12px;
+  left: 7%;
+  width: 8px;
+  height: 8px;
+}
+
+#island-settings .dtp-star-b::after {
+  content: '';
+  top: -6px;
+  left: 108px;
+  width: 5.5px;
+  height: 5.5px;
+  opacity: 0.85;
+}
+
+#island-settings .dtp-star-c {
+  top: 7px;
+  right: 8%;
+  width: 8px;
+  height: 8px;
+}
+
+#island-settings .dtp-star-c::after {
+  content: '';
+  top: 14px;
+  right: 104px;
+  width: 5.5px;
+  height: 5.5px;
+  opacity: 0.88;
+}
+
+#island-settings .dtp-track[data-mode='dark'] .dtp-star-b {
+  animation: dtp-twinkle 2.1s ease-in-out infinite alternate;
+}
+
+#island-settings .dtp-track[data-mode='dark'] .dtp-star-c {
+  animation: dtp-twinkle 2.6s ease-in-out 0.6s infinite alternate;
+}
+
+@keyframes dtp-twinkle {
+  0% {
+    opacity: 0.56;
+    transform: scale(0.84) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.16) rotate(12deg);
+  }
+}
+
+/* 3) 液态玻璃宽幅棱镜流光带 + 6 颗 3D 悬浮液态水珠（适配 34px 高度） */
+#island-settings .dtp-glass-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: var(--dtp-w-glass, 0);
+  transform: translateY(calc((1 - var(--dtp-w-glass, 0)) * 22px)) scale(calc(0.94 + var(--dtp-w-glass, 0) * 0.06));
+  transition:
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.44s ease;
+}
+
+#island-settings .dtp-glass-ribbon {
+  position: absolute;
+  inset: -50% -50%;
+  background: linear-gradient(
+    112deg,
+    transparent 34%,
+    rgba(255, 255, 255, 0.14) 44%,
+    rgba(255, 255, 255, 0.44) 50%,
+    rgba(255, 255, 255, 0.14) 56%,
+    transparent 66%
+  );
+  transform: translateX(calc(-58% + var(--dtp-w-glass, 0) * 74%)) rotate(12deg);
+  transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#island-settings .dtp-gb {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.3) 48%, rgba(255, 255, 255, 0.56) 100%);
+  box-shadow:
+    inset 0 1px 1.2px rgba(255, 255, 255, 0.96),
+    inset 0 -1px 2px rgba(56, 189, 248, 0.48),
+    0 1.5px 4px rgba(0, 0, 0, 0.24),
+    0 0 0 0.6px rgba(255, 255, 255, 0.48);
+}
+
+#island-settings .dtp-gb.b1 { top: 6px; left: 7%; width: 10px; height: 10px; }
+#island-settings .dtp-gb.b2 { top: 19px; left: 19%; width: 7px; height: 7px; }
+#island-settings .dtp-gb.b3 { top: 7px; left: 32%; width: 8.5px; height: 8.5px; }
+#island-settings .dtp-gb.b4 { top: 18px; left: 47%; width: 9.5px; height: 9.5px; }
+#island-settings .dtp-gb.b5 { top: 7px; left: 62%; width: 7px; height: 7px; }
+#island-settings .dtp-gb.b6 { top: 17px; left: 76%; width: 8.5px; height: 8.5px; }
+
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b1 { animation: dtp-bubble-float 2.8s ease-in-out infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b2 { animation: dtp-bubble-float 3.2s ease-in-out 0.4s infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b3 { animation: dtp-bubble-float 2.5s ease-in-out 0.8s infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b4 { animation: dtp-bubble-float 3.4s ease-in-out 0.2s infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b5 { animation: dtp-bubble-float 2.9s ease-in-out 0.6s infinite alternate; }
+#island-settings .dtp-track[data-mode='glass'] .dtp-gb.b6 { animation: dtp-bubble-float 3.1s ease-in-out 0.3s infinite alternate; }
+
+@keyframes dtp-bubble-float {
+  0% {
+    transform: translateY(1.5px);
+  }
+  100% {
+    transform: translateY(-2px);
+  }
+}
+
+/* 3.5) Glass Light Toggle 同款凹槽环境溢光洗墙（Track Wash） */
+#island-settings .dtp-wash {
+  position: absolute;
+  top: 4px;
+  left: calc(4px + (100% - 34px) * var(--dtp-p, 0));
+  width: 26px;
+  height: 26px;
+  z-index: 3;
+  pointer-events: none;
+  transition: left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1);
+}
+
+#island-settings .dtp-wash > i {
+  position: absolute;
+  left: -24px;
+  top: -24px;
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 24%,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 72%, transparent) 0%,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 24%, transparent) 42%,
+    transparent 70%
+  );
+  filter: blur(6px);
+  opacity: calc(0.66 * var(--dtp-boost, 1));
+  transform: rotate(var(--dtp-led-deg, 180deg));
+  transition: transform 0.68s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+}
+
+/* 3.8) Glass Light Toggle 同款绕行白炽灯带弧（Orbiting Light Strip） */
+#island-settings .dtp-led-wrap {
+  position: absolute;
+  top: 1px;
+  left: calc(1px + (100% - 34px) * var(--dtp-p, 0));
+  width: 32px;
+  height: 32px;
+  z-index: 5;
+  pointer-events: none;
+  transform: translateY(calc(var(--dtp-lift, 0) * -0.8px)) scale(var(--dtp-sx, 1), var(--dtp-sy, 1));
+  transition: left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1), transform 0.28s var(--spring);
+}
+
+#island-settings .dtp-led-halo,
+#island-settings .dtp-led-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transform: rotate(var(--dtp-led-deg, 180deg));
+  transition: transform 0.68s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+}
+
+#island-settings .dtp-led-halo {
+  inset: -2.5px;
+  background: conic-gradient(
+    from -50deg,
+    transparent 0deg,
+    var(--dtp-led-color, #6f86ff) 22deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 30%, #ffffff) 50deg,
+    var(--dtp-led-color, #6f86ff) 78deg,
+    transparent 100deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5.5px), #000 calc(100% - 2.5px), #000 100%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5.5px), #000 calc(100% - 2.5px), #000 100%);
+  filter: blur(3.5px);
+  mix-blend-mode: screen;
+  opacity: calc(0.95 * var(--dtp-boost, 1));
+}
+
+#island-settings .dtp-led-core {
+  inset: 0;
+  background: conic-gradient(
+    from -46deg,
+    transparent 0deg,
+    var(--dtp-led-color, #6f86ff) 14deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 22%, #ffffff) 34deg,
+    #ffffff 46deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 22%, #ffffff) 58deg,
+    var(--dtp-led-color, #6f86ff) 78deg,
+    transparent 92deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.2px), #000 100%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.2px), #000 100%);
+  filter: drop-shadow(0 0 2px var(--dtp-led-color, #6f86ff));
+  opacity: calc(1 * var(--dtp-boost, 1));
+}
+
+/* 三态 3D 物理滑动滚珠（26×26px 纤细比例 + TIR 内折射） */
+#island-settings .dtp-orb {
+  position: absolute;
+  top: 4px;
+  left: calc(4px + (100% - 34px) * var(--dtp-p, 0));
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(calc(var(--dtp-lift, 0) * -0.8px)) scale(var(--dtp-sx, 1), var(--dtp-sy, 1));
+  box-shadow:
+    0 calc(2.5px + var(--dtp-lift, 0) * 2px) calc(8px + var(--dtp-lift, 0) * 4px) rgba(0, 0, 0, 0.44),
+    0 1px 3px rgba(0, 0, 0, 0.28),
+    0 0 calc(9px * var(--dtp-boost, 1)) color-mix(in srgb, var(--dtp-led-color, #6f86ff) 32%, transparent);
+  transition:
+    left 0.68s cubic-bezier(0.34, 1.28, 0.44, 1),
+    box-shadow 0.42s ease,
+    transform 0.28s var(--spring);
+}
+
+#island-settings .dtp-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transition:
+    opacity 0.44s ease,
+    transform 0.66s cubic-bezier(0.34, 1.28, 0.44, 1);
+}
+
+/* 球面 A：3D 金色骄阳 */
+#island-settings .dtp-face-sun {
+  opacity: var(--dtp-w-light, 0);
+  background: radial-gradient(circle at 32% 28%, #fff8c4 0%, #facc15 48%, #e29d00 100%);
+  box-shadow:
+    inset 1.2px 2px 3px rgba(255, 255, 255, 0.84),
+    inset -2px -2.5px 4px rgba(176, 98, 0, 0.44);
+  transform: rotate(var(--dtp-spin-sun, -105deg)) scale(calc(0.86 + var(--dtp-w-light, 0) * 0.14));
+}
+
+/* 球面 B：3D 银白陨石坑月球（三大立体凹坑等比精雕） */
+#island-settings .dtp-face-moon {
+  opacity: var(--dtp-w-dark, 0);
+  background: radial-gradient(circle at 30% 26%, #f5f7fb 0%, #d1d7e2 58%, #aab3c4 100%);
+  box-shadow:
+    inset 1.2px 2px 3px rgba(255, 255, 255, 0.94),
+    inset -2px -2.5px 4px rgba(66, 74, 90, 0.46);
+  transform: rotate(var(--dtp-spin-moon, 0deg)) scale(calc(0.86 + var(--dtp-w-dark, 0) * 0.14));
+}
+
+#island-settings .dtp-crater {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  background: #9aa3b4;
+  box-shadow:
+    inset 0.8px 1px 1.5px rgba(62, 70, 86, 0.52),
+    0 0.6px 0 rgba(255, 255, 255, 0.58);
+}
+
+#island-settings .dtp-crater.c1 {
+  left: 4.5px;
+  bottom: 4.5px;
+  width: 8.5px;
+  height: 8.5px;
+}
+
+#island-settings .dtp-crater.c2 {
+  left: 11px;
+  top: 3.5px;
+  width: 5.5px;
+  height: 5.5px;
+}
+
+#island-settings .dtp-crater.c3 {
+  right: 3.5px;
+  bottom: 4px;
+  width: 6.5px;
+  height: 6.5px;
+}
+
+/* 球面 C：3D 液态玻璃折射晶球（高光弯月 + 底部焦散 + 边缘微色散） */
+#island-settings .dtp-face-glass {
+  opacity: var(--dtp-w-glass, 0);
+  background: radial-gradient(
+    circle at 28% 24%,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(255, 255, 255, 0.34) 34%,
+    color-mix(in srgb, var(--dock-accent, #5e9bff) 44%, rgba(139, 92, 246, 0.28)) 68%,
+    rgba(255, 255, 255, 0.74) 100%
+  );
+  backdrop-filter: blur(6px) saturate(1.65);
+  -webkit-backdrop-filter: blur(6px) saturate(1.65);
+  box-shadow:
+    inset 0 1.5px 3px rgba(255, 255, 255, 0.96),
+    inset 1.2px 0 2.5px rgba(56, 189, 248, 0.52),
+    inset -1.2px 0 2.5px rgba(244, 114, 182, 0.48),
+    inset 0 -3px 5px color-mix(in srgb, var(--dock-accent, #38bdf8) 68%, rgba(168, 85, 247, 0.45)),
+    inset 0 0 0 0.8px rgba(255, 255, 255, 0.64);
+  transform: rotate(var(--dtp-spin-glass, 105deg)) scale(calc(0.86 + var(--dtp-w-glass, 0) * 0.14));
+}
+
+#island-settings .dtp-glass-glint {
+  position: absolute;
+  top: 3.5px;
+  left: 5px;
+  width: 10px;
+  height: 5px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.08));
+  transform: rotate(-28deg);
+}
+
+#island-settings .dtp-glass-caustic {
+  position: absolute;
+  right: 3.5px;
+  bottom: 3.5px;
+  width: 8px;
+  height: 5px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.8), transparent 72%);
+  transform: rotate(-22deg);
+}
+
+/* 滚珠内斜角全反射光晕（TIR Bevel Coupling — 与外圈灯带弧实时同角耦合） */
+#island-settings .dtp-orb-tir {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(
+    from -52deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 82%, transparent) 26deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 35%, #ffffff) 52deg,
+    color-mix(in srgb, var(--dtp-led-color, #6f86ff) 82%, transparent) 78deg,
+    transparent 104deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent 62%, rgba(0, 0, 0, 0.65) 86%, #000 100%);
+  mask: radial-gradient(farthest-side, transparent 62%, rgba(0, 0, 0, 0.65) 86%, #000 100%);
+  opacity: calc(0.76 * var(--dtp-boost, 1));
+  transform: rotate(var(--dtp-led-deg, 180deg));
+  mix-blend-mode: screen;
+  transition: transform 0.68s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 精密 0.8px 左上主光斜角高光边（Specular Rim） */
+#island-settings .dtp-orb-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    inset 1px 1.5px 1.5px rgba(255, 255, 255, 0.78),
+    inset -1px -1.5px 2px rgba(0, 0, 0, 0.24);
+}
+
+/* 顶层内凹物理倒角阴影罩 + 底部 1.3px 反射内亮边（让整个场景真正沉在光学凹槽内） */
+#island-settings .dtp-bevel {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow:
+    inset 0 6px 14px rgba(0, 0, 0, 0.5),
+    inset 0 -1.5px 1.5px rgba(255, 255, 255, 0.3),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+/* 胶囊左/中/右三段透明点击区 */
+#island-settings .dtp-hits {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  pointer-events: none;
+}
+
+#island-settings .dtp-hit {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: inherit;
+  pointer-events: auto;
+}
+
+#island-settings .dtp-hit:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: -3px;
+  border-radius: 999px;
+}
+
+/* 胶囊下方全宽对齐的三档文字指示按钮（首尾适度朝滚珠圆心靠拢，呼应物理停靠点） */
+#island-settings .dtp-labels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+}
+
+#island-settings .dtp-label-btn:first-child {
+  padding-right: 68px;
+}
+
+#island-settings .dtp-label-btn:last-child {
+  padding-left: 68px;
+}
+
+#island-settings .dtp-label-btn {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 1px 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--dock-muted, var(--g4));
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.22s var(--spring);
+}
+
+#island-settings .dtp-label-btn:active {
+  transform: scale(0.94);
+}
+
+#island-settings .dtp-label-btn::after {
+  content: '';
+  width: 20px;
+  height: 2.5px;
+  border-radius: 999px;
+  background: var(--dock-accent, #5e9bff);
+  opacity: 0;
+  transform: scaleX(0.3);
+  transition:
+    opacity 0.26s ease,
+    transform 0.36s var(--spring);
+}
+
+#island-settings .dtp-label-btn:hover {
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .dtp-label-btn.on {
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+  font-weight: 650;
+}
+
+#island-settings .dtp-label-btn.on::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+/* 液态玻璃卡片内的预设与玻璃色调调节区 */
+#island-settings .dock-glass-seg {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px;
+  margin: 2px 0 4px;
+  border-radius: 999px;
+}
+
+#island-settings .dock-glass-seg > button {
+  padding: 4px 0;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 11.5px;
+}
+
+#island-settings .glass-accent-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .glass-accent-zone {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .ilook-accent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+#island-settings .ilook-accent-row .winaccent-mode {
+  margin-top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#island-settings .ilook-accents {
+  margin-top: 2px;
+}
+
+#island-settings .glass-reg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .glass-reg {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .glass-reg-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+#island-settings .glass-reg-t {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#island-settings .glass-reg-d {
+  font-size: 11px;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .ilook-slider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 22px;
+}
+
+#island-settings .ilook-slider-lbl {
+  flex: 0 0 56px;
+  font-size: 11.5px;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .ilook-slider-row .ilook-rng {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#island-settings .ilook-slider-row .rng {
+  flex: 1;
+  width: auto;
+  height: 4px;
+}
+
+#island-settings .ilook-hint {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--dock-muted, var(--g4));
+}
+
+/* 字体颜色与内嵌玻璃调色板（色圆 + 等宽 HEX 序号严格同一水平中轴线对齐） */
+#island-settings .ilook-typo-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .ilook-typo-item {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .ilook-typo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+}
+
+#island-settings .ilook-typo-lbl {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .ilook-typo-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+#island-settings .typo-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  cursor: pointer;
+}
+
+#island-settings .typo-pill-btn:hover {
+  border-color: var(--g4);
+}
+
+#island-settings .typo-pill-btn.on {
+  border-color: var(--dock-accent, #5e9bff);
+  box-shadow: 0 0 0 1px var(--dock-accent, #5e9bff);
+}
+
+#island-settings .typo-dot {
+  flex: none;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+#island-settings .typo-hex {
+  display: inline-flex;
+  align-items: center;
+  width: 7.2ch;
+  font-size: 12px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .typo-clear-btn {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#island-settings .typo-clear-btn.is-ghost {
+  opacity: 0.32;
+  pointer-events: none;
+}
+
+/* 紧凑液态玻璃浮窗调色盘（2D 色板 + 彩虹色相条 + RGB 0-255 + HEX #ffffff + 清空） */
+#island-settings .cp-popover {
+  position: absolute;
+  z-index: 80;
+  width: 244px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) 18%, rgba(24, 27, 40, 0.88));
+  backdrop-filter: blur(22px) saturate(1.55);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 16px 40px rgba(0, 0, 0, 0.42);
+  animation: cp-pop-in 0.22s var(--spring) both;
+}
+
+.tb-light #island-settings .cp-popover {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(252, 252, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 14px 36px rgba(0, 0, 0, 0.16);
+}
+
+#island-settings .cp-popover[hidden] {
+  display: none;
+}
+
+@keyframes cp-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#island-settings .cp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#island-settings .cp-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+}
+
+#island-settings .cp-close {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dock-muted, var(--g5));
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.16s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .cp-close:hover {
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .cp-close:active {
+  transform: scale(0.9);
+}
+
+/* 2D 饱和度 × 明度色板 */
+#island-settings .cp-sv {
+  position: relative;
+  width: 100%;
+  height: 126px;
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+#island-settings .cp-sv-white {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+}
+
+#island-settings .cp-sv-black {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, #000000 100%);
+  pointer-events: none;
+}
+
+#island-settings .cp-sv-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* 彩虹色相滑条 */
+#island-settings .cp-hue {
+  position: relative;
+  width: 100%;
+  height: 13px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+  cursor: ew-resize;
+  touch-action: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+#island-settings .cp-hue-thumb {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.48);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* RGB (0-255) 三通道精准输入行 */
+#island-settings .cp-rgb-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+#island-settings .cp-rgb-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 8px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  box-sizing: border-box;
+}
+
+#island-settings .cp-rgb-field:focus-within {
+  border-color: var(--dock-accent, #5e9bff);
+}
+
+#island-settings .cp-rgb-field > span {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--dock-muted, var(--g5));
+  user-select: none;
+}
+
+#island-settings .cp-rgb-in {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  outline: none;
+  background: transparent;
+  color: var(--dock-fg, var(--fg));
+  font-size: 11.5px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 底栏：清空/跟随系统 + HEX (#ffffff) 输入框 */
+#island-settings .cp-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#island-settings .cp-clear {
+  flex: none;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dock-fg, var(--fg));
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.16s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .cp-clear:hover {
+  background: var(--g2);
+}
+
+#island-settings .cp-clear:active {
+  transform: scale(0.95);
+}
+
+#island-settings .cp-hex-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 9px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  box-sizing: border-box;
+}
+
+#island-settings .cp-hex-wrap:focus-within {
+  border-color: var(--dock-accent, #5e9bff);
+}
+
+#island-settings .cp-hex-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+#island-settings .cp-hex-in {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  outline: none;
+  background: transparent;
+  color: var(--dock-fg, var(--fg));
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 背景图片预览与位置调整浮窗（默认自动自适应 + 用户 DIY 拖动/缩放） ---- */
+#island-settings .wp-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(10, 12, 18, 0.54);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: wp-fade-in 0.18s ease both;
+}
+
+#island-settings .wp-modal-backdrop[hidden] {
+  display: none;
+}
+
+@keyframes wp-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+#island-settings .wp-modal {
+  width: min(410px, 100%);
+  max-height: calc(100% - 8px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(24, 27, 38, 0.94);
+  backdrop-filter: blur(24px) saturate(1.48);
+  -webkit-backdrop-filter: blur(24px) saturate(1.48);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 22px 48px rgba(0, 0, 0, 0.52);
+  animation: cp-pop-in 0.22s var(--spring) both;
+}
+
+.tb-light #island-settings .wp-modal {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(252, 252, 255, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 18px 42px rgba(0, 0, 0, 0.18);
+}
+
+#island-settings .wp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#island-settings .wp-head-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+#island-settings .wp-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+}
+
+#island-settings .wp-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .wp-stage-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.tb-light #island-settings .wp-stage-wrap {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+#island-settings .wp-stage {
+  position: relative;
+  width: 196px;
+  height: 196px;
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  background: #14161e;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.24),
+    0 10px 26px rgba(0, 0, 0, 0.38);
+}
+
+#island-settings .wp-stage.is-dragging {
+  cursor: grabbing;
+  box-shadow:
+    0 0 0 2px var(--dock-accent, #5e9bff),
+    0 12px 30px rgba(0, 0, 0, 0.46);
+}
+
+#island-settings .wp-stage-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: 50% 50%;
+  pointer-events: none;
+}
+
+#island-settings .wp-stage-dim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+#island-settings .wp-stage.is-dragging .wp-stage-dim {
+  opacity: 0.35;
+}
+
+/* 三分法辅助网格（拖动构图时淡入） */
+#island-settings .wp-stage-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+#island-settings .wp-stage.is-dragging .wp-stage-grid {
+  opacity: 1;
+}
+
+#island-settings .wp-stage-grid > i,
+#island-settings .wp-stage-grid > b {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+#island-settings .wp-stage-grid > i {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+#island-settings .wp-stage-grid > i:nth-child(1) { left: 33.33%; }
+#island-settings .wp-stage-grid > i:nth-child(2) { left: 66.66%; }
+
+#island-settings .wp-stage-grid > b {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+#island-settings .wp-stage-grid > b:nth-child(3) { top: 33.33%; }
+#island-settings .wp-stage-grid > b:nth-child(4) { top: 66.66%; }
+
+/* 极淡 Dock 面板参考轮廓，直观感知文字与卡片落位 */
+#island-settings .wp-stage-mock {
+  position: absolute;
+  inset: 10px 10px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+  opacity: 0.56;
+  transition: opacity 0.18s ease;
+}
+
+#island-settings .wp-stage.is-dragging .wp-stage-mock {
+  opacity: 0.18;
+}
+
+#island-settings .wp-mock-head {
+  height: 14px;
+  width: 64%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+#island-settings .wp-mock-card {
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+#island-settings .wp-mock-card.sm {
+  height: 24px;
+  width: 78%;
+}
+
+#island-settings .wp-stage-tip {
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  transform: translateX(-50%);
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(14, 16, 22, 0.78);
+  color: #ffffff;
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .wp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+#island-settings .wp-chip {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.2s var(--spring);
+}
+
+#island-settings .wp-chip:hover {
+  border-color: var(--g4);
+}
+
+#island-settings .wp-chip:active {
+  transform: scale(0.95);
+}
+
+#island-settings .wp-chip.on {
+  border-color: #005fb8;
+  background: #005fb8;
+  color: #ffffff;
+}
+
+#island-settings .wp-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#island-settings .wp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tb-light #island-settings .wp-foot {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+#island-settings .wp-foot-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- 插件页：「小工具」可折叠卡片（视觉与结构严格对齐「运行依赖」折叠卡） ---- */
+#island-settings .w-studio {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--g3);
+  border-radius: 14px;
+  background: var(--g1);
+}
+
+#island-settings .w-studio-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+
+#island-settings .w-studio-head:focus-visible {
+  outline: 2px solid #80b6ff;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+#island-settings .w-studio-title {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+#island-settings .w-studio-title::before {
+  content: '▸';
+  display: inline-block;
+  width: 14px;
+  color: var(--g4);
+  transition: transform 0.18s ease;
+}
+
+#island-settings .w-studio.open .w-studio-title::before {
+  transform: rotate(90deg);
+}
+
+#island-settings .w-studio-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+#island-settings .w-studio-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-muted, var(--g5));
+  font-size: 11px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .w-studio-body[hidden] {
+  display: none;
+}
+
+#island-settings .w-studio-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--g3);
+}
+
+#island-settings .w-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#island-settings .w-item-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+}
+
+.tb-light #island-settings .w-item-card {
+  border-color: rgba(0, 0, 0, 0.07);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+#island-settings .w-item-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.tb-light #island-settings .w-item-card:hover {
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+#island-settings .w-item-card.is-placed {
+  border-color: color-mix(in srgb, var(--dock-accent, #5e9bff) 28%, rgba(255, 255, 255, 0.08));
+}
+
+#island-settings .w-item-row {
+  padding: 8px 10px;
+  min-height: 48px;
+  gap: 10px;
+}
+
+#island-settings .w-icon-box {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--w-tint, #5e9bff) 15%, rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--w-tint, #5e9bff) 28%, rgba(255, 255, 255, 0.08));
+}
+
+#island-settings .w-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+#island-settings .w-item-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#island-settings .w-item-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#island-settings .w-reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--g2);
+  color: var(--dock-fg, var(--fg));
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+#island-settings .w-desc {
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+#island-settings .w-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+#island-settings .w-item-actions .pl-at {
+  min-width: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  font-size: 11px;
+}
+
+#island-settings .w-item-drawer {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.tb-light #island-settings .w-item-drawer {
+  border-top-color: rgba(0, 0, 0, 0.07);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+#island-settings .w-item-drawer .pf {
+  padding: 8px 12px 10px;
+}
+
+/* 液态玻璃模式全设定页半透明 + 模糊 + 玻璃色调染色 + 360° 玻璃高光边（清除颜色时 --dock-glass-tint-* 归零，呈现纯粹水晶玻璃） */
+body.dock-glass #island-settings .grp,
+body.dock-glass #island-settings .mode,
+body.dock-glass #island-settings .tile,
+body.dock-glass #island-settings .ilook-card,
+body.dock-glass #island-settings .ilook-sec-card,
+body.dock-glass #island-settings .w-studio,
+body.dock-glass #island-settings .w-item-card,
+body.dock-glass #island-settings .tab-order,
+body.dock-glass #island-settings .card,
+body.dock-glass #island-settings .wcard,
+body.dock-glass #island-settings .s-ask,
+body.dock-glass #island-settings .welcome,
+body.dock-glass #island-settings .identity-panel,
+body.dock-glass #island-settings .note-row,
+body.dock-glass #island-settings .extension-card,
+body.dock-glass #island-settings .extension-auth,
+body.dock-glass #island-settings .extension-runtime,
+body.dock-glass #island-settings .extension-failure,
+body.dock-glass #island-settings .extension-down,
+body.dock-glass #island-settings .notes-skeleton .sk,
+body.dock-glass #island-settings .adv-b,
+body.dock-glass #island-settings .ag-way {
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-card, 10%), rgba(24, 26, 36, var(--dock-glass-card-op, 0.22)));
+  backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.38);
+  -webkit-backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.38);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 26%), rgba(255, 255, 255, 0.18)),
+    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-card, 10%), rgba(255, 255, 255, 0.12));
+  transition: background 0.34s ease, box-shadow 0.34s ease, border-color 0.28s ease;
+}
+
+body.dock-glass #island-settings .s-confirm-dialog,
+body.dock-glass #island-settings .mmenu,
+body.dock-glass #island-settings .cp-popover,
+body.dock-glass #island-settings .wp-modal,
+body.dock-glass #island-settings .ext-progress {
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-overlay, 12%), rgba(24, 26, 36, var(--dock-glass-overlay-op, 0.45)));
+  backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.42);
+  -webkit-backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.42);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 26%), rgba(255, 255, 255, 0.22)),
+    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-overlay, 12%), rgba(255, 255, 255, 0.14)),
+    0 18px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* 「更多」动作浮层在玻璃模式下保持高不透明度，避免底下文字干扰且隔离点击 */
+body.dock-glass #island-settings .extension-more-body {
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-overlay, 12%), rgba(22, 24, 34, 0.94));
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 26%), rgba(255, 255, 255, 0.26)),
+    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-overlay, 12%), rgba(255, 255, 255, 0.18)),
+    0 18px 42px rgba(0, 0, 0, 0.56);
+}
+
+body.dock-glass #island-settings .s-tabs,
+body.dock-glass #island-settings .pbtn,
+body.dock-glass #island-settings .seg,
+body.dock-glass #island-settings .in,
+body.dock-glass #island-settings .identity-directory,
+body.dock-glass #island-settings .cmd,
+body.dock-glass #island-settings .wc-cmd,
+body.dock-glass #island-settings .s-device-code,
+body.dock-glass #island-settings .card .pv,
+body.dock-glass #island-settings .petrow .thumb,
+body.dock-glass #island-settings .tile .c,
+body.dock-glass #island-settings .pick,
+body.dock-glass #island-settings .kbadge,
+body.dock-glass #island-settings .wc-tool,
+body.dock-glass #island-settings .typo-pill-btn,
+body.dock-glass #island-settings .cp-rgb-field,
+body.dock-glass #island-settings .cp-hex-wrap,
+body.dock-glass #island-settings .ilook-hero-badge,
+body.dock-glass #island-settings .mode-beta,
+body.dock-glass #island-settings .w-reading,
+body.dock-glass #island-settings .w-studio-badge,
+body.dock-glass #island-settings .w-item-actions .pl-at,
+body.dock-glass #island-settings .tab-order li,
+body.dock-glass #island-settings .extension-views,
+body.dock-glass #island-settings .extension-search,
+body.dock-glass #island-settings .extension-page-entry,
+body.dock-glass #island-settings .extension-more > summary,
+body.dock-glass #island-settings .extension-node,
+body.dock-glass #island-settings .extension-build,
+body.dock-glass #island-settings .extension-build-source,
+body.dock-glass #island-settings .s-tabs button.on {
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-card, 10%), rgba(42, 46, 62, var(--dock-glass-control-op, 0.28)));
+  backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.28);
+  -webkit-backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.28);
+  border-color: color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 22%), rgba(255, 255, 255, 0.14));
+}
+
+body.dock-glass #island-settings .pbtn.al {
+  background: #005fb8;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--dock-accent, #005fb8) 42%, transparent);
+}
+
+body.dock-glass #island-settings .seg > :is(span, button).on,
+body.dock-glass #island-settings .extension-view[aria-selected='true'] {
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-rim, 22%), rgba(58, 64, 86, 0.78));
+  color: var(--dock-fg, var(--fg));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+body.dock-glass #island-settings .extension-host,
+body.dock-glass #island-settings .extension-service-shell,
+body.dock-glass #island-settings iframe {
+  background: transparent;
 }

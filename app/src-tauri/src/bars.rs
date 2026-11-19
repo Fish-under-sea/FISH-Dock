@@ -310,7 +310,7 @@ fn create(sh: &Arc<Shared>, label: String, area: Area, edge: Edge) {
         let hwnd = 0;
         crate::tasks::no_transitions(hwnd);
         sh.own_window(&win);
-        let granted = if hwnd != 0 && appbar::register(hwnd) { appbar::place(hwnd, area.mon, edge, thick) } else { strip };
+        let granted = if hwnd != 0 && appbar::register(hwnd) { crate::taskbar::claim(|| appbar::place(hwnd, area.mon, edge, thick)) } else { strip };
         lay(&win, granted);
         // Zoomed before its page lays out (fit_zoom).
         let zoom = 1.0 / island::text_size(&sh);

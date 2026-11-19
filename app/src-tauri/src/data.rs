@@ -186,6 +186,36 @@ fn defaults() -> Map<String, Value> {
         "plugins": {},
         // Mail accounts (mail.rs); their passwords are in the Credential Manager.
         "mail": [],
+        // A code or a link to sign in with, come by mail, on the island (mail/codes.rs).
+        "mailCodes": true,
+        // Other programs' approvals on her prompt panel (app_asks.rs).
+        "appAsks": true,
+        // Dock's own appearance (light / dark / glass, accent, wallpaper, liquid glass, typography).
+        "dockLook": {
+            "mode": "dark",
+            "accentMode": "system",
+            "accent": "#0078d4",
+            "wallpaper": "",
+            "wallpaperDim": 58,
+            "wallpaperFit": "auto",
+            "wallpaperPosX": 50,
+            "wallpaperPosY": 50,
+            "wallpaperZoom": 100,
+            "glass": {
+                "preset": "balanced",
+                "surfaceOp": 38,
+                "surfaceBlur": 18,
+                "cardOp": 22,
+                "cardBlur": 12,
+                "overlayOp": 45,
+                "overlayBlur": 16,
+                "controlOp": 28,
+                "controlBlur": 8
+            },
+            "headingColor": "",
+            "textColor": "",
+            "mutedColor": ""
+        },
         "walk": true,
         "look": true,
         // Done, changed or failed: shown 8 s, or until seen ("seen"); 30 and
@@ -208,6 +238,8 @@ fn defaults() -> Map<String, Value> {
         "dnd": false,
         "hideInFullscreen": true,
         "onboarded": false,
+        // Antigravity PreToolUse 效率模式（events_agy.rs）：开启时，非极速模式下的普通工作区读写与非高危命令自动 auto_approve。
+        "agyEfficiencyMode": true,
         // 全局快捷键（shortcuts.rs）：Alt+Y 允许 / Alt+N 拒绝 / Alt+W 展开收起。
         // 默认关着，开了才占这些组合键。
         "shortcutsEnabled": false,
@@ -386,6 +418,31 @@ static PETS_PUT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 // under way as she puts it in is not kept either.
 pub fn forget_pets() {
     PETS_PUT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Only pets downloaded into `<dir>/pets/<id>` (not Codex's read-only store
+/// or bundled source-tree pets) can be deleted from the UI.
+pub fn pet_deletable(dir: &Path, pet: &PetInfo) -> bool {
+    !pet.from_codex && dir.join("pets").join(&pet.id).is_dir()
+}
+
+/// Asset URL for Dock's own wallpaper stored under `<dir>/config/<name>`.
+pub fn dock_paper_url(dir: &Path, dock_look: &Value) -> Option<String> {
+    let name = dock_look.get("wallpaper").and_then(Value::as_str)?.trim();
+    if name.is_empty() || name.contains(['/', '\\']) || name.contains("..") {
+        return None;
+    }
+    let path = dir.join("config").join(name);
+    if !path.is_file() {
+        return None;
+    }
+    let stamp = fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    Some(format!("{}?v={stamp}", asset_url(&path)))
 }
 
 pub fn pets(dir: &Path) -> Vec<PetInfo> {
@@ -631,5 +688,17 @@ mod tests {
         let mut s = settings(json!({ "taskbarLayout": null }));
         drop_part(&mut s, "tags");
         assert_eq!(s["taskbarLayout"], Value::Null);
+    }
+
+    #[test]
+    fn dock_paper_url_checks_config_file_and_blocks_traversal() {
+        let dir = std::env::temp_dir().join(format!("fish-dock-paper-{}", crate::now_ms()));
+        let cfg = dir.join("config");
+        fs::create_dir_all(&cfg).unwrap();
+        assert_eq!(dock_paper_url(&dir, &json!({ "wallpaper": "dock-wallpaper.png" })), None);
+        assert_eq!(dock_paper_url(&dir, &json!({ "wallpaper": "../evil.png" })), None);
+        fs::write(cfg.join("dock-wallpaper.png"), b"png").unwrap();
+        assert!(dock_paper_url(&dir, &json!({ "wallpaper": "dock-wallpaper.png" })).is_some());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
