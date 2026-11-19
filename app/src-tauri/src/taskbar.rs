@@ -1374,6 +1374,48 @@ mod imp {
         SENT_WINDOWS.lock().unwrap().clone()
     }
 
+    // 顶栏 + Dock（测试版）专用：无需接管任务栏也可直接实时枚举运行中的窗口与图标。
+    pub fn topbar_windows(sf: f64) -> Vec<Value> {
+        static CACHE: Mutex<Option<HashMap<isize, (isize, String)>>> = Mutex::new(None);
+        let size = (32.0 * sf.max(1.0)).round().clamp(24.0, 64.0) as i32;
+        let list = tasks::list();
+        let mut cache_guard = CACHE.lock().unwrap();
+        let cache = cache_guard.get_or_insert_with(HashMap::new);
+        let alive: std::collections::HashSet<isize> = list.iter().map(|t| t.hwnd).collect();
+        cache.retain(|hwnd, _| alive.contains(hwnd));
+        let mut out = Vec::with_capacity(list.len());
+        for t in list {
+            let icon = tasks::icon_of(t.hwnd);
+            let png = match cache.get(&t.hwnd) {
+                Some((cached_icon, cached_png)) if *cached_icon == icon && !cached_png.is_empty() => cached_png.clone(),
+                _ => {
+                    let mut got = if icon != 0 { png_of(icon, size).unwrap_or_default() } else { String::new() };
+                    if got.is_empty() && !t.path.is_empty() {
+                        let fi = tasks::file_icon(&t.path);
+                        if fi != 0 {
+                            got = png_of(fi, size).unwrap_or_default();
+                            tasks::destroy_icon(fi);
+                        }
+                    }
+                    cache.insert(t.hwnd, (icon, got.clone()));
+                    got
+                }
+            };
+            let title = if t.title.is_empty() {
+                tasks::app_name(&t.path)
+            } else {
+                t.title
+            };
+            out.push(json!({
+                "hwnd": t.hwnd,
+                "title": title,
+                "minimized": t.min,
+                "icon": png,
+            }));
+        }
+        out
+    }
+
     // Windows' look as last sent: light or dark, the accent (bars.rs).
     pub fn look_value() -> Value {
         LOOK.lock().unwrap().clone()
@@ -3423,6 +3465,9 @@ mod imp {
     pub fn windows_now() -> serde_json::Value {
         serde_json::Value::Null
     }
+    pub fn topbar_windows(_sf: f64) -> Vec<serde_json::Value> {
+        Vec::new()
+    }
     pub fn press(_sh: &Shared, _key: u64, _press: &str, _home_hwnd: isize) -> bool {
         false
     }
@@ -3473,7 +3518,7 @@ mod imp {
     }
 }
 
-pub use imp::{claim, end_task_on, explorer_room, give_back, handing_back, hold_still, is_up, set_edge, look_for_other, look_now, look_value, note, resend, strip_moved, strip_picture, task_view_on, take, waiting, wake, windows_now, work_area_bottom, work_area_rect};
+pub use imp::{claim, end_task_on, explorer_room, give_back, handing_back, hold_still, is_up, set_edge, look_for_other, look_now, look_value, note, resend, strip_moved, strip_picture, task_view_on, take, topbar_windows, waiting, wake, windows_now, work_area_bottom, work_area_rect};
 
 // Windows' End task setting's number (end_task_on): on once set, but for 0.
 #[cfg_attr(not(windows), allow(dead_code))]

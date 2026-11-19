@@ -324,6 +324,11 @@ pub fn home_display(sh: &Shared) -> Option<((i32, i32, i32, i32), f64)> {
     area(sh).map(|a| (a.mon, a.sf))
 }
 
+// 顶栏/dock 所在显示器的完整几何（含排除 Windows 任务栏后的工作区）。
+pub fn home_area(sh: &Shared) -> Option<crate::screen::Area> {
+    area(sh)
+}
+
 // Where the window goes, by home. Returns the physical rect if it moved.
 fn fit(sh: &Shared) -> Option<((i32, i32), (i32, i32))> {
     let home = sh.home();

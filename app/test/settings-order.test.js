@@ -132,24 +132,24 @@ test('规格 11/13/34：闲置分钟、等你回答秒数、轮流显示秒数�
   assert.match(source, /const SPINS = \[0, 5, 8, 15\]/, '规格 34：关（0）/ 5 / 8 / 15')
 })
 
-test('规格 16–24：外观页 显示方式 → 内置（任务栏 → 灵动岛外观）→ 标签页排序 → 她 → 宠物与图库', () => {
+test('规格 16–24：外观页 显示方式 → 主题模式胶囊 → 任务栏/灵动岛布局 → 独立展开外观卡片 → 标签页排序 → 她 → 宠物与图库', () => {
   const look = slice('  function pageLook()', '  // Windows\' own mode and accent colour')
   inOrder('外观页', look, [
-    'home.display', // 17 显示方式
-    's.builtin', // 18 内置（分组）
+    'home.display', // 17 显示方式（一排三列）
+    'themeHeroCard()', // 三态光学主题胶囊
     's.taskbarEdge', // 19 任务栏参数
-    'islandPosRow()', // 20 灵动岛参数
-    'ilookRow()', // 灵动岛外观（含主题三选一 / 强调色 / 壁纸 / 液态玻璃 / 字体颜色）
+    'islandPosRow()', // 20 灵动岛布局与护眼
+    'ilookPanel()', // 默认展开的独立外观卡片（背景图片 / 液态玻璃与玻璃色调 / 字体颜色）
     'pageTabOrder()', // 22 标签页排序
     's.her', // 23 她
     'pagePets()', // 24 宠物与图库
   ])
   assert.doesNotMatch(look, /pageWindows\(/, '外观页不再渲染独立的 Windows / 系统壁纸分节')
   inOrder('任务栏参数', look, ['s.taskbarEdge', 'displaysRow()', 's.taskbarMaterial', 's.clearWhen', 's.taskbarButtons'])
-  inOrder('灵动岛参数', look, ['islandPosRow()', 's.islandWidth', 'hideUnderRow()', 's.oledShift', 'ilookRow()'])
+  inOrder('灵动岛参数', look, ['islandPosRow()', 's.islandWidth', 'hideUnderRow()', 's.oledShift', 'ilookPanel()'])
   inOrder('她', look, ['menu.size', 's.details', 's.walk', 's.look'])
   const panel = slice('  function ilookPanel()', '  // A slider moved')
-  inOrder('灵动岛外观面板', panel, ['s.dockTheme', 's.dockPaper', 's.glass', 's.dockAccent', 's.typo'])
+  inOrder('灵动岛外观独立卡片', panel, ['s.dockPaper', 's.glass', 's.dockAccent', 's.typo'])
   const pets = slice('  function pagePets()', '  // --- Her island')
   inOrder('宠物与图库', pets, ['home.installed', 's.download', '${more}'])
 })
@@ -170,8 +170,9 @@ test('规格 30–36：插件页 身份 → 插件扩展页签 → 插件和小�
     'w.terminal', // 35 在终端里用
     'w.write', // 36 自己写一个
   ])
-  // 32 插件扩展页签也在这块卡里：render() 之后紧跟 w.section，中间不再插备份面板。
-  assert.match(widgets, /extensionPanel\.render\(\)\}\$\{sec\(T\('w\.section'\)/)
+  // 32 插件扩展页签也在这块卡里：render() 之后紧跟小工具折叠卡（w.section），中间不再插备份面板。
+  assert.match(widgets, /extensionPanel\.render\(\)\}<div class="w-studio/)
+  assert.match(widgets, /T\('w\.section'\)/)
 })
 
 test('规格 2/3/5：快捷开关四个的顺序、安静两条、网络代理手动 + 测试', () => {

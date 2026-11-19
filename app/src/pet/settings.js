@@ -814,7 +814,7 @@
     balanced: { surfaceOp: 38, surfaceBlur: 18, cardOp: 22, cardBlur: 12, overlayOp: 45, overlayBlur: 16, controlOp: 28, controlBlur: 8 },
     clear: { surfaceOp: 18, surfaceBlur: 24, cardOp: 12, cardBlur: 16, overlayOp: 25, overlayBlur: 20, controlOp: 16, controlBlur: 10 },
   }
-  let widgetsFoldOpen = true
+  let widgetsFoldOpen = false
   let cpState = null
   const colorPop = document.createElement('div')
   colorPop.className = 'cp-popover'
@@ -1053,24 +1053,21 @@
     }
   }
   function syncDockLookDOM() {
-    const ilook = body.querySelector('.ilook')
-    if (!ilook || !snap?.settings) return false
+    const track = body.querySelector('.dtp-track')
+    if (!track || !snap?.settings) return false
     const dl = dockLookOf()
     const g = dl.glass || DOCK_LOOK_DEFAULT.glass
-    const track = ilook.querySelector('.dtp-track')
-    if (track) {
-      if (track.dataset.mode !== dl.mode) track.dataset.mode = dl.mode
-      track._dtpSetMode?.(dl.mode)
-    }
-    ilook.querySelectorAll('.dtp-hit').forEach(btn => {
+    if (track.dataset.mode !== dl.mode) track.dataset.mode = dl.mode
+    track._dtpSetMode?.(dl.mode)
+    body.querySelectorAll('.dtp-hit').forEach(btn => {
       btn.setAttribute('aria-pressed', String(btn.dataset.dockTheme === dl.mode))
     })
-    ilook.querySelectorAll('.dtp-label-btn').forEach(btn => {
+    body.querySelectorAll('.dtp-label-btn').forEach(btn => {
       const on = btn.dataset.dockTheme === dl.mode
       btn.classList.toggle('on', on)
       btn.setAttribute('aria-pressed', String(on))
     })
-    ilook.querySelectorAll('[data-glass-preset]').forEach(btn => {
+    body.querySelectorAll('[data-glass-preset]').forEach(btn => {
       btn.classList.toggle('on', btn.dataset.glassPreset === g.preset)
     })
     const sliders = [
@@ -1085,7 +1082,7 @@
       ['glass.controlBlur', g.controlBlur, 'px'],
     ]
     for (const [key, val, unit] of sliders) {
-      const inp = ilook.querySelector(`[data-dock-look="${key}"]`)
+      const inp = body.querySelector(`[data-dock-look="${key}"]`)
       if (inp && Number(inp.value) !== Number(val)) inp.value = String(val)
       const rv = inp?.parentElement?.querySelector('.rv')
       if (rv) rv.textContent = `${val}${unit}`
@@ -1094,7 +1091,7 @@
     const curAccent = accentCleared
       ? (dl.mode === 'light' ? '#005fb8' : '#5e9bff')
       : String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
-    const accentItem = ilook.querySelector('[data-typo-item="accent"]')
+    const accentItem = body.querySelector('[data-typo-item="accent"]')
     if (accentItem) {
       const sysBtn = accentItem.querySelector('[data-dock-accent-mode="system"]')
       const clearBtn = accentItem.querySelector('[data-dock-accent-clear]')
@@ -1117,7 +1114,7 @@
       mutedColor: dl.mode === 'light' ? '#5d5d5d' : '#a1a1a6',
     }
     for (const k of ['headingColor', 'textColor', 'mutedColor']) {
-      const item = ilook.querySelector(`[data-typo-item="${k}"]`)
+      const item = body.querySelector(`[data-typo-item="${k}"]`)
       if (!item) continue
       const val = dl[k] || ''
       const preview = /^#[0-9a-f]{6}$/i.test(val) ? val.toLowerCase() : typoFallbacks[k]
@@ -1256,6 +1253,48 @@
     root.setProperty('--dock-wallpaper-dim', String((dl.wallpaperDim ?? 58) / 100))
   }
 
+  function themeHeroCard() {
+    const dl = dockLookOf()
+    const g = dl.glass || DOCK_LOOK_DEFAULT.glass
+    const modeLabel = T(`s.dockTheme.${dl.mode}`)
+    const detail = dl.mode === 'glass'
+      ? T(`s.glass.${g.preset || 'balanced'}`)
+      : (dl.accentMode === 'custom' ? (dl.accent || (lang === 'zh' ? '默认' : 'Default')) : (lang === 'zh' ? '跟随系统' : 'System'))
+    return `<div class="ilook-sec-card ilook-hero-card">
+        <div class="ilook-hero-head">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.dockTheme'))}</span><span class="ilook-box-note">${esc(T('s.dockThemeNote'))}</span></div>
+          <span class="ilook-hero-badge" data-ilook-summary>${esc(`${modeLabel} · ${detail}`)}</span>
+        </div>
+        <div class="dock-theme-pill" role="radiogroup" aria-label="${esc(T('s.dockTheme'))}">
+          <div class="dtp-track" data-mode="${esc(dl.mode)}">
+            <span class="dtp-sky dtp-sky-light" aria-hidden="true"></span>
+            <span class="dtp-sky dtp-sky-dark" aria-hidden="true"></span>
+            <span class="dtp-sky dtp-sky-glass" aria-hidden="true"></span>
+            <span class="dtp-rings" aria-hidden="true"><i></i></span>
+            <span class="dtp-clouds" aria-hidden="true"><i class="dtp-cloud-back"></i><i class="dtp-cloud-front"></i></span>
+            <span class="dtp-stars" aria-hidden="true"><i class="dtp-star-a"></i><i class="dtp-star-b"></i><i class="dtp-star-c"></i><i class="dtp-star-d"></i></span>
+            <span class="dtp-glass-fx" aria-hidden="true"><i class="dtp-glass-ribbon"></i><i class="dtp-gb b1"></i><i class="dtp-gb b2"></i><i class="dtp-gb b3"></i><i class="dtp-gb b4"></i><i class="dtp-gb b5"></i><i class="dtp-gb b6"></i></span>
+            <span class="dtp-wash" aria-hidden="true"><i></i></span>
+            <span class="dtp-led-wrap" aria-hidden="true"><i class="dtp-led-halo"></i><i class="dtp-led-core"></i></span>
+            <span class="dtp-orb" aria-hidden="true">
+              <i class="dtp-face dtp-face-sun"></i>
+              <i class="dtp-face dtp-face-moon"><b class="dtp-crater c1"></b><b class="dtp-crater c2"></b><b class="dtp-crater c3"></b></i>
+              <i class="dtp-face dtp-face-glass"><b class="dtp-glass-glint"></b><b class="dtp-glass-caustic"></b></i>
+              <i class="dtp-orb-tir"></i>
+              <i class="dtp-orb-rim"></i>
+            </span>
+            <span class="dtp-bevel" aria-hidden="true"></span>
+            <div class="dtp-hits">${['light', 'dark', 'glass']
+              .map(m => `<button type="button" class="dtp-hit" data-dock-theme="${m}" aria-label="${esc(T(`s.dockTheme.${m}`))}" aria-pressed="${dl.mode === m}" title="${esc(T(`s.dockTheme.${m}`))}"></button>`)
+              .join('')}</div>
+          </div>
+          <div class="dtp-labels">${['light', 'dark', 'glass']
+            .map(m => `<button type="button" class="dtp-label-btn${dl.mode === m ? ' on' : ''}" data-dock-theme="${m}" aria-pressed="${dl.mode === m}"><span>${esc(T(`s.dockTheme.${m}`))}</span></button>`)
+            .join('')}</div>
+        </div>
+      </div>`
+  }
+
   function ilookPanel() {
     const dl = dockLookOf()
     const g = dl.glass
@@ -1270,33 +1309,6 @@
     const paperPreview = snap.dockPaperUrl
       ? `<div class="dock-paper-row"><img class="dock-paper-thumb" src="${esc(snap.dockPaperUrl)}" alt=""><button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperChange'))}</button><button type="button" class="pbtn sm" data-dock-paper="remove">${esc(T('s.dockPaperRemove'))}</button></div>`
       : `<button type="button" class="pbtn sm" data-dock-paper="pick">${esc(T('s.dockPaperPick'))}</button>`
-    const themePill = `<div class="dock-theme-pill" role="radiogroup" aria-label="${esc(T('s.dockTheme'))}">
-      <div class="dtp-track" data-mode="${esc(dl.mode)}">
-        <span class="dtp-sky dtp-sky-light" aria-hidden="true"></span>
-        <span class="dtp-sky dtp-sky-dark" aria-hidden="true"></span>
-        <span class="dtp-sky dtp-sky-glass" aria-hidden="true"></span>
-        <span class="dtp-rings" aria-hidden="true"><i></i></span>
-        <span class="dtp-clouds" aria-hidden="true"><i class="dtp-cloud-back"></i><i class="dtp-cloud-front"></i></span>
-        <span class="dtp-stars" aria-hidden="true"><i class="dtp-star-a"></i><i class="dtp-star-b"></i><i class="dtp-star-c"></i><i class="dtp-star-d"></i></span>
-        <span class="dtp-glass-fx" aria-hidden="true"><i class="dtp-glass-ribbon"></i><i class="dtp-gb b1"></i><i class="dtp-gb b2"></i><i class="dtp-gb b3"></i><i class="dtp-gb b4"></i><i class="dtp-gb b5"></i><i class="dtp-gb b6"></i></span>
-        <span class="dtp-wash" aria-hidden="true"><i></i></span>
-        <span class="dtp-led-wrap" aria-hidden="true"><i class="dtp-led-halo"></i><i class="dtp-led-core"></i></span>
-        <span class="dtp-orb" aria-hidden="true">
-          <i class="dtp-face dtp-face-sun"></i>
-          <i class="dtp-face dtp-face-moon"><b class="dtp-crater c1"></b><b class="dtp-crater c2"></b><b class="dtp-crater c3"></b></i>
-          <i class="dtp-face dtp-face-glass"><b class="dtp-glass-glint"></b><b class="dtp-glass-caustic"></b></i>
-          <i class="dtp-orb-tir"></i>
-          <i class="dtp-orb-rim"></i>
-        </span>
-        <span class="dtp-bevel" aria-hidden="true"></span>
-        <div class="dtp-hits">${['light', 'dark', 'glass']
-          .map(m => `<button type="button" class="dtp-hit" data-dock-theme="${m}" aria-label="${esc(T(`s.dockTheme.${m}`))}" aria-pressed="${dl.mode === m}" title="${esc(T(`s.dockTheme.${m}`))}"></button>`)
-          .join('')}</div>
-      </div>
-      <div class="dtp-labels">${['light', 'dark', 'glass']
-        .map(m => `<button type="button" class="dtp-label-btn${dl.mode === m ? ' on' : ''}" data-dock-theme="${m}" aria-pressed="${dl.mode === m}"><span>${esc(T(`s.dockTheme.${m}`))}</span></button>`)
-        .join('')}</div>
-    </div>`
     const glassPresets = ['off', 'light', 'balanced', 'clear', 'custom']
       .map(p => `<button type="button" class="${g.preset === p ? 'on' : ''}" data-glass-preset="${p}">${esc(T(`s.glass.${p}`))}</button>`)
       .join('')
@@ -1320,18 +1332,14 @@
       </div>`
     }
 
-    return `<div class="ilook">
-        <div class="ilook-sec-card ilook-theme-merged">
-          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.dockTheme'))}</span><span class="ilook-box-note">${esc(T('s.dockThemeNote'))}</span></div>
-          <div class="ilook-paper-zone">
-            <div class="ilook-paper-top">
-              <div class="ilook-paper-meta"><span class="ilook-sub-title">${esc(T('s.dockPaper'))}</span><span class="ilook-box-note">${esc(T('s.dockPaperNote'))}</span></div>
-              <div class="ilook-paper-bar">${paperPreview}</div>
-            </div>
-            <div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.dockPaperDim'))}</span>${dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58)}</div>
-            <div class="ilook-hint">${esc(T('s.dockPaperDimNote'))}</div>
+    return `<div class="ilook-cards-stack">
+        <div class="ilook-sec-card">
+          <div class="ilook-paper-top">
+            <div class="ilook-paper-meta"><span class="ilook-box-title">${esc(T('s.dockPaper'))}</span><span class="ilook-box-note">${esc(T('s.dockPaperNote'))}</span></div>
+            <div class="ilook-paper-bar">${paperPreview}</div>
           </div>
-          ${themePill}
+          <div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.dockPaperDim'))}</span>${dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58)}</div>
+          <div class="ilook-hint">${esc(T('s.dockPaperDimNote'))}</div>
         </div>
         <div class="ilook-sec-card">
           <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.glass'))}</span><span class="ilook-box-note">${esc(T('s.glassNote'))}</span></div>
@@ -1737,27 +1745,53 @@
     list.onpointercancel = finishPtr
   }
 
-  // 外观（规格 17–24，逐条同序）：显示方式 → 内置（任务栏参数 → 灵动岛参数 →
-  // Windows）→ 标签页排序 → 她 → 宠物与图库。
+  // 外观：显示方式（一排三列）→ 主题模式（48px 全宽三态光学胶囊）→ 任务栏/灵动岛布局 →
+  // 背景图片 / 液态玻璃 / 字体颜色（全独立展开卡片）→ 标签页排序 → 她 → 宠物与图库。
   function pageLook() {
     const s = snap.settings
-    return `${sec(T('home.display'))}<div class="modes">
-        <div class="mode${s.display !== 'taskbar' && s.display !== 'topbar' ? ' on' : ''}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span>${esc(T('s.displayIsland'))}</div></div>
-        <div class="mode${s.display === 'taskbar' ? ' on' : ''}" data-mode="taskbar"><div class="pv"><s></s></div><div class="l"><span class="rd"></span>${esc(T('s.displayTaskbar'))}</div></div>
-        <div class="mode${s.display === 'topbar' ? ' on' : ''}" data-mode="topbar"><div class="pv"><t></t></div><div class="l"><span class="rd"></span>${esc(T('s.displayTopbar'))}</div></div>
+    const betaTag = `<span class="mode-beta">${esc(lang === 'zh' ? '测试版' : 'Beta')}</span>`
+    return `<div class="look-page">
+      ${sec(T('home.display'))}<div class="modes">
+        <div class="mode${s.display !== 'taskbar' && s.display !== 'topbar' ? ' on' : ''}" data-mode="island"><div class="pv"><i></i></div><div class="l"><span class="rd"></span><span class="mode-name">${esc(T('s.displayIsland'))}</span></div></div>
+        <div class="mode${s.display === 'taskbar' ? ' on' : ''}" data-mode="taskbar"><div class="pv"><s></s></div><div class="l"><span class="rd"></span><span class="mode-name">${esc(T('s.displayTaskbar'))}</span></div></div>
+        <div class="mode${s.display === 'topbar' ? ' on' : ''}" data-mode="topbar"><div class="pv"><t></t>${betaTag}</div><div class="l"><span class="rd"></span><span class="mode-name">${esc(T('s.displayTopbar'))}</span></div></div>
       </div>
-      ${s.display === 'topbar' ? `<div class="grp"><div class="note">${esc(T('s.topbarNote'))}</div></div>` : ''}
-      ${sec(T('s.builtin'))}
-      ${s.display === 'taskbar' ? `<div class="grp"><div class="note">${esc(T('s.taskbarNote'))}</div>${row(esc(T('s.embedTaskbar')), esc(T('s.embedTaskbarNote')), sw('embedTaskbar', s.embedTaskbar))}</div><div class="grp">${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}${displaysRow()}${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}${layoutRow()}${ilookRow()}</div>` : ''}
-      ${part('place', '')}<div class="grp">${islandPosRow()}${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}${s.display === 'taskbar' ? '' : ilookRow()}</div>
+      ${s.display === 'topbar' ? `<div class="ilook-sec-card look-beta-banner"><span class="mode-beta">${esc(lang === 'zh' ? '测试版' : 'Beta')}</span><span class="look-beta-text">${esc(T('s.topbarNote'))}</span></div>` : ''}
+      ${themeHeroCard()}
+      ${s.display === 'taskbar' ? `<div class="ilook-sec-card look-opt-card">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.displayTaskbar'))}</span><span class="ilook-box-note">${esc(T('s.taskbarNote'))}</span></div>
+          <div class="look-opt-rows">
+            ${row(esc(T('s.embedTaskbar')), esc(T('s.embedTaskbarNote')), sw('embedTaskbar', s.embedTaskbar))}
+            ${row(esc(T('s.taskbarEdge')), esc(T('s.taskbarEdgeNote')), seg('taskbarEdge', ['bottom', 'top', 'left', 'right'].map(e => [e, T(`s.edge.${e}`)]), s.taskbarEdge || 'bottom'))}
+            ${displaysRow()}
+            ${row(esc(T('s.taskbarMaterial')), esc(T('s.taskbarMaterialNote')), seg('taskbarMaterial', ['mica', 'black', 'clear'].map(m => [m, T(`s.material.${m}`)]), s.taskbarMaterial || 'mica'))}
+            ${s.taskbarMaterial === 'clear' ? row(esc(T('s.clearWhen')), esc(T('s.clearWhenNote')), seg('taskbarClearWhen', ['mica', 'solid', 'always'].map(w => [w, T(`s.clearWhen.${w}`)]), ['solid', 'always'].includes(s.taskbarClearWhen) ? s.taskbarClearWhen : 'mica')) : ''}
+            ${['left', 'right'].includes(s.taskbarEdge) ? row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsSide')), `<span class="seg off">${['icons', 'labels'].map(b => `<span class="${b === 'icons' ? 'on' : ''}">${esc(T(`s.buttons.${b}`))}</span>`).join('')}</span>`) : row(esc(T('s.taskbarButtons')), esc(T('s.taskbarButtonsNote')), seg('taskbarButtons', ['icons', 'labels'].map(b => [b, T(`s.buttons.${b}`)]), s.taskbarButtons || 'icons'))}
+            ${layoutRow()}
+          </div>
+        </div>` : ''}
+      ${part('place', '')}<div class="ilook-sec-card look-opt-card">
+        <div class="ilook-box-head"><span class="ilook-box-title">${esc(lang === 'zh' ? '灵动岛布局与护眼' : 'Island layout & display')}</span><span class="ilook-box-note">${esc(lang === 'zh' ? '控制停靠位置、收起宽度、窗口避让与防烧屏' : 'Position, collapsed width, auto-stow and OLED protection')}</span></div>
+        <div class="look-opt-rows">
+          ${islandPosRow()}
+          ${row(esc(T('s.islandWidth')), esc(T('s.islandWidthNote')), seg('islandWidth', ['narrow', 'normal', 'wide'].map(w => [w, T(`s.width.${w}`)]), s.islandWidth || 'normal'))}
+          ${s.display === 'taskbar' || window.pet.mac ? '' : hideUnderRow()}
+          ${row(esc(T('s.oledShift')), esc(T('s.oledShiftNote')), sw('oledShift', s.oledShift))}
+        </div>
+      </div>
+      ${ilookPanel()}
       ${pageTabOrder()}
-      ${sec(T('s.her'))}<div class="grp">
-        ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
-        ${row(esc(T('s.details')), esc(T('s.detailsNote')), sw('details', s.details !== false))}
-        ${row(esc(T('s.walk')), esc(T('s.walkNote')), sw('walk', s.walk))}
-        ${row(esc(T('s.look')), '', sw('look', s.look))}
+      <div class="ilook-sec-card look-opt-card">
+        <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.her'))}</span><span class="ilook-box-note">${esc(lang === 'zh' ? '宠物缩放尺寸、详情展示与桌面互动行为' : 'Pet scale, status details and desktop behaviours')}</span></div>
+        <div class="look-opt-rows">
+          ${row(esc(T('menu.size')), '', seg('scale', SIZES.map(([name, scale]) => [scale, T(`menu.${name}`)]), s.scale))}
+          ${row(esc(T('s.details')), esc(T('s.detailsNote')), sw('details', s.details !== false))}
+          ${row(esc(T('s.walk')), esc(T('s.walkNote')), sw('walk', s.walk))}
+          ${row(esc(T('s.look')), '', sw('look', s.look))}
+        </div>
       </div>
-      ${part('pets', pagePets())}`
+      ${part('pets', pagePets())}
+    </div>`
   }
 
   // Windows' own mode and accent colour, set as Settings → Personalization →
@@ -2263,17 +2297,14 @@
     const spins = SPINS.map(n => [n, n ? T('settings.seconds', { n }) : T('w.spinOff')])
     const waku = `powershell -ExecutionPolicy Bypass -File "${snap.waku}" npm run build`
     const example = `Invoke-RestMethod -Method Post http://127.0.0.1:${snap.port}/widget -ContentType application/json -Body '{"id":"hello","label":"Hello","value":"42","icon":"star"}'`
-    const summaryBadge = lang === 'zh' ? `${placedCount} 在用 · 共 ${list.length} 项` : `${placedCount}/${list.length} active`
+    const activeBadge = lang === 'zh' ? `${placedCount} 在用` : `${placedCount} active`
+    const totalBadge = lang === 'zh' ? `共 ${list.length} 项` : `${list.length} total`
     const foldAttr = widgetsFoldOpen ? '' : ' hidden'
-    return `${extensionPanel.render()}${sec(T('w.section'))}<div class="grp w-studio${widgetsFoldOpen ? ' open' : ''}">
-        <div class="w-studio-head" data-widgets-fold role="button" tabindex="0" aria-expanded="${widgetsFoldOpen}">
-          <span class="w-studio-chev">${widgetsFoldOpen ? '▾' : '▸'}</span>
-          <div class="grow w-studio-lead">
-            <div class="w-studio-title-row"><span class="w-studio-title">${esc(T('w.section'))}</span><span class="w-studio-badge">${esc(summaryBadge)}</span></div>
-            <div class="w-studio-note">${esc(T('w.note'))}</div>
-          </div>
-          <span class="pbtn sm w-studio-btn">${esc(widgetsFoldOpen ? T('s.ilookFold') : (lang === 'zh' ? '展开' : 'Expand'))}</span>
-        </div>
+    return `${extensionPanel.render()}<div class="w-studio${widgetsFoldOpen ? ' open' : ''}">
+        <button type="button" class="w-studio-head" data-widgets-fold aria-expanded="${widgetsFoldOpen}">
+          <span class="w-studio-title">${esc(T('w.section'))}</span>
+          <span class="w-studio-badges"><span class="w-studio-badge">${esc(activeBadge)}</span><span class="w-studio-badge">${esc(totalBadge)}</span></span>
+        </button>
         <div class="w-studio-body"${foldAttr}><div class="w-card-list">${rows}</div></div>
       </div>
       <div class="w-studio-more"${foldAttr}>
@@ -4706,6 +4737,14 @@
     // A click anywhere but on it closes the letter menu.
     if (!menuEl.hidden && !at('.mmenu')) closeMenu()
     if (!colorPop.hidden && !at('.cp-popover') && !at('[data-typo-toggle]')) closeColorPop()
+    if (!at('.extension-more')) {
+      const openMores = body.querySelectorAll('.extension-more[open]')
+      if (openMores.length) {
+        openMores.forEach(d => { d.open = false })
+        body.querySelectorAll('.is-more-open').forEach(el => el.classList.remove('is-more-open'))
+      }
+    }
+    if (at('.extension-more-body')) return
     if (at('[data-cp-close]')) return closeColorPop()
     if (at('[data-cp-clear]') && cpState) {
       const k = cpState.key

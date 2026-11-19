@@ -765,14 +765,31 @@
       panel.querySelectorAll('[data-extension-auth]').forEach(b => { b.onclick = () => auth(b.dataset.extensionAuth) })
       const refresh = panel.querySelector('[data-extension-refresh]')
       if (refresh) refresh.onclick = () => checkUpdates()
+      const syncMoreZ = () => {
+        const anyOpen = !!panel.querySelector('.extension-more[open]')
+        panel.classList?.toggle('is-more-open', anyOpen)
+        panel.querySelector('.extension-list')?.classList?.toggle('is-more-open', anyOpen)
+        panel.querySelectorAll('.extension-card').forEach(card => {
+          card.classList?.toggle('is-more-open', !!card.querySelector('.extension-more[open]'))
+        })
+      }
       panel.querySelectorAll('.extension-more').forEach(d => {
         d.ontoggle = () => {
           if (d.open) panel.querySelectorAll('.extension-more[open]').forEach(other => { if (other !== d) other.open = false })
+          syncMoreZ()
+        }
+        const pop = d.querySelector?.('.extension-more-body')
+        if (pop) {
+          pop.onpointerdown = e => { e.stopPropagation?.() }
+          pop.onclick = e => { e.stopPropagation?.() }
         }
       })
-      panel.querySelectorAll('[data-extension-action]').forEach(b => { b.onclick = () => {
+      syncMoreZ()
+      panel.querySelectorAll('[data-extension-action]').forEach(b => { b.onclick = e => {
+        e?.stopPropagation?.()
         const more = b.closest ? b.closest('.extension-more') : null
         if (more) more.open = false
+        syncMoreZ()
         void action(b.dataset.extensionAction, b.dataset.extensionId)
       } })
       // t29：进度弹窗的取消——真取消（宿主在下一个块返回「已取消」）。

@@ -1702,20 +1702,25 @@
   color: #fff;
 }
 
-/* Her home: two pictures to pick from. */
+/* Her home: three modes displayed cleanly in one row. */
 #island-settings .modes {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
 #island-settings .mode {
-  padding: 8px;
-  border-radius: 18px;
+  padding: 7px;
+  border-radius: 16px;
   background: var(--g1);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset 0 0 0 1.5px transparent;
   cursor: pointer;
-  transition: box-shadow 0.25s;
+  transition: box-shadow 0.25s ease, border-color 0.2s ease, transform 0.22s var(--spring);
+}
+
+.tb-light #island-settings .mode {
+  border-color: rgba(0, 0, 0, 0.06);
 }
 
 #island-settings .mode.on {
@@ -1725,21 +1730,21 @@
 #island-settings .mode .pv {
   position: relative;
   overflow: hidden;
-  height: 58px;
+  height: 50px;
   margin-bottom: 6px;
-  border-radius: 12px;
+  border-radius: 10px;
   background: linear-gradient(140deg, #3b4a66, #6f5b70 60%, #8a6a58);
 }
 
 #island-settings .mode .pv i {
   position: absolute;
-  top: 6px;
+  top: 5px;
   left: 50%;
-  width: 60px;
-  height: 14px;
-  border-radius: 7px;
+  width: 48px;
+  height: 12px;
+  border-radius: 6px;
   background: #000;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
   transform: translateX(-50%);
 }
 
@@ -1747,7 +1752,7 @@
 #island-settings .mode .pv s {
   position: absolute;
   inset: auto 0 0;
-  height: 13px;
+  height: 12px;
   background: #000;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
@@ -1756,31 +1761,93 @@
   content: '';
   position: absolute;
   left: 4px;
-  top: 3px;
+  top: 2.5px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   box-shadow: 0 0 0 1.5px #5e9bff;
 }
 
+/* Top bar + floating Dock preview */
+#island-settings .mode .pv t {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+#island-settings .mode .pv t::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 9px;
+  background: rgba(12, 14, 20, 0.88);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+}
+
+#island-settings .mode .pv t::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 58px;
+  height: 11px;
+  border-radius: 6px;
+  background: rgba(12, 14, 20, 0.84);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  transform: translateX(-50%);
+}
+
+#island-settings .mode .pv .mode-beta {
+  position: absolute;
+  top: 12px;
+  right: 5px;
+  z-index: 2;
+  background: rgba(16, 18, 26, 0.78);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #f5f5f7;
+}
+
 #island-settings .mode .pv .thumb {
   position: absolute;
-  right: 10px;
+  right: 8px;
   bottom: -4px;
 }
 
 #island-settings .mode .l {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 4px;
-  font-size: 12.5px;
+  gap: 5px;
+  padding: 0 2px;
+  font-size: 11.5px;
   font-weight: 600;
+  min-width: 0;
+}
+
+#island-settings .mode .mode-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#island-settings .mode-beta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-muted, var(--g5));
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 #island-settings .mode .rd {
-  width: 14px;
-  height: 14px;
+  flex: none;
+  width: 13px;
+  height: 13px;
   box-sizing: border-box;
   border: 1.5px solid var(--g3);
   border-radius: 50%;
@@ -1788,7 +1855,7 @@
 }
 
 #island-settings .mode.on .rd {
-  border: 4px solid var(--fg);
+  border: 3.5px solid var(--fg);
 }
 
 /* A pet, playing her idle row. */
@@ -3261,6 +3328,94 @@
   border-top-color: rgba(0, 0, 0, 0.07);
 }
 
+/* 外观页平级独立卡片流（头部三态主题胶囊 + 三列显示方式 + 各功能独立展开卡） */
+#island-settings .look-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 6px;
+}
+
+#island-settings .look-page > .sec {
+  margin: 2px 0 -4px;
+}
+
+#island-settings .ilook-cards-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#island-settings .ilook-hero-card {
+  gap: 8px;
+  padding: 12px 14px 10px;
+}
+
+#island-settings .ilook-hero-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#island-settings .ilook-hero-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--g3);
+  background: var(--g2);
+  color: var(--dock-muted, var(--g5));
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+#island-settings .ilook-hero-card .dock-theme-pill {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+#island-settings .look-beta-banner {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+#island-settings .look-beta-text {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .look-opt-card {
+  gap: 6px;
+}
+
+#island-settings .look-opt-rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 4px;
+}
+
+.tb-light #island-settings .look-opt-rows {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .look-opt-rows .r {
+  min-height: 36px;
+  padding: 6px 0;
+}
+
+#island-settings .look-opt-rows .r + .r {
+  padding-top: 8px;
+}
+
 #island-settings .ilook-box-head {
   display: flex;
   align-items: baseline;
@@ -4576,79 +4731,79 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- 插件页：「插件和小工具」可折叠与重构卡片式界面 ---- */
+/* ---- 插件页：「小工具」可折叠卡片（视觉与结构严格对齐「运行依赖」折叠卡） ---- */
 #island-settings .w-studio {
   display: flex;
   flex-direction: column;
+  margin-top: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--g3);
+  border-radius: 14px;
+  background: var(--g1);
 }
 
 #island-settings .w-studio-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dock-heading, var(--dock-fg, var(--fg)));
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
   cursor: pointer;
   user-select: none;
 }
 
-#island-settings .w-studio-head:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.tb-light #island-settings .w-studio-head:hover {
-  background: rgba(0, 0, 0, 0.03);
-}
-
-#island-settings .w-studio-chev {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  background: var(--g2);
-  color: var(--dock-muted, var(--g5));
-  font-size: 12px;
-}
-
-#island-settings .w-studio-lead {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-#island-settings .w-studio-title-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+#island-settings .w-studio-head:focus-visible {
+  outline: 2px solid #80b6ff;
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 #island-settings .w-studio-title {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
   font-weight: 600;
 }
 
-#island-settings .w-studio-badge {
+#island-settings .w-studio-title::before {
+  content: '▸';
+  display: inline-block;
+  width: 14px;
+  color: var(--g4);
+  transition: transform 0.18s ease;
+}
+
+#island-settings .w-studio.open .w-studio-title::before {
+  transform: rotate(90deg);
+}
+
+#island-settings .w-studio-badges {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  height: 19px;
-  padding: 0 8px;
+  gap: 6px;
+  font-weight: 500;
+}
+
+#island-settings .w-studio-badge {
+  padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--g3);
   background: var(--g2);
   color: var(--dock-muted, var(--g5));
   font-size: 11px;
-  font-weight: 500;
+  line-height: 1.3;
   font-variant-numeric: tabular-nums;
-}
-
-#island-settings .w-studio-note {
-  font-size: 11.5px;
-  line-height: 1.35;
-  color: var(--dock-muted, var(--g4));
 }
 
 #island-settings .w-studio-body[hidden],
@@ -4657,19 +4812,15 @@
 }
 
 #island-settings .w-studio-body {
-  padding: 2px 10px 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.tb-light #island-settings .w-studio-body {
-  border-top-color: rgba(0, 0, 0, 0.06);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--g3);
 }
 
 #island-settings .w-card-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 6px;
 }
 
 #island-settings .w-item-card {
@@ -4788,6 +4939,7 @@ body.dock-glass #island-settings .mode,
 body.dock-glass #island-settings .tile,
 body.dock-glass #island-settings .ilook-card,
 body.dock-glass #island-settings .ilook-sec-card,
+body.dock-glass #island-settings .w-studio,
 body.dock-glass #island-settings .w-item-card,
 body.dock-glass #island-settings .tab-order,
 body.dock-glass #island-settings .card,
@@ -4816,7 +4968,6 @@ body.dock-glass #island-settings .ag-way {
 body.dock-glass #island-settings .s-confirm-dialog,
 body.dock-glass #island-settings .mmenu,
 body.dock-glass #island-settings .cp-popover,
-body.dock-glass #island-settings .extension-more-body,
 body.dock-glass #island-settings .ext-progress {
   background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-overlay, 12%), rgba(24, 26, 36, var(--dock-glass-overlay-op, 0.45)));
   backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.42);
@@ -4825,6 +4976,17 @@ body.dock-glass #island-settings .ext-progress {
     inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 26%), rgba(255, 255, 255, 0.22)),
     inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-overlay, 12%), rgba(255, 255, 255, 0.14)),
     0 18px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* 「更多」动作浮层在玻璃模式下保持高不透明度，避免底下文字干扰且隔离点击 */
+body.dock-glass #island-settings .extension-more-body {
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-overlay, 12%), rgba(22, 24, 34, 0.94));
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 26%), rgba(255, 255, 255, 0.26)),
+    inset 0 0 0 1px color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-overlay, 12%), rgba(255, 255, 255, 0.18)),
+    0 18px 42px rgba(0, 0, 0, 0.56);
 }
 
 body.dock-glass #island-settings .s-tabs,
@@ -4844,6 +5006,8 @@ body.dock-glass #island-settings .wc-tool,
 body.dock-glass #island-settings .typo-pill-btn,
 body.dock-glass #island-settings .cp-rgb-field,
 body.dock-glass #island-settings .cp-hex-wrap,
+body.dock-glass #island-settings .ilook-hero-badge,
+body.dock-glass #island-settings .mode-beta,
 body.dock-glass #island-settings .w-reading,
 body.dock-glass #island-settings .w-studio-badge,
 body.dock-glass #island-settings .w-item-actions .pl-at,
