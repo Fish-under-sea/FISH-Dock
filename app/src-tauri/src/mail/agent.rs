@@ -868,13 +868,24 @@ pub fn models(sh: &Shared) -> Value {
 const AGY_MODELS_EVERY: Duration = Duration::from_secs(30 * 60);
 const AGY_MODELS_AGAIN: Duration = Duration::from_secs(2 * 60);
 
+pub(crate) fn should_probe_agy_models(settings_open: bool, has_accounts: bool, mail_agent: &str) -> bool {
+    settings_open && has_accounts && mail_agent == "agy"
+}
+
 // Antigravity's models, as `agy models` lists them (an id, a tab, a name a
 // line; each a model at one effort: gemini-3.8-flash-high): asked in the
-// background when the settings want them (only while they are open), at
-// most every half hour, and the page told when they came; none until then.
+// background when the settings want them (only while they are open and Mail
+// actually has an account using agy), at most every half hour, and the page
+// told when they came; none until then.
 fn agy_models(sh: &Shared) -> Vec<Value> {
     // When to ask next; what it said last.
     static KNOWN: Mutex<(Option<Instant>, Vec<Value>)> = Mutex::new((None, Vec::new()));
+    let settings_open = sh.island.lock().unwrap().settings_open;
+    let has_accounts = !sh.mail.lock().unwrap().watches.is_empty();
+    let mail_agent = sh.setting("mailAgent").as_str().unwrap_or("").to_string();
+    if !should_probe_agy_models(settings_open, has_accounts, &mail_agent) {
+        return KNOWN.lock().unwrap().1.clone();
+    }
     let mut known = KNOWN.lock().unwrap();
     if known.0.is_none_or(|next| Instant::now() >= next) {
         known.0 = Some(Instant::now() + AGY_MODELS_EVERY);
@@ -1732,5 +1743,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(out.status.success());
         assert_eq!(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"), format!("a b|it's|--x\n{line}"));
+    }
+
+    #[test]
+    fn agy_models_only_probed_when_settings_open_and_mail_uses_agy() {
+        assert!(!should_probe_agy_models(false, true, "agy"));
+        assert!(!should_probe_agy_models(true, false, "agy"));
+        assert!(!should_probe_agy_models(true, true, "claude"));
+        assert!(!should_probe_agy_models(true, true, ""));
+        assert!(should_probe_agy_models(true, true, "agy"));
     }
 }
