@@ -906,25 +906,9 @@
   }
 
   function ilookPanel() {
-    const s = snap.settings
     const dl = dockLookOf()
     const g = dl.glass
-    const mode = ilookFor()
-    const look = ilookOf(mode)
-    const active = ilookPreset(mode)
-    const top = isTop()
-    const isCapsule = (s.taskbarMaterial || 'clear') !== 'black' || winMode() === 'light'
-    const note = top ? T('s.ilookTop') : isCapsule ? '' : T('s.ilookBlack')
-    const cards = ilookPresets(mode)
-      .map(([id, p]) => `<button class="ilook-card${id === active ? ' on' : ''}" data-ilook-preset="${id}">${ilookPreview(mode, p)}<span>${esc(ilookName(mode, id))}</span></button>`)
-      .join('')
-    const swatches = ILOOK_SWATCHES[mode]
-      .map(c => `<button class="swc${c === look.bg.toLowerCase() ? ' on' : ''}" data-ilook-bg="${c}" style="background:${c}" title="${c}"></button>`)
-      .join('')
-    const picker = `<span class="ilook-sw">${swatches}<input type="color" class="swc-in" data-ilook="bg" value="${esc(look.bg)}" title="${esc(T('s.ilookPick'))}"></span>`
-    const range = (key, min, max, unit) => `<span class="ilook-rng"><input type="range" class="rng" data-ilook="${key}" min="${min}" max="${max}" step="1" value="${look[key]}"><span class="rv">${look[key]}${unit}</span></span>`
     const dockRange = (key, min, max, unit, val) => `<span class="ilook-rng"><input type="range" class="rng" data-dock-look="${key}" min="${min}" max="${max}" step="1" value="${val}"><span class="rv">${val}${unit}</span></span>`
-    const blurRow = top && snap.plate !== true ? '' : row(esc(T('s.ilookBlur')), esc(T(top ? 's.ilookBlurTopNote' : 's.ilookBlurNote')), range('blur', 0, 60, 'px'))
 
     const curAccent = String(dl.accentMode === 'custom' ? dl.accent : (snap?.winLook?.accent || '#0078d4')).toLowerCase()
     const colours = /^#[0-9a-f]{6}$/.test(curAccent) && !ACCENTS.includes(curAccent) ? [...ACCENTS, curAccent] : ACCENTS
@@ -935,48 +919,40 @@
     const glassPresets = ['off', 'light', 'balanced', 'clear', 'custom']
       .map(p => `<button type="button" class="${g.preset === p ? 'on' : ''}" data-glass-preset="${p}">${esc(T(`s.glass.${p}`))}</button>`)
       .join('')
+    const glassRegion = (titleKey, noteKey, opKey, opVal, blurKey, blurVal) =>
+      `<div class="glass-reg"><div class="glass-reg-head"><span class="glass-reg-t">${esc(T(titleKey))}</span><span class="glass-reg-d">${esc(T(noteKey))}</span></div><div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.glass.op'))}</span>${dockRange(opKey, 0, 100, '%', opVal)}</div><div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.glass.blur'))}</span>${dockRange(blurKey, 0, 32, 'px', blurVal)}</div></div>`
     const typoRow = (key, label) => {
       const val = dl[key] || ''
-      return `<div class="r"><div class="grow"><div>${esc(label)}</div></div><span class="btns"><input type="color" class="swc-in" data-dock-look="${key}" value="${esc(val || (dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7'))}"><span class="d mono">${esc(val || '—')}</span>${val ? `<button type="button" class="pbtn sm" data-dock-typo-clear="${key}">${esc(T('s.typo.clear'))}</button>` : ''}</span></div>`
+      return `<div class="ilook-typo-row"><span class="ilook-slider-lbl">${esc(label)}</span><span class="btns"><input type="color" class="swc-in" data-dock-look="${key}" value="${esc(val || (dl.mode === 'light' ? '#1b1b1f' : '#f5f5f7'))}"><span class="d mono">${esc(val || (lang === 'zh' ? '默认' : 'Default'))}</span>${val ? `<button type="button" class="pbtn sm" data-dock-typo-clear="${key}">${esc(T('s.typo.clear'))}</button>` : ''}</span></div>`
     }
 
     return `<div class="ilook">
-        ${note ? `<div class="note">${esc(note)}</div>` : ''}
-        ${row(esc(T('s.dockTheme')), esc(T('s.dockThemeNote')), `<span class="seg">${['light', 'dark', 'glass'].map(m => `<button type="button" class="${dl.mode === m ? 'on' : ''}" data-dock-theme="${m}">${esc(T(`s.dockTheme.${m}`))}</button>`).join('')}</span>`)}
-        <div class="r col"><div class="t">${esc(T('s.dockAccent'))}</div><div class="winaccent-mode">${[['system', lang === 'zh' ? '跟随系统' : 'Follow system'], ['custom', lang === 'zh' ? '自定义' : 'Custom']]
-          .map(([k, label]) => `<button type="button" class="pbtn sm${dl.accentMode === k ? ' al' : ''}" data-dock-accent-mode="${k}" aria-pressed="${dl.accentMode === k}">${esc(label)}</button>`)
-          .join('')}${dl.accentMode === 'system' ? `<span class="acc on" style="background:${esc(curAccent)}" title="${esc(curAccent)}"></span><span class="d">${esc(curAccent)}</span>` : ''}</div>${dl.accentMode === 'custom' ? `<div class="accents">${accentSwatches}</div>` : ''}</div>
-        <div class="ilook-sub">${esc(T('s.dockPaper'))}</div>
-        <div class="note">${esc(T('s.dockPaperNote'))}</div>
-        ${row(esc(T('s.dockPaper')), '', paperPreview)}
-        ${row(esc(T('s.dockPaperDim')), esc(T('s.dockPaperDimNote')), dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58))}
-        <div class="ilook-sub">${esc(T('s.glass'))}</div>
-        <div class="note">${esc(T('s.glassNote'))}</div>
-        <div class="seg dock-glass-seg">${glassPresets}</div>
-        ${row(esc(T('s.glass.surface')), esc(T('s.glass.surfaceNote')), '')}
-        ${row(esc(T('s.glass.op')), '', dockRange('glass.surfaceOp', 0, 100, '%', g.surfaceOp))}
-        ${row(esc(T('s.glass.blur')), '', dockRange('glass.surfaceBlur', 0, 32, 'px', g.surfaceBlur))}
-        ${row(esc(T('s.glass.card')), esc(T('s.glass.cardNote')), '')}
-        ${row(esc(T('s.glass.op')), '', dockRange('glass.cardOp', 0, 100, '%', g.cardOp))}
-        ${row(esc(T('s.glass.blur')), '', dockRange('glass.cardBlur', 0, 32, 'px', g.cardBlur))}
-        ${row(esc(T('s.glass.overlay')), esc(T('s.glass.overlayNote')), '')}
-        ${row(esc(T('s.glass.op')), '', dockRange('glass.overlayOp', 0, 100, '%', g.overlayOp))}
-        ${row(esc(T('s.glass.blur')), '', dockRange('glass.overlayBlur', 0, 32, 'px', g.overlayBlur))}
-        ${row(esc(T('s.glass.control')), esc(T('s.glass.controlNote')), '')}
-        ${row(esc(T('s.glass.op')), '', dockRange('glass.controlOp', 0, 100, '%', g.controlOp))}
-        ${row(esc(T('s.glass.blur')), '', dockRange('glass.controlBlur', 0, 32, 'px', g.controlBlur))}
-        <div class="ilook-sub">${esc(T('s.typo'))}</div>
-        <div class="note">${esc(T('s.typoNote'))}</div>
-        ${typoRow('textColor', T('s.typo.text'))}
-        ${typoRow('mutedColor', T('s.typo.muted'))}
-        <div class="ilook-top">${seg('ilookMode', [['dark', T('s.ilookDark')], ['light', T('s.ilookLight')]], mode)}<span class="grow"></span><button class="pbtn sm" data-ilook-reset ${sameLook(look, ilookDefault(mode)) ? 'disabled' : ''}>${esc(T('s.ilookReset'))}</button></div>
-        ${ilookPreview(mode, look, true)}
-        <div class="ilook-cards">${cards}</div>
-        ${row(esc(T('s.ilookBg')), esc(T('s.ilookBgNote')), picker)}
-        ${row(esc(T('s.ilookOp')), '', range('op', 20, 100, '%'))}
-        ${blurRow}
-        ${row(esc(T('s.ilookEdge')), '', seg('ilookEdge', ['none', 'line', 'ring'].map(e => [e, T(`s.ilookEdge.${e}`)]), look.edge))}
-        ${top ? '' : row(esc(T('s.ilookBare')), esc(T('s.ilookBareNote')), sw('ilookBare', look.bare))}
+        <div class="ilook-sec-card">
+          ${row(esc(T('s.dockTheme')), esc(T('s.dockThemeNote')), `<span class="seg">${['light', 'dark', 'glass'].map(m => `<button type="button" class="${dl.mode === m ? 'on' : ''}" data-dock-theme="${m}">${esc(T(`s.dockTheme.${m}`))}</button>`).join('')}</span>`)}
+          <div class="r ilook-accent-row"><div class="grow"><div>${esc(T('s.dockAccent'))}</div></div><div class="winaccent-mode">${[['system', lang === 'zh' ? '跟随系统' : 'Follow system'], ['custom', lang === 'zh' ? '自定义' : 'Custom']]
+            .map(([k, label]) => `<button type="button" class="pbtn sm${dl.accentMode === k ? ' al' : ''}" data-dock-accent-mode="${k}" aria-pressed="${dl.accentMode === k}">${esc(label)}</button>`)
+            .join('')}<span class="acc on" style="background:${esc(curAccent)}" title="${esc(curAccent)}"></span><span class="d mono">${esc(curAccent)}</span></div></div>
+          ${dl.accentMode === 'custom' ? `<div class="accents ilook-accents">${accentSwatches}</div>` : ''}
+        </div>
+        <div class="ilook-sec-card">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.dockPaper'))}</span><span class="ilook-box-note">${esc(T('s.dockPaperNote'))}</span></div>
+          <div class="ilook-paper-bar">${paperPreview}</div>
+          <div class="ilook-slider-row"><span class="ilook-slider-lbl">${esc(T('s.dockPaperDim'))}</span>${dockRange('wallpaperDim', 0, 100, '%', dl.wallpaperDim ?? 58)}</div>
+          <div class="ilook-hint">${esc(T('s.dockPaperDimNote'))}</div>
+        </div>
+        <div class="ilook-sec-card">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.glass'))}</span><span class="ilook-box-note">${esc(T('s.glassNote'))}</span></div>
+          <div class="seg dock-glass-seg">${glassPresets}</div>
+          ${glassRegion('s.glass.surface', 's.glass.surfaceNote', 'glass.surfaceOp', g.surfaceOp, 'glass.surfaceBlur', g.surfaceBlur)}
+          ${glassRegion('s.glass.card', 's.glass.cardNote', 'glass.cardOp', g.cardOp, 'glass.cardBlur', g.cardBlur)}
+          ${glassRegion('s.glass.overlay', 's.glass.overlayNote', 'glass.overlayOp', g.overlayOp, 'glass.overlayBlur', g.overlayBlur)}
+          ${glassRegion('s.glass.control', 's.glass.controlNote', 'glass.controlOp', g.controlOp, 'glass.controlBlur', g.controlBlur)}
+        </div>
+        <div class="ilook-sec-card">
+          <div class="ilook-box-head"><span class="ilook-box-title">${esc(T('s.typo'))}</span><span class="ilook-box-note">${esc(T('s.typoNote'))}</span></div>
+          ${typoRow('textColor', T('s.typo.text'))}
+          ${typoRow('mutedColor', T('s.typo.muted'))}
+        </div>
       </div>`
   }
 
@@ -1024,15 +1000,16 @@
   // The fold's own row: how the island looks in Windows' mode now.
   function ilookRow() {
     const dl = dockLookOf()
-    const mode = winMode()
-    const now = T('s.ilookNow', { mode: T(`s.dockTheme.${dl.mode}`), name: ilookName(mode, ilookPreset(mode)) })
+    const modeLabel = T(`s.dockTheme.${dl.mode}`)
+    const detail = dl.mode === 'glass' ? T(`s.glass.${dl.glass?.preset || 'balanced'}`) : (dl.accentMode === 'custom' ? dl.accent : (lang === 'zh' ? '跟随系统' : 'System'))
+    const now = `${modeLabel} · ${detail}`
     return `${row(esc(T('s.ilook')), esc(now), `<button class="pbtn sm" data-ilook-fold>${esc(T(ilookOpen ? 's.ilookFold' : 's.ilookAdjust'))}</button>`)}${ilookOpen ? ilookPanel() : ''}`
   }
 
   let orderBusy = false, orderNote = '', orderError = '', draggingTab = ''
   function pageTabOrder() {
-    const rows = TABS.map((key, index) => `<li draggable="${!orderBusy}" data-order-key="${esc(key)}"><span class="grow">${esc(tabTitle(key))}</span><button type="button" class="pbtn sm" data-order-move="-1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '前移 ' : 'Move earlier: ') + tabTitle(key))}"${index === 0 || orderBusy ? ' disabled' : ''}>↑</button><button type="button" class="pbtn sm" data-order-move="1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '后移 ' : 'Move later: ') + tabTitle(key))}"${index === TABS.length - 1 || orderBusy ? ' disabled' : ''}>↓</button></li>`).join('')
-    return `<section class="tab-order"><h3>${lang === 'zh' ? '标签页排序' : 'Tab order'}</h3><p class="note">${lang === 'zh' ? '拖动或使用前后移动按钮调整；停用的插件保留原位置。' : 'Drag or use the arrow buttons. Disabled extensions keep their positions.'}</p><ol>${rows}</ol><button type="button" class="pbtn" data-order-reset${orderBusy ? ' disabled' : ''}>${lang === 'zh' ? '恢复默认顺序' : 'Restore default order'}</button><p role="status" aria-live="polite">${esc(orderNote)}</p>${orderError ? `<p class="bad" role="alert">${esc(orderError)}</p>` : ''}</section>`
+    const rows = TABS.map((key, index) => `<li draggable="${!orderBusy}" data-order-key="${esc(key)}"><span class="tab-order-grip" aria-hidden="true">⋮⋮</span><span class="grow">${esc(tabTitle(key))}</span><button type="button" class="pbtn sm" data-order-move="-1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '前移 ' : 'Move earlier: ') + tabTitle(key))}"${index === 0 || orderBusy ? ' disabled' : ''}>↑</button><button type="button" class="pbtn sm" data-order-move="1" data-order-id="${esc(key)}" aria-label="${esc((lang === 'zh' ? '后移 ' : 'Move later: ') + tabTitle(key))}"${index === TABS.length - 1 || orderBusy ? ' disabled' : ''}>↓</button></li>`).join('')
+    return `${sec(lang === 'zh' ? '标签页排序' : 'Tab order')}<section class="grp tab-order"><p class="tab-order-note">${lang === 'zh' ? '拖动或使用前后移动按钮调整；停用的插件保留原位置。' : 'Drag or use the arrow buttons. Disabled extensions keep their positions.'}</p><ol>${rows}</ol><div class="tab-order-foot"><button type="button" class="pbtn sm" data-order-reset${orderBusy ? ' disabled' : ''}>${lang === 'zh' ? '恢复默认顺序' : 'Restore default order'}</button><span class="tab-order-status" role="status" aria-live="polite">${esc(orderNote)}</span>${orderError ? `<span class="bad" role="alert">${esc(orderError)}</span>` : ''}</div></section>`
   }
   async function saveTabOrder(order, key, direction) {
     if (orderBusy) return
@@ -1053,26 +1030,66 @@
       }
     }
   }
+  function commitTabMove(key, from, to) {
+    if (from < 0 || to < 0 || from === to) return
+    const direction = to > from ? 1 : -1
+    let order = snap.settings.appearance?.tabOrder || []
+    const pages = extensionPanel.pages().map(page => page.key)
+    for (let step = 0; step < Math.abs(to - from); step++) order = window.ExtensionTabs.move(order, pages, key, direction)
+    void saveTabOrder(order, key, direction)
+  }
   function mountTabOrder() {
     const panel = body.querySelector('.tab-order'); if (!panel) return
+    const list = panel.querySelector('ol')
     panel.querySelectorAll('[data-order-move]').forEach(button => { button.onclick = () => {
       const direction = Number(button.dataset.orderMove), key = button.dataset.orderId
       void saveTabOrder(window.ExtensionTabs.move(snap.settings.appearance?.tabOrder, extensionPanel.pages().map(page => page.key), key, direction), key, direction)
     } })
     panel.querySelector('[data-order-reset]').onclick = () => saveTabOrder([], '', 0)
     panel.querySelectorAll('[data-order-key]').forEach(row => {
-      row.ondragstart = event => { if (orderBusy) { event.preventDefault(); return }; draggingTab = row.dataset.orderKey; event.dataTransfer.setData('text/plain', draggingTab); event.dataTransfer.effectAllowed = 'move' }
+      row.ondragstart = event => { if (orderBusy) { event.preventDefault(); return }; draggingTab = row.dataset.orderKey; event.dataTransfer?.setData('text/plain', draggingTab); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move' }
       row.ondragend = () => { draggingTab = '' }
       row.ondragover = event => { if (draggingTab) event.preventDefault() }
       row.ondrop = event => {
         event.preventDefault(); const key = draggingTab; draggingTab = ''
-        const to = TABS.indexOf(row.dataset.orderKey), from = TABS.indexOf(key)
-        if (from < 0 || to < 0 || from === to) return
-        const direction = to > from ? 1 : -1
-        let order = snap.settings.appearance?.tabOrder || []
-        for (let step = 0; step < Math.abs(to - from); step++) order = window.ExtensionTabs.move(order, extensionPanel.pages().map(page => page.key), key, direction)
-        void saveTabOrder(order, key, direction)
+        commitTabMove(key, TABS.indexOf(key), TABS.indexOf(row.dataset.orderKey))
       }
+      let ptr = null
+      row.onpointerdown = event => {
+        if (orderBusy || event.button !== 0 || event.target.closest('button')) return
+        ptr = { id: event.pointerId, startY: event.clientY, key: row.dataset.orderKey, from: TABS.indexOf(row.dataset.orderKey), active: false }
+      }
+      row.onpointermove = event => {
+        if (!ptr || ptr.id !== event.pointerId || !list) return
+        if (!ptr.active) {
+          if (Math.abs(event.clientY - ptr.startY) < 4) return
+          ptr.active = true
+          try { row.setPointerCapture(event.pointerId) } catch {}
+          row.classList.add('is-dragging')
+        }
+        event.preventDefault()
+        const siblings = [...list.querySelectorAll('[data-order-key]')]
+        for (const sib of siblings) {
+          if (sib === row) continue
+          const box = sib.getBoundingClientRect()
+          const mid = box.top + box.height / 2
+          const rowIdx = siblings.indexOf(row), sibIdx = siblings.indexOf(sib)
+          if (rowIdx < sibIdx && event.clientY > mid) { sib.after(row); break }
+          if (rowIdx > sibIdx && event.clientY < mid) { sib.before(row); break }
+        }
+      }
+      const finishPtr = event => {
+        if (!ptr || ptr.id !== event.pointerId) return
+        const state = ptr; ptr = null
+        row.classList.remove('is-dragging')
+        try { if (row.hasPointerCapture?.(event.pointerId)) row.releasePointerCapture(event.pointerId) } catch {}
+        if (!state.active || !list) return
+        const currentOrder = [...list.querySelectorAll('[data-order-key]')].map(el => el.dataset.orderKey)
+        const to = currentOrder.indexOf(state.key)
+        commitTabMove(state.key, state.from, to)
+      }
+      row.onpointerup = finishPtr
+      row.onpointercancel = finishPtr
     })
   }
 

@@ -764,7 +764,16 @@
       panel.querySelectorAll('[data-extension-auth]').forEach(b => { b.onclick = () => auth(b.dataset.extensionAuth) })
       const refresh = panel.querySelector('[data-extension-refresh]')
       if (refresh) refresh.onclick = () => checkUpdates()
-      panel.querySelectorAll('[data-extension-action]').forEach(b => { b.onclick = () => action(b.dataset.extensionAction, b.dataset.extensionId) })
+      panel.querySelectorAll('.extension-more').forEach(d => {
+        d.ontoggle = () => {
+          if (d.open) panel.querySelectorAll('.extension-more[open]').forEach(other => { if (other !== d) other.open = false })
+        }
+      })
+      panel.querySelectorAll('[data-extension-action]').forEach(b => { b.onclick = () => {
+        const more = b.closest ? b.closest('.extension-more') : null
+        if (more) more.open = false
+        void action(b.dataset.extensionAction, b.dataset.extensionId)
+      } })
       // t29：进度弹窗的取消——真取消（宿主在下一个块返回「已取消」）。
       panel.querySelectorAll('[data-extension-cancel]').forEach(b => {
         b.onclick = () => {

@@ -378,10 +378,9 @@
 .s-body {
   overflow-x: hidden;
   overflow-y: auto;
-  margin-right: -6px;
-  padding-right: 6px;
-  border-bottom-left-radius: 14px;
-  border-bottom-right-radius: 14px;
+  padding: 2px 2px 6px 0;
+  border-radius: 14px;
+  clip-path: inset(0 round 14px);
 }
 
 /* 滚动锁（#69 S3，settings.js 的 lockScroll / unlockScroll）：
@@ -457,17 +456,21 @@
 
 #island-settings .grp {
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 14px;
   background: var(--g1);
+}
+
+#island-settings .grp + .grp {
+  margin-top: 8px;
 }
 
 #island-settings .r {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 46px;
+  gap: 10px;
+  min-height: 40px;
   box-sizing: border-box;
-  padding: 10px 14px;
+  padding: 8px 14px;
 }
 
 /* A row whose control goes under its title: Windows' accent colours, the
@@ -598,7 +601,8 @@
 
 #island-settings .d {
   color: var(--g4);
-  font-size: 12px;
+  font-size: 11.5px;
+  line-height: 1.35;
 }
 
 #island-settings .in-use {
@@ -698,10 +702,13 @@
   font-size: 12px;
 }
 
-#island-settings .seg span {
+#island-settings .seg > :is(span, button) {
   padding: 3px 11px;
+  border: 0;
   border-radius: 12px;
+  background: transparent;
   color: var(--g5);
+  font: inherit;
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -709,14 +716,14 @@
     color 0.25s;
 }
 
-#island-settings .seg span.on {
+#island-settings .seg > :is(span, button).on {
   background: var(--g3);
   color: var(--fg);
   font-weight: 600;
 }
 
 /* One choice there but not to be picked yet (Antigravity without agy). */
-#island-settings .seg span.off {
+#island-settings .seg > :is(span, button).off {
   opacity: 0.45;
   cursor: default;
 }
@@ -3147,11 +3154,73 @@
   color: var(--dock-muted, var(--g4));
 }
 
-#island-settings .ilook-sub {
-  margin: 14px 2px 4px;
-  font-size: 12px;
+#island-settings .ilook {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 10px 10px;
+}
+
+#island-settings .ilook-sec-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tb-light #island-settings .ilook-sec-card {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.025);
+}
+
+#island-settings .ilook-sec-card .r {
+  min-height: 30px;
+  padding: 2px 0;
+}
+
+#island-settings .ilook-sec-card .r + .r {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 6px;
+}
+
+.tb-light #island-settings .ilook-sec-card .r + .r {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .ilook-accent-row .winaccent-mode {
+  margin-top: 0;
+}
+
+#island-settings .ilook-accents {
+  margin-top: 4px;
+}
+
+#island-settings .ilook-box-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+}
+
+#island-settings .ilook-box-title {
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .ilook-box-note {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .ilook-paper-bar {
+  display: flex;
+  align-items: center;
+  padding: 2px 0;
 }
 
 #island-settings .dock-paper-row {
@@ -3161,21 +3230,100 @@
 }
 
 #island-settings .dock-paper-thumb {
-  width: 76px;
-  height: 46px;
+  width: 68px;
+  height: 40px;
   border-radius: 8px;
   object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
 #island-settings .dock-glass-seg {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
   width: 100%;
-  margin: 6px 0 8px;
+  box-sizing: border-box;
+  padding: 3px;
+  margin: 2px 0 4px;
+  border-radius: 999px;
 }
 
 #island-settings .dock-glass-seg > button {
-  flex: 1 1 0;
+  padding: 4px 0;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 11.5px;
+}
+
+#island-settings .glass-reg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tb-light #island-settings .glass-reg {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+#island-settings .glass-reg-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+#island-settings .glass-reg-t {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dock-fg, var(--fg));
+}
+
+#island-settings .glass-reg-d {
+  font-size: 11px;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .ilook-slider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 22px;
+}
+
+#island-settings .ilook-slider-lbl {
+  flex: 0 0 56px;
+  font-size: 11.5px;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .ilook-slider-row .ilook-rng {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#island-settings .ilook-slider-row .rng {
+  flex: 1;
+  width: auto;
+  height: 4px;
+}
+
+#island-settings .ilook-hint {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--dock-muted, var(--g4));
+}
+
+#island-settings .ilook-typo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 2px 0;
 }
 
 /* 液态玻璃模式全设定页半透明 + 模糊 + 360° 玻璃高光边 */
@@ -3183,8 +3331,19 @@ body.dock-glass #island-settings .grp,
 body.dock-glass #island-settings .mode,
 body.dock-glass #island-settings .tile,
 body.dock-glass #island-settings .ilook-card,
+body.dock-glass #island-settings .ilook-sec-card,
 body.dock-glass #island-settings .tab-order,
-body.dock-glass #island-settings .card {
+body.dock-glass #island-settings .card,
+body.dock-glass #island-settings .wcard,
+body.dock-glass #island-settings .s-ask,
+body.dock-glass #island-settings .welcome,
+body.dock-glass #island-settings .extension-card,
+body.dock-glass #island-settings .extension-auth,
+body.dock-glass #island-settings .extension-failure,
+body.dock-glass #island-settings .extension-down,
+body.dock-glass #island-settings .notes-skeleton .sk,
+body.dock-glass #island-settings .adv-b,
+body.dock-glass #island-settings .ag-way {
   background: rgba(24, 26, 36, var(--dock-glass-card-op, 0.22));
   backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.35);
   -webkit-backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.35);
@@ -3194,7 +3353,9 @@ body.dock-glass #island-settings .card {
 }
 
 body.dock-glass #island-settings .s-confirm-dialog,
-body.dock-glass #island-settings .mmenu {
+body.dock-glass #island-settings .mmenu,
+body.dock-glass #island-settings .extension-more-body,
+body.dock-glass #island-settings .ext-progress {
   background: rgba(24, 26, 36, var(--dock-glass-overlay-op, 0.45));
   backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.4);
   -webkit-backdrop-filter: blur(var(--dock-glass-overlay-blur, 16px)) saturate(1.4);
@@ -3204,9 +3365,19 @@ body.dock-glass #island-settings .mmenu {
     0 18px 40px rgba(0, 0, 0, 0.4);
 }
 
+body.dock-glass #island-settings .s-tabs,
 body.dock-glass #island-settings .pbtn,
 body.dock-glass #island-settings .seg,
 body.dock-glass #island-settings .in,
+body.dock-glass #island-settings .pick,
+body.dock-glass #island-settings .kbadge,
+body.dock-glass #island-settings .wc-tool,
+body.dock-glass #island-settings .tab-order li,
+body.dock-glass #island-settings .extension-views,
+body.dock-glass #island-settings .extension-search,
+body.dock-glass #island-settings .extension-page-entry,
+body.dock-glass #island-settings .extension-more > summary,
+body.dock-glass #island-settings .extension-node,
 body.dock-glass #island-settings .s-tabs button.on {
   background: rgba(42, 46, 62, var(--dock-glass-control-op, 0.28));
   backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.25);
@@ -3221,10 +3392,11 @@ body.dock-glass #island-settings .pbtn.al {
   box-shadow: 0 0 12px color-mix(in srgb, var(--dock-accent, #005fb8) 42%, transparent);
 }
 
-body.dock-glass #island-settings .seg button.on {
-  background: rgba(44, 48, 64, 0.85);
+body.dock-glass #island-settings .seg > :is(span, button).on,
+body.dock-glass #island-settings .extension-view[aria-selected='true'] {
+  background: rgba(58, 64, 86, 0.78);
   color: var(--dock-fg, #ffffff);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
 body.dock-glass #island-settings .extension-host,

@@ -84,15 +84,15 @@
 /* —— 服务卡 —— */
 /* 标题行上下内衬各 10px（规范 ②）：卡自身只留上 10px，下沿 12px 给卡片收口；
    行高由字号决定，按钮高度仍归 .pbtn.sm 的 min-height —— 内衬不许把行撑高。 */
-#island-settings .extension-card { display: grid; align-content: start; gap: 8px; min-width: 0; margin: 0; padding: 10px 16px 12px; border: 1px solid transparent; border-radius: 12px; background: var(--g1); }
+#island-settings .extension-card { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; padding: 10px 14px 10px; border: 1px solid transparent; border-radius: 14px; background: var(--g1); }
 #island-settings .extension-card:hover { border-color: var(--g3); }
-#island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; min-width: 0; padding-block: 0; }
+#island-settings .extension-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; min-width: 0; padding-block: 0; }
 /* 名字与状态信号同一基线（规范 ②）：17px 的名字不再和 12px 的信号各浮一半。 */
-#island-settings .extension-card-title { display: flex; flex: 1 1 220px; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+#island-settings .extension-card-title { display: flex; flex: 1 1 140px; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 #island-settings .extension-card-title strong { color: var(--fg); font-size: 13px; font-weight: 600; }
 /* 已安装卡的插件名是这一页的主语（S2 / #69）：17px/600、行高 1.3。
    目录卡与第三方卡是「列表里的条目」，保持 13px —— 一屏十几张卡时不靠字号抢读。 */
-#island-settings .extension-card[data-kind='installed'] .extension-card-title strong { font-size: 17px; font-weight: 600; line-height: 1.3; }
+#island-settings .extension-card[data-kind='installed'] .extension-card-title strong { font-size: 15.5px; font-weight: 600; line-height: 1.3; }
 
 /* 状态信号：一盏 LED + 一句话。版本与「有更新」合成同一条文案
    （v2.1.2 → v2.1.3）；LED 只是装饰，语义全在文字里。
@@ -125,23 +125,19 @@
 #island-settings .extension-source { flex: 0 1 auto; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #island-settings .extension-card-foot .extension-pages { flex: 0 0 auto; }
 
-/* 「更多」：卸载与打开日志降级到这里。打开时整块占满一行，主操作那一行不动。
-   details 自身的上下内衬必须是 0：`.extension-panel details` 的 10px 会让展开区
-   直接多出 20px（#69 量的 210px 里有一部分就是它）。 */
+/* 「更多」：卸载与打开日志降级到这里。打开时以右对齐浮层展开，不撑高插件卡片，主操作行保持在同一行。 */
 #island-settings .extension-more { position: relative; padding: 0; }
-#island-settings .extension-more[open] { flex: 1 1 100%; }
 #island-settings .extension-more > summary { display: flex; align-items: center; gap: 4px; width: fit-content; min-height: 24px; padding: 0 10px; border: 1px solid var(--g3); border-radius: 12px; background: transparent; color: var(--g4); font-size: 12px; font-weight: 600; list-style: none; cursor: pointer; }
 #island-settings .extension-more > summary::-webkit-details-marker { display: none; }
 #island-settings .extension-more > summary:hover { background: var(--g2); color: var(--fg); }
 #island-settings .extension-more > summary:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-#island-settings .extension-more[open] > summary { color: var(--fg); }
+#island-settings .extension-more[open] > summary { background: var(--g2); color: var(--fg); }
 /* 行式动作列表（T-C / #63 的口径，#69 S1 收紧）
    column、无间隙；每行整行可点（按钮撑满、文字左对齐），32px 高；
    第二行起 1px 发丝线（--g3）隔 8px；禁用/空态不塌陷（min-height 保住）。
-   展开区总高：summary 26 + 上内衬 6 + 32 + (8 + 1 + 32) = 105px ≤ 120px。
    左侧 16px 图标位用伪元素（不占一列、不进 textContent）：
    日志 ≡、卸载 ⌫；图标不跟着危险色走，卸载那格取 inherit。 */
-#island-settings .extension-more-body { display: flex; flex-direction: column; gap: 0; padding-block: 6px 0; }
+#island-settings .extension-more-body { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 0; min-width: 148px; padding-block: 4px; padding-inline: 0; border-radius: 10px; background: var(--g2); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36), inset 0 0 0 1px var(--g3); }
 #island-settings .extension-more-row { display: flex; align-items: center; width: 100%; min-height: 32px; margin: 0; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--g4); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
 #island-settings .extension-more-row::before { flex: none; display: inline-block; width: 16px; margin-inline-end: 8px; color: var(--g5); font-size: 13px; font-weight: 400; line-height: 1; text-align: center; }
 #island-settings .extension-more-row[data-extension-action='logs']::before { content: '≡'; }
@@ -216,9 +212,15 @@
 #island-settings .extension-third-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 #island-settings .extension-third-actions .pbtn { min-height: 32px; }
 /* 外观标签顺序支持鼠标拖动与键盘按钮。 */
-.tab-order { padding-block: 12px; }
-.tab-order ol { list-style: none; padding: 0; }
-.tab-order li { display: flex; align-items: center; gap: 8px; padding: 8px; margin-block: 4px; background: var(--g1); border-radius: 8px; }
+.tab-order { padding: 10px 12px; border-radius: 14px; }
+.tab-order-note { margin: 0 2px 8px; padding: 0; font-size: 11.5px; line-height: 1.4; color: var(--g4); }
+.tab-order ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.tab-order li { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 10px; margin: 0; background: var(--g2); border: 1px solid var(--g3); border-radius: 10px; cursor: grab; user-select: none; touch-action: none; transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease; }
+.tab-order li:hover { border-color: var(--g4); }
+.tab-order li.is-dragging { cursor: grabbing; background: var(--g3); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32); transform: scale(1.01); z-index: 2; }
+.tab-order-grip { flex: none; color: var(--g4); font-size: 12px; letter-spacing: -1px; opacity: 0.75; cursor: grab; }
+.tab-order-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.tab-order-status { font-size: 11.5px; color: var(--g4); }
 .tab-order :is(button,li):focus-visible { outline: 2px solid #80b6ff; outline-offset: 3px; }
 .s-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .models .s-body { overflow: hidden; margin-right: 0; padding-right: 0; }
