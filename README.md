@@ -1,30 +1,30 @@
 <div align="center">
 
 <p>
-  <a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark-v237.png"><img src="assets/readme/key-zh-zh-light-v237.png" alt="中文" height="40"></picture></a>
-  <a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark-v237.png"><img src="assets/readme/key-en-zh-light-v237.png" alt="English" height="40"></picture></a>
-  <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-zh-dark-v237.png"><img src="assets/readme/key-start-zh-light-v237.png" alt="入门指南" height="40"></picture></a>
+  <a href="README.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-zh-zh-dark-v238.png"><img src="assets/readme/key-zh-zh-light-v238.png" alt="中文" height="40"></picture></a>
+  <a href="README.en.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-en-zh-dark-v238.png"><img src="assets/readme/key-en-zh-light-v238.png" alt="English" height="40"></picture></a>
+  <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-start-zh-dark-v238.png"><img src="assets/readme/key-start-zh-light-v238.png" alt="入门指南" height="40"></picture></a>
 </p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark-v237.png">
-  <img src="assets/readme/hero-zh-light-v237.png" alt="FISH Dock：桌面与模型工作台" width="1448">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark-v238.png">
+  <img src="assets/readme/hero-zh-light-v238.png" alt="FISH Dock：桌面与模型工作台" width="1448">
 </picture>
 
 <p>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.7"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark-v237.png"><img src="assets/readme/stat-version-zh-light-v237.png" alt="VERSION：当前版本 2.3.7" width="23%"></picture></a>
-  <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark-v237.png"><img src="assets/readme/stat-desktop-zh-light-v237.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
-  <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark-v237.png"><img src="assets/readme/stat-mail-zh-light-v237.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
-  <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v237.png"><img src="assets/readme/stat-channels-zh-light-v237.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.8"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-version-zh-dark-v238.png"><img src="assets/readme/stat-version-zh-light-v238.png" alt="VERSION：当前版本 2.3.8" width="23%"></picture></a>
+  <a href="#features"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-desktop-zh-dark-v238.png"><img src="assets/readme/stat-desktop-zh-light-v238.png" alt="DESKTOP：桌面岛与工作台" width="23%"></picture></a>
+  <a href="#workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-mail-zh-dark-v238.png"><img src="assets/readme/stat-mail-zh-light-v238.png" alt="WORKSPACE：邮件与模型工作区" width="23%"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-DOCK-Plugins"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/stat-channels-zh-dark-v238.png"><img src="assets/readme/stat-channels-zh-light-v238.png" alt="PLUGINS：三个官方插件" width="23%"></picture></a>
 </p>
 
 <p><img src="https://img.shields.io/badge/Windows-10%2F11%20x64-8fd6a0?style=flat-square&logo=windows&logoColor=white&labelColor=5a544a" alt="Windows x64"> <img src="https://img.shields.io/badge/Rust-Tauri-8fd6a0?style=flat-square&logo=rust&logoColor=white&labelColor=5a544a" alt="Rust Tauri"> <img src="https://img.shields.io/badge/Node.js-24.14%2B-8fd6a0?style=flat-square&logo=nodedotjs&logoColor=white&labelColor=5a544a" alt="Node.js"> <img src="https://img.shields.io/badge/License-MIT-8fd6a0?style=flat-square&labelColor=5a544a" alt="MIT License"> <img src="https://img.shields.io/badge/Official%20Plugins-3-ffd84a?style=flat-square&labelColor=5a544a" alt="Three official plugins"></p>
 <p><strong>Everything is a Plugin · 一切皆插件</strong><br>一个安静的桌面宿主，把会话、模型和工具收进同一个工作台。</p>
 
 <p>
-  <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark-v237.png"><img src="assets/readme/key-download-zh-light-v237.png" alt="下载 / Releases" height="40"></picture></a>
-  <a href="docs/releases/release-2.3.7.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark-v237.png"><img src="assets/readme/key-release-zh-light-v237.png" alt="更新记录" height="40"></picture></a>
-  <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark-v237.png"><img src="assets/readme/key-issues-zh-light-v237.png" alt="反馈 / Issues" height="40"></picture></a>
+  <a href="#get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-download-zh-dark-v238.png"><img src="assets/readme/key-download-zh-light-v238.png" alt="下载 / Releases" height="40"></picture></a>
+  <a href="docs/releases/release-2.3.8.md"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-release-zh-dark-v238.png"><img src="assets/readme/key-release-zh-light-v238.png" alt="更新记录" height="40"></picture></a>
+  <a href="https://github.com/Fish-under-sea/FISH-Dock/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/key-issues-zh-dark-v238.png"><img src="assets/readme/key-issues-zh-light-v238.png" alt="反馈 / Issues" height="40"></picture></a>
 </p>
 
 </div>
@@ -76,6 +76,7 @@
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器与插件管理。
 
+- **2.3.8**：支持非系统盘无 8.3 短路径的含空格安装目录（`call "<exe>"`），修复 Antigravity `PermissionRequest` 等待态、`file:///...%20...` 空格 URI 解码、危险命令词边界误判与 290s 等待超时上限。**主岛外观不变。** [完整说明](docs/releases/release-2.3.8.md)。
 - **2.3.7**：新增纯 Antigravity 2.0 桌面端的岛上工具审批（仅「允许 / 拒绝」，仅高风险/越界/Review 模式下弹窗）与 `ask_question` 岛上选方案支持，修复 `agy_hook` 因旧数据目录 `quit-by-choice` 残留导致的断连；同步修复 #96（打开灵动岛时不再后台拉起 `agy.exe models` 闪出黑色控制台窗口）。**主岛外观不变。** [完整说明](docs/releases/release-2.3.7.md)。
 
 - **2.3.6**：合并 #95（解决 #94）并补充宿主收口加固：修复外部窗口 `build()` 主线程死锁超时、`show_without_activating()` 首显空白不绘制、透明窗 8 px 非客户区白框与默认白底，补齐 `dock.dock.reserve` / `release` 与 `host.dock.reserve` / `release` 转发；新增 `build()` 非主线程守卫、`.shadow(!snapshot.transparent)` 阴影匹配，以及零参/退订占位按归属清理并主动推送 `island:reserve`。**主岛外观不变。** [完整说明](docs/releases/release-2.3.6.md)。
@@ -97,13 +98,13 @@
 
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark-v3.png"><img src="assets/readme/section-install-light-v3.png" alt="INSTALL · 安装" width="100%"></picture></h2>
 
-**FISH Dock 2.3.7** 只提供完整安装包 Setup；2.2.0 是最后一个同时提供 Update 精简更新包的版本。下载及校验文件见 [v2.3.7 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.7)。
+**FISH Dock 2.3.8** 只提供完整安装包 Setup；2.2.0 是最后一个同时提供 Update 精简更新包的版本。下载及校验文件见 [v2.3.8 Release](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.8)。
 
 | 安装包 | 使用场景 |
 | --- | --- |
-| `FISH-Dock-Setup-2.3.7.exe` | 首次安装、修复安装、2.2.0 应用内更新及旧版覆盖升级，含 Node.js；**需系统已安装 Evergreen WebView2**，缺失时提示官方下载页并退出，不自动安装依赖。 |
+| `FISH-Dock-Setup-2.3.8.exe` | 首次安装、修复安装、2.2.0 应用内更新及旧版覆盖升级，含 Node.js；**需系统已安装 Evergreen WebView2**，缺失时提示官方下载页并退出，不自动安装依赖。 |
 
-1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.7) 下载安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
+1. 从 [Releases](https://github.com/Fish-under-sea/FISH-Dock/releases/tag/v2.3.8) 下载安装包，并用同版本 `SHA256SUMS.txt` 核对摘要。
 2. 安装后从桌面或开始菜单打开 FISH Dock，首次启动会核对运行资源，不再弹出随包固定版 WebView2 的许可确认。
 3. 打开「插件」页，点击「GitHub 登录」。Dock 内弹窗显示验证码及实际复制结果；在系统浏览器中粘贴并确认，Dock 自动检查授权。等待期间可单独解除临时锁定／置顶，也可取消验证。旧版账号若未保存续期凭据，升级后需重新登录一次；新授权随后自动续期。
 4. 为 [FISH Dock 主仓](https://github.com/Fish-under-sea/FISH-Dock) 点 Star，再点击「检查登录与 Star」。登录和 Star 均验证通过后，官方插件安装入口及对应功能页才会显示。
