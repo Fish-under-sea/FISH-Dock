@@ -76,27 +76,11 @@
 
 业务源码、插件包和商店目录由 [FISH-DOCK-Plugins](https://github.com/Fish-under-sea/FISH-DOCK-Plugins) 维护。本仓负责桌面宿主、SDK、安装器与插件管理。
 
-- **2.4.0**：玻璃态快捷开关启用项新增动态 RGB 流光描边与星光微粒特效，修复透明控件下图标发黑看不清；全面升级 Antigravity Hook（读取会话级极速预设不再误弹、效率模式自动审批静默零提示音、人工审批覆盖写入/命令/MCP/搜索/浏览器/越界检索与并行队列、区分桌面端「去 Antigravity 处理」与 CLI、以及通过 `PreInvocation` 内联同步回答与审批记录）。[完整说明](docs/releases/release-2.4.0.md)。
-- **2.3.9**：灵动岛外观全面重构——浅色 / 深色 / 玻璃三态主题胶囊、玻璃色调与强调色、可预览并调整构图的背景图片、液态玻璃与字体颜色；新增宠物删除与「顶栏 + Dock」测试版，修复小工具折叠与插件「更多」浮层，并同步上游 v0.4.3。[完整说明](docs/releases/release-2.3.9.md)。
-- **2.3.8**：支持非系统盘无 8.3 短路径的含空格安装目录（`call "<exe>"`），修复 Antigravity `PermissionRequest` 等待态、`file:///...%20...` 空格 URI 解码、危险命令词边界误判与 290s 等待超时上限。**主岛外观不变。** [完整说明](docs/releases/release-2.3.8.md)。
-- **2.3.7**：新增纯 Antigravity 2.0 桌面端的岛上工具审批（仅「允许 / 拒绝」，仅高风险/越界/Review 模式下弹窗）与 `ask_question` 岛上选方案支持，修复 `agy_hook` 因旧数据目录 `quit-by-choice` 残留导致的断连；同步修复 #96（打开灵动岛时不再后台拉起 `agy.exe models` 闪出黑色控制台窗口）。**主岛外观不变。** [完整说明](docs/releases/release-2.3.7.md)。
+- **2.4.0**：玻璃态快捷开关新增星光与动态 RGB 流光描边；全面升级 Antigravity Hook（会话级极速识别、效率模式零提示音、人工审批全覆盖与并行队列、桌面端/CLI 区分及零 Token 同步回显）。[完整说明](docs/releases/release-2.4.0.md)。
+- **2.3.9**：灵动岛外观重构（浅色 / 深色 / 玻璃三态主题、可调构图背景图与液态玻璃字色），新增宠物删除与「顶栏 + Dock」测试版，同步上游 v0.4.3。[完整说明](docs/releases/release-2.3.9.md)。
+- **2.3.8**：支持含空格安装目录，修复 Antigravity 等待态、空格 URI 解码、危险命令误判与 290s 等待超时上限。[完整说明](docs/releases/release-2.3.8.md)。
 
-- **2.3.6**：合并 #95（解决 #94）并补充宿主收口加固：修复外部窗口 `build()` 主线程死锁超时、`show_without_activating()` 首显空白不绘制、透明窗 8 px 非客户区白框与默认白底，补齐 `dock.dock.reserve` / `release` 与 `host.dock.reserve` / `release` 转发；新增 `build()` 非主线程守卫、`.shadow(!snapshot.transparent)` 阴影匹配，以及零参/退订占位按归属清理并主动推送 `island:reserve`。**主岛外观不变。** [完整说明](docs/releases/release-2.3.6.md)。
-
-- **2.3.5**：修复 Dock 内部框选或长按拖动后鼠标穿透锁死、无法点击；插件页桥单次调用上限提升到 2 MiB，超限/拒收立即回传结构化错误；加固提权目录、邮件 HTML 净化与 Tauri IPC 来源校验，并修正若干交互与可访问性问题。**主岛外观不变。** [完整说明](docs/releases/release-2.3.5.md)。
-
-- **2.3.4**：补齐 #87 宿主 dialogs 能力与文档、#88 外部原生窗口 Hook 全项、#89 任务视图图标与上游 3.2 稳定性；实现顶栏 + dock、嵌入任务栏、任意显示器、日历 / 正在播放、HTML 邮件净化、外部审批 `POST /ask` 与 CI。整页 TypeScript 化（DEC-8）本轮撤销，页面保持 JS，转 2.4.0。**主岛外观不变。** [完整说明](docs/releases/release-2.3.4.md)。
-
-- **2.2.1**：修复 WebView2 正在更新时启动崩溃，清除旧版遗留的失效运行时目录变量；插件清理 `tmp` 后换版本不再失败；托盘关闭插件窗口只通知一次。仅发布 Setup。[完整说明](docs/releases/release-2.2.1.md)。
-- **2.2.0**：插件通过 Hook 按需请求 Dock 外部原生窗口，自行绘制业务界面；无请求不创建第二窗口。移除硬编码暂存条与常驻小球，应用内更新改用 Setup。**本版最后一次同时发布 Setup 和 Update，之后仅发布 Setup。** [完整说明](docs/releases/release-2.2.0.md)。
-- **2.1.9**：改用系统 Evergreen WebView2，安装事务清理旧随包运行时并保留用户资料。[完整说明](docs/releases/release-2.1.9.md)。
-- **2.1.8**：修复 Clash 退出后的系统代理恢复，并补充宿主代理自愈。[完整说明](docs/releases/release-2.1.8.md)。
-
-- **2.2.2**：补齐外部原生窗口 Hook：主岛几何/状态读取与订阅、窗口宽度跟随胶囊、锚点对齐语义、窗口下限降到 32×32、拖入落点坐标、窗口焦点事件、`zOrder`。**主岛外观不变**，新增上报按需启用。仅发布 Setup。[完整说明](docs/releases/release-2.2.3.md)。
-
-- **2.2.3**：外部窗口 Hook 补齐拖出（`beginDragOut`）、透明区穿透（`hitRects`）、内部页打开（`openPage`）与动画跟手；修掉旧插件清单退役字段导致整张注册表读不出来的升级故障。**主岛外观不变**。[完整说明](docs/releases/release-2.2.3.md)。
-
-更早版本及完整变更见 [发行记录](https://github.com/Fish-under-sea/FISH-Dock/releases)。
+更早版本（2.3.7 及以前）见 [历史发行说明](docs/releases) 或 [GitHub Releases](https://github.com/Fish-under-sea/FISH-Dock/releases)。
 
 <h2 id="get-started"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/section-install-dark-v3.png"><img src="assets/readme/section-install-light-v3.png" alt="INSTALL · 安装" width="100%"></picture></h2>
 
