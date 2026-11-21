@@ -124,6 +124,8 @@ const ENV_PROXY_CONNECT_MS: &str = "FISH_DOCK_PROXY_CONNECT_MS";
 const DEFAULT_PROXY_CONNECT_MS: u64 = 300;
 /// 自愈只探测本机租约端口；保留原有 200ms 预算，与设置页探测分别定义。
 pub const PROXY_HEAL_CONNECT_TIMEOUT: Duration = Duration::from_millis(200);
+const ENV_AGY_SYNC_MS: &str = "FISH_DOCK_AGY_SYNC_MS";
+const DEFAULT_AGY_SYNC_MS: u64 = 250;
 const ENV_PROXY_TEST_MS: &str = "FISH_DOCK_PROXY_TEST_MS";
 const DEFAULT_PROXY_TEST_MS: u64 = 10_000;
 const ENV_PLUGIN_DOWNLOAD_SECS: &str = "FISH_DOCK_PLUGIN_DOWNLOAD_TIMEOUT_SECS";
@@ -276,6 +278,7 @@ pub const KEYS: &[Key] = &[
     Key { name: "timeout.auth_ms", env: ENV_AUTH_MS, default: "20000", category: Category::Timeout, impact: "GitHub 登录/Star 校验整单预算" },
     Key { name: "timeout.proxy_probe_ms", env: ENV_PROXY_PROBE_MS, default: "600", category: Category::Timeout, impact: "设置页代理端口探测等待" },
     Key { name: "timeout.proxy_connect_ms", env: ENV_PROXY_CONNECT_MS, default: "300", category: Category::Timeout, impact: "代理端口监听探测连接等待" },
+    Key { name: "timeout.agy_sync_ms", env: ENV_AGY_SYNC_MS, default: "250", category: Category::Timeout, impact: "Antigravity PreInvocation 查询 Dock 同步摘要的短超时" },
     Key { name: "timeout.proxy_test_ms", env: ENV_PROXY_TEST_MS, default: "10000", category: Category::Timeout, impact: "设置页「测试代理」向 GitHub 发一次请求的预算" },
     Key { name: "timeout.plugin_download_secs", env: ENV_PLUGIN_DOWNLOAD_SECS, default: "30", category: Category::Timeout, impact: "单次插件包/目录下载预算" },
     Key { name: "timeout.plugin_activate_secs", env: ENV_PLUGIN_ACTIVATE_SECS, default: "5", category: Category::Timeout, impact: "插件激活 RPC 预算" },
@@ -449,6 +452,7 @@ pub fn update_timeout() -> Duration { ms(ENV_UPDATE_MS, DEFAULT_UPDATE_MS) }
 pub fn auth_timeout() -> Duration { ms(ENV_AUTH_MS, DEFAULT_AUTH_MS) }
 pub fn proxy_probe_timeout() -> Duration { ms(ENV_PROXY_PROBE_MS, DEFAULT_PROXY_PROBE_MS) }
 pub fn proxy_connect_timeout() -> Duration { ms(ENV_PROXY_CONNECT_MS, DEFAULT_PROXY_CONNECT_MS) }
+pub fn agy_sync_timeout() -> Duration { ms(ENV_AGY_SYNC_MS, DEFAULT_AGY_SYNC_MS) }
 pub fn proxy_test_timeout() -> Duration { ms(ENV_PROXY_TEST_MS, DEFAULT_PROXY_TEST_MS) }
 pub fn plugin_download_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_DOWNLOAD_SECS, DEFAULT_PLUGIN_DOWNLOAD_SECS)) }
 pub fn plugin_activate_timeout() -> Duration { Duration::from_secs(num(ENV_PLUGIN_ACTIVATE_SECS, DEFAULT_PLUGIN_ACTIVATE_SECS)) }
@@ -915,6 +919,7 @@ mod tests {
                 "timeout.auth_ms" => auth_timeout().as_millis().to_string(),
                 "timeout.proxy_probe_ms" => proxy_probe_timeout().as_millis().to_string(),
                 "timeout.proxy_connect_ms" => proxy_connect_timeout().as_millis().to_string(),
+                "timeout.agy_sync_ms" => agy_sync_timeout().as_millis().to_string(),
                 "timeout.proxy_test_ms" => proxy_test_timeout().as_millis().to_string(),
                 "timeout.plugin_download_secs" => plugin_download_timeout().as_secs().to_string(),
                 "timeout.plugin_activate_secs" => plugin_activate_timeout().as_secs().to_string(),

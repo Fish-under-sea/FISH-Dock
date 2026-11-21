@@ -256,6 +256,8 @@ pub struct Shared {
     pub shuffle_until: std::sync::atomic::AtomicU64,
     // 本次运行时标记为「极速放行」的 Antigravity 会话 ID（单会话极速模式免拦截）。
     pub agy_turbo_sessions: Mutex<std::collections::HashSet<String>>,
+    // 在 Dock 完成的 Antigravity 审批/提问摘要，待下一次 PreInvocation 同步渲染进对话流。
+    pub agy_sync_notes: Mutex<std::collections::HashMap<String, Vec<String>>>,
     // Debug only: answers to /debug/eval, by id.
     pub evals: Mutex<(u64, std::collections::HashMap<u64, std::sync::mpsc::Sender<Value>>)>,
 }
@@ -286,6 +288,38 @@ impl Shared {
 
     pub fn setting(&self, key: &str) -> Value {
         self.settings.lock().unwrap().get(key).cloned().unwrap_or(Value::Null)
+    }
+
+    pub fn push_agy_sync_note(&self, session: &str, note: Option<String>) {
+        if session.is_empty() {
+            return;
+        }
+        let Some(note) = note else { return };
+        let mut notes = self.agy_sync_notes.lock().unwrap();
+        let entry = notes.entry(session.to_string()).or_default();
+        if entry.len() >= 8 {
+            entry.remove(0);
+        }
+        entry.push(note);
+    }
+
+    pub fn take_agy_sync_inject(&self, session: &str) -> Option<Value> {
+        if session.is_empty() {
+            return None;
+        }
+        let notes = self.agy_sync_notes.lock().unwrap().remove(session)?;
+        if notes.is_empty() {
+            return None;
+        }
+        let merged = notes.join("\n\n");
+        Some(json!({
+            "injectSteps": [{
+                "systemMessage": {
+                    "systemMessage": "",
+                    "metadata": { "user_markdown": merged }
+                }
+            }]
+        }))
     }
 
     pub fn flag(&self, key: &str) -> bool {
@@ -1160,32 +1194,35 @@ async fn pet_answer(app: AppHandle, id: u64, choice: Value) -> bool {
         return ok;
     }
     let lang = sh.lang();
+    let ask_view = sh.asks.lock().unwrap().view_by_id(id);
     if choice["action"].as_str() == Some("turbo_session") {
-        let session = sh
-            .asks
-            .lock()
-            .unwrap()
-            .views()
-            .as_array()
-            .and_then(|rows| rows.iter().find(|row| row["id"] == json!(id)))
-            .and_then(|row| row["session"].as_str())
-            .unwrap_or("")
-            .to_string();
+        let session = ask_view.as_ref().and_then(|v| v["session"].as_str()).unwrap_or("").to_string();
         if !session.is_empty() {
             sh.agy_turbo_sessions.lock().unwrap().insert(session.clone());
+            if let Some(ref v) = ask_view {
+                sh.push_agy_sync_note(&session, events_agy::format_dock_sync_markdown(v, &choice, true));
+            }
         }
-        let ok = sh.asks.lock().unwrap().dismiss(id);
+        let ok = sh.asks.lock().unwrap().dismiss_with(id, Some(json!({ "agyDecision": "auto_approve" })));
         sh.log(&format!("agy turbo_session {id} ({session}) -> {ok}"));
         if ok {
             sh.push_asks();
         }
         return ok;
     }
-    let agent = sh.asks.lock().unwrap().views().as_array().and_then(|rows| rows.iter().find(|row| row["id"] == json!(id))).and_then(|row| row["agent"].as_str()).unwrap_or("").to_string();
+    let agent = ask_view.as_ref().and_then(|v| v["agent"].as_str()).unwrap_or("").to_string();
+    let from = ask_view.as_ref().and_then(|v| v["from"].as_str()).unwrap_or("").to_string();
     let ok = sh.asks.lock().unwrap().answer(id, &choice, lang);
     sh.log(&format!("answer {id}: {choice} -> {ok}"));
     if ok {
         sh.push_asks();
+        if from == "agy" {
+            if let Some(ref v) = ask_view {
+                let session = v["session"].as_str().unwrap_or("");
+                let approved = matches!(choice["action"].as_str(), Some("allow" | "always" | "answer"));
+                sh.push_agy_sync_note(session, events_agy::format_dock_sync_markdown(v, &choice, approved));
+            }
+        }
         // An approval given on her, for today's count.
         if matches!(choice["action"].as_str(), Some("allow" | "always")) {
             sh.count_today(|t| t.approve(&agent));
@@ -1206,7 +1243,15 @@ async fn pet_dismiss(app: AppHandle, id: u64) {
         sh.push_asks();
         return;
     }
-    if sh.asks.lock().unwrap().dismiss(id) {
+    let ask_view = sh.asks.lock().unwrap().view_by_id(id);
+    let ok = if ask_view.as_ref().and_then(|v| v["from"].as_str()) == Some("agy") {
+        let is_q = ask_view.as_ref().and_then(|v| v["kind"].as_str()) == Some("question");
+        let decision = if is_q { "allow" } else { "ask" };
+        sh.asks.lock().unwrap().dismiss_with(id, Some(json!({ "agyDecision": decision })))
+    } else {
+        sh.asks.lock().unwrap().dismiss(id)
+    };
+    if ok {
         sh.log(&format!("prompt {id} handed to the terminal: asked to on her"));
         sh.push_asks();
     }
@@ -1608,27 +1653,62 @@ fn agy_hook(port: u16, name: &str) {
             fields.insert("hook_event_name".into(), json!(name));
         }
         let is_q = events_agy::is_question(&event);
-        if !is_q {
-            let decision = events_agy::evaluate_pre_tool_use(&event, events_agy::read_host_efficiency_mode());
-            if let Some(reply_json) = events_agy::pre_tool_stdout(decision) {
-                let mut out = std::io::stdout();
-                let _ = out.write_all(reply_json.as_bytes());
-                let _ = out.flush();
-                post_and_go(port, "agy", &event);
-                return;
-            }
-        }
+        // 由运行中的 Dock 服务端统一作为 PreToolUse 的唯一决策真相源，避免本地与
+        // 宿主配置分叉或 auto_approve 时再发一次请求误触发提示音。
         let answer = if jump::is_listening(port) {
             let agent = ureq::Agent::config_builder()
                 .timeout_global(Some(Duration::from_secs(connection::AGY_PROMPT_TIMEOUT - 5)))
                 .build()
                 .new_agent();
-            match agent.post(&format!("http://127.0.0.1:{port}/hook?from=wakuwaku&agent=agy")).send_json(&event) {
+            match agent.post(&format!("http://127.0.0.1:{port}/hook?from=fish-dock&agent=agy")).send_json(&event) {
                 Ok(mut res) => events_agy::to_output(&res.body_mut().read_to_string().unwrap_or_default(), is_q),
                 Err(_) => r#"{"decision":"allow"}"#.to_string(),
             }
         } else {
             r#"{"decision":"allow"}"#.to_string()
+        };
+        let mut out = std::io::stdout();
+        let _ = out.write_all(answer.as_bytes());
+        let _ = out.flush();
+        return;
+    }
+    if name == "PreInvocation" {
+        let Some(mut event) = read_event() else {
+            let mut out = std::io::stdout();
+            let _ = out.write_all(b"{}");
+            let _ = out.flush();
+            return;
+        };
+        let turn = event.get("invocationNum").and_then(Value::as_u64) == Some(0);
+        if let Some(fields) = event.as_object_mut() {
+            fields.insert("hook_event_name".into(), json!(name));
+            if turn {
+                fields.insert(jump::CODEX_CHAIN.into(), jump::chain_json(&jump::hook_chain()));
+            }
+        }
+        let answer = if jump::is_listening(port) {
+            let agent = ureq::Agent::config_builder()
+                .timeout_global(Some(config::agy_sync_timeout()))
+                .build()
+                .new_agent();
+            match agent.post(&format!("http://127.0.0.1:{port}/hook?from=fish-dock&agent=agy")).send_json(&event) {
+                Ok(mut res) => {
+                    let raw = res.body_mut().read_to_string().unwrap_or_default();
+                    match serde_json::from_str::<Value>(&raw) {
+                        Ok(val) if val.get("injectSteps").and_then(Value::as_array).is_some_and(|a| !a.is_empty()) => {
+                            json!({ "injectSteps": val["injectSteps"] }).to_string()
+                        }
+                        _ => "{}".to_string(),
+                    }
+                }
+                Err(_) => "{}".to_string(),
+            }
+        } else {
+            let who = || starts::hook_who("Antigravity", name, &[], &hook_parents());
+            if !post_and_go(port, "agy", &event) {
+                start_or_say(starts::Hook::Agy, name, who);
+            }
+            "{}".to_string()
         };
         let mut out = std::io::stdout();
         let _ = out.write_all(answer.as_bytes());
@@ -1641,7 +1721,7 @@ fn agy_hook(port: u16, name: &str) {
     let _ = out.flush();
     let Some(mut event) = read_event() else { return };
     let who = || starts::hook_who("Antigravity", name, &[], &hook_parents());
-    let turn = name == "SessionStart" || (name == "PreInvocation" && event.get("invocationNum").and_then(Value::as_u64) == Some(0));
+    let turn = name == "SessionStart";
     if let Some(fields) = event.as_object_mut() {
         fields.insert("hook_event_name".into(), json!(name));
         if turn {
@@ -2252,6 +2332,7 @@ fn main() {
                 push_pending: AtomicBool::new(false),
                 shuffle_until: std::sync::atomic::AtomicU64::new(0),
                 agy_turbo_sessions: Mutex::new(std::collections::HashSet::new()),
+                agy_sync_notes: Mutex::new(std::collections::HashMap::new()),
                 evals: Mutex::new((0, std::collections::HashMap::new())),
             });
             app.manage(sh.clone());

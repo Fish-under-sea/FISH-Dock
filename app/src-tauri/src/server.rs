@@ -283,21 +283,34 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
             // reasonix_hook), so she only waits with it
             // (zhoupengjie/Wakuwaku#60, phase 1); nor is one of DSH's her
             // plugin cannot take an answer to.
-            let agy_cid = event["conversationId"].as_str().unwrap_or("");
-            let agy_session_turbo = agent == Some("agy")
-                && event["hook_event_name"] == "PreToolUse"
-                && !agy_cid.is_empty()
-                && sh.agy_turbo_sessions.lock().unwrap().contains(agy_cid);
-            let agy_eff = sh.setting("agyEfficiencyMode").as_bool().unwrap_or(true);
+            let agy_cid = event["conversationId"].as_str().unwrap_or("").to_string();
             let is_agy_q = events_agy::is_question(&event);
-            let is_agy_prompt = agent == Some("agy")
-                && event["hook_event_name"] == "PreToolUse"
-                && (is_agy_q
-                    || (!agy_session_turbo
-                        && events_agy::evaluate_pre_tool_use(&event, agy_eff) == events_agy::PreToolDecision::AskDock));
-            if agy_session_turbo && !is_agy_q {
-                sh.log(&format!("agy prompt skipped: session {agy_cid} marked turbo"));
+            if agent == Some("agy") && event["hook_event_name"] == "PreToolUse" {
+                if !is_agy_q {
+                    let agy_session_turbo = !agy_cid.is_empty()
+                        && sh.agy_turbo_sessions.lock().unwrap().contains(&agy_cid);
+                    if agy_session_turbo {
+                        sh.log(&format!("agy prompt skipped: session {agy_cid} marked turbo"));
+                        return reply(req, 200, json!({ "agyDecision": "allow" }));
+                    }
+                    let agy_eff = sh.setting("agyEfficiencyMode").as_bool().unwrap_or(true);
+                    match events_agy::evaluate_pre_tool_use(&event, agy_eff) {
+                        events_agy::PreToolDecision::AutoApprove => {
+                            return reply(req, 200, json!({ "agyDecision": "auto_approve" }));
+                        }
+                        events_agy::PreToolDecision::Passthrough => {
+                            return reply(req, 200, json!({ "agyDecision": "allow" }));
+                        }
+                        events_agy::PreToolDecision::AskDock => {}
+                    }
+                }
+                if !sh.asks_seen() {
+                    let decision = if is_agy_q { "allow" } else { "ask" };
+                    sh.log(&format!("agy prompt handed to Antigravity ({decision}): out of sight"));
+                    return reply(req, 200, json!({ "agyDecision": decision }));
+                }
             }
+            let is_agy_prompt = agent == Some("agy") && event["hook_event_name"] == "PreToolUse";
             let is_prompt = is_agy_prompt || (event["hook_event_name"] == "PermissionRequest" && !answers_none(agent, &event));
             let holds = is_prompt && sh.asks_seen();
             let msg = match agent {
@@ -388,7 +401,12 @@ fn handle(sh: &Arc<Shared>, mut req: Request, is_debug: bool) {
                 }
                 sh.push_asks();
             }
-            reply(req, 200, json!({}))
+            let extra = if agent == Some("agy") && event["hook_event_name"] == "PreInvocation" {
+                sh.take_agy_sync_inject(&agy_cid)
+            } else {
+                None
+            };
+            reply(req, 200, extra.unwrap_or_else(|| json!({})))
         }
         // A widget from a script (widgets.rs).
         ("POST", "/widget") => match read_json(&mut req) {
@@ -846,5 +864,21 @@ mod tests {
         assert_eq!(ask["hook_event_name"], "PermissionRequest");
         assert_eq!(ask["tool_name"], "AskUserQuestion");
         assert_eq!(ask["agent"], "agy");
+        assert_eq!(ask["agy_surface"], "app");
+
+        // AutoApprove & Passthrough never emit a waiting pet message / waiting chime.
+        let eff_cmd = json!({
+            "hook_event_name": "PreToolUse",
+            "conversationId": "5064aa2e",
+            "workspacePaths": ["Z:/nowhere/agyws"],
+            "cwd": "Z:\\nowhere\\agyws",
+            "stepIdx": 5,
+            "toolCall": { "name": "run_command", "args": { "CommandLine": "git status" } }
+        });
+        assert_eq!(
+            events_agy::evaluate_pre_tool_use_full(&eff_cmd, &Value::Null, &Value::Null, None, true),
+            events_agy::PreToolDecision::AutoApprove
+        );
+        assert!(events_agy::to_message(&eff_cmd).is_none());
     }
 }

@@ -203,7 +203,7 @@ fn classify_tool(raw_tool: &str, raw_args: &Value) -> (String, Value, Option<(&'
             if !desc.is_empty() {
                 input["description"] = json!(desc);
             }
-            ("Bash".into(), input, None)
+            ("Bash".into(), input, Some(("command", cmd.trim().to_string())))
         }
         "write_file" | "write_to_file" => {
             let path = first_str(raw_args, &["Path", "TargetFile", "file_path"]);
@@ -231,9 +231,22 @@ fn classify_tool(raw_tool: &str, raw_args: &Value) -> (String, Value, Option<(&'
             let path = first_str(raw_args, &["Path", "AbsolutePath", "File", "file_path"]);
             ("Read".into(), json!({ "file_path": path }), Some(("read_file", path.into())))
         }
+        "list_dir" | "find_by_name" | "grep_search" => {
+            let path = first_str(raw_args, &["DirectoryPath", "SearchDirectory", "SearchPath", "Path"]);
+            let disp = match raw_tool {
+                "list_dir" => "LS",
+                "find_by_name" => "Glob",
+                _ => "Grep",
+            };
+            (disp.into(), raw_args.clone(), Some(("read_file", path.into())))
+        }
         "read_url_content" => {
             let url = first_str(raw_args, &["Url", "url"]);
             ("WebFetch".into(), json!({ "url": url }), Some(("read_url", url.into())))
+        }
+        "search_web" => {
+            let q = first_str(raw_args, &["query", "Query"]);
+            ("WebSearch".into(), json!({ "query": q }), Some(("read_url", q.into())))
         }
         "ask_question" => {
             let questions: Vec<Value> = raw_args
@@ -260,11 +273,19 @@ fn classify_tool(raw_tool: &str, raw_args: &Value) -> (String, Value, Option<(&'
                 .collect();
             ("AskUserQuestion".into(), json!({ "questions": questions }), None)
         }
+        "call_mcp_tool" => {
+            let srv = first_str(raw_args, &["ServerName", "serverName", "server"]);
+            let name = first_str(raw_args, &["ToolName", "toolName", "tool"]);
+            let target = if srv.is_empty() { name.to_string() } else { format!("{srv}/{name}") };
+            let display = if srv.is_empty() { format!("mcp_{name}") } else { format!("mcp_{srv}_{name}") };
+            (display, raw_args.clone(), Some(("mcp", target)))
+        }
         other if other.starts_with("mcp_") => {
             let suffix = other.strip_prefix("mcp_").unwrap_or(other);
             let target = suffix.split_once('_').map_or_else(|| suffix.to_string(), |(srv, tool)| format!("{srv}/{tool}"));
             (other.to_string(), raw_args.clone(), Some(("mcp", target)))
         }
+        other if other.starts_with("browser_") => (other.to_string(), raw_args.clone(), Some(("browser", other.to_string()))),
         other => (other.to_string(), raw_args.clone(), None),
     }
 }
@@ -445,6 +466,7 @@ pub enum PreToolDecision {
     AskDock,
 }
 
+#[allow(dead_code)]
 pub fn pre_tool_stdout(decision: PreToolDecision) -> Option<&'static str> {
     match decision {
         PreToolDecision::Passthrough => Some(r#"{"decision":"allow"}"#),
@@ -453,6 +475,7 @@ pub fn pre_tool_stdout(decision: PreToolDecision) -> Option<&'static str> {
     }
 }
 
+#[allow(dead_code)]
 pub fn read_host_efficiency_mode() -> bool {
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     if let Some(home) = crate::config::unified_root_env() {
@@ -478,14 +501,107 @@ pub fn read_host_efficiency_mode() -> bool {
     true
 }
 
+pub fn parse_annotation_preset(text: &str) -> Option<String> {
+    let mut rest = text;
+    while let Some(idx) = rest.find("permission_preset:") {
+        let before = &rest[..idx];
+        let at_boundary = before.is_empty() || before.ends_with(|c: char| c.is_whitespace() || c == '{' || c == '}');
+        let after = rest[idx + "permission_preset:".len()..].trim_start();
+        if at_boundary {
+            let val: String = after.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            if !val.is_empty() {
+                return Some(val);
+            }
+        }
+        rest = after;
+    }
+    None
+}
+
+fn product_roots_from_event(e: &Value) -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    let mut push = |p: std::path::PathBuf| {
+        if !roots.contains(&p) {
+            roots.push(p);
+        }
+    };
+    for key in ["transcriptPath", "artifactDirectoryPath"] {
+        let raw = s(e, key);
+        if raw.is_empty() {
+            continue;
+        }
+        let path = std::path::Path::new(raw);
+        for anc in path.ancestors() {
+            if anc.file_name().and_then(|n| n.to_str()).is_some_and(|n| matches!(n, "brain" | "conversations" | "artifacts")) {
+                if let Some(parent) = anc.parent() {
+                    push(parent.to_path_buf());
+                }
+            }
+        }
+        if let Some(p) = path.parent().and_then(|p| p.parent()) {
+            push(p.to_path_buf());
+        }
+    }
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default();
+    let gemini = std::path::PathBuf::from(home).join(".gemini");
+    for sub in ["antigravity", "antigravity-ide", "antigravity-cli"] {
+        push(gemini.join(sub));
+    }
+    roots
+}
+
+pub fn load_conversation_preset(e: &Value) -> Option<String> {
+    let cid = s(e, "conversationId");
+    if cid.is_empty() || cid.contains('/') || cid.contains('\\') || cid.contains("..") {
+        return None;
+    }
+    for root in product_roots_from_event(e) {
+        let path = root.join("annotations").join(format!("{cid}.pbtxt"));
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Some(preset) = parse_annotation_preset(&text) {
+                return Some(preset);
+            }
+        }
+    }
+    None
+}
+
+pub fn is_cli_surface(e: &Value) -> bool {
+    ["transcriptPath", "artifactDirectoryPath"]
+        .into_iter()
+        .map(|k| norm_path(s(e, k)))
+        .any(|p| p.contains("/antigravity-cli/") || p.ends_with("/antigravity-cli"))
+}
+
+fn is_manual_review_mode(preset: &str, policy: &str) -> bool {
+    if preset == "AGENT_PERMISSION_PRESET_REQUEST_REVIEW" {
+        return true;
+    }
+    if matches!(preset, "AGENT_PERMISSION_PRESET_AGENT_DECIDES" | "AGENT_PERMISSION_PRESET_TURBO") {
+        return false;
+    }
+    matches!(
+        policy,
+        "CASCADE_COMMANDS_AUTO_EXECUTION_OFF"
+            | "CASCADE_COMMANDS_AUTO_EXECUTION_REQUEST_REVIEW"
+            | "request-review"
+            | "strict"
+    )
+}
+
 pub fn evaluate_pre_tool_use(e: &Value, efficiency_mode: bool) -> PreToolDecision {
     let dir = config_dir();
     let cfg = read_json_file(&dir.join("config.json"));
     let proj = load_project_config(&dir, e);
-    evaluate_pre_tool_use_with(e, &cfg, &proj, efficiency_mode)
+    let conv_preset = load_conversation_preset(e);
+    evaluate_pre_tool_use_full(e, &cfg, &proj, conv_preset.as_deref(), efficiency_mode)
 }
 
 pub fn evaluate_pre_tool_use_with(e: &Value, config: &Value, project: &Value, efficiency_mode: bool) -> PreToolDecision {
+    evaluate_pre_tool_use_full(e, config, project, None, efficiency_mode)
+}
+
+pub fn evaluate_pre_tool_use_full(e: &Value, config: &Value, project: &Value, conv_preset: Option<&str>, efficiency_mode: bool) -> PreToolDecision {
     if is_question(e) {
         return PreToolDecision::AskDock;
     }
@@ -495,13 +611,17 @@ pub fn evaluate_pre_tool_use_with(e: &Value, config: &Value, project: &Value, ef
     };
     let global_settings = config.get("userSettings").unwrap_or(&Value::Null);
     let proj_settings = project.get("settings").unwrap_or(&Value::Null);
-    let preset = proj_settings.get("permissionPreset").or_else(|| global_settings.get("permissionPreset")).and_then(Value::as_str).unwrap_or("");
+    let preset = conv_preset
+        .filter(|v| !v.is_empty())
+        .or_else(|| proj_settings.get("permissionPreset").and_then(Value::as_str))
+        .or_else(|| global_settings.get("permissionPreset").and_then(Value::as_str))
+        .unwrap_or("");
     let policy = proj_settings
         .get("autoExecutionPolicy")
         .or_else(|| global_settings.get("autoExecutionPolicy"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    // 极速模式（TURBO / EAGER / always-proceed）最高优先级：hook 不拦截，全部透传交由 AGY 全放行。
+    // 极速模式（会话级 TURBO / 项目 / 全局 TURBO / EAGER / always-proceed）最高优先级：hook 不拦截，全部透传交由 AGY 全放行。
     if preset == "AGENT_PERMISSION_PRESET_TURBO" || matches!(policy, "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER" | "always-proceed") {
         return PreToolDecision::Passthrough;
     }
@@ -522,8 +642,9 @@ pub fn evaluate_pre_tool_use_with(e: &Value, config: &Value, project: &Value, ef
     if has_rule("allow") {
         return PreToolDecision::Passthrough;
     }
+    let manual_review = is_manual_review_mode(preset, policy);
     match action {
-        "read_file" | "write_file" => {
+        "read_file" => {
             if !is_inside_ws_or_artifacts(e, &target) {
                 PreToolDecision::AskDock
             } else if efficiency_mode {
@@ -532,7 +653,18 @@ pub fn evaluate_pre_tool_use_with(e: &Value, config: &Value, project: &Value, ef
                 PreToolDecision::Passthrough
             }
         }
-        "read_url" | "mcp" => PreToolDecision::AskDock,
+        "write_file" => {
+            if !is_inside_ws_or_artifacts(e, &target) {
+                PreToolDecision::AskDock
+            } else if efficiency_mode {
+                PreToolDecision::AutoApprove
+            } else if manual_review {
+                PreToolDecision::AskDock
+            } else {
+                PreToolDecision::Passthrough
+            }
+        }
+        "read_url" | "mcp" | "browser" => PreToolDecision::AskDock,
         "command" => {
             if efficiency_mode {
                 if is_risky_command(&target) {
@@ -540,14 +672,7 @@ pub fn evaluate_pre_tool_use_with(e: &Value, config: &Value, project: &Value, ef
                 } else {
                     PreToolDecision::AutoApprove
                 }
-            } else if matches!(
-                policy,
-                "CASCADE_COMMANDS_AUTO_EXECUTION_OFF"
-                    | "CASCADE_COMMANDS_AUTO_EXECUTION_REQUEST_REVIEW"
-                    | "request-review"
-                    | "strict"
-            ) || is_risky_command(&target)
-            {
+            } else if manual_review || is_risky_command(&target) {
                 PreToolDecision::AskDock
             } else {
                 PreToolDecision::Passthrough
@@ -557,10 +682,12 @@ pub fn evaluate_pre_tool_use_with(e: &Value, config: &Value, project: &Value, ef
     }
 }
 
+#[allow(dead_code)]
 pub fn needs_approval(e: &Value) -> bool {
     !is_question(e) && evaluate_pre_tool_use(e, read_host_efficiency_mode()) == PreToolDecision::AskDock
 }
 
+#[cfg(test)]
 pub fn needs_approval_with(e: &Value, config: &Value, project: &Value) -> bool {
     !is_question(e) && evaluate_pre_tool_use_with(e, config, project, false) == PreToolDecision::AskDock
 }
@@ -580,15 +707,18 @@ pub fn for_ask(e: &Value) -> Value {
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| s(e, "cwd"));
     let step = e.get("stepIdx").and_then(Value::as_i64).map(|v| v.to_string()).unwrap_or_default();
+    let call_id = first_str(call, &["id"]);
+    let tool_use_id = if call_id.is_empty() { format!("{session}-{step}") } else { call_id.to_string() };
     json!({
         "hook_event_name": "PermissionRequest",
         "session_id": session,
         "conversationId": session,
         "cwd": cwd,
         "agent": "agy",
+        "agy_surface": if is_cli_surface(e) { "cli" } else { "app" },
         "tool_name": tool,
         "tool_input": input,
-        "tool_use_id": format!("{session}-{step}"),
+        "tool_use_id": tool_use_id,
     })
 }
 
@@ -596,6 +726,13 @@ pub fn to_output(body: &str, is_q: bool) -> String {
     let Ok(val) = serde_json::from_str::<Value>(body) else {
         return r#"{"decision":"allow"}"#.to_string();
     };
+    if let Some(d) = val.get("agyDecision").and_then(Value::as_str) {
+        let mut out = json!({ "decision": d });
+        if let Some(reason) = val.get("reason").and_then(Value::as_str).filter(|r| !r.is_empty()) {
+            out["reason"] = json!(reason);
+        }
+        return out.to_string();
+    }
     let Some(decision) = val.get("hookSpecificOutput").and_then(|h| h.get("decision")) else {
         return r#"{"decision":"allow"}"#.to_string();
     };
@@ -625,6 +762,49 @@ pub fn to_output(body: &str, is_q: bool) -> String {
     }
 }
 
+fn choice_text(picked: &Value) -> String {
+    match picked {
+        Value::Array(items) => items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("、"),
+        Value::Object(map) => map
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| map.get("number").map(Value::to_string))
+            .unwrap_or_default(),
+        Value::String(text) => text.clone(),
+        _ => String::new(),
+    }
+}
+
+pub fn format_dock_sync_markdown(view: &Value, choice: &Value, approved: bool) -> Option<String> {
+    let action = s(choice, "action");
+    if action == "turbo_session" {
+        return Some("> **FISH Dock 已开启本会话极速放行**（后续审批交回 Antigravity）".to_string());
+    }
+    let kind = s(view, "kind");
+    if kind == "question" && action == "answer" {
+        let questions = view.get("questions").and_then(Value::as_array)?;
+        let answers = choice.get("answers").and_then(Value::as_array)?;
+        let mut lines = vec!["> **FISH Dock 已提交回答**".to_string()];
+        for (q, a) in questions.iter().zip(answers.iter()) {
+            let qtext = clip(s(q, "question"), 80);
+            let atext = clip(&choice_text(a), 140);
+            if !qtext.is_empty() && !atext.is_empty() {
+                lines.push(format!("> - {qtext}：{atext}"));
+            }
+        }
+        return (lines.len() > 1).then(|| lines.join("\n"));
+    }
+    if matches!(kind, "permission" | "plan") {
+        let tool = s(view, "tool");
+        let summary = clip(s(view, "summary").lines().next().unwrap_or(""), 120);
+        let label = if approved { "已批准" } else { "已拒绝" };
+        let detail = if summary.is_empty() { String::new() } else { format!("：`{summary}`") };
+        return Some(format!("> **FISH Dock {label}** `{tool}`{detail}"));
+    }
+    None
+}
+
 pub fn with_seen(e: &mut Value) {
     let session = s(e, "conversationId").to_string();
     if session.is_empty() {
@@ -632,6 +812,7 @@ pub fn with_seen(e: &mut Value) {
     }
     let is_post = s(e, "hook_event_name") == "PostToolUse";
     let step = e.get("stepIdx").and_then(Value::as_i64).map(|v| v.to_string());
+    let call_id = e.get("toolCall").map(|c| first_str(c, &["id"]).to_string()).unwrap_or_default();
     let mapped = is_post.then(|| {
         let call = e.get("toolCall").unwrap_or(&Value::Null);
         classify_tool(s(call, "name"), call.get("args").unwrap_or(&Value::Null))
@@ -641,7 +822,9 @@ pub fn with_seen(e: &mut Value) {
         if let Some((tool, input, _)) = mapped {
             fields.entry("tool_name".to_string()).or_insert_with(|| json!(tool));
             fields.entry("tool_input".to_string()).or_insert(input);
-            if let Some(step) = step {
+            if !call_id.is_empty() {
+                fields.entry("tool_use_id".to_string()).or_insert_with(|| json!(call_id));
+            } else if let Some(step) = step {
                 fields.entry("tool_use_id".to_string()).or_insert_with(|| json!(format!("{session}-{step}")));
             }
         }
@@ -944,5 +1127,134 @@ mod tests {
         // 关闭效率模式：REQUEST_REVIEW 下普通命令交由 Dock 询问，空配置则退回 Passthrough。
         assert_eq!(evaluate_pre_tool_use_with(&pre("run_command", json!({ "CommandLine": "git status" })), &review_cfg, &empty, false), PreToolDecision::AskDock);
         assert_eq!(evaluate_pre_tool_use_with(&pre("run_command", json!({ "CommandLine": "git status" })), &empty, &empty, false), PreToolDecision::Passthrough);
+    }
+
+    #[test]
+    fn conversation_annotation_turbo_overrides_global_review_and_manual_review_covers_all_tools() {
+        let dir = std::env::temp_dir().join(format!("fish-dock-agy-ann-{}", std::process::id()));
+        let ann_dir = dir.join("antigravity").join("annotations");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&ann_dir).unwrap();
+        let pb = ann_dir.join("sess-turbo.pbtxt");
+        std::fs::write(&pb, r#"title:"T" last_user_view_time:{seconds:1} permission_preset:AGENT_PERMISSION_PRESET_TURBO plan_execute:true"#).unwrap();
+
+        let pre = |cid: &str, root_sub: &str, tool: &str, args: Value| json!({
+            "hook_event_name": "PreToolUse",
+            "conversationId": cid,
+            "workspacePaths": ["Z:/nowhere/agyws"],
+            "cwd": "Z:\\nowhere\\agyws",
+            "transcriptPath": format!("{}/{}/brain/{cid}/.system_generated/logs/transcript.jsonl", dir.to_string_lossy().replace('\\', "/"), root_sub),
+            "artifactDirectoryPath": format!("{}/{}/brain/{cid}", dir.to_string_lossy().replace('\\', "/"), root_sub),
+            "stepIdx": 9,
+            "toolCall": { "id": "call_parallel_1", "name": tool, "args": args }
+        });
+
+        let preset = load_conversation_preset(&pre("sess-turbo", "antigravity", "run_command", json!({ "CommandLine": "rm -rf foo" })));
+        assert_eq!(preset.as_deref(), Some("AGENT_PERMISSION_PRESET_TURBO"));
+
+        let review_cfg = json!({
+            "userSettings": {
+                "autoExecutionPolicy": "CASCADE_COMMANDS_AUTO_EXECUTION_OFF",
+                "permissionPreset": "AGENT_PERMISSION_PRESET_REQUEST_REVIEW"
+            }
+        });
+        let empty = Value::Null;
+
+        // 会话 annotations 标为 TURBO：即使全局是 REQUEST_REVIEW + OFF，也全部透传；ask_question 仍上 Dock。
+        for (tool, args) in [
+            ("run_command", json!({ "CommandLine": "rm -rf foo" })),
+            ("write_file", json!({ "Path": r"Z:\nowhere\agyws\a.txt" })),
+            ("call_mcp_tool", json!({ "ServerName": "github", "ToolName": "get_issue" })),
+            ("search_web", json!({ "query": "test" })),
+            ("browser_open_url", json!({ "Url": "https://example.com" })),
+        ] {
+            assert_eq!(
+                evaluate_pre_tool_use_full(&pre("sess-turbo", "antigravity", tool, args), &review_cfg, &empty, preset.as_deref(), false),
+                PreToolDecision::Passthrough,
+                "turbo should bypass {tool}"
+            );
+        }
+        assert_eq!(
+            evaluate_pre_tool_use_full(
+                &pre("sess-turbo", "antigravity", "ask_question", json!({ "questions": [{ "question": "Pick", "options": ["A"] }] })),
+                &review_cfg,
+                &empty,
+                preset.as_deref(),
+                false,
+            ),
+            PreToolDecision::AskDock
+        );
+
+        // 人工审批模式（REQUEST_REVIEW 且未开效率模式）：写入、命令、MCP、搜索、浏览器、越界检索全部上 Dock。
+        for (tool, args) in [
+            ("write_file", json!({ "Path": r"Z:\nowhere\agyws\a.txt" })),
+            ("edit_file", json!({ "Path": r"Z:\nowhere\agyws\b.txt" })),
+            ("send_command_input", json!({ "Input": "y\n" })),
+            ("call_mcp_tool", json!({ "ServerName": "github", "ToolName": "get_issue" })),
+            ("search_web", json!({ "query": "rust" })),
+            ("browser_open_url", json!({ "Url": "https://example.com" })),
+            ("grep_search", json!({ "SearchPath": r"D:\outside\dir" })),
+            ("list_dir", json!({ "DirectoryPath": r"D:\outside" })),
+        ] {
+            assert_eq!(
+                evaluate_pre_tool_use_full(&pre("sess-manual", "antigravity", tool, args), &review_cfg, &empty, None, false),
+                PreToolDecision::AskDock,
+                "manual review should ask Dock for {tool}"
+            );
+        }
+        // 工作区内只读不打扰。
+        assert_eq!(
+            evaluate_pre_tool_use_full(&pre("sess-manual", "antigravity", "grep_search", json!({ "SearchPath": r"Z:\nowhere\agyws" })), &review_cfg, &empty, None, false),
+            PreToolDecision::Passthrough
+        );
+        // 会话切换为 AGENT_DECIDES 时不被全局遗留 OFF 锁死。
+        assert_eq!(
+            evaluate_pre_tool_use_full(&pre("sess-decides", "antigravity", "write_file", json!({ "Path": r"Z:\nowhere\agyws\a.txt" })), &review_cfg, &empty, Some("AGENT_PERMISSION_PRESET_AGENT_DECIDES"), false),
+            PreToolDecision::Passthrough
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn surface_detection_to_output_override_and_sync_markdown() {
+        let app_ev = event("PreToolUse", json!({
+            "stepIdx": 4,
+            "artifactDirectoryPath": "C:/Users/Fish/.gemini/antigravity/brain/5064aa2e",
+            "toolCall": { "id": "toolu_99", "name": "call_mcp_tool", "args": { "ServerName": "memory", "ToolName": "save" } }
+        }));
+        let cli_ev = event("PreToolUse", json!({
+            "stepIdx": 4,
+            "transcriptPath": "C:/Users/Fish/.gemini/antigravity-cli/brain/5064aa2e/transcript.jsonl",
+            "toolCall": { "name": "search_web", "args": { "query": "fish dock" } }
+        }));
+        assert!(!is_cli_surface(&app_ev));
+        assert!(is_cli_surface(&cli_ev));
+
+        let app_ask = for_ask(&app_ev);
+        assert_eq!(app_ask["agy_surface"], "app");
+        assert_eq!(app_ask["tool_use_id"], "toolu_99");
+        assert_eq!(app_ask["tool_name"], "mcp_memory_save");
+
+        let cli_ask = for_ask(&cli_ev);
+        assert_eq!(cli_ask["agy_surface"], "cli");
+        assert_eq!(cli_ask["tool_name"], "WebSearch");
+
+        assert_eq!(to_output(r#"{"agyDecision":"ask"}"#, false), r#"{"decision":"ask"}"#);
+        assert_eq!(to_output(r#"{"agyDecision":"allow"}"#, true), r#"{"decision":"allow"}"#);
+        assert_eq!(to_output(r#"{"agyDecision":"auto_approve"}"#, false), r#"{"decision":"auto_approve"}"#);
+
+        let q_view = json!({
+            "kind": "question",
+            "questions": [{ "question": "要升级吗" }, { "question": "选哪个" }]
+        });
+        let q_choice = json!({ "action": "answer", "answers": [["升级"], { "text": "自定义" }] });
+        let md = format_dock_sync_markdown(&q_view, &q_choice, true).unwrap();
+        assert!(md.contains("FISH Dock 已提交回答") && md.contains("要升级吗：升级") && md.contains("选哪个：自定义"));
+
+        let p_view = json!({ "kind": "permission", "tool": "Bash", "summary": "rm -rf tmp" });
+        let p_md = format_dock_sync_markdown(&p_view, &json!({ "action": "deny" }), false).unwrap();
+        assert!(p_md.contains("FISH Dock 已拒绝") && p_md.contains("Bash") && p_md.contains("rm -rf tmp"));
+        assert!(format_dock_sync_markdown(&p_view, &json!({ "action": "turbo_session" }), true).unwrap().contains("极速放行"));
     }
 }

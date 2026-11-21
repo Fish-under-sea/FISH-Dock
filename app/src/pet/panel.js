@@ -413,7 +413,7 @@
                   ? T('panel.backTo', { app: ask.app || '?' })
                   : ask.kind === 'question' && !ask.canAnswer
                     ? T('panel.gotIt')
-                    : IN_APP.has(ask.from)
+                    : IN_APP.has(ask.from) || (ask.from === 'agy' && ask.agySurface !== 'cli')
                       ? T('panel.toApp', { app: FROM[ask.from] })
                       : T('panel.toTerminal'),
                 'dismiss',

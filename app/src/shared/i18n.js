@@ -741,7 +741,7 @@
       's.details': '显示具体内容',
       's.detailsNote': '会话名、命令、文件和 Claude 的回复；共享屏幕时可以关掉',
       's.agyEfficiency': '效率模式',
-      's.agyEfficiencyNote': '请求人工审查下自动放行非危险命令与工作区内读写，仅高危或越界操作弹上 Dock；极速模式始终遵循 Antigravity 全放行',
+      's.agyEfficiencyNote': '开启后静默自动放行非危险命令与工作区内读写（无提示音），仅高危、越界、联网或 MCP 弹上 Dock；关闭时人工审查下的命令、编辑与越界操作均上 Dock；极速模式始终遵循 Antigravity 全放行',
       'jump.hint': '点一下，去它的窗口',
       'jump.notFound': '找不到它的窗口了',
 
@@ -2428,7 +2428,7 @@
       's.details': 'Show the specifics',
       's.detailsNote': "Session names, commands, files and Claude's replies; turn off when sharing your screen",
       's.agyEfficiency': 'Efficiency mode',
-      's.agyEfficiencyNote': 'Auto-approve safe commands and in-workspace file actions under review mode; only risky or out-of-workspace calls prompt on Dock. Turbo mode always defers to Antigravity',
+      's.agyEfficiencyNote': 'Silently auto-approve safe commands and in-workspace file actions (no chime); risky, out-of-workspace, web, or MCP calls prompt on Dock. When off in review mode, commands, file edits, and out-of-workspace actions all prompt on Dock. Turbo mode always defers to Antigravity',
       'jump.hint': 'Click to go to its window',
       'jump.notFound': "Can't find its window any more",
 

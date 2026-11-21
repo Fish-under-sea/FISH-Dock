@@ -261,6 +261,9 @@ pub fn view_of(e: &Value) -> Option<Value> {
     // agent: the subagent asking (Claude Code, OpenCode); from: "codex",
     // "opencode", or "" for Claude Code.
     let mut view = json!({ "session": s(e, "session_id"), "agent": s(e, "agent_id"), "from": s(e, "agent"), "project": project, "tool": tool });
+    if !s(e, "agy_surface").is_empty() {
+        view["agySurface"] = json!(s(e, "agy_surface"));
+    }
 
     if tool == "AskUserQuestion" {
         let questions: Vec<Value> = input.get("questions").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -306,10 +309,14 @@ fn is_dsh(e: &Value) -> bool {
     s(e, "agent") == "dsh"
 }
 
+fn is_agy(e: &Value) -> bool {
+    s(e, "agent") == "agy"
+}
+
 // Prompts that wait side by side, each open till answered or closed by its
-// own id: OpenCode's, DSH's (they ask for calls running together).
+// own id: OpenCode's, DSH's, and Antigravity's (they issue parallel tool calls).
 fn is_side_by_side(e: &Value) -> bool {
-    is_opencode(e) || is_dsh(e)
+    is_opencode(e) || is_dsh(e) || is_agy(e)
 }
 
 // DSH's answer to one question, as it takes it back: the labels picked, or
@@ -527,19 +534,34 @@ impl<R: FnOnce(Option<Value>)> Asks<R> {
     }
 
     // Give it back to the terminal or the app's own window, the session told
-    // so where that changes its words (handed_back).
-    fn hand_back(&mut self, index: usize) {
+    // so where that changes its words (handed_back). For Antigravity, return
+    // ask/allow so the native IDE prompt pops instead of silently auto-allowing.
+    fn hand_back(&mut self, index: usize, custom_reply: Option<Value>) {
         if let Some(message) = handed_back(&self.list[index]) {
             self.handed.push(message);
         }
-        self.finish(index, Some(json!({})));
+        let default_reply = if s(&self.list[index].event, "agent") == "agy" {
+            let decision = if s(&self.list[index].view, "kind") == "question" { "allow" } else { "ask" };
+            json!({ "agyDecision": decision })
+        } else {
+            json!({})
+        };
+        self.finish(index, Some(custom_reply.unwrap_or(default_reply)));
+    }
+
+    pub fn view_by_id(&self, id: u64) -> Option<Value> {
+        self.list.iter().find(|a| a.id == id).map(|a| a.view.clone())
+    }
+
+    pub fn dismiss_with(&mut self, id: u64, reply: Option<Value>) -> bool {
+        let Some(i) = self.list.iter().position(|a| a.id == id) else { return false };
+        self.hand_back(i, reply);
+        true
     }
 
     // Leave it to the terminal.
     pub fn dismiss(&mut self, id: u64) -> bool {
-        let Some(i) = self.list.iter().position(|a| a.id == id) else { return false };
-        self.hand_back(i);
-        true
+        self.dismiss_with(id, None)
     }
 
     // Hand every prompt to the terminal (do not disturb, out of sight).
@@ -547,7 +569,7 @@ impl<R: FnOnce(Option<Value>)> Asks<R> {
     pub fn dismiss_all(&mut self) -> usize {
         let n = self.list.len();
         while !self.list.is_empty() {
-            self.hand_back(0);
+            self.hand_back(0, None);
         }
         n
     }
@@ -591,7 +613,7 @@ impl<R: FnOnce(Option<Value>)> Asks<R> {
         let mut gone = Vec::new();
         while let Some(i) = self.list.iter().position(|a| a.deadline <= now) {
             gone.push(self.list[i].id);
-            self.hand_back(i);
+            self.hand_back(i, None);
         }
         gone
     }
@@ -949,5 +971,55 @@ mod tests {
         assert!(asks.seen(&json!({ "hook_event_name": "PreToolUse", "session_id": "c", "tool_name": "Bash" })).is_empty());
         assert_eq!(asks.seen(&json!({ "hook_event_name": "Interrupt", "session_id": "c", "agent": "codex" })).len(), 1);
         assert_eq!(got.borrow().as_slice(), &[Some(json!({}))]);
+    }
+
+    #[test]
+    fn agy_parallel_asks_wait_side_by_side_and_hand_back_native_decision() {
+        let got = Rc::new(RefCell::new(Vec::new()));
+        let mut asks: Asks<Box<dyn FnOnce(Option<Value>)>> = Asks::default();
+        let reply = |got: &Rc<RefCell<Vec<Option<Value>>>>| {
+            let got = got.clone();
+            Box::new(move |v| got.borrow_mut().push(v)) as Box<dyn FnOnce(Option<Value>)>
+        };
+        let agy_perm = |id: &str, cmd: &str| json!({
+            "hook_event_name": "PermissionRequest",
+            "session_id": "agy-s",
+            "cwd": "D:\\work\\pet",
+            "agent": "agy",
+            "agy_surface": "app",
+            "tool_name": "Bash",
+            "tool_input": { "command": cmd },
+            "tool_use_id": id,
+        });
+        let agy_q = || json!({
+            "hook_event_name": "PermissionRequest",
+            "session_id": "agy-s",
+            "cwd": "D:\\work\\pet",
+            "agent": "agy",
+            "agy_surface": "cli",
+            "tool_name": "AskUserQuestion",
+            "tool_input": { "questions": [{ "question": "Pick", "options": [{ "label": "A" }] }] },
+            "tool_use_id": "call-q",
+        });
+
+        let p1 = asks.add(agy_perm("c1", "rm a"), reply(&got), 0, 1000).ok().unwrap();
+        let p2 = asks.add(agy_perm("c2", "rm b"), reply(&got), 0, 1000).ok().unwrap();
+        let q1 = asks.add(agy_q(), reply(&got), 0, 1000).ok().unwrap();
+        assert_eq!(asks.views().as_array().unwrap().len(), 3, "parallel agy prompts must stay in queue");
+        assert_eq!(asks.view_by_id(p1).unwrap()["agySurface"], "app");
+        assert_eq!(asks.view_by_id(q1).unwrap()["agySurface"], "cli");
+
+        // dismiss_with for turbo_session / hand-back / dismiss_all
+        assert!(asks.dismiss_with(p1, Some(json!({ "agyDecision": "auto_approve" }))));
+        assert_eq!(asks.dismiss_all(), 2);
+        assert_eq!(
+            got.borrow().as_slice(),
+            &[
+                Some(json!({ "agyDecision": "auto_approve" })),
+                Some(json!({ "agyDecision": "ask" })),
+                Some(json!({ "agyDecision": "allow" })),
+            ]
+        );
+        let _ = p2;
     }
 }

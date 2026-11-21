@@ -161,17 +161,21 @@ test('Edit 批准卡有正文/diff、高度非 0 且不被岛裁掉（回归：�
     assert.ok(geometry.rowBottom !== null && geometry.rowBottom <= geometry.islandBottom + 1, `按钮行底 ${geometry.rowBottom} 应在岛底 ${geometry.islandBottom} 内`)
     // 5) 岛自身不被撑爆屏幕。
     assert.ok(geometry.islandH <= geometry.vh + 1, `岛高 ${geometry.islandH} 应不超过视口 ${geometry.vh}`)
-    // 非 agy 请求不出现本会话极速放行；agy 批准请求显示该按钮且仍在岛内。
+    // 非 agy 请求不出现本会话极速放行；agy 批准请求显示该按钮且仍在岛内；左下角按 agySurface 区分 App 与 CLI。
     assert.equal(await evaluate(`!!document.querySelector('#panel button[data-action="turbo_session"]')`), false)
-    const agyAsk = { id: 2, session: 'agy-s', agent: 'agy', from: 'agy', project: 'pet', tool: 'Bash', kind: 'permission', summary: 'rm -rf tmp', always: null, reason: null }
+    const agyAsk = { id: 2, session: 'agy-s', agent: 'agy', from: 'agy', agySurface: 'app', project: 'pet', tool: 'Bash', kind: 'permission', summary: 'rm -rf tmp', always: null, reason: null }
     await evaluate(`__fire('pet:asks', ${JSON.stringify([agyAsk])})`)
     await eventually(() => evaluate(`!!document.querySelector('#panel button[data-action="turbo_session"]')`))
     const agyGeom = await evaluate(`(() => {
       const i = document.getElementById('island').getBoundingClientRect()
       const b = document.querySelector('#panel button[data-action="turbo_session"]').getBoundingClientRect()
-      return { btnBottom: b.bottom, islandBottom: i.bottom }
+      const d = document.querySelector('#panel button[data-action="dismiss"]')?.textContent || ''
+      return { btnBottom: b.bottom, islandBottom: i.bottom, dismissText: d }
     })()`)
     assert.ok(agyGeom.btnBottom <= agyGeom.islandBottom + 1, '极速放行按钮应完整位于岛内')
+    assert.equal(agyGeom.dismissText, '去 Antigravity 处理')
+    await evaluate(`__fire('pet:asks', ${JSON.stringify([{ ...agyAsk, id: 3, agySurface: 'cli' }])})`)
+    await eventually(() => evaluate(`document.querySelector('#panel button[data-action="dismiss"]')?.textContent === '去终端处理'`))
     // 证据留档。
     const shot = await pageSocket.call('Page.captureScreenshot', { format: 'png' })
     await writeFile(path.join(results, 'ask-island-edit.png'), Buffer.from(shot.data, 'base64'))

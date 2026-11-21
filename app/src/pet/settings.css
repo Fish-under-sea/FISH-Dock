@@ -5424,3 +5424,158 @@ body.dock-glass #island-settings .extension-service-shell,
 body.dock-glass #island-settings iframe {
   background: transparent;
 }
+
+/* 液态玻璃快捷开关「已启用」态：深邃星云透底 + 动态流光 RGB 描边 + 星芒闪烁特效，彻底解决透底黑字看不清的问题 */
+@property --tile-rgb-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes tile-rgb-spin {
+  to {
+    --tile-rgb-angle: 360deg;
+  }
+}
+
+@keyframes tile-starlight {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
+body.dock-glass #island-settings .tile.on {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background-color: rgba(18, 22, 38, 0.68);
+  background-image:
+    radial-gradient(circle at 50% 22%, color-mix(in srgb, var(--dock-accent, #5e9bff) 38%, rgba(139, 92, 246, 0.30)), rgba(18, 22, 38, 0.42) 76%);
+  backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.5);
+  color: #ffffff;
+  font-weight: 600;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.68);
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--dock-accent, #5e9bff) 32%, rgba(168, 85, 247, 0.24)),
+    0 0 10px rgba(56, 189, 248, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+body.dock-glass #island-settings .tile.on > * {
+  position: relative;
+  z-index: 2;
+}
+
+body.dock-glass #island-settings .tile.on::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  z-index: 1;
+  background: conic-gradient(
+    from var(--tile-rgb-angle),
+    #38bdf8,
+    #818cf8,
+    #e879f9,
+    #fb7185,
+    #fbbf24,
+    #34d399,
+    #38bdf8
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: tile-rgb-spin 4.2s linear infinite;
+}
+
+body.dock-glass #island-settings .tile.on::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(closest-side, #ffffff 0%, rgba(255, 255, 255, 0.9) 24%, rgba(196, 181, 253, 0.4) 55%, transparent 100%),
+    radial-gradient(closest-side, #ffffff 0%, rgba(125, 211, 252, 0.85) 30%, transparent 100%),
+    radial-gradient(closest-side, #ffffff 0%, rgba(244, 114, 182, 0.78) 28%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 14% 28%, #ffffff 70%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 84% 22%, #e0f2fe 70%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 22% 76%, #fae8ff 70%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 78% 72%, #bae6fd 70%, transparent 100%),
+    radial-gradient(1px 1px at 66% 16%, #ffffff 65%, transparent 100%),
+    radial-gradient(1px 1px at 36% 84%, #ffffff 65%, transparent 100%);
+  background-size:
+    12px 12px,
+    9px 9px,
+    8px 8px,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  background-position:
+    18% 16%,
+    82% 24%,
+    74% 68%,
+    0 0,
+    0 0,
+    0 0,
+    0 0,
+    0 0,
+    0 0;
+  background-repeat: no-repeat;
+  animation: tile-starlight 2.8s ease-in-out infinite;
+}
+
+body.dock-glass #island-settings .tile.on:nth-child(2)::after { animation-delay: -0.7s; }
+body.dock-glass #island-settings .tile.on:nth-child(3)::after { animation-delay: -1.4s; }
+body.dock-glass #island-settings .tile.on:nth-child(4)::after { animation-delay: -2.1s; }
+
+body.dock-glass #island-settings .tile.on .c {
+  position: relative;
+  z-index: 2;
+  background-color: rgba(30, 36, 66, 0.72);
+  background-image:
+    radial-gradient(
+      circle at 30% 25%,
+      rgba(255, 255, 255, 0.46),
+      color-mix(in srgb, var(--dock-accent, #5e9bff) 64%, rgba(168, 85, 247, 0.50)) 64%,
+      rgba(30, 41, 72, 0.76)
+    );
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  box-shadow:
+    0 0 14px color-mix(in srgb, var(--dock-accent, #5e9bff) 58%, rgba(232, 121, 249, 0.40)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+body.dock-glass #island-settings .tile.on .c svg {
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.92));
+}
+
+.tb-light body.dock-glass #island-settings .tile.on {
+  background-color: rgba(24, 30, 54, 0.74);
+  color: #ffffff;
+}
+
+.tb-light body.dock-glass #island-settings .tile.on .c {
+  background-color: rgba(32, 42, 76, 0.78);
+  color: #ffffff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.dock-glass #island-settings .tile.on::before,
+  body.dock-glass #island-settings .tile.on::after {
+    animation: none;
+  }
+}
