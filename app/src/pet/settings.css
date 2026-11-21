@@ -5398,11 +5398,21 @@ body.dock-glass #island-settings .extension-more > summary,
 body.dock-glass #island-settings .extension-node,
 body.dock-glass #island-settings .extension-build,
 body.dock-glass #island-settings .extension-build-source,
+body.dock-glass #island-settings .chip,
+body.dock-glass #island-settings .letter .cnt,
 body.dock-glass #island-settings .s-tabs button.on {
   background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-card, 10%), rgba(42, 46, 62, var(--dock-glass-control-op, 0.28)));
   backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.28);
   -webkit-backdrop-filter: blur(var(--dock-glass-control-blur, 8px)) saturate(1.28);
   border-color: color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-rim, 22%), rgba(255, 255, 255, 0.14));
+}
+
+/* 邮件双栏顶部粘性工具栏同步液态玻璃，避免 var(--g1) 不透明底色盖住收件箱玻璃卡片 */
+body.dock-glass #island-settings .pane-l .mail-tools {
+  background: color-mix(in srgb, var(--dock-accent, #5e9bff) var(--dock-glass-tint-card, 10%), rgba(24, 26, 36, var(--dock-glass-card-op, 0.22)));
+  backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.38);
+  -webkit-backdrop-filter: blur(var(--dock-glass-card-blur, 12px)) saturate(1.38);
+  border-bottom: 1px solid color-mix(in srgb, var(--dock-accent, #ffffff) var(--dock-glass-tint-card, 10%), rgba(255, 255, 255, 0.1));
 }
 
 body.dock-glass #island-settings .pbtn.al {
