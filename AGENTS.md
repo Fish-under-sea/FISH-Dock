@@ -1,8 +1,8 @@
 # FISH Dock 宿主仓 · Agent 必读
 
 > 本文件是本仓的**跨机器口径**：任何人克隆本仓都适用，只写「改这里一定会踩到的坑」。
-> 涉及本机路径、工具链位置、凭据文件的内容**不写在这里**，见第零节。
-> 提交 issue / PR 的规则在 `.github/CONTRIBUTING.md`，不与本文件重复。
+> 本机路径、工具链与凭据位置记录在 `docs/agents/local/<用户名>.md`（见第零节）。
+> 提交 issue / PR 的规则在 `.github/CONTRIBUTING.md`。
 
 ## 零、先认出当前用户，再读你的本机覆盖
 
@@ -17,7 +17,7 @@
 4. 两层冲突时的优先级：**路径、工具链、凭据、缓存位置以本机覆盖为准；规则、契约、发布口径以本文件为准。**
 5. 拿不准用户名的规范写法，看 `docs/agents/README.md`。
 
-不要凭猜测套用别人的本机文件：别人的盘符和令牌位置在你的机器上不成立。
+仅读取与当前 `$env:USERNAME` 对应的那份个人档案。
 
 ## 一、仓库边界与模块位置
 
@@ -54,26 +54,22 @@
 ## 三、摘要与清单的权威来源
 
 - **宿主自身**：Release 必须附 `<exe>.sha256`，应用内更新从它读 digest；只给 `SHA256SUMS.txt` 会让 Dock 拒绝应用内升级。
-- **资源清单** `resources/manifest.json`：`product` 必须是 `FISH Dock`，`version` 必须等于 `app/src-tauri/tauri.conf.json`。
-  - `rebuild-manifest.mjs` 会**保留旧 product**，产品改名后不要用它重置清单，改用 `app/scripts/prepare-installer.mjs` 的 `writeManifest`。
-  - **清单只能由 `writeManifest` 生成，不要手写 JSON**：2.1.2 手写时漏了 `node_version` / `webview2_version` 两个必填字段，`runtime.rs` 的 `Manifest` 反序列化在启动第一步就失败（「安装资源清单无法解析：missing field `node_version`」），Setup 与 Update 两个包全崩，用户也进不去应用内更新，只能手动重装。
-  - 键集合固定 7 项（`schema` / `product` / `version` / `architecture` / `node_version` / `webview2_version` / `files`），改结构要同步 `runtime.rs`；`installer.test.mjs` 与 `runtime.rs` 各有一条回归测试钉住它。
-- **插件摘要**以插件仓的 `catalog/stable.json` 为准，本仓不重复定义。
+- **资源清单** `resources/manifest.json`：`product` 必须是 `FISH Dock`，`version` 必须等于 `app/src-tauri/tauri.conf.json`；统一通过 `app/scripts/prepare-installer.mjs` 的 `writeManifest` 生成，确保 7 项必填键（`schema` / `product` / `version` / `architecture` / `node_version` / `webview2_version` / `files`）与 `runtime.rs` 及 `installer.test.mjs` 回归测试一致。
+- **插件摘要**以插件仓的 `catalog/stable.json` 为准。
 
 ## 四、出包与发布
 
-- 当前仅发布 Setup；2.2.0 是最后的 Setup + Update 双包版本。历史双包脚本不能当作当前默认入口。
-- 资源由 `app/scripts/prepare-installer.mjs` 从已下载并锁定摘要的 Node 包准备；不再携带 Windhawk 或固定版 WebView2，Setup 检测系统 Evergreen。清单必须用 `writeManifest` 生成。
-- 从仓库根运行 `pwsh app/scripts/build-installer.ps1 -Resources <含 manifest.json 的资源目录>`；实际工具参数见脚本与 `docs/guides/installer-build.md`。复用资源时不得就地修改硬链接。
+- 当前统一发布单包 Setup（构建入口 `app/scripts/build-installer.ps1`）；应用内更新直接下载并校验 Setup 载荷及其 `.sha256` 摘要。
+- 资源由 `app/scripts/prepare-installer.mjs` 从已锁定摘要的 Node 包准备，清单通过 `writeManifest` 生成；Setup 启动时检测系统 Evergreen WebView2。
+- 从仓库根运行 `pwsh app/scripts/build-installer.ps1 -Resources <含 manifest.json 的资源目录>`；实际工具参数见脚本与 `docs/guides/installer-build.md`。复用现有资源时，先复制到 `.work/` 临时副本再修改。
 - 出包后用 7-Zip 验证完整性，抽取清单与 NOTICE 核对，并校验 `FISH-Dock-Setup-<ver>.exe.sha256`。
-- 更新器自 2.2.0 起只认 Setup 载荷及其摘要，不再用 Update 作为候选；不要沿用「Setup-only 不能应用内升级」的过期说法。
-- 推送、发布与部署必须单独得到用户确认；本地构建或提交不代表授权发布。
+- 推送、发布与部署须单独获得用户确认后执行。
 
 ## 五、版本位与文档同步
 
 - 版本唯一权威：`app/src-tauri/tauri.conf.json` 与 `app/src-tauri/Cargo.toml`（必须同版）。
-- README 的版本卡与头图由 `tools/docs/render-readme.mjs` 渲染（从 `tauri.conf.json` 读取），**禁止手改 PNG**；改完用 `read_image` 确认两个版本号都对。
-- 发版要同步：`README.md`、`README.en.md` 的当前版本 / Release 链接 / 包名，并新增 `docs/releases/release-<ver>.md`；历史变更条目保持原样。
+- README 的版本卡与头图由 `tools/docs/render-readme.mjs` 从 `tauri.conf.json` 自动渲染生成；更新后用 `read_image` 核对版本号。
+- 发版同步更新 `README.md`、`README.en.md` 的当前版本 / Release 链接 / 包名，并新增 `docs/releases/release-<ver>.md`。
 
 ## 六、环境坑（跨机器通用的部分）
 
@@ -106,16 +102,14 @@
   | `mirror.prefer` / `FISH_DOCK_MIRROR_PREFER` | `auto` | `auto` 原地址优先、`domestic` 镜像优先、`overseas` 原地址优先 |
 
 - 择源统一入口：`sources::candidates(url)` = 原地址 + `picks(url)` 的镜像候选，**所有候选共用一个请求 deadline**；`plugin_store::download` 也走 `sources::fetch_bytes_with`。
-- **历史欠账如实标注**：Windhawk / LHM 没有已确认的免费国内镜像；未配置 Gitee / pet mirror / Release 加速时「每类资源默认国内外双源」不成立。**不能把默认空前缀算作已完成，也不要求用户部署服务**；未找到时写缺口，别伪造镜像。
-- 写文档时不要沿用过期的 Gitee 状态：需要引用「Gitee 下载」前，先用 Node TLS 拉 `https://gitee.com/api/v5/repos/<owner>/<repo>/releases` 重跑探测（接口按 id 升序返回，取末条才是最新）。
+- 镜像文档须按实测结果逐项记录已验证的国内外可用源；尚无可用镜像的资源如实标注为待补齐。
+- 引用 Gitee 发行状态前，用 Node TLS 拉取 `https://gitee.com/api/v5/repos/<owner>/<repo>/releases` 实时探测（接口按 id 升序返回，末条为最新）。
 
 ## 八、提交与交付
 
 - 命令行默认 PowerShell 7。
 - 提交用中文 conventional（`chore(release): …` / `fix(plugin): …` / `docs(...): …`），一个提交只做一件事。
-- `.work/`、`target/`、`dist/`、`*.exe` 不进库；`.work/` 只放一次性产物。
-- **禁用 `git clean -fdx`**，删东西按白名单逐项删。
-- 改本文件或 `docs/agents/` 下的内容，随**改动它的那次功能提交**一起带上，不为文档单独开一个空转提交。
-- `AGENTS.local.md` 这种只在本机生效、不入库的写法已废弃；本机事实一律写进 `docs/agents/local/<用户名>.md` 并入库。
-
-- 不提交 handoff、会话交接、临时验收与构建报告。短期材料放忽略的 `.work/`；长期知识归入指南、规格或回归测试。
+- 仅提交源码与长期文档；`.work/`、`target/`、`dist/`、`*.exe` 留在本地工作区。
+- 清理临时产物时，仅显式指定本次在 `.work/` 下自建的路径逐项删除。
+- 改动本文件或 `docs/agents/` 下的内容时，随对应功能或环境更新提交一起入库。
+- 短期交接与临时构建/验收产物保存在 `.work/`；长期知识沉淀至对应指南、规格或回归测试后随功能提交入库。
