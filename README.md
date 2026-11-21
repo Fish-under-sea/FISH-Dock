@@ -140,7 +140,7 @@ node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js' 'ap
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
 
-插件业务源码、打包与商店目录维护在 [官方插件仓](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。开发插件先读 [开发者指南](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md)；外部原生窗口接入见 [Hook 文档](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md)、[宿主接口说明](docs/guides/plugin-windows-2.2.0.md) 与 [完整协议示例](sdk/examples/window-file-drop/README.md)。SDK 与宿主接口由本仓维护，业务界面由插件提供。
+插件业务源码、打包与商店目录维护在 [官方插件仓](https://github.com/Fish-under-sea/FISH-DOCK-Plugins)。开发插件与所有 Hook 接口（自启动、外部原生窗口、液态玻璃与主题联动）统一维护在插件仓：先读 [开发者指南](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md)，外部原生窗口接入见 [原生窗口 Hook](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md) 与 [完整协议示例](sdk/examples/window-file-drop/README.md)，液态玻璃与主题联动见 [液态玻璃 Hook](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/liquid-glass-hooks.md)。SDK 运行时由本仓提供，业务界面与插件接口文档由插件仓维护。
 
 构建输入固定在 `app/scripts/runtime-sources.json`；资源目录由 `prepare-installer.mjs` 准备，再用 `build-installer.ps1` 与 NSIS 打包。
 

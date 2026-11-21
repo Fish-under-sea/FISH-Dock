@@ -109,7 +109,7 @@ node --test --test-isolation=none 'sdk/node/*.test.mjs' 'app/test/*.test.js' 'ap
 cargo test --locked --no-default-features --manifest-path app/src-tauri/Cargo.toml -- --test-threads=1
 ```
 
-Plugin code, packaging and the catalog live in the [official plugin repository](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Start with the [developer guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md). For native windows outside Dock, see the [Hook guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md), [host API notes](docs/guides/plugin-windows-2.2.0.md) and [complete protocol example](sdk/examples/window-file-drop/README.md).
+Plugin code, packaging, store catalog and plugin Hook docs all live in the [official plugin repository](https://github.com/Fish-under-sea/FISH-DOCK-Plugins). Start with the [developer guide](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md); see the [native window Hook](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md), [liquid glass & theme Hook](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/liquid-glass-hooks.md), and the [complete protocol example](sdk/examples/window-file-drop/README.md) in this repo.
 
 Build inputs are pinned in `app/scripts/runtime-sources.json`. Prepare a new resource directory with `prepare-installer.mjs`, then build with `build-installer.ps1` and NSIS. See the Chinese README for detailed storage and build instructions.
 

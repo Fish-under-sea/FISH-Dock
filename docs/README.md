@@ -10,7 +10,7 @@
 | 安装、验包与构建 | [安装版构建](guides/installer-build.md) |
 | 已安装版本的运行、迁移与排障 | [运维说明](guides/operations.md) |
 | 配置与环境变量 | [配置键](guides/config-keys.md) |
-| 插件原生窗口 | [宿主接口](guides/plugin-windows-2.2.0.md) |
+| 插件开发与 Hook 接口 | [插件仓开发者指南](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/README.md)、[原生窗口 Hook](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/native-window-hook.md)、[液态玻璃 Hook](https://github.com/Fish-under-sea/FISH-DOCK-Plugins/blob/main/docs/developers/liquid-glass-hooks.md) |
 | 国内网络来源 | [镜像实测矩阵](guides/domestic-mirror-matrix-2026-11-04.md) |
 | Agent 开工与本机环境 | [Agent 文档](agents/README.md)、仓库根 [AGENTS.md](../AGENTS.md) |
 | 样式和视觉 | [设计说明](design/style.md)、[当前场景预览](design/previews/README.md)、[预览工具](../tools/preview/README.md) |
