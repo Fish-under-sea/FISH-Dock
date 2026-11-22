@@ -5883,6 +5883,7 @@ body.dock-glass.dock-has-paper #island[data-view='expanded']::after {
 
 /* 选了背景图时，深色/浅色模式下的卡片也轻度半透明磨砂，让底图温柔透出且文字清晰 */
 body.dock-has-paper:not(.dock-glass) #island-settings .grp,
+body.dock-has-paper:not(.dock-glass) #island-settings .pane-l .mail-tools,
 body.dock-has-paper:not(.dock-glass) #island-settings .mode,
 body.dock-has-paper:not(.dock-glass) #island-settings .ilook-sec-card,
 body.dock-has-paper:not(.dock-glass) #island-settings .w-studio,
@@ -5894,6 +5895,7 @@ body.dock-has-paper:not(.dock-glass) #island-settings .extension-runtime {
 }
 
 body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .grp,
+body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .pane-l .mail-tools,
 body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .mode,
 body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .ilook-sec-card,
 body.dock-light.dock-has-paper:not(.dock-glass) #island-settings .w-studio,
