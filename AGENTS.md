@@ -34,7 +34,7 @@
 | `integrations/`、`examples/` | Agent / 邮件集成与示例脚本，Rust 编译期嵌入路径从这里取 |
 | `pets/`、`art/`、`wallpapers/` | 默认宠物、素材说明与壁纸；素材许可独立于代码 |
 | `relay/` | 独立的崩溃报告中转代码，不在源码构建目录内 |
-| `.github/` | issue 模板与 `CONTRIBUTING.md`（提交规则唯一出处） |
+| `.github/` | issue 模板、`CONTRIBUTING.md`（提交规则唯一出处）与工作流（`ci.yml`、`sync-plugin-packages.yml`） |
 
 官方插件本体与商店目录不在本仓，在 `Fish-under-sea/FISH-DOCK-Plugins`。
 
@@ -64,6 +64,7 @@
 - 从仓库根运行 `pwsh app/scripts/build-installer.ps1 -Resources <含 manifest.json 的资源目录>`；实际工具参数见脚本与 `docs/guides/installer-build.md`。复用现有资源时，先复制到 `.work/` 临时副本再修改。
 - 出包后用 7-Zip 验证完整性，抽取清单与 NOTICE 核对，并校验 `FISH-Dock-Setup-<ver>.exe.sha256`。
 - 推送、发布与部署须单独获得用户确认后执行。
+- **同步官方插件到本仓 Packages 栏**：插件仓发布新版本且 npm 源到位后，在 GitHub Actions 触发 `Sync Plugin Packages`（或运行 `gh workflow run sync-plugin-packages.yml --repo Fish-under-sea/FISH-Dock`，单包可加 `-f only=<feishu|clash|magpie>`），工作流会按插件仓 `catalog/stable.json` 校验 SHA-256 并将新版同步挂到本仓 GitHub Packages。
 
 ## 五、版本位与文档同步
 
