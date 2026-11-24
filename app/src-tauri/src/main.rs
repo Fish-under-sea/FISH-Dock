@@ -2697,6 +2697,7 @@ fn main() {
         // mail stopped (the plugins she runs end with her: plugins.rs).
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                QUITTING.store(true, Ordering::SeqCst);
                 let sh = shared(app);
                 sh.log("quitting: the bar given back, the mail stopped");
                 island::release_bar(&sh);
@@ -2711,6 +2712,10 @@ fn main() {
 // This process ended at once, whatever its threads are doing.
 // Quitting once: a second quit (the tray, an update) while the first hands over does nothing.
 static QUITTING: AtomicBool = AtomicBool::new(false);
+
+pub fn is_quitting() -> bool {
+    QUITTING.load(Ordering::SeqCst)
+}
 
 fn end_now() -> ! {
     #[cfg(windows)]

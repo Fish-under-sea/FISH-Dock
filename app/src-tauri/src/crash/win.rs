@@ -60,6 +60,7 @@ extern "system" {
     fn GetWindowThreadProcessId(hwnd: Hwnd, pid: *mut u32) -> u32;
     fn IsHungAppWindow(hwnd: Hwnd) -> i32;
     fn GetClassNameW(hwnd: Hwnd, name: *mut u16, max: i32) -> i32;
+    fn GetSystemMetrics(index: i32) -> i32;
 }
 
 const FROM_ADDRESS: u32 = 0x4;
@@ -520,6 +521,15 @@ pub fn webview_version() -> Option<String> {
         let v: String = RegKey::predef(*root).open_subkey(path).ok()?.get_value("pv").ok()?;
         (v.chars().all(|c| c.is_ascii_digit() || c == '.') && !v.is_empty() && v != "0.0.0.0").then(|| v.chars().take(24).collect())
     })
+}
+
+// Whether the current Windows user session is shutting down or logging off
+// (SM_SHUTTINGDOWN): CSRSS terminates WebView2 with 0x40010004 then, and
+// starting a replacement process during shutdown only races the OS.
+pub fn system_shutting_down() -> bool {
+    const SM_SHUTTINGDOWN: i32 = 0x2000;
+    // SAFETY: read-only system metric query with a documented constant.
+    unsafe { GetSystemMetrics(SM_SHUTTINGDOWN) != 0 }
 }
 
 // One of WebView2's processes gone, for this window: told (crash.rs

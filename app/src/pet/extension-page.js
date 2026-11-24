@@ -48,10 +48,29 @@
     // 被 park、正等着到点退场的那一页，与它的计时器（PARK_DISCARD_MS）。
     let parkedKey = '', discarding = null
     const text = (zh,en) => lang() === 'en' ? en : zh
-    function theme(record) {
+    // 与插件侧 dock.css（:root dark / [data-dock-theme=light] light）保持同源 color-scheme，
+    // 防止 OS 浅色 + Dock 暗色/液态玻璃时 iframe 失配被 Chromium 强制铺不透明 #121212（#99）。
+    function resolveThemeState() {
       const appearance = typeof getAppearance === 'function' ? getAppearance() : null
-      const light = appearance ? appearance.mode === 'light' : document.body.classList.contains('tb-light')
-      const dockMode = appearance?.mode || (light ? 'light' : 'dark')
+      const classes = document.body?.classList
+      const bodyMode = document.body?.dataset?.dockMode || ''
+      const glassFromBody = !!(classes?.contains('dock-glass') || bodyMode === 'glass')
+      const light = appearance
+        ? appearance.mode === 'light'
+        : !!(classes?.contains('dock-light') || bodyMode === 'light' || (classes?.contains('tb-light') && !glassFromBody && bodyMode !== 'dark'))
+      const dockMode = appearance?.mode || (bodyMode || (glassFromBody ? 'glass' : light ? 'light' : 'dark'))
+      return { appearance, light, dockMode, scheme: light ? 'light' : 'dark' }
+    }
+    function syncFrameScheme(frame, scheme) {
+      if (frame?.style) frame.style.colorScheme = scheme
+    }
+    function syncRecordScheme(record, scheme = resolveThemeState().scheme) {
+      syncFrameScheme(record.frame, scheme)
+      syncFrameScheme(record.service, scheme)
+    }
+    function theme(record) {
+      const { appearance, light, dockMode, scheme } = resolveThemeState()
+      syncRecordScheme(record, scheme)
       const target = document.getElementById('island-settings') || document.body
       const style = hostWindow.getComputedStyle?.(target)
       const rootStyle = hostWindow.getComputedStyle?.(document.documentElement)
@@ -76,7 +95,7 @@
         type: 'fish:theme',
         ticket: record.ticket,
         title: record.title,
-        mode: light ? 'light' : 'dark',
+        mode: scheme,
         dockMode,
         colors,
         appearance,
@@ -188,6 +207,7 @@
         if (asked !== revision || current !== page.key) { void invoke('extension_page_close',{ticket:granted.ticket}).catch(()=>{}); return }
         const frame=document.createElement('iframe')
         frame.title=page.title; frame.className='extension-frame'; frame.setAttribute('sandbox','allow-scripts'); frame.setAttribute('referrerpolicy','no-referrer')
+        syncFrameScheme(frame, resolveThemeState().scheme)
         const outer=document.createElement('div');outer.className='extension-service-shell';outer.appendChild(frame)
         const record={frame,outer,key:page.key,page,root,title:page.title,ticket:granted.ticket,generation:granted.generation,digest:page.digest,pending:new Set(),ready:false,timer:null,layoutTimer:null,layoutSeen:false,pageHeight:0,toolbarHeight:0,isService:false,layout:'single',notice:null,reported:false,initialTimer:null}
         frames.set(page.key,record)
@@ -252,7 +272,7 @@
           // 服务页：这里上报的是工具栏那一条（44–320），业务 iframe 自己铺剩余高度。
           record.isService=true;record.frame.classList.add('extension-service-toolbar');applyServiceFrame(record);report(record)
           if (!record.service || record.service.src !== url.href) {
-            record.service?.remove();const service=document.createElement('iframe');service.title=`${record.title}管理界面`;service.className='extension-service-content';service.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-popups allow-downloads');service.setAttribute('referrerpolicy','no-referrer');service.src=url.href;record.outer.appendChild(service);record.service=service;applyServiceFrame(record);report(record)
+            record.service?.remove();const service=document.createElement('iframe');service.title=`${record.title}管理界面`;service.className='extension-service-content';service.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-popups allow-downloads');service.setAttribute('referrerpolicy','no-referrer');syncFrameScheme(service, resolveThemeState().scheme);service.src=url.href;record.outer.appendChild(service);record.service=service;applyServiceFrame(record);report(record)
           }
         }
         if(row.method==='gateway.stop'){record.service?.remove();record.service=null;record.frame.classList.remove('extension-service-toolbar');record.frame.style.height='100%';record.isService=false;report(record)}
@@ -262,9 +282,15 @@
       finally { record.pending.delete(row.id) }
       if ([...frames.values()].includes(record)) record.frame.contentWindow.postMessage({type:'fish:result',ticket:record.ticket,id:row.id,...response},'*')
     }
-    const themeObserver = hostWindow.MutationObserver ? new hostWindow.MutationObserver(() => { for (const record of frames.values()) if (record.ready) theme(record) }) : null
+    function refreshTheme() {
+      const { scheme } = resolveThemeState()
+      for (const record of frames.values()) {
+        syncRecordScheme(record, scheme)
+        if (record.ready) theme(record)
+      }
+    }
+    const themeObserver = hostWindow.MutationObserver ? new hostWindow.MutationObserver(refreshTheme) : null
     themeObserver?.observe(document.body, { attributes:true, attributeFilter:['class', 'data-dock-mode', 'data-dock-glass'] })
-    function refreshTheme() { for (const record of frames.values()) if (record.ready) theme(record) }
     hostWindow.addEventListener('message',receive)
     // 2.2.0：宿主的插件外部窗口事件只转给**这个插件**的帧（别的插件收不到，路径不广播）。
     // 设置面板里的插件页与外部窗口共用同一份 FishDock.windows / fileDrop 接口。

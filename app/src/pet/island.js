@@ -4172,12 +4172,17 @@
     const { dl, mode, g } = dockLookInfo()
     const light = mode === 'light'
     const glassOn = mode === 'glass'
-    const root = document.documentElement.style
+    const rootEl = document.documentElement
+    const root = rootEl.style
     body.classList.toggle('dock-light', light)
     body.classList.toggle('dock-glass', glassOn)
     body.classList.toggle('tb-light', light || (isLight() && view !== 'settings'))
     body.dataset.dockMode = mode
     body.dataset.dockGlass = glassOn ? '1' : '0'
+    if (rootEl.dataset) {
+      rootEl.dataset.dockMode = mode
+      rootEl.dataset.dockGlass = glassOn ? '1' : '0'
+    }
     const sysAccent = (look.mode === 'light' ? look.accent?.dark : look.accent?.light) || ''
     const glassTinted = dl.accentMode === 'system' || /^#[0-9a-f]{6}$/i.test(dl.accent || '')
     const accent = dl.accentMode === 'custom'

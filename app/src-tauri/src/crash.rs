@@ -985,7 +985,9 @@ fn issue_body(report: &Value, log_lines: usize, frames: usize) -> String {
     lines.push(format!("### FISH Dock 崩溃报告 · v{}", report["app"].as_str().unwrap_or("?")));
     lines.push(String::new());
     lines.push(format!("- 类型：{}", report["kind"].as_str().unwrap_or("?")));
-    if let Some(code) = report["code"].as_i64() {
+    if let Some(code) = report["code"].as_str().filter(|s| !s.is_empty()) {
+        lines.push(format!("- 退出码：{code}"));
+    } else if let Some(code) = report["code"].as_i64() {
         lines.push(format!("- 退出码：{code}"));
     }
     if let Some(place) = report["where"].as_str() {
@@ -1154,6 +1156,58 @@ fn webview_crash(kind: i32, reason: i32, code: i32) -> bool {
     matches!(kind, 0..=2) && reason != 2 && (!told_by_code || is_crash_code(code as u32))
 }
 
+fn system_shutting_down() -> bool {
+    #[cfg(windows)]
+    {
+        win::system_shutting_down()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn webview_suppression_reason(quitting: bool, updating_restart: bool, shutting_down: bool) -> Option<&'static str> {
+    if quitting {
+        Some("quitting")
+    } else if updating_restart {
+        Some("updating")
+    } else if shutting_down {
+        Some("shutdown")
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WebviewAction {
+    report: bool,
+    restart: bool,
+    reload: bool,
+}
+
+fn webview_action(kind: i32, reason: i32, code: i32, testing: bool, suppressing: bool, uptime_ms: Option<u64>) -> WebviewAction {
+    if suppressing {
+        return WebviewAction { report: false, restart: false, reload: false };
+    }
+    WebviewAction {
+        report: webview_crash(kind, reason, code) || (matches!(kind, 0..=2) && testing),
+        restart: kind == 0 && uptime_ms.is_some_and(|ms| ms > 60_000),
+        reload: matches!(kind, 1 | 2),
+    }
+}
+
+fn should_record_webview(last: &mut Option<u64>, now: u64, report: bool) -> bool {
+    if !report {
+        return false;
+    }
+    if last.is_some_and(|prev| now < prev.saturating_add(10_000)) {
+        return false;
+    }
+    *last = Some(now);
+    true
+}
+
 // One of WebView2's processes gone (its kind, why, its exit code: WebView2's
 // numbers): said in the log; its report made and sent or told, for a crash
 // (webview_crash; twice in ten seconds, one report: her two pages share one
@@ -1164,17 +1218,17 @@ pub fn webview_failed(sh: &Arc<Shared>, label: &str, kind: i32, reason: i32, cod
     const REASONS: [&str; 7] = ["unexpected", "unresponsive", "terminated", "crashed", "launch-failed", "out-of-memory", "profile-deleted"];
     let kind_name = KINDS.get(kind as usize).copied().unwrap_or("unknown-exited");
     let reason_name = REASONS.get(reason as usize).copied().unwrap_or("other");
-    sh.log(&format!("webview: {label}: {kind_name} ({reason_name}), exit 0x{:X}", code as u32));
-    let reportable = webview_crash(kind, reason, code) || (matches!(kind, 0..=2) && testing_webview());
-    static LAST: Mutex<u64> = Mutex::new(0);
+    let suppressed = webview_suppression_reason(crate::is_quitting(), crate::updates::is_restarting(), system_shutting_down());
+    match suppressed {
+        Some(why) => sh.log(&format!("webview: {label}: {kind_name} ({reason_name}), exit 0x{:X} (ignored: {why})", code as u32)),
+        None => sh.log(&format!("webview: {label}: {kind_name} ({reason_name}), exit 0x{:X}", code as u32)),
+    }
     let now = crate::now_ms();
-    let again = {
-        let mut last = LAST.lock().unwrap();
-        let again = now < *last + 10_000;
-        *last = now;
-        again
-    };
-    if reportable && !again {
+    let uptime_ms = STARTED.get().map(|s| now.saturating_sub(*s));
+    let action = webview_action(kind, reason, code, testing_webview(), suppressed.is_some(), uptime_ms);
+    static LAST: Mutex<Option<u64>> = Mutex::new(None);
+    let record = should_record_webview(&mut LAST.lock().unwrap_or_else(|e| e.into_inner()), now, action.report);
+    if record {
         let found = Found {
             kind: "webview",
             pid: std::process::id(),
@@ -1203,7 +1257,7 @@ pub fn webview_failed(sh: &Arc<Shared>, label: &str, kind: i32, reason: i32, cod
     }
     // Once: each of her windows hears the browser go.
     static RESTARTING: AtomicBool = AtomicBool::new(false);
-    if kind == 0 && STARTED.get().is_some_and(|s| now > s + 60_000) && !RESTARTING.swap(true, Ordering::SeqCst) {
+    if action.restart && !RESTARTING.swap(true, Ordering::SeqCst) {
         let sh = sh.clone();
         std::thread::spawn(move || {
             sh.log("crash: WebView2's browser process gone: starting anew");
@@ -1213,12 +1267,12 @@ pub fn webview_failed(sh: &Arc<Shared>, label: &str, kind: i32, reason: i32, cod
             }
         });
     }
-    matches!(kind, 1 | 2)
+    action.reload
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{found_for, holds_the_strip, is_crash_code, is_frame, iso_minute, thread_said, webview_crash};
+    use super::{found_for, holds_the_strip, is_crash_code, is_frame, iso_minute, should_record_webview, thread_said, webview_action, webview_crash, webview_suppression_reason, WebviewAction};
     use serde_json::{json, Value};
     // 导出用例都会读写同一个 EXPORTED 静态，串行跑，避免并行互相踩。
     static EXPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -1258,6 +1312,64 @@ mod tests {
         for (kind, reason, code) in not {
             assert!(!webview_crash(kind, reason, code as i32), "{kind} {reason} {code:#x}");
         }
+    }
+
+    // Issue #100 复核：退出 / 更新交接 / 系统关机注销期间收到 WebView2 ProcessFailed 时，
+    // 既不得写崩溃报告，也不得拉起 start_again 复活旧进程或重载关闭中的页面；
+    // 非抑制态下真实崩溃（如 0xC0000005）照常上报与恢复，绝不掩盖意外崩溃。
+    #[test]
+    fn webview_actions_suppress_during_quit_update_and_shutdown() {
+        assert_eq!(webview_suppression_reason(true, false, false), Some("quitting"));
+        assert_eq!(webview_suppression_reason(false, true, false), Some("updating"));
+        assert_eq!(webview_suppression_reason(false, false, true), Some("shutdown"));
+        assert_eq!(webview_suppression_reason(false, false, false), None);
+
+        let none = WebviewAction { report: false, restart: false, reload: false };
+        // 退出 / 更新交接 / 系统关机注销期间：0x40010004 或任何 ProcessFailed 都不上报、不重启、不重载。
+        assert_eq!(webview_action(0, 0, 0x4001_0004u32 as i32, false, true, Some(120_000)), none);
+        assert_eq!(webview_action(0, 0, 0xC000_0005u32 as i32, false, true, Some(120_000)), none);
+        assert_eq!(webview_action(1, 3, 0xC000_0005u32 as i32, false, true, Some(120_000)), none);
+        assert_eq!(webview_action(2, 1, 0, false, true, Some(120_000)), none);
+
+        // 正常运行时：0x40010004 不报崩溃，但运行满一分钟后仍拉起自愈（避免留白壳）。
+        assert_eq!(
+            webview_action(0, 0, 0x4001_0004u32 as i32, false, false, Some(120_000)),
+            WebviewAction { report: false, restart: true, reload: false }
+        );
+        // 启动未满 60 秒不触发自愈重启，避免启动风暴。
+        assert_eq!(
+            webview_action(0, 0, 0x4001_0004u32 as i32, false, false, Some(30_000)),
+            none
+        );
+        // 正常运行时真实崩溃：必须照常上报 + 恢复，绝不掩盖。
+        assert_eq!(
+            webview_action(0, 0, 0xC000_0005u32 as i32, false, false, Some(120_000)),
+            WebviewAction { report: true, restart: true, reload: false }
+        );
+        assert_eq!(
+            webview_action(1, 3, 0xC000_0005u32 as i32, false, false, Some(120_000)),
+            WebviewAction { report: true, restart: false, reload: true }
+        );
+        assert_eq!(
+            webview_action(2, 1, 0, false, false, Some(120_000)),
+            WebviewAction { report: true, restart: false, reload: true }
+        );
+        // 崩溃自测开关（FISH_DOCK_CRASH_TEST=webview）在正常运行时照常上报。
+        assert_eq!(
+            webview_action(1, 2, 1, true, false, Some(120_000)),
+            WebviewAction { report: true, restart: false, reload: true }
+        );
+    }
+
+    // 非上报事件（如 gpu-exited 或 0x40010004）不得刷新去重时间戳，
+    // 否则 10 秒内紧随其后的真实崩溃会被误吞；两扇窗同时崩溃仍按 10 秒去重。
+    #[test]
+    fn benign_webview_events_do_not_suppress_a_real_crash_right_after() {
+        let mut last = None;
+        assert!(!should_record_webview(&mut last, 100_000, false));
+        assert!(should_record_webview(&mut last, 102_000, true), "非崩溃事件之后 2 秒内的真实崩溃必须上报");
+        assert!(!should_record_webview(&mut last, 102_050, true), "同批第二扇窗 50 ms 内去重");
+        assert!(should_record_webview(&mut last, 112_000, true), "超过 10 秒的新崩溃照常上报");
     }
 
     #[test]
@@ -1471,6 +1583,15 @@ mod tests {
         assert!(url.contains("body="));
         assert!(url.contains("101"), "退出码应在正文");
         assert!(super::url_encode("a b") == "a%20b");
+    }
+
+    // 真实报告里 code 字段是字符串（如 "0xC0000005" 或 "browser-exited/unexpected/0xC0000005"），
+    // 预填 issue 正文必须带上退出码，不再因为只认 as_i64() 而静默丢掉。
+    #[test]
+    fn issue_link_includes_string_exit_code_from_real_reports() {
+        let report = json!({ "app": "2.4.1", "kind": "webview", "code": "browser-exited/unexpected/0xC0000005", "log": ["-0.0s boom"] });
+        let body = super::issue_body(&report, 10, 8);
+        assert!(body.contains("- 退出码：browser-exited/unexpected/0xC0000005"), "{body}");
     }
 
     // 导出：最新一份待发报告（已脱敏）写成 .txt，路径返回；没有报告时明确报错。

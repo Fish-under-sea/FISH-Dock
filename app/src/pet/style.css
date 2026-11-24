@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --scale: 0.55;
   --accent: #9aa4b2;
   --sprite: none;
@@ -5813,6 +5814,31 @@ body.has-news #island[data-view='compact'] .news-dot {
 }
 
 /* ---- Dock Light & Liquid Glass whole-island theme ---- */
+/* 宿主文档与插件页（dock.css :root{color-scheme:dark} / [data-dock-theme=light]{color-scheme:light}）
+   保持 color-scheme 一致：否则 Chromium 会在透明 iframe 合成层强制铺不透明 #121212/#ffffff（#99）。 */
+:root[data-dock-mode='light'],
+:root:has(> body.dock-light),
+:root:has(> body.tb-light:not(.dock-glass):not([data-dock-mode='dark']):not([data-dock-mode='glass'])) {
+  color-scheme: light;
+}
+
+:root[data-dock-mode='dark'],
+:root[data-dock-mode='glass'],
+:root:has(> body.dock-glass) {
+  color-scheme: dark;
+}
+
+body.dock-light,
+body.tb-light {
+  color-scheme: light;
+}
+
+body.dock-glass,
+body[data-dock-mode='dark'],
+body[data-dock-mode='glass'] {
+  color-scheme: dark;
+}
+
 body.dock-light #island {
   background: #f5f5f7;
   color: var(--dock-fg, #1b1b1f);

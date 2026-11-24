@@ -1277,6 +1277,16 @@ fn stage(sh: &Shared, stage: &'static str) {
     sh.push_settings();
 }
 
+// 仅在更新进入「拉起安装器 / 交接新版并退出」的 restart 阶段返回 true；
+// download/verify/waiting 阶段应用仍在正常运行，不得抑制真实崩溃。
+fn stage_is_restarting(stage: Option<&str>) -> bool {
+    stage == Some("restart")
+}
+
+pub fn is_restarting() -> bool {
+    stage_is_restarting(STATE.lock().unwrap_or_else(|e| e.into_inner()).stage)
+}
+
 fn install(sh: &Arc<Shared>, r: &Release) -> Result<(), Value> {
     // 安装版走「下载安装器并拉起」；便携版走「换掉自己的 exe」。
     if current_mode().installed {
@@ -2781,5 +2791,13 @@ mod tests {
             assert!(!to.exists());
             std::fs::remove_dir_all(&dir).unwrap();
         });
+    }
+
+    #[test]
+    fn only_the_restart_stage_counts_as_restarting() {
+        for stage in [None, Some("download"), Some("verify"), Some("waiting")] {
+            assert!(!super::stage_is_restarting(stage), "{stage:?} 阶段仍在正常运行，不视为交接重启");
+        }
+        assert!(super::stage_is_restarting(Some("restart")));
     }
 }

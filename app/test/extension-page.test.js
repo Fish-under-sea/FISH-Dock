@@ -296,3 +296,42 @@ test('超限、非法方法与并发超限立即回传带错误码的 fish:resul
 
   page.dispose()
 })
+
+test('Issue #99：插件页与服务子 iframe 随宿主 dark/glass/light 同步 colorScheme（防止 #121212 失配）', async () => {
+  const f = fixture()
+  let appearance = { mode: 'glass', baseMode: 'dark', glass: { enabled: true } }
+  const posted = []
+  const page = window.ExtensionPage.create({
+    invoke: f.invoke,
+    lang: () => 'zh',
+    getAppearance: () => appearance,
+    hostWindow: f.hostWindow,
+    document: f.document,
+  })
+  const root = f.document.createElement('div')
+  await page.enter(root, { key: 'fish.magpie/main', title: 'Magpie', digest: 'd1' })
+  const frame = root.children[0].children[0]
+  frame.contentWindow.postMessage = row => posted.push(row)
+  assert.equal(frame.style.colorScheme, 'dark', 'glass 模式创建 iframe 时即写入 colorScheme=dark')
+
+  send(f, frame, { type: 'fish:ready', ticket: f.tickets[0] })
+  send(f, frame, { type: 'fish:call', ticket: f.tickets[0], id: 1, method: 'gateway.open', params: {} })
+  await wait(10)
+  const service = root.children[0].children[1]
+  assert.equal(service.style.colorScheme, 'dark', 'gateway.open 创建的业务 iframe 同步 colorScheme=dark')
+  assert.equal(posted.find(r => r.type === 'fish:theme')?.mode, 'dark')
+  assert.equal(posted.find(r => r.type === 'fish:theme')?.dockMode, 'glass')
+
+  appearance = { mode: 'light', baseMode: 'light', glass: { enabled: false } }
+  page.refreshTheme()
+  assert.equal(frame.style.colorScheme, 'light', '切到 light 模式后主 iframe 切为 colorScheme=light')
+  assert.equal(service.style.colorScheme, 'light', '切到 light 模式后业务 iframe 切为 colorScheme=light')
+  assert.equal(posted.filter(r => r.type === 'fish:theme').at(-1)?.mode, 'light')
+
+  appearance = { mode: 'dark', baseMode: 'dark', glass: { enabled: false } }
+  page.refreshTheme()
+  assert.equal(frame.style.colorScheme, 'dark', '切回 dark 模式后主 iframe 切回 colorScheme=dark')
+  assert.equal(service.style.colorScheme, 'dark', '切回 dark 模式后业务 iframe 切回 colorScheme=dark')
+
+  page.dispose()
+})

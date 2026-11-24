@@ -1522,7 +1522,8 @@
     const info = buildAppearancePayload()
     if (!info) return
     const dl = dockLookOf()
-    const root = document.documentElement.style
+    const rootEl = document.documentElement
+    const root = rootEl.style
     const light = info.mode === 'light'
     const glassOn = info.glass.enabled
     document.body.classList.toggle('dock-light', light)
@@ -1531,6 +1532,10 @@
     else document.body.classList.remove('tb-light')
     document.body.dataset.dockMode = info.mode
     document.body.dataset.dockGlass = glassOn ? '1' : '0'
+    if (rootEl.dataset) {
+      rootEl.dataset.dockMode = info.mode
+      rootEl.dataset.dockGlass = glassOn ? '1' : '0'
+    }
     layer.style.setProperty('--sys-accent', info.accent)
     root.setProperty('--sys-accent', info.accent)
     root.setProperty('--dock-accent', info.accent)
