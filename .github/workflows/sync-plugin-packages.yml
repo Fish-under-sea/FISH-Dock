@@ -1,0 +1,133 @@
+# 将官方插件仓（Fish-under-sea/FISH-DOCK-Plugins）已发布的 npm 插件单包镜像到本仓 GitHub Packages，
+# 让仓库右侧 Packages 栏直接展示并关联三个官方插件（feishu / clash / magpie）。
+#
+# 安全与边界：
+# - 仅支持手动触发（workflow_dispatch），不触碰 npmjs.org，不修改插件仓 catalog/stable.json。
+# - 下载 npmjs.org 对应版本的已发布包后，严格逐字节核对内含 .fish-plugin 的 SHA-256 与官方目录一致再发布。
+# - 使用 GitHub 内置 GITHUB_TOKEN（packages: write），无需额外个人令牌。
+name: Sync Plugin Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: '仅同步单个插件（留空同步全部；可选 feishu / clash / magpie）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  sync:
+    name: 发布官方插件到 GitHub Packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@fish-under-sea'
+
+      - name: 从官方目录校验并发布到 GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_ONLY: ${{ inputs.only }}
+        run: |
+          node --input-type=module << 'EOF'
+          import fs from 'node:fs/promises';
+          import os from 'node:os';
+          import path from 'node:path';
+          import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+
+          const CATALOG_URL = 'https://raw.githubusercontent.com/Fish-under-sea/FISH-DOCK-Plugins/main/catalog/stable.json';
+          const GH_REGISTRY = 'https://npm.pkg.github.com';
+          const SCOPE = '@fish-under-sea';
+          const TARGET_REPO = 'git+https://github.com/Fish-under-sea/FISH-Dock.git';
+          const only = (process.env.INPUT_ONLY || '').trim().toLowerCase();
+
+          const catRes = await fetch(CATALOG_URL, { headers: { 'User-Agent': 'fish-dock-packages-sync' } });
+          if (!catRes.ok) throw new Error(`拉取官方插件目录失败：HTTP ${catRes.status}`);
+          const catalog = await catRes.json();
+          const entries = (catalog.plugins || [])
+            .map(row => ({ ...row, shortId: String(row.id || '').replace(/^fish\./, '') }))
+            .filter(row => row.shortId && (!only || row.shortId === only));
+
+          if (!entries.length) {
+            throw new Error(only ? `目录中未找到插件：${only}` : '官方插件目录为空');
+          }
+
+          const workRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'fish-dock-ghpkg-'));
+          const summary = [];
+
+          for (const entry of entries) {
+            const pkgName = `${SCOPE}/fish-dock-plugin-${entry.shortId}`;
+            const version = String(entry.version || '').trim();
+            const expectedSha = String(entry.sha256 || '').trim().toLowerCase();
+            if (!version || !/^[0-9a-f]{64}$/.test(expectedSha)) {
+              throw new Error(`${pkgName} 目录元数据异常：version=${version}`);
+            }
+
+            // 1. 幂等检查：该版本已在 GitHub Packages 则跳过
+            const ghCheck = await fetch(`${GH_REGISTRY}/${pkgName}`, {
+              headers: {
+                Authorization: `Bearer ${process.env.NODE_AUTH_TOKEN}`,
+                Accept: 'application/json',
+              },
+            });
+            if (ghCheck.ok) {
+              const meta = await ghCheck.json();
+              if (meta?.versions && Object.prototype.hasOwnProperty.call(meta.versions, version)) {
+                console.log(`[skip] ${pkgName}@${version} 已存在于 GitHub Packages`);
+                summary.push(`${pkgName}@${version} (skipped)`);
+                continue;
+              }
+            }
+
+            // 2. 拉取 npmjs.org 已发布的对应版本元数据与 tarball
+            const npmMetaRes = await fetch(`https://registry.npmjs.org/${pkgName}`);
+            if (!npmMetaRes.ok) {
+              throw new Error(`拉取 npmjs ${pkgName} 元数据失败：HTTP ${npmMetaRes.status}`);
+            }
+            const npmMeta = await npmMetaRes.json();
+            const tarballUrl = npmMeta?.versions?.[version]?.dist?.tarball;
+            if (!tarballUrl) throw new Error(`${pkgName}@${version} 在 npmjs 缺少 dist.tarball`);
+
+            const stageDir = path.join(workRoot, entry.shortId);
+            await fs.mkdir(stageDir, { recursive: true });
+            const tgzPath = path.join(stageDir, 'pkg.tgz');
+
+            const tgzRes = await fetch(tarballUrl);
+            if (!tgzRes.ok) throw new Error(`下载 ${tarballUrl} 失败：HTTP ${tgzRes.status}`);
+            await fs.writeFile(tgzPath, Buffer.from(await tgzRes.arrayBuffer()));
+
+            execFileSync('tar', ['-xzf', tgzPath, '-C', stageDir], { stdio: 'inherit' });
+            const pkgDir = path.join(stageDir, 'package');
+
+            // 3. 强校验 .fish-plugin 与官方 catalog/stable.json 的 SHA-256 完全一致
+            const archivePath = path.join(pkgDir, `${entry.shortId}.fish-plugin`);
+            const archiveBytes = await fs.readFile(archivePath);
+            const actualSha = createHash('sha256').update(archiveBytes).digest('hex');
+            if (actualSha !== expectedSha) {
+              throw new Error(`${pkgName}@${version} 摘要不匹配：actual=${actualSha}, expected=${expectedSha}`);
+            }
+
+            // 4. 将 repository 指向本仓 FISH-Dock 并发布到 GitHub Packages
+            const pkgJsonPath = path.join(pkgDir, 'package.json');
+            const pkgJson = JSON.parse(await fs.readFile(pkgJsonPath, 'utf8'));
+            pkgJson.repository = { type: 'git', url: TARGET_REPO };
+            pkgJson.publishConfig = { registry: GH_REGISTRY };
+            await fs.writeFile(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`, 'utf8');
+
+            console.log(`[publish] ${pkgName}@${version} (sha256=${actualSha}, bytes=${archiveBytes.length})`);
+            execFileSync('npm', ['publish', `--registry=${GH_REGISTRY}`], {
+              cwd: pkgDir,
+              stdio: 'inherit',
+            });
+            summary.push(`${pkgName}@${version} (published)`);
+          }
+
+          console.log('SYNC_SUMMARY=' + JSON.stringify(summary));
+          EOF
